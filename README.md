@@ -1,7 +1,9 @@
 # astack
 
 Personal coding instructions and agent skills, deployable across macOS and Linux.
-The content is a skeleton to fill in later; the installer is ready to use.
+The instruction and skill content is a skeleton to fill in later; the installer
+is ready to use. Installation also disables Claude Code's
+automatic memory through its user settings; Codex settings are unchanged by default.
 
 ## Quick start
 
@@ -37,10 +39,12 @@ instructions/
   GEMINI.md           Gemini CLI additions
   OPENCODE.md         OpenCode additions
 skills/               Installable skills: <skill-name>/SKILL.md
+settings/             Selected harness settings to merge (JSON sources)
 templates/skill/      Starter to copy when creating a skill; never installed
 upstream/             Provenance, original snapshots, and upstream review decisions
 harnesses.json        Destination paths and instruction overlays
 scripts/manage.py     Install/update/uninstall implementation
+scripts/astack_settings.py  Per-key JSON/TOML settings editing and restoration
 scripts/upstream.py   Track origins and compare upstream changes
 install.sh            Installation entry point
 uninstall.sh          Removal entry point
@@ -105,8 +109,9 @@ Paths follow the official docs:
 
 ## Update and remove
 
-Installed files are copies, so moving or deleting the checkout does not break
-them. Edit sources in the repo, commit/push your changes, then on each computer:
+Installed instructions and skills are copies, so moving or deleting the checkout
+does not break them. Settings are merged into the harness configuration. Edit
+sources in the repo, commit/push your changes, then on each computer:
 
 ```sh
 git pull --ff-only
@@ -117,8 +122,8 @@ Rerunning updates managed files and removes previously installed skill files
 that have been deleted from the repo. It leaves other skills and configuration
 alone. Restart the harness or reload its skills/context after installation.
 
-The installer refuses to overwrite existing unmanaged files or locally modified
-installed files, even if an unmanaged file has identical contents. Resolve the
+For instructions and skills, the installer refuses to overwrite existing unmanaged
+files or locally modified installed files, even if an unmanaged file has identical contents. Resolve the
 conflict manually, or explicitly back up and replace conflicting files:
 
 ```sh
@@ -143,11 +148,82 @@ use `--force` only after reviewing its backup preview.
 ./uninstall.sh --target all
 ```
 
-Uninstall removes only recorded, unmodified files. It preserves unrelated files,
+Uninstall removes only recorded, unmodified instruction/skill files. It preserves unrelated files,
 empty directories, state, and backups. Local edits cause a conflict;
 `./uninstall.sh --force` backs them up before removal. Uninstall does not
 automatically restore old backups. If changing a configuration directory
 override, uninstall that target first, then install at the new location.
+
+## Managed harness settings
+
+`settings/claude.json` supplies selected keys for Claude's user `settings.json`:
+
+```json
+{
+  "autoMemoryEnabled": false
+}
+```
+
+This disables automatic memory while retaining `CLAUDE.md` instructions and
+existing memory files. It sets a user-level default; higher-priority project,
+launch, or managed settings can override it. See
+[Claude memory](https://code.claude.com/docs/en/memory) and
+[settings precedence](https://code.claude.com/docs/en/settings).
+
+`settings/codex.json` is initially `{}`: astack neither reads nor writes Codex's
+`config.toml` until you add a preference. It uses the same JSON source format,
+translated into native TOML. For example, to manage reasoning effort later:
+
+```json
+{
+  "model_reasoning_effort": "high"
+}
+```
+
+The destinations are `~/.claude/settings.json` and `~/.codex/config.toml`, honoring
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `--home`. Codex's configuration precedence
+still applies; see [Codex configuration](https://learn.chatgpt.com/docs/config-file/config-basic).
+An empty source stops managing its previously owned keys and restores them.
+
+The installer owns individual leaf keys. Nested source objects select nested keys;
+arrays are replaced as a whole. It records each key's original presence/value and
+last installed value. On initial install, your selected preferences replace those
+keys while retaining the rest of the configuration. Reinstall updates managed keys;
+removing a source key or uninstalling restores its original value, or removes it
+if it was originally absent. Unrelated settings and local edits are preserved.
+
+Changes to or deletion of a managed key cause a conflict before installation starts.
+`--force` backs up the current settings file and applies the selected preferences
+or restoration. The first pre-install value remains the restoration baseline.
+`--dry-run` names affected keys without printing their values or changing files.
+Settings are never followed through destination symlinks, even with `--force`.
+Malformed configuration and unsupported structures fail before any payload writes.
+
+JSON may be reformatted when merged. TOML edits preserve unrelated text, comments,
+and formatting, and retain original literals for restoration. Supported managed
+TOML values are scalars and arrays of scalars (including nested arrays), under
+ordinary or dotted tables. Managing a table itself, children of inline tables,
+or children of arrays of tables is unsupported; unrelated instances are preserved.
+Codex values cannot be JSON `null`. Change an owned scalar/object structure by
+removing its managed keys and reinstalling before adding the new structure.
+
+When nothing unrelated has changed, uninstall restores the original file exactly,
+or removes a settings file astack created. Otherwise it restores only owned keys
+and retains the file. Existing file permissions are preserved; newly created
+settings files and the local ownership manifest use mode `0600`. The manifest
+contains original configuration snapshots for restoration; keep it local.
+
+Installer state version 1 migrates automatically to version 2. Use this installer
+or a newer one to uninstall a version 2 installation; older installers reject it.
+Settings writes are atomic per file, and a detected state-write failure rolls back
+that settings file. An abrupt process/machine failure can still require manual
+reconciliation. Run one installer at a time and avoid editing settings during it;
+the installer checks for intervening edits before writing, but does not lock the
+harness out of its configuration.
+
+A bundled, licensed copy of the Python standard-library TOML 1.0 reader keeps
+settings management compatible with Python 3.10+. No package installation or
+network access is required.
 
 ## Test without touching your configuration
 
@@ -165,6 +241,13 @@ files, backup restoration, custom environment paths, moved checkouts, executable
 helpers, binary assets, Unicode paths, symlinks, blocked state directories, and
 retry after an injected file-write failure. GitHub Actions runs the suite on
 macOS and Ubuntu with Python 3.10 and 3.14.
+
+Settings tests temporarily configure both Claude and Codex, reinstall updates,
+then uninstall and check exact restoration. They also cover unrelated edits,
+conflicts and backups, nested keys, TOML comments and multiline values, custom
+roots, state migration, and rollback after a settings-state write failure. These
+validate configuration files and installer behavior; they do not launch agent
+sessions or change your real harness settings.
 
 To run just the deployment tests:
 
@@ -190,10 +273,9 @@ distinct destination paths so updates and removal have unambiguous ownership;
 overlapping targets, including symlinked directory aliases, are rejected before
 installation, even with `--force`.
 
-Harnesses requiring different rule formats, plugin packages, or settings changes
-need a dedicated adapter. This repo currently distributes instructions and
-skills; credentials, model settings, MCP servers, and harness binaries stay
-machine-specific.
+Harnesses requiring different rule formats, plugin packages, or settings formats
+need a dedicated adapter. This repo distributes instructions, skills, and selected
+harness preferences; credentials and harness binaries stay machine-specific.
 
 ## Customized upstream skills
 

@@ -162,7 +162,9 @@ class InstallerLifecycleTests(InstallerFixture):
         env = {"CLAUDE_CONFIG_DIR": str(original)}
         self.run_with_config(module, env, "install", "--target", "claude")
         settings = original / "settings.json"
-        settings.write_text('{"personal": true}\n')
+        content = json.loads(settings.read_text())
+        content["personal"] = True
+        settings.write_text(json.dumps(content) + "\n")
         env["CLAUDE_CONFIG_DIR"] = str(replacement)
         with self.assertRaisesRegex(ValueError, "destination changed"):
             self.run_with_config(module, env, "install", "--target", "claude")

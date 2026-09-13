@@ -2,11 +2,13 @@
   "claude": {
     "instructions": {"default": ".claude", "env": "CLAUDE_CONFIG_DIR", "suffix": "CLAUDE.md"},
     "skills": {"default": ".claude", "env": "CLAUDE_CONFIG_DIR", "suffix": "skills"},
+    "settings": {"default": ".claude", "env": "CLAUDE_CONFIG_DIR", "suffix": "settings.json", "format": "json", "source": "claude.json"},
     "overlay": "CLAUDE.md"
   },
   "codex": {
     "instructions": {"default": ".codex", "env": "CODEX_HOME", "suffix": "AGENTS.md"},
     "skills": {"default": ".agents", "suffix": "skills"},
+    "settings": {"default": ".codex", "env": "CODEX_HOME", "suffix": "config.toml", "format": "toml", "source": "codex.json"},
     "overlay": "CODEX.md"
   },
   "gemini": {

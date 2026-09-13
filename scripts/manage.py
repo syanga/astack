@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deploy personal instructions and skills using only Python's standard library."""
+"""Deploy personal instructions, skills, and selected harness settings."""
 
 import argparse
 import hashlib
@@ -14,6 +14,8 @@ import tempfile
 import uuid
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
+import astack_settings
 
 
 def fingerprint(data, mode):
@@ -111,6 +113,41 @@ def desired_files(harness, home, use_env, skills):
     return result
 
 
+def settings_operations(harnesses, selected, state, home, use_env, args):
+    operations = []
+    for target in selected:
+        old = state.get("settings", {}).get(target, {})
+        spec = harnesses[target].get("settings")
+        desired = {}
+        if args.command == "install" and spec:
+            source = REPO / "settings" / spec["source"]
+            if source.is_symlink():
+                raise ValueError("Settings source symlinks are unsupported: {}".format(source))
+            values = astack_settings.json_loads(source.read_text(encoding="utf-8"))
+            if list(astack_settings.leaves(values)):
+                desired[str(destination(spec, home, use_env))] = (spec["format"], values)
+            if old and str(destination(spec, home, use_env)) not in old:
+                raise ValueError("{} settings destination changed; uninstall this target before reinstalling".format(target))
+        for filename in sorted(set(old) | set(desired)):
+            path = Path(filename)
+            validate_parents(path)
+            actual = current_hash(path)
+            if actual == "symlink":
+                raise ValueError("Settings destination symlinks are unsupported, even with --force: {}".format(path))
+            data = path.read_bytes() if path.exists() else b""
+            mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
+            previous = old.get(filename)
+            format_name, values = desired.get(filename, (previous["format"] if previous else None, {}))
+            try:
+                rendered, record, changes, conflicts = astack_settings.plan(
+                    format_name, data.decode("utf-8"), values, previous, path.exists(), args.force)
+            except ValueError as error:
+                # Do not echo invalid configuration content (it may contain secrets).
+                raise ValueError("Cannot merge settings at {} ({})".format(path, type(error).__name__)) from None
+            operations.append((target, path, actual, data, mode, rendered, record, changes, conflicts))
+    return operations
+
+
 def main():
     harnesses = json.loads((REPO / "harnesses.json").read_text(encoding="utf-8"))
     parser = argparse.ArgumentParser(description=__doc__)
@@ -130,10 +167,12 @@ def main():
     # Reject a blocked state directory before changing any managed files.
     validate_parents(state_path)
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {"version": 1, "targets": {}}
-    if state.get("version") != 1:
+    if state.get("version") not in (1, 2):
         raise ValueError("Unsupported astack manifest version")
+    state["version"] = 2
 
     skills = skill_files() if args.command == "install" else []
+    settings = settings_operations(harnesses, selected, state, home, use_env, args)
     operations = []
     conflicts = []
     for target in selected:
@@ -166,16 +205,27 @@ def main():
     for target, path, action, payload, expected, conflict in operations:
         if payload is not None:
             owners.setdefault(destination_identity(path), set()).add(target)
+    for target, records in state.get("settings", {}).items():
+        for filename in records:
+            owners.setdefault(destination_identity(Path(filename)), set()).add(target + " settings")
+    for target, path, *_ in settings:
+        owners.setdefault(destination_identity(path), set()).add(target + " settings")
     for filename, targets in owners.items():
         if len(targets) > 1:
             raise ValueError("Targets must use distinct destinations: {} ({})".format(
                 filename, ", ".join(sorted(targets))))
 
+    for target, path, actual, data, mode, rendered, record, changes, key_conflicts in settings:
+        conflicts.extend("{} [{}]".format(path, key) for key in key_conflicts)
     if conflicts and not args.force:
         raise ValueError("Existing or locally modified files:\n  " + "\n  ".join(conflicts) +
                          "\nReconcile them, or use --force to back them up first.")
 
     backup_root = state_root / "backups" / uuid.uuid4().hex
+    # Check all shared settings files again before starting any mutation.
+    for target, path, actual, *_ in settings:
+        if current_hash(path) != actual:
+            raise ValueError("Settings changed during preview; retry: {}".format(path))
     for target, path, action, payload, expected, conflict in operations:
         if conflict:
             backup = backup_root / str(path).lstrip("/")
@@ -200,6 +250,44 @@ def main():
         # Record each completed operation. This is not a transaction across files:
         # interruption between a payload change and this write needs reconciliation.
         atomic_write(state_path, (json.dumps(state, indent=2) + "\n").encode(), 0o600)
+
+    for target, path, actual, data, mode, rendered, record, changes, key_conflicts in settings:
+        if current_hash(path) != actual:
+            raise ValueError("Settings changed during installation; retry: {}".format(path))
+        if key_conflicts:
+            backup = backup_root / str(path).lstrip("/")
+            print("BACKUP {} -> {}".format(path, backup))
+            if not args.dry_run and actual is not None:
+                atomic_write(backup, data, mode)
+        action = "REMOVE" if rendered is None else "MERGE" if rendered.encode() != data else "KEEP"
+        print("{} SETTINGS {}{}".format(action, path, " [" + ", ".join(changes) + "]" if changes else ""))
+        if args.dry_run:
+            continue
+        old_settings = state.get("settings", {})
+        new_settings = {name: dict(records) for name, records in old_settings.items()}
+        records = new_settings.setdefault(target, {})
+        if record is None:
+            records.pop(str(path), None)
+        else:
+            records[str(path)] = record
+        if not records:
+            new_settings.pop(target, None)
+        if action == "MERGE":
+            atomic_write(path, rendered.encode(), mode)
+        elif action == "REMOVE" and path.exists():
+            path.unlink()
+        state["settings"] = new_settings
+        try:
+            atomic_write(state_path, (json.dumps(state, indent=2) + "\n").encode(), 0o600)
+        except OSError:
+            # Restore the settings payload if its ownership record could not be saved.
+            state["settings"] = old_settings
+            if actual is None:
+                if path.exists():
+                    path.unlink()
+            else:
+                atomic_write(path, data, mode)
+            raise
     print("{} complete for {}.".format("Preview" if args.dry_run else args.command.capitalize(), ", ".join(selected)))
 
 
