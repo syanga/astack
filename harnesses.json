@@ -1,0 +1,22 @@
+{
+  "claude": {
+    "instructions": {"default": ".claude", "env": "CLAUDE_CONFIG_DIR", "suffix": "CLAUDE.md"},
+    "skills": {"default": ".claude", "env": "CLAUDE_CONFIG_DIR", "suffix": "skills"},
+    "overlay": "CLAUDE.md"
+  },
+  "codex": {
+    "instructions": {"default": ".codex", "env": "CODEX_HOME", "suffix": "AGENTS.md"},
+    "skills": {"default": ".agents", "suffix": "skills"},
+    "overlay": "CODEX.md"
+  },
+  "gemini": {
+    "instructions": {"default": ".gemini", "suffix": "GEMINI.md"},
+    "skills": {"default": ".gemini", "suffix": "skills"},
+    "overlay": "GEMINI.md"
+  },
+  "opencode": {
+    "instructions": {"default": ".config", "env": "XDG_CONFIG_HOME", "suffix": "opencode/AGENTS.md"},
+    "skills": {"default": ".config", "env": "XDG_CONFIG_HOME", "suffix": "opencode/skills"},
+    "overlay": "OPENCODE.md"
+  }
+}
