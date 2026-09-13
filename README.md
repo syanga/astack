@@ -164,7 +164,8 @@ entry to `harnesses.json` and an overlay to `instructions/`. A destination combi
 `env` when set. Then use `./install.sh --target <name>`. Add a destination assertion
 to the tests and document the official discovery paths here. Give each target
 distinct destination paths so updates and removal have unambiguous ownership;
-overlapping targets are rejected before installation.
+overlapping targets, including symlinked directory aliases, are rejected before
+installation, even with `--force`.
 
 Harnesses requiring different rule formats, plugin packages, or settings changes
 need a dedicated adapter. This repo currently distributes instructions and

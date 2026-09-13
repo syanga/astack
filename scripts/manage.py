@@ -31,6 +31,11 @@ def current_hash(path):
     return fingerprint(path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
 
 
+def destination_identity(path):
+    # Resolve directory aliases, but preserve a leaf symlink that we replace itself.
+    return str(path.parent.resolve() / path.name)
+
+
 def atomic_write(path, data, mode=0o644):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".astack-", dir=str(path.parent))
@@ -151,10 +156,10 @@ def main():
     owners = {}
     for target, records in state["targets"].items():
         for filename in records:
-            owners.setdefault(filename, set()).add(target)
+            owners.setdefault(destination_identity(Path(filename)), set()).add(target)
     for target, path, action, payload, expected, conflict in operations:
         if payload is not None:
-            owners.setdefault(str(path), set()).add(target)
+            owners.setdefault(destination_identity(path), set()).add(target)
     for filename, targets in owners.items():
         if len(targets) > 1:
             raise ValueError("Targets must use distinct destinations: {} ({})".format(

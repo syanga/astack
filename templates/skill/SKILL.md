@@ -18,4 +18,3 @@ description: Replace with what this skill does and the specific requests that sh
 ## Verification
 
 <!-- Explain how to check the outcome, where applicable. -->
-

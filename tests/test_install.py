@@ -190,6 +190,29 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("distinct destinations", result.stderr)
         self.assertFalse(self.home.exists())
 
+    def test_symlinked_skill_roots_cannot_share_ownership(self):
+        shared = self.home / ".agents/skills"
+        shared.mkdir(parents=True)
+        (self.home / ".claude").mkdir()
+        (self.home / ".claude/skills").symlink_to(shared, target_is_directory=True)
+        result = self.run_installer(success=False)
+        self.assertIn("distinct destinations", result.stderr)
+        self.assertFalse((shared / "test-skill/SKILL.md").exists())
+        self.assertFalse((self.home / ".local").exists())
+
+    def test_force_cannot_claim_another_targets_files_through_symlink(self):
+        self.run_installer("--target", "codex")
+        before = self.manifest()
+        shared = self.home / ".agents/skills"
+        installed = shared / "test-skill/SKILL.md"
+        content = installed.read_bytes()
+        (self.home / ".claude").mkdir()
+        (self.home / ".claude/skills").symlink_to(shared, target_is_directory=True)
+        result = self.run_installer("--target", "claude", "--force", success=False)
+        self.assertIn("distinct destinations", result.stderr)
+        self.assertEqual(installed.read_bytes(), content)
+        self.assertEqual(self.manifest(), before)
+
 
 if __name__ == "__main__":
     unittest.main()
