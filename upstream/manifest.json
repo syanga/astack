@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "sources": {
+    "gstack": {
+      "repository": "https://github.com/garrytan/gstack.git",
+      "ref": "refs/heads/main"
+    },
+    "pstack": {
+      "repository": "https://github.com/cursor/plugins.git",
+      "ref": "refs/heads/main"
+    },
+    "mattpocock": {
+      "repository": "https://github.com/mattpocock/skills.git",
+      "ref": "refs/heads/main"
+    }
+  },
+  "imports": {}
+}

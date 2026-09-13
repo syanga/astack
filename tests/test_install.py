@@ -11,16 +11,18 @@ import unittest
 SOURCE = Path(__file__).resolve().parent.parent
 
 
-class InstallerTests(unittest.TestCase):
+class InstallerFixture(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="astack test ")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.repo = self.root / "checkout with spaces"
-        shutil.copytree(SOURCE, self.repo, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+        shutil.copytree(SOURCE, self.repo, ignore=shutil.ignore_patterns(".git", ".cache", "__pycache__"))
         self.home = self.root / "test home"
+        # The user's growing skill collection is not part of this test fixture.
+        shutil.rmtree(self.repo / "skills")
         self.skill = self.repo / "skills/test-skill"
-        self.skill.mkdir()
+        self.skill.mkdir(parents=True)
         (self.skill / "SKILL.md").write_text(
             "---\nname: test-skill\ndescription: Exercise the installer in isolation.\n---\n\nTest instructions.\n"
         )
@@ -31,7 +33,7 @@ class InstallerTests(unittest.TestCase):
 
     def run_installer(self, *arguments, command="install", success=True, env=None):
         result = subprocess.run(
-            ["sh", str(self.repo / (command + ".sh")), "--home", str(self.home), *arguments],
+            [str(self.repo / (command + ".sh")), "--home", str(self.home), *arguments],
             cwd=str(self.root), capture_output=True, text=True, env=env,
         )
         if success:
@@ -43,6 +45,8 @@ class InstallerTests(unittest.TestCase):
     def manifest(self):
         return json.loads((self.home / ".local/state/astack/manifest.json").read_text())
 
+
+class InstallerTests(InstallerFixture):
     def test_all_harnesses_and_supporting_files(self):
         self.run_installer("--target", "all")
         for config, filename, skills in [
