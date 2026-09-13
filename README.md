@@ -38,8 +38,10 @@ instructions/
   OPENCODE.md         OpenCode additions
 skills/               Installable skills: <skill-name>/SKILL.md
 templates/skill/      Starter to copy when creating a skill; never installed
+upstream/             Provenance, original snapshots, and upstream review decisions
 harnesses.json        Destination paths and instruction overlays
 scripts/manage.py     Install/update/uninstall implementation
+scripts/upstream.py   Track origins and compare upstream changes
 install.sh            Installation entry point
 uninstall.sh          Removal entry point
 AGENTS.md             Instructions for working on this repository only
@@ -131,6 +133,11 @@ Backups are retained; restore them manually after uninstalling if desired.
 Do not delete the manifest while using the installer to manage those files.
 Run only one installer/uninstaller at a time.
 
+Individual file writes are atomic, but an entire install/uninstall is not a
+transaction. A crash or state-write failure after changing a file can leave its
+ownership record out of sync. Rerun to identify conflicts and reconcile them;
+use `--force` only after reviewing its backup preview.
+
 ```sh
 ./uninstall.sh --dry-run           # Claude Code + Codex by default
 ./uninstall.sh --target all
@@ -152,9 +159,25 @@ python3 -m unittest discover -s tests -v
 ```
 
 `--home` redirects installation and state, ignoring configuration environment
-overrides. Tests use temporary homes and check conflicts, backups, updates,
-uninstall, executable skills, symlinks, and paths containing spaces. GitHub Actions
-runs the tests on macOS and Ubuntu.
+overrides. Tests use temporary homes and exercise install, repeat install,
+updates, and uninstall for all four harnesses. They check local edits, unrelated
+files, backup restoration, custom environment paths, moved checkouts, executable
+helpers, binary assets, Unicode paths, symlinks, blocked state directories, and
+retry after an injected file-write failure. GitHub Actions runs the suite on
+macOS and Ubuntu with Python 3.10 and 3.14.
+
+To run just the deployment tests:
+
+```sh
+python3 -m unittest discover -s tests -p 'test_install*.py' -v
+```
+
+These tests verify files and installer behavior. Before relying on a new harness
+adapter or imported skill, also test discovery and invocation in that harness
+using an isolated profile: confirm the global instructions take effect, invoke a
+skill and its helpers, reinstall an update, then uninstall and restart the harness
+to confirm removal. Skills with external runtime dependencies need their own
+smoke tests; copying their files does not establish that those dependencies work.
 
 ## Add another harness
 
@@ -171,3 +194,20 @@ Harnesses requiring different rule formats, plugin packages, or settings changes
 need a dedicated adapter. This repo currently distributes instructions and
 skills; credentials, model settings, MCP servers, and harness binaries stay
 machine-specific.
+
+## Customized upstream skills
+
+Use [upstream/README.md](upstream/README.md) to track adaptations from gstack,
+pstack, Matt Pocock's skills, or other repositories. Each import pins the exact
+original commit and stores a snapshot of its relevant files, independently of
+your customized skill. No upstream skills have been imported yet.
+
+```sh
+python3 scripts/upstream.py list
+python3 scripts/upstream.py check
+```
+
+Agents working in this repo use the root `AGENTS.md` and `CLAUDE.md` to inspect
+upstream changes, preserve intentional customizations, and ask which specific
+changes you want to adopt. Checking for updates never changes installed skills
+or advances the original baseline; selective decisions have their own review log.

@@ -36,6 +36,12 @@ def destination_identity(path):
     return str(path.parent.resolve() / path.name)
 
 
+def validate_parents(path):
+    for parent in path.parents:
+        if (parent.exists() or parent.is_symlink()) and not parent.is_dir():
+            raise ValueError("Destination parent is not a directory: {}".format(parent))
+
+
 def atomic_write(path, data, mode=0o644):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".astack-", dir=str(path.parent))
@@ -121,6 +127,8 @@ def main():
     use_env = args.home is None
     state_root = destination({"default": ".local/state", "env": "XDG_STATE_HOME", "suffix": "astack"}, home, use_env)
     state_path = state_root / "manifest.json"
+    # Reject a blocked state directory before changing any managed files.
+    validate_parents(state_path)
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {"version": 1, "targets": {}}
     if state.get("version") != 1:
         raise ValueError("Unsupported astack manifest version")
@@ -138,9 +146,7 @@ def main():
                 raise ValueError("{} destination changed; uninstall this target before reinstalling".format(target))
         for filename in sorted(set(old) | set(desired)):
             path = Path(filename)
-            for parent in path.parents:
-                if (parent.exists() or parent.is_symlink()) and not parent.is_dir():
-                    raise ValueError("Destination parent is not a directory: {}".format(parent))
+            validate_parents(path)
             actual = current_hash(path)
             expected = fingerprint(*desired[filename]) if filename in desired else None
             # An unmanaged file remains a conflict even when its contents match.
@@ -191,7 +197,8 @@ def main():
             records[str(path)] = expected
         if not records:
             state["targets"].pop(target, None)
-        # Save after each change so interrupted runs can safely resume.
+        # Record each completed operation. This is not a transaction across files:
+        # interruption between a payload change and this write needs reconciliation.
         atomic_write(state_path, (json.dumps(state, indent=2) + "\n").encode(), 0o600)
     print("{} complete for {}.".format("Preview" if args.dry_run else args.command.capitalize(), ", ".join(selected)))
 
