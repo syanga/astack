@@ -73,6 +73,10 @@ Git repositories under ignored `.cache/upstream/`, with no upstream checkout or 
 execution. Snapshots reject symlinks and submodules and are checked for unexpected
 changes before comparisons. A whole tracked directory disappearing upstream is
 reported as deletions. A move to a new, untracked path requires manual investigation.
+Paths that alias on the host filesystem (for example `README.md` and `readme.md`
+on a case-insensitive Mac) fail explicitly during snapshot creation or extraction,
+instead of silently losing an original file. Review those sources on a
+case-sensitive filesystem.
 Commands that fetch or register imports take a repository-local lock. A concurrent
 command exits with a retry message instead of overwriting another import's record.
 

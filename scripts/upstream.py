@@ -74,6 +74,18 @@ def fetch(repository, ref):
     return cache, commit
 
 
+def write_snapshot_file(root, filename, data, mode):
+    # Git permits names that the host filesystem may treat as the same path.
+    # Check every component, including directories, before replacing any bytes.
+    current = root
+    for part in PurePosixPath(filename).parts:
+        child = current / part
+        if child.exists() and part not in os.listdir(current):
+            raise ValueError("Upstream paths collide on this filesystem: {}".format(filename))
+        current = child
+    atomic_write(current, data, mode)
+
+
 def snapshot(cache, commit, paths, output, require_paths=False):
     output.mkdir(parents=True, exist_ok=True)
     for source_path in paths:
@@ -90,7 +102,7 @@ def snapshot(cache, commit, paths, output, require_paths=False):
             if kind != "blob" or mode not in ("100644", "100755"):
                 raise ValueError("Unsupported upstream symlink or submodule: {}".format(path))
             data = git("-C", cache, "cat-file", "blob", object_id)
-            atomic_write(output / path, data, 0o755 if mode == "100755" else 0o644)
+            write_snapshot_file(output, path, data, 0o755 if mode == "100755" else 0o644)
 
 
 def archive_snapshot(root, target):
@@ -119,7 +131,7 @@ def baseline(identifier, entry):
                 mode = item.external_attr >> 16
                 if not stat.S_ISREG(mode) or stat.S_IMODE(mode) not in (0o644, 0o755):
                     raise ValueError("Unsupported snapshot entry: {}".format(filename))
-                atomic_write(root / filename, archive.read(item), stat.S_IMODE(mode))
+                write_snapshot_file(root, filename, archive.read(item), stat.S_IMODE(mode))
         yield root
 
 

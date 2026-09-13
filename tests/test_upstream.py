@@ -2,12 +2,16 @@
 
 import json
 import fcntl
+import hashlib
+import importlib.util
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 SOURCE = Path(__file__).resolve().parent.parent
@@ -167,6 +171,34 @@ class UpstreamTests(unittest.TestCase):
         self.assertIn("already pinned", result.stderr)
         self.assertEqual(self.manifest_path.read_bytes(), before)
 
+    def test_manifest_write_failure_removes_snapshot_and_allows_retry(self):
+        spec = importlib.util.spec_from_file_location("astack_upstream", self.repo / "scripts/upstream.py")
+        module = importlib.util.module_from_spec(spec)
+        with patch.object(sys, "path", [str(self.repo / "scripts"), *sys.path]):
+            spec.loader.exec_module(module)
+        before = self.manifest_path.read_bytes()
+        archive = self.repo / "upstream/bases/example-fixture.zip"
+        real_replace = module.os.replace
+
+        def fail_manifest(source, destination):
+            if Path(destination) == module.MANIFEST:
+                self.assertTrue(archive.is_file())
+                raise OSError("Injected manifest-write failure")
+            return real_replace(source, destination)
+
+        arguments = ["upstream.py", "track", "example-fixture", "--source", "fixture",
+                     "--path", "plugin/skills/example", "--local", "skills/custom-example"]
+        with patch.object(sys, "argv", arguments), patch.object(module.os, "replace", side_effect=fail_manifest):
+            with self.assertRaisesRegex(OSError, "Injected manifest-write failure"):
+                module.main()
+        self.assertEqual(self.manifest_path.read_bytes(), before)
+        self.assertFalse(archive.exists())
+        self.assertFalse(list((self.repo / "upstream").rglob(".astack-*")))
+        self.assertFalse(list(archive.parent.glob(".snapshot-*")))
+        self.pin()
+        self.assertEqual(self.manifest()["imports"]["example-fixture"]["base_commit"], self.original)
+        self.assertIn("No upstream changes", self.command("check").stdout)
+
     def test_invalid_or_missing_source_paths_do_not_register_import(self):
         for path in ("../escape", "/absolute", "missing-path"):
             with self.subTest(path=path):
@@ -186,6 +218,56 @@ class UpstreamTests(unittest.TestCase):
         self.assertIn("No tracked imports", self.command("list").stdout)
         self.assertIn("No tracked imports", self.command("check").stdout)
         self.assertFalse((self.repo / ".cache").exists())
+
+    def test_case_collisions_preserve_both_files_or_fail_explicitly(self):
+        probe = self.root / "CaseProbe"
+        probe.touch()
+        insensitive = probe.with_name("caseprobe").exists()
+        first_blob = self.git("rev-parse", "HEAD:plugin/skills/example/SKILL.md")
+        second_blob = self.git("rev-parse", "HEAD:LICENSE")
+        first = "plugin/skills/example/Guide/README.md"
+        # Cover both a leaf collision and a directory alias with distinct leaves.
+        for second in ("plugin/skills/example/Guide/readme.md", "plugin/skills/example/guide/other.md"):
+            with self.subTest(second=second):
+                self.git("reset", "--hard", self.original)
+                for filename, blob in ((first, first_blob), (second, second_blob)):
+                    self.git("update-index", "--add", "--cacheinfo", "100644,{},{}".format(blob, filename))
+                self.git("commit", "-m", "Fixture with case-distinct Git paths")
+                result = self.pin(success=not insensitive)
+                archive_path = self.repo / "upstream/bases/example-fixture.zip"
+                if insensitive:
+                    self.assertIn("paths collide", result.stderr)
+                    self.assertFalse(archive_path.exists())
+                    self.assertEqual(self.manifest()["imports"], {})
+                else:
+                    with zipfile.ZipFile(archive_path) as archive:
+                        self.assertEqual(archive.read(first), b"Original skill guidance.\n")
+                        self.assertEqual(archive.read(second), b"Fixture license text.\n")
+
+                # Simulate a valid baseline brought over from a case-sensitive machine.
+                with zipfile.ZipFile(archive_path, "w") as archive:
+                    for filename, data in ((first, b"First\n"), (second, b"Second\n")):
+                        info = zipfile.ZipInfo(filename)
+                        info.external_attr = (stat.S_IFREG | 0o644) << 16
+                        archive.writestr(info, data)
+                manifest = self.manifest()
+                manifest["imports"] = {"example-fixture": {
+                    "local": "skills/custom-example", "path": "plugin/skills/example",
+                    "repository": str(self.remote), "base_commit": self.original,
+                    "baseline_digest": hashlib.sha256(archive_path.read_bytes()).hexdigest(),
+                }}
+                self.manifest_path.write_text(json.dumps(manifest))
+                local = self.repo / "skills/custom-example"
+                local.mkdir(exist_ok=True)
+                result = self.command("diff", "example-fixture", "--local", success=not insensitive)
+                if insensitive:
+                    self.assertIn("paths collide", result.stderr)
+                else:
+                    self.assertIn("-First", result.stdout)
+                    self.assertIn("-Second", result.stdout)
+                archive_path.unlink()
+                manifest["imports"] = {}
+                self.manifest_path.write_text(json.dumps(manifest))
 
     def test_snapshot_survives_normal_git_commit_and_clone_with_upstream_ignore_rules(self):
         (self.primary / ".gitignore").write_text("*.txt\n")
