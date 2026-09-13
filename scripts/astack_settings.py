@@ -125,7 +125,8 @@ class TomlDocument:
             start = pos
             if source[pos] == "[":
                 array = source.startswith("[[", pos)
-                end, header = parse_key(source, pos + (2 if array else 1))
+                key_start = skip_chars(source, pos + (2 if array else 1), " \t")
+                end, header = parse_key(source, key_start)
                 if array:
                     arrays.append(header)
                 pos = end + (2 if array else 1)

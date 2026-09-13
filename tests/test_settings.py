@@ -158,6 +158,19 @@ class SettingsTests(InstallerFixture):
         self.run_installer("--target", "codex")
         self.assertFalse((self.home / ".codex/config.toml").exists())
 
+    def test_toml_header_whitespace_preserved_on_update_and_restore(self):
+        self.source("codex", {"features": {"memories": False, "apps": True}})
+        original = ('[ \tfeatures \t] # toggles\r\nmemories = true\r\n'
+                    '[[ \tagents . "list" ]]\r\nname = "keep"\r\n')
+        path = self.config("codex", original)
+        self.run_installer("--target", "codex")
+        self.assertIn(b'[ \tfeatures \t] # toggles\r\n', path.read_bytes())
+        self.assertIn(b'memories = false\r\n', path.read_bytes())
+        self.assertIn(b'"apps" = true\r\n', path.read_bytes())
+        self.assertIn(b'[[ \tagents . "list" ]]\r\nname = "keep"\r\n', path.read_bytes())
+        self.run_installer("--target", "codex", command="uninstall")
+        self.assertEqual(path.read_bytes(), original.encode())
+
     def test_uninstall_preview_preserves_settings_and_ownership(self):
         self.source("codex", {"model_reasoning_effort": "high"})
         self.config("codex", 'model_reasoning_effort="low"\n')
