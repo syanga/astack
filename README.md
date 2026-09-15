@@ -29,6 +29,24 @@ Select individual harnesses, repeat `--target`, or install all four:
 The scripts work from any working directory, including paths containing spaces.
 They install configuration files even if a harness is not installed yet.
 
+## Optional secret-scanning hook
+
+Install a Gitleaks pre-push guard in a repository you choose:
+
+```sh
+python3 scripts/git_hooks.py install --repo /path/to/project --dry-run
+python3 scripts/git_hooks.py install --repo /path/to/project
+```
+
+This is separate from `install.sh` and agent configuration. It runs on pushes
+from any terminal or agent, across the selected repository's linked worktrees.
+The installer downloads a pinned, checksum-verified Gitleaks release for macOS
+or Linux (ARM64 or x64). It requires Python 3.10+ and Git 2.31+.
+
+To replace an existing gstack-managed guard, use `--replace-gstack`. Uninstall
+restores the original hook. See [Git hook installation and behavior](docs/git-hooks.md)
+for offline installation, hook chaining, scan coverage, and removal.
+
 ## What to edit
 
 ```text
