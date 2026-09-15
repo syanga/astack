@@ -222,6 +222,28 @@ class HookTests(HookFixture):
         self.assertFalse((self.hooks / git_hooks.PAYLOAD).exists())
         self.assertFalse((self.hooks / git_hooks.ORIGINAL).exists())
 
+    def test_interruption_after_hook_swap_preserves_recoverable_installation(self):
+        old = self.hooks / "pre-push"
+        old.write_text("#!/bin/sh\n# existing checks\nexit 0\n")
+        old.chmod(0o751)
+        before = old.read_bytes()
+        replace = os.replace
+
+        def interrupt_after_swap(source, destination):
+            replace(source, destination)
+            if Path(destination) == old:
+                raise KeyboardInterrupt()
+
+        with patch.object(git_hooks.os, "replace", side_effect=interrupt_after_swap):
+            with self.assertRaises(KeyboardInterrupt):
+                git_hooks.install(self.hooks, self.binary)
+        self.assertEqual((self.hooks / git_hooks.ORIGINAL).read_bytes(), before)
+        self.assertEqual(self.invoke().returncode, 0)
+        self.manage()  # Interrupted installation can be retried safely.
+        self.manage("uninstall")
+        self.assertEqual(old.read_bytes(), before)
+        self.assertEqual(old.stat().st_mode & 0o777, 0o751)
+
     def test_hook_survives_checkout_and_repository_moves(self):
         self.manage()
         moved = self.root / "moved repo"
@@ -271,6 +293,30 @@ class RealScannerTests(HookFixture):
     def secret(self):
         # Synthetic fixture only, assembled to avoid a valid token in this source.
         return "ghp_" + "Ab3Cd4Ef5Gh6Ij7Kl8Mn9Op0Qr1St2Uv3Wx4"
+
+    def test_real_replacement_commit_cannot_hide_pushed_secret(self):
+        head = self.commit("credential.txt", self.secret() + "\n")
+        tree = self.git("rev-parse", self.base + "^{tree}").stdout.strip()
+        replacement = self.git("commit-tree", tree, "-p", self.base,
+                               "-m", "clean local view").stdout.strip()
+        self.git("replace", head, replacement)
+        result = self.git("push", "origin", "main", ok=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("secret detected", result.stderr)
+        self.assertNotIn(self.secret(), result.stderr)
+        self.assertEqual(self.git("rev-parse", "main", repo=self.remote).stdout.strip(), self.base)
+
+    def test_real_replacement_tag_cannot_change_selected_history(self):
+        self.commit("credential.txt", self.secret() + "\n")
+        self.git("tag", "-a", "secret-tag", "-m", "fixture")
+        self.git("tag", "-a", "clean-tag", self.base, "-m", "fixture")
+        original = self.git("rev-parse", "secret-tag").stdout.strip()
+        replacement = self.git("rev-parse", "clean-tag").stdout.strip()
+        self.git("replace", original, replacement)
+        result = self.git("push", "origin", "secret-tag", ok=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("secret detected", result.stderr)
+        self.assertEqual(self.git("ls-remote", "origin", "refs/tags/secret-tag").stdout, "")
 
     def test_real_clean_push_and_deleted_secret_in_intermediate_commit(self):
         self.commit("file.txt", "clean change\n")

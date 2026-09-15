@@ -190,12 +190,18 @@ def install(hooks, binary=None, replace_gstack=False, dry_run=False):
                     os.fchmod(backup.fileno(), original["mode"])
             atomic_write(hook, WRAPPER, 0o755)
         except BaseException:
-            # Only artifacts created by this attempt; the original hook is intact
-            # unless the final atomic replacement succeeded.
-            if created:
-                shutil.rmtree(payload)
-            if saved:
-                (hooks / ORIGINAL).unlink(missing_ok=True)
+            # os.replace may have succeeded before an interruption was delivered.
+            # Clean up only when the original hook is demonstrably still intact;
+            # otherwise retain the runner and backup for retry or restoration.
+            try:
+                unchanged = (record(hook) if hook.exists() or hook.is_symlink() else None) == original
+            except (OSError, ValueError):
+                unchanged = False
+            if unchanged:
+                if created:
+                    shutil.rmtree(payload)
+                if saved:
+                    (hooks / ORIGINAL).unlink(missing_ok=True)
             raise
 
 

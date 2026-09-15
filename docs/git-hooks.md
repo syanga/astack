@@ -66,6 +66,10 @@ when none existed. `uninstall.sh` removes harness configuration only; use the co
 above to remove this optional integration. Concurrent installer operations are
 rejected; an interrupted operation may leave `astack-hooks.lock` in the common
 Git directory. Confirm no installer is running before removing that lock.
+If interruption occurs after the active hook is replaced, the complete installation
+and saved predecessor are retained; retry installation or run uninstall to restore
+the predecessor. A failure before replacement cleans up only when the original
+hook is confirmed unchanged.
 
 ## What is scanned
 
@@ -83,6 +87,8 @@ Git directory. Confirm no installer is running before removing that lock.
 
 Missing remote-tip objects and shallow history block the push with a fetch/retry
 message. The hook does not silently fetch, change refs, or widen permissions.
+Git replacement objects are disabled during history selection and scanning so the
+guard checks the original objects that Git will transfer, including annotated tags.
 Git diff drivers and text conversions are disabled during scanning. The guard
 uses Gitleaks' bundled default rules; working-tree `.gitleaks.toml`, `.gitleaksignore`,
 `gitleaks:allow` comments, and `GITLEAKS_*` environment overrides cannot silently

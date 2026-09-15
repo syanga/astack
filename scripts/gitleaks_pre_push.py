@@ -16,7 +16,8 @@ MARKER = "# astack gitleaks pre-push v1"
 
 
 def git(*args):
-    result = subprocess.run(["git", *args], capture_output=True, text=True)
+    # Push transfers original objects, even when local replace refs hide them.
+    result = subprocess.run(["git", "--no-replace-objects", *args], capture_output=True, text=True)
     if result.returncode:
         # Git errors can contain remote URLs or file content. Don't echo them.
         raise ValueError("Git could not determine the outgoing history; fetch the remote and retry.")
@@ -48,6 +49,7 @@ def revisions(data):
 
 def scan(payload, revs):
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITLEAKS_")}
+    env["GIT_NO_REPLACE_OBJECTS"] = "1"  # Also applies to Git invoked by Gitleaks.
     with tempfile.TemporaryDirectory(prefix="astack-gitleaks-") as tmp:
         report = Path(tmp) / "report.json"
         opts = ["--full-history", "--diff-merges=separate", "--root", "--format=medium",
