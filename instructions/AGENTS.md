@@ -24,7 +24,7 @@ I wanted to share some of my preferences here so we can be more aligned as we wo
 * If the answer is obvious and the change is trivial, still answer first and offer the change. Ask before making it.
 
 ## Visual and design work
-* Do not edit real components first. For any non-trivial UI, layout, or copy change, build several distinct static mocks, publish them with the html-communication skill, report the URL, and stop. Wait for a pick before implementing.
+* Do not edit real components first. For any non-trivial UI, layout, or copy change, build several distinct static mocks, publish them with the t3-preview skill, report the link, and stop. Wait for a pick before implementing.
 * Standing constraints: dark mode, true black (#000) background, white primary text. Information-dense, no decorative card/pill chrome, no light-gray subtitle lines above sections. Minimal copy. No em dashes.
 * Avoid continuously repainting CSS animations (pulse, shimmer, blur, spinners); they peg the GPU on high-refresh displays.
 

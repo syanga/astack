@@ -170,6 +170,12 @@ class InstallerTests(InstallerFixture):
         self.run_installer(success=False)
         self.assertFalse(self.home.exists())
 
+    def test_long_description_fails_before_writes(self):
+        description = "Use when " + "x" * 200
+        (self.skill / "SKILL.md").write_text("---\nname: test-skill\ndescription: {}\n---\n".format(description))
+        self.run_installer(success=False)
+        self.assertFalse(self.home.exists())
+
     def test_home_ignores_environment_overrides(self):
         outside = self.root / "outside"
         env = dict(os.environ, CODEX_HOME=str(outside), CLAUDE_CONFIG_DIR=str(outside),
