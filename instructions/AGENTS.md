@@ -16,7 +16,7 @@ I wanted to share some of my preferences here so we can be more aligned as we wo
 * Don't be scared to propose bold ideas if they can meaningfully benefit our work.
 * Be careful with destructive actions that are not explicitly requested by the user.
 * Tests are good! Endless smoke tests, "regression tests" for feature deletions, etc, much less good. Tests should be focused, not slop.
-* Code carries its meaning in names, types, and structure, not comments. Keep a comment only for a non-obvious why the code cannot show, a constraint forced by an external dependency, a license header, an issue link, or a doc comment that defines a public API contract. The no-comments skill strips the rest.
+* Names, types, and structure carry meaning; comments do not. Keep a comment only for a license header, behaviour forced by an external dependency or protocol we cannot change, a doc comment that defines a public API contract, an issue link that explains a constraint the code cannot express, or a lint suppression whose rule is faulty or style-only. The no-comments skill's keep list is the full list.
 
 ## Questions are read-only
 * A question is a request for an answer, not for changes. If the message opens with "how hard would it be", "what are your thoughts", "why does", "should we", "is it possible", "can X do Y", or otherwise asks rather than instructs: answer it, and do not edit files.

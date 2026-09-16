@@ -18,7 +18,7 @@
     "path": "pstack/skills/principle-*",
     "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
     "license": "MIT, kept in skills/principles/LICENSE",
-    "note": "Sixteen of the 23 principle skills, bodies verbatim as plain files under one index skill instead of 23 skills. Frontmatter dropped, cross-links rewritten to sibling files, references to pstack-only skills removed."
+    "note": "Sixteen of the 23 principle skills, bodies verbatim as plain files under one index skill instead of 23 skills. Frontmatter dropped, cross-links rewritten to sibling files, references to pstack-only skills (show-me-your-work, typescript-best-practices, brain) removed."
   },
   "open-pr": {
     "repository": "https://github.com/cursor/plugins.git",
@@ -42,7 +42,7 @@
       "959a8e9f1edc3adbe2f7e3054bb6fbefa6696260"
     ],
     "license": "MIT, kept in skills/babysit-pr/LICENSE-pstack and LICENSE-mattpocock",
-    "note": "Single PR, three modes, conflicts-threads-CI order, CI classification, triage rubric with generalised patterns. Stack, merge-queue, Origin forge, and the TypeScript watch-pr replaced by scripts/pr_status.py (stdlib + gh). Merge-conflict steps folded in from Matt."
+    "note": "Single PR, three modes, conflicts-threads-CI order, CI classification, triage rubric with the dismissal patterns and their sources. Stack, merge-queue, Origin forge, and the TypeScript watch-pr replaced by scripts/pr.py (stdlib + gh: status, reply, resolve, comment). Merge-conflict steps from Matt live in conflicts.md."
   },
   "review-pr": {
     "repository": [
@@ -58,7 +58,7 @@
       "959a8e9f1edc3adbe2f7e3054bb6fbefa6696260"
     ],
     "license": "MIT, kept in skills/review-pr/LICENSE-pstack and LICENSE-mattpocock",
-    "note": "Interrogate's shape (intent, parallel read-only reviewers, rubric, lead judgment) with the rubric pointing at ../principles files instead of restating them, evidence ladder from blast-radius, and Matt's spec axis as a separate reviewer. Model table and Cursor config removed."
+    "note": "Interrogate's shape (intent, parallel read-only reviewers, rubric, lead judgment) with the rubric pointing at ../principles files pasted into the prompt, the code-quality lens folded into the rubric and judgment, the evidence ladder from blast-radius, Matt's spec axis and spec-source order as a separate reviewer, and a worktree for the PR head. Model table and Cursor config removed."
   },
   "blast-radius": {
     "repository": "https://github.com/cursor/plugins.git",

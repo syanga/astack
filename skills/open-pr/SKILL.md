@@ -17,7 +17,7 @@ Run every check CI runs, the way CI runs it. Record each command and its result 
 
 ## 3. Clean the diff
 
-Read the whole diff as its reviewer. Remove debug output, dead paths, and guards for cases the code cannot reach. Apply [`../no-comments/SKILL.md`](../no-comments/SKILL.md) to the diff. If the change reaches code outside the diff, or you cannot name the one fact it is safe because of, apply [`../blast-radius/SKILL.md`](../blast-radius/SKILL.md) and keep its result for the Blast radius section. Done when the diff has no debug output, no unreachable guard, and no comment outside the no-comments keep list, and any blast-radius result is kept.
+Read the whole diff as its reviewer. Remove debug output, dead paths, and guards for cases the code cannot reach. Apply [`../no-comments/SKILL.md`](../no-comments/SKILL.md) to the diff. If the change reaches code outside the diff, or you cannot name the safety fact (the one fact the change is safe because of), apply [`../blast-radius/SKILL.md`](../blast-radius/SKILL.md) and keep its hand-back for the Blast radius section. Done when the diff has no debug output, no unreachable guard, and no comment outside the no-comments keep list, every flag no-comments raised is fixed or recorded as open, and any blast-radius hand-back is kept.
 
 ## 4. Shape the commits
 
@@ -38,7 +38,7 @@ The body is the briefing the global rules describe. It is also the squash commit
 - `## Why`. Give the intent and the approach in one or two short paragraphs. For a bug fix, give the root cause. Add `Closes #<n>` when an issue exists.
 - `## Scope`. Include it when the boundary matters. Name the symbols and paths that are in, what stays out, and both sides of a rename.
 - `## Tradeoffs`. Include it when there was a real choice. Name the alternative you rejected and why.
-- `## Blast radius`. Include it when the change reaches code outside the diff. Give the one fact it is safe because of, the rung it reached, and the proof, as blast-radius hands them back.
+- `## Blast radius`. Include it when the change reaches code outside the diff. Give the safety fact, the rung it reached, and the proof, as blast-radius hands them back.
 - `## Verification`. List each check from step 2 with its command and result. For a performance change, give one number with its unit, before and after. Attach a screenshot or recording when it proves a claim.
 - Add the model and harness line that the global rules require.
 
@@ -56,4 +56,4 @@ If the host opened it as a draft, run `gh pr ready <n>`. Inside T3 Code, call `l
 
 ## 8. Reply
 
-Reply with the URL and the Verification section. Babysit only when the user asks, through [`../babysit-pr/SKILL.md`](../babysit-pr/SKILL.md). Done when the reply carries the URL and the Verification section.
+Reply with the URL, the Verification section, and any constraints no-comments left open. Babysit only when the user asks, through [`../babysit-pr/SKILL.md`](../babysit-pr/SKILL.md). Done when the reply carries those three things.

@@ -1,39 +1,42 @@
 ---
 name: review-pr
-description: Adversarial review of a diff or pull request.
+description: Adversarial review of a diff or pull request. Findings, no fixes.
 disable-model-invocation: true
 ---
 
 # Review a PR
 
-Read-only. The deliverable is a verdict the author can act on, with every finding sorted into act on, consider, noted, or dismissed. Nothing changes during the review; fixing is a separate request.
+Read-only. The deliverable is a verdict the author can act on. Fixing is a separate request. The one write this skill makes is a worktree for the PR head, so reviewers read the code the diff describes.
 
-## 1. Fix the scope
+## 1. Set the scope
 
-For a PR number or URL, take `gh pr diff <n>` and `gh pr view <n> --json title,body,commits,closingIssuesReferences`. For the current branch, fetch the base and diff from the merge base, `git diff $(git merge-base origin/<base> HEAD)`, which includes the working tree. Done when the ref resolves and the diff is non-empty; otherwise say so and stop.
+- For a PR number or URL: run `gh pr view <n> --json title,body,baseRefName,headRefName,commits,closingIssuesReferences`, then `git fetch origin pull/<n>/head:review/<n>` and `git worktree add ../review-<n> review/<n>`. Reviewers read that worktree.
+- For the current branch: run `git fetch origin <base>`, then `git diff $(git merge-base origin/<base> HEAD)`, which covers the working tree. Reviewers read this tree.
+- For files or a pasted diff the user names: use those.
+
+Record the diff, the commit list from `git log --oneline origin/<base>..HEAD`, and the base. Done when the diff is non-empty and the tree the reviewers will read contains the change. Otherwise say so and stop.
 
 ## 2. State the intent
 
-One paragraph on what this change is supposed to accomplish, from the PR body, the commit messages, the linked issue (`gh issue view`), and the user's message. This is the one place a question to the user is allowed: if the intent is unclear, ask before spawning anything. Code reviewers take the intent as given and judge execution. The spec reviewer judges delivery against it.
+Write one paragraph on what the change sets out to do. Collect its sources in this order: the linked issue (`gh issue view <n>`), a spec file under `docs/` or `specs/` or a path the user gave, the PR body, the commit messages, the user's message, and the code itself when nothing else exists. If the intent is still unclear, ask the user now. This is the only question the review asks. Done when the paragraph accounts for every source that exists and names which ones you found.
 
-## 3. Spawn the reviewers, in parallel, read-only
+## 3. Spawn the reviewers
 
-- At least two code reviewers, each given the code reviewer prompt in [`reviewer.md`](reviewer.md) filled with the intent, the diff, [`rubric.md`](rubric.md), and the ladder from [`../blast-radius/evidence.md`](../blast-radius/evidence.md). Identical prompt to all. When the harness lets you choose models, give each reviewer a different one; independence is where the signal comes from.
-- One spec reviewer, given the spec reviewer prompt in [`reviewer.md`](reviewer.md) with the intent, its sources, and the diff.
+Assemble the code reviewer prompt from [`reviewer.md`](reviewer.md): the intent, the diff, the commit list, the worktree path, [`rubric.md`](rubric.md) with the text of every principle file it links pasted after the lens that names it, and the ladder from [`../blast-radius/evidence.md`](../blast-radius/evidence.md). Send the identical prompt to three read-only reviewers, or two when the harness offers one model. Give each reviewer a different model when you can; two models rarely make the same mistake. Assemble the spec reviewer prompt with the intent, its sources, the diff, and the commit list. Send it to one read-only reviewer. Run all of them in parallel.
 
-Point every reviewer at the repository so it can read beyond the diff. Without a subagent tool, run each prompt yourself in turn and write the findings down before starting the next.
+Without a subagent tool, run the code reviewer prompt once and the spec reviewer prompt once yourself, and drop the Agreement section from the output.
+
+Done when every reviewer has reported and each prompt carried everything listed above.
 
 ## 4. Judge
 
-Apply [`judgment.md`](judgment.md). Merge duplicates and record which reviewers raised each. Trace the call site of every hypothetical before accepting it. Done when every finding has a bucket and a one-line rationale, and act on holds five items or fewer, or you say why more survived.
+Apply [`judgment.md`](judgment.md) to the code findings. Keep the spec findings separate. Never merge or rerank them with code findings. Remove the worktree with `git worktree remove ../review-<n>`. Done when every code finding has a bucket and a one-line rationale, every spec finding quotes its source line, and the worktree is gone.
 
 ## Output
 
-- **Intent.** The paragraph from step 2.
+- **Intent.** The paragraph, and the sources found.
 - **Reviewers.** One line each: label, model, number of findings.
-- **Act on.** Findings that would block the PR. Location with the quoted line, what is wrong, why it matters, who raised it.
-- **Consider.** Legitimate points with a real cost to address now. Same shape.
-- **Noted.** Valid, low priority. One line each.
-- **Dismissed.** Rejected findings with the reason. This section is how the user overrides you.
-- **Spec.** Missing, unrequested, and wrong against the intent, each quoting the source line.
-- **Agreement.** Where reviewers agreed, where they split, and what that says.
+- **Act on**, **Consider**, **Noted**, **Dismissed**, as judgment.md defines them. Each finding carries its location with the quoted line, what is wrong, the evidence, and who raised it.
+- **Spec.** Missing, unrequested, and wrong, each quoting the source line.
+- **Agreement.** Where reviewers agreed, where one contradicted another, and which findings came from one reviewer alone.
+- **Summary.** One line: the number of findings per axis and the worst in each. No single winner across the two axes.
