@@ -11,7 +11,7 @@
     "path": "pstack/skills/unslop",
     "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
     "license": "MIT, kept in skills/unslop/LICENSE",
-    "note": "Rules verbatim; rule numbers are stable ids other skills cite. Description shortened to a human-facing line; Codex agents/openai.yaml added to keep it user-invoked."
+    "note": "Rules verbatim; rule numbers are stable ids other skills cite. Description shortened to a human-facing line; disable-model-invocation set, from which the installer generates the Codex policy."
   },
   "principles": {
     "repository": "https://github.com/cursor/plugins.git",
