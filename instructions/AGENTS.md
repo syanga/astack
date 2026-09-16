@@ -16,7 +16,7 @@ I wanted to share some of my preferences here so we can be more aligned as we wo
 * Don't be scared to propose bold ideas if they can meaningfully benefit our work.
 * Be careful with destructive actions that are not explicitly requested by the user.
 * Tests are good! Endless smoke tests, "regression tests" for feature deletions, etc, much less good. Tests should be focused, not slop.
-* Names, types, and structure carry meaning; comments do not. Keep a comment only for a license header, behaviour forced by an external dependency or protocol we cannot change, a doc comment that defines a public API contract, an issue link that explains a constraint the code cannot express, or a lint suppression whose rule is faulty or style-only. The no-comments skill's keep list is the full list.
+* Names, types, and structure carry meaning. Comments do not. Keep a comment only for a legal or license header, behaviour forced by an external dependency, platform, vendor, or protocol we cannot change, a doc comment that defines a public API contract, an issue or RFC link that explains a constraint the code cannot express, or a lint or type suppression whose rule is faulty, pedantic, or style-only. When unsure, delete the comment. The no-comments skill's keep list is the authority.
 
 ## Questions are read-only
 * A question is a request for an answer, not for changes. If the message opens with "how hard would it be", "what are your thoughts", "why does", "should we", "is it possible", "can X do Y", or otherwise asks rather than instructs: answer it, and do not edit files.
@@ -27,7 +27,7 @@ I wanted to share some of my preferences here so we can be more aligned as we wo
 * Standing constraints: dark mode, true black (#000) background, white primary text. Information-dense, no decorative card/pill chrome, no light-gray subtitle lines above sections. Minimal copy. No em dashes.
 * Avoid continuously repainting CSS animations (pulse, shimmer, blur, spinners); they peg the GPU on high-refresh displays.
 
-## Blast radius
+## Live systems
 * Never touch production, live databases, or daily-driver build/preview channels unless explicitly told to. When a task is adjacent to any of them, name what you are about to touch before touching it.
 
 ## Pull Requests

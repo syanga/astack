@@ -17,6 +17,7 @@ PR = {
     "number": 12, "url": "https://github.com/o/r/pull/12", "state": "OPEN", "isDraft": False,
     "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED", "reviewDecision": "",
     "headRefOid": "abc123", "headRefName": "feature", "baseRefName": "main", "autoMergeRequest": None,
+    "commits": [{"committedDate": "2026-09-15T09:30:00Z"}, {"committedDate": "2026-09-15T10:00:00Z"}],
     "statusCheckRollup": [
         {"__typename": "CheckRun", "name": "tests", "status": "COMPLETED", "conclusion": "SUCCESS", "detailsUrl": "u1"},
         {"__typename": "CheckRun", "name": "lint", "status": "IN_PROGRESS", "conclusion": None, "detailsUrl": "u2"},
@@ -62,7 +63,8 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual([(review["author"], review["bot"]) for review in snapshot["new_reviews"]],
                          [("bugbot", True), ("alan", False)])
         self.assertIsNone(snapshot["review_decision"])
-        self.assertEqual(snapshot["head"], {"sha": "abc123", "ref": "feature", "committed_at": SINCE})
+        self.assertEqual(snapshot["head"], {"sha": "abc123", "ref": "feature", "committed_at": "2026-09-15T10:00:00Z"})
+        self.assertEqual(snapshot["since"], SINCE)
 
     def test_comment_header(self):
         self.assertEqual(pr.format_body("claude-fable-5-1", "Fixed in 1a2b3c.\n"),

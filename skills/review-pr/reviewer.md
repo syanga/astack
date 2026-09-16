@@ -1,6 +1,6 @@
 # Reviewer prompts
 
-The lead fills the placeholders and sends the same filled prompt to every reviewer of that kind. Each prompt is the fenced block below. Nothing outside a fence reaches a reviewer. Reviewers run read-only. In a harness with typed subagents, pick the read-only type.
+The lead fills the placeholders and sends the same filled prompt to every reviewer of that kind. Each prompt is the fenced block below. Nothing outside a fence reaches a reviewer. Reviewers run read-only. In a harness with typed subagents, pick the read-only type. `{RUBRIC}` is rubric.md with each linked principle's text pasted after its lens, first headings removed. `{LADDER}` is `../blast-radius/evidence.md`. `{TREE}` is the tree from step 1; for a pasted diff, delete that sentence. `{SOURCES}` is every source step 2 found, in step 2's order, or "none beyond the intent paragraph".
 
 ## Code reviewer
 
@@ -21,25 +21,27 @@ Commits, oldest first:
 
 {COMMIT LIST}
 
-The tree at {WORKTREE PATH} contains this change. Read callers, callees, types, and tests there whenever a lens asks you to.
+The tree at {TREE} contains this change. Read callers, callees, types, and tests there whenever a lens asks you to.
 
 ## Rubric
 
-{RUBRIC, with each principle's text pasted after the lens that names it}
+{RUBRIC}
 
 ## Evidence ladder
 
 {LADDER}
 
+Rung 3 is your ceiling. You are read-only.
+
 ## What a finding needs
 
 1. Severity. `critical` for a bug, data loss, a security hole, or broken behaviour. `warning` for a design or correctness cost that will hurt later. `nit` only when the fix takes one line.
-2. Location. `file:line` and the verbatim line or lines that motivate the finding. A finding you cannot quote is unverified. Mark it so and place it last.
+2. Location. `file:line` and the verbatim line or lines that motivate the finding.
 3. Finding. What is wrong, concretely.
-4. Evidence. Why it is a problem, and the rung of the ladder you reached. A hypothetical needs a reachable path.
+4. Evidence. Why it is a problem, and the rung of the ladder you reached. A hypothetical needs a reachable path. A finding below rung 2 is unverified. Mark it so and place it last.
 5. Suggestion. Optional, and only with a concrete alternative.
 
-Every finding names a defect and quotes the line that shows it. Restating what the code does is not a finding. Order the findings by the rubric's priority. State a structural problem as a structural problem. When the real issue is the design, "maybe rename this" is not the finding. Zero findings is a valid result. Write "no findings" and stop.
+Restating what the code does is not a finding. Order the findings: structural regressions and missed simplifications first, then tangled branching, then boundary, type, and file-size concerns, then smaller legibility issues. Prefer a few high-conviction findings to a long list of nits. State a structural problem as a structural problem. When the real issue is the design, "maybe rename this" is not the finding. Zero findings is a valid result. Write "no findings" and stop.
 
 ## Output
 
@@ -61,7 +63,7 @@ You are checking whether the change delivers what was asked, nothing less and no
 
 > {INTENT}
 
-{SOURCES: the linked issue, the spec file, the PR body, in that order, or "none beyond the intent paragraph"}
+{SOURCES}
 
 ## Change under review
 

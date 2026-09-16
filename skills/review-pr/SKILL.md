@@ -6,37 +6,51 @@ disable-model-invocation: true
 
 # Review a PR
 
-Read-only. The deliverable is a verdict the author can act on. Fixing is a separate request. The one write this skill makes is a worktree for the PR head, so reviewers read the code the diff describes.
+This review is read-only. The deliverable is a verdict the author can act on. Fixing is a separate request. The one write this skill makes is a worktree for the PR head, so reviewers read the code the diff describes.
 
 ## 1. Set the scope
 
-- For a PR number or URL: run `gh pr view <n> --json title,body,baseRefName,headRefName,commits,closingIssuesReferences`, then `git fetch origin pull/<n>/head:review/<n>` and `git worktree add ../review-<n> review/<n>`. Reviewers read that worktree.
-- For the current branch: run `git fetch origin <base>`, then `git diff $(git merge-base origin/<base> HEAD)`, which covers the working tree. Reviewers read this tree.
-- For files or a pasted diff the user names: use those.
+Take one of three routes.
 
-Record the diff, the commit list from `git log --oneline origin/<base>..HEAD`, and the base. Done when the diff is non-empty and the tree the reviewers will read contains the change. Otherwise say so and stop.
+- For a PR number or URL, run `gh pr view <n> --json title,body,baseRefName,headRefName,commits,closingIssuesReferences` and `gh pr diff <n>`. Then run `git fetch origin pull/<n>/head:review/<n>` and `git worktree add ../review-<n> review/<n>`. The tree is `../review-<n>` and the commit list is `git log --oneline origin/<base>..review/<n>`.
+- For the current branch, run `git fetch origin <base>` and `git diff $(git merge-base origin/<base> HEAD)`. The tree is the repository root and the commit list is `git log --oneline origin/<base>..HEAD`.
+- For files or a pasted diff the user names, use those. There is no tree.
+
+Done when the diff is non-empty and the tree, when there is one, contains the change. Otherwise say so and stop.
 
 ## 2. State the intent
 
-Write one paragraph on what the change sets out to do. Collect its sources in this order: the linked issue (`gh issue view <n>`), a spec file under `docs/` or `specs/` or a path the user gave, the PR body, the commit messages, the user's message, and the code itself when nothing else exists. If the intent is still unclear, ask the user now. This is the only question the review asks. Done when the paragraph accounts for every source that exists and names which ones you found.
+Write one paragraph on what the change sets out to do. Collect its sources in this order.
+
+1. The linked issue, from `gh issue view <n>`.
+2. A spec file under `docs/` or `specs/`, or a path the user gave.
+3. The PR body.
+4. The commit messages.
+5. The user's message.
+6. The code itself, when nothing else exists.
+
+If the intent is still unclear, ask the user now. That question is the only one the review asks. Done when the paragraph accounts for every source that exists and names which ones you found.
 
 ## 3. Spawn the reviewers
 
-Assemble the code reviewer prompt from [`reviewer.md`](reviewer.md): the intent, the diff, the commit list, the worktree path, [`rubric.md`](rubric.md) with the text of every principle file it links pasted after the lens that names it, and the ladder from [`../blast-radius/evidence.md`](../blast-radius/evidence.md). Send the identical prompt to three read-only reviewers, or two when the harness offers one model. Give each reviewer a different model when you can. Two models rarely make the same mistake. Assemble the spec reviewer prompt with the intent, its sources, the diff, and the commit list. Send it to one read-only reviewer. Run all of them in parallel.
+1. Assemble the code reviewer prompt from [`reviewer.md`](reviewer.md) with the intent, the diff, the commit list, the tree, the rubric, and the ladder. The rubric is [`rubric.md`](rubric.md) with the text of every principle file it links pasted after the lens that names it, each pasted file's first heading removed. The ladder is [`../blast-radius/evidence.md`](../blast-radius/evidence.md).
+2. When the harness offers more than one model, send the identical prompt to three read-only reviewers, each on a different model. With one model, send it to two.
+3. Assemble the spec reviewer prompt with the intent, every source step 2 found in that order, the diff, and the commit list. Send it to one read-only reviewer.
+4. Run all of them in parallel. Name them code reviewer 1, 2, 3 and spec reviewer.
 
-Without a subagent tool, run the code reviewer prompt once and the spec reviewer prompt once yourself, and drop the Agreement section from the output.
+Without a subagent tool, run the code reviewer prompt once and the spec reviewer prompt once yourself. Then skip the consensus and contradiction signals in [`judgment.md`](judgment.md) and drop the Agreement section from the output.
 
 Done when every reviewer has reported and each prompt carried everything listed above.
 
 ## 4. Judge
 
-Apply [`judgment.md`](judgment.md) to the code findings. Keep the spec findings separate. Never merge or rerank them with code findings. Remove the worktree with `git worktree remove ../review-<n>`. Done when every code finding has a bucket and a one-line rationale, every spec finding quotes its source line, and the worktree is gone.
+Apply [`judgment.md`](judgment.md) to the code findings. Keep the spec findings separate from the code findings. For the PR route, run `git worktree remove ../review-<n>` and `git branch -D review/<n>`. Done when every code finding has a bucket and a one-line rationale, every spec finding quotes its source line, and, for the PR route, the worktree and the branch are gone.
 
 ## Output
 
 - **Intent.** The paragraph, and the sources found.
-- **Reviewers.** One line each: label, model, number of findings.
+- **Reviewers.** One line each: name, model, number of findings.
 - **Act on**, **Consider**, **Noted**, **Dismissed**, as judgment.md defines them. Each finding carries its location with the quoted line, what is wrong, the evidence, and who raised it.
 - **Spec.** Missing, unrequested, and wrong, each quoting the source line.
 - **Agreement.** Where reviewers agreed, where one contradicted another, and which findings came from one reviewer alone.
-- **Summary.** One line: the number of findings per axis and the worst in each. No single winner across the two axes.
+- **Summary.** One line naming the worst code finding and the worst spec finding. Do not rank one against the other.
