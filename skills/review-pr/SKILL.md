@@ -22,7 +22,7 @@ Write one paragraph on what the change sets out to do. Collect its sources in th
 
 ## 3. Spawn the reviewers
 
-Assemble the code reviewer prompt from [`reviewer.md`](reviewer.md): the intent, the diff, the commit list, the worktree path, [`rubric.md`](rubric.md) with the text of every principle file it links pasted after the lens that names it, and the ladder from [`../blast-radius/evidence.md`](../blast-radius/evidence.md). Send the identical prompt to three read-only reviewers, or two when the harness offers one model. Give each reviewer a different model when you can; two models rarely make the same mistake. Assemble the spec reviewer prompt with the intent, its sources, the diff, and the commit list. Send it to one read-only reviewer. Run all of them in parallel.
+Assemble the code reviewer prompt from [`reviewer.md`](reviewer.md): the intent, the diff, the commit list, the worktree path, [`rubric.md`](rubric.md) with the text of every principle file it links pasted after the lens that names it, and the ladder from [`../blast-radius/evidence.md`](../blast-radius/evidence.md). Send the identical prompt to three read-only reviewers, or two when the harness offers one model. Give each reviewer a different model when you can. Two models rarely make the same mistake. Assemble the spec reviewer prompt with the intent, its sources, the diff, and the commit list. Send it to one read-only reviewer. Run all of them in parallel.
 
 Without a subagent tool, run the code reviewer prompt once and the spec reviewer prompt once yourself, and drop the Agreement section from the output.
 

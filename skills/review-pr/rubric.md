@@ -1,6 +1,6 @@
 # Review rubric
 
-Lenses for a code reviewer. Apply the ones the change touches; a simple bug fix needs no paragraph on architecture. Each lens names the principle that sets its standard. The principle's text follows the lens in the prompt you received, and the lens says how a violation looks in a diff. A coding standard the repository documents (`CONTRIBUTING.md`, `CODING_STANDARDS.md`, `AGENTS.md`) overrides a principle where they conflict. Skip anything a linter or formatter already enforces.
+Lenses for a code reviewer. Apply the ones the change touches. A simple bug fix needs no paragraph on architecture. Each lens names the principle that sets its standard. The principle's text follows the lens in the prompt you received, and the lens says how a violation looks in a diff. A coding standard the repository documents (`CONTRIBUTING.md`, `CODING_STANDARDS.md`, `AGENTS.md`) overrides a principle where they conflict. Skip anything a linter or formatter already enforces.
 
 Order your findings: structural regressions and missed simplifications first, then tangled branching, then boundary, type, and file-size concerns, then smaller legibility issues. Prefer a few high-conviction findings to a long list of nits.
 
@@ -59,7 +59,7 @@ Is the complexity paid for by what the code does? Be ambitious here. Look for th
 - Layers a reader must trace and state a reader must hold: a pass-through wrapper, a one-caller helper, mutable scope wider than needed. Principle: [`minimize-reader-load.md`](../principles/minimize-reader-load.md).
 - A generic or magical mechanism that hides a simple data-shape assumption. Prefer direct, boring code.
 - An ad hoc conditional added to an unrelated flow. A scattered special case is a design problem, not a style nit. The remedy is a helper, a state machine, or a module.
-- A file pushed from under a thousand lines to over. Decompose first; a waiver needs a structural reason.
+- A file pushed from under a thousand lines to over. Decompose first. A waiver needs a structural reason.
 - Does the shipped surface earn its place? A feature, control, or option nobody asked for costs more than it returns, and a half-finished feature costs more than a missing one.
 
 ## Security

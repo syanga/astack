@@ -13,7 +13,7 @@ Each code finding lands in one bucket, with the reviewers who raised it and one 
 - **Noted.** Valid and not actionable now: context-dependent, premature, low impact.
 - **Dismissed.** Wrong, nitpicky, or missing context, with one line of why. This section is how the user overrides you.
 
-Severity is the reviewer's opening bid. `critical` starts in act on, `warning` in consider, `nit` in noted, and the filters below move a finding from there. Act on holds five items or fewer; if more survive, say why. A structural finding blocks unless the author can justify it: incidental complexity a restructuring would delete, a file pushed past a thousand lines, ad hoc branching tangled into an existing flow, feature checks scattered through shared code, an unnecessary abstraction or cast-heavy contract, a duplicated helper, or logic outside its canonical layer.
+Severity is the reviewer's opening bid. `critical` starts in act on, `warning` in consider, `nit` in noted, and the filters below move a finding from there. Act on holds five items or fewer. If more survive, say why. A structural finding blocks unless the author can justify it: incidental complexity a restructuring would delete, a file pushed past a thousand lines, ad hoc branching tangled into an existing flow, feature checks scattered through shared code, an unnecessary abstraction or cast-heavy contract, a duplicated helper, or logic outside its canonical layer.
 
 ## Filters that move a finding down
 
@@ -26,4 +26,4 @@ Severity is the reviewer's opening bid. `critical` starts in act on, `warning` i
 
 ## Signals that a finding is right
 
-A finding deserves attention when two or more reviewers raised it independently, when it names a concrete execution path, or when it shows you something missing from your own model of the code. A finding from one reviewer alone is read on its merits: weight it, and keep it when it holds. When one reviewer contradicts another, record both positions in the Agreement section. An uncomfortable finding gets the same treatment as any other; catching what you would miss is the point. A security or correctness finding gets extra scrutiny before dismissal, even from a single reviewer.
+A finding deserves attention when two or more reviewers raised it independently, when it names a concrete execution path, or when it shows you something missing from your own model of the code. A finding from one reviewer alone is read on its merits: weight it, and keep it when it holds. When one reviewer contradicts another, record both positions in the Agreement section. An uncomfortable finding gets the same treatment as any other. Catching what you would miss is the point. A security or correctness finding gets extra scrutiny before dismissal, even from a single reviewer.

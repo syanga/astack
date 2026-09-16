@@ -1,6 +1,6 @@
 # Reviewer prompts
 
-The lead fills the placeholders and sends the same filled prompt to every reviewer of that kind. Each prompt is the fenced block below; nothing outside a fence reaches a reviewer. Reviewers run read-only. In a harness with typed subagents, pick the read-only type.
+The lead fills the placeholders and sends the same filled prompt to every reviewer of that kind. Each prompt is the fenced block below. Nothing outside a fence reaches a reviewer. Reviewers run read-only. In a harness with typed subagents, pick the read-only type.
 
 ## Code reviewer
 
@@ -39,7 +39,7 @@ The tree at {WORKTREE PATH} contains this change. Read callers, callees, types, 
 4. Evidence. Why it is a problem, and the rung of the ladder you reached. A hypothetical needs a reachable path.
 5. Suggestion. Optional, and only with a concrete alternative.
 
-Every finding names a defect and quotes the line that shows it. Restating what the code does is not a finding. Order the findings by the rubric's priority. State a structural problem as a structural problem; when the real issue is the design, "maybe rename this" is not the finding. Zero findings is a valid result. Write "no findings" and stop.
+Every finding names a defect and quotes the line that shows it. Restating what the code does is not a finding. Order the findings by the rubric's priority. State a structural problem as a structural problem. When the real issue is the design, "maybe rename this" is not the finding. Zero findings is a valid result. Write "no findings" and stop.
 
 ## Output
 

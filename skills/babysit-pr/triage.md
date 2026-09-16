@@ -5,10 +5,10 @@ A review thread, from a bot or a person, is a claim to check against the code, n
 ## Classify
 
 - **fix**. The claim holds against the current code. Fix it, push, reply with the commit SHA, and resolve the thread.
-- **dismiss**. The current code proves the claim needs no change, and the proof is in the reply. A pattern below says where to look for the proof; matching a pattern is not itself the proof. Reply with the evidence and resolve the thread.
+- **dismiss**. The current code proves the claim needs no change, and the proof is in the reply. A pattern below says where to look for the proof. Matching a pattern is not itself the proof. Reply with the evidence and resolve the thread.
 - **ask**. The claim is in an ask-by-default category and you did not verify it by running code, or it is novel or ambiguous. Put it in the reply to the user with the thread link and your read. An ask stays unresolved.
 
-When in doubt, ask. Skipping a noisy style comment is cheap; skipping a real data or security bug is not. When a claim is cheap to test, run the test before classifying. A red run confirms the claim. A green run is the disproof for the reply.
+When in doubt, ask. Skipping a noisy style comment is cheap. Skipping a real data or security bug is not. When a claim is cheap to test, run the test before classifying. A red run confirms the claim. A green run is the disproof for the reply.
 
 ## Ask by default
 
@@ -26,7 +26,7 @@ Every reply cites code. From a bot's third pass on the same PR (the snapshot cou
 
 ## Patterns that dismiss
 
-Each pattern names when it holds, when it does not, the signal that identifies it, and its source. A pattern is where to look for the disproof; the reply still carries the disproof. Add a new one in the same shape once a dismissal has repeated, through its own PR.
+Each pattern names when it holds, when it does not, the signal that identifies it, and its source. A pattern is where to look for the disproof. The reply still carries the disproof. Add a new one in the same shape once a dismissal has repeated, through its own PR.
 
 - **Unused in this PR, used by a later one.** Holds when a later PR in the stack visibly uses it. Does not hold outside a stack, for public API, or when the later use cannot be shown. Signal: "exported X is never used". Source: pstack.
 - **Intentional visual change.** Holds when the PR states the change or a design review approved it. Does not hold for accessibility, focus, contrast, keyboard behaviour, or a component API the PR did not mean to change. Signal: comments on focus outlines, sizes, spacing, or shared component defaults. Source: pstack.

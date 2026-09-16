@@ -33,7 +33,7 @@ When unsure whether a keep-list entry applies, delete the comment.
 
 ## Fix what the flags name
 
-Delete the dead path, drop the unused parameter, or call the real API. When two or more flags need the same fix, sketch the new structure once, over the flagged code and its surroundings, before writing code. Make the smallest root-cause fix in scope and remove every named workaround. [`fix-root-causes.md`](../principles/fix-root-causes.md) and [`redesign-from-first-principles.md`](../principles/redesign-from-first-principles.md) guide the intent; neither widens the scope or licenses fixing instances outside it. An out-of-scope root cause gets the smallest in-scope fix and a note. A symptom guard is not a fix.
+Delete the dead path, drop the unused parameter, or call the real API. When two or more flags need the same fix, sketch the new structure once, over the flagged code and its surroundings, before writing code. Make the smallest root-cause fix in scope and remove every named workaround. [`fix-root-causes.md`](../principles/fix-root-causes.md) and [`redesign-from-first-principles.md`](../principles/redesign-from-first-principles.md) guide the intent. Neither widens the scope or licenses fixing instances outside it. An out-of-scope root cause gets the smallest in-scope fix and a note. A symptom guard is not a fix.
 
 ## Report
 
