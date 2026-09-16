@@ -32,10 +32,10 @@ I wanted to share some of my preferences here so we can be more aligned as we wo
 * Never touch production, live databases, or daily-driver build/preview channels unless explicitly told to. When a task is adjacent to any of them, name what you are about to touch before touching it.
 
 ## Pull Requests
-* Make sure titles follow conventions from the repo. They should be simple and easy to understand. Conventional commit styles in projects that use them, i.e. "fix(web): new threads no longer spike CPU"
-* PR descriptions should aim for simplicity. Open with a minimal, clear description of the problem. Follow up with how you solved it.
-* Add a blurb to the end of the PR description about what model and harness is making the changes.
+* Open PRs with the open-pr skill. Prefer several narrow PRs to one large one.
+* Titles follow the repo's convention. Conventional Commits in projects that use them, i.e. "fix(web): new threads no longer spike CPU"
+* The body is a briefing a reviewer reads in under a minute: why the change exists, then how it was verified. End with a blurb naming the model and harness that made the changes.
 * Open a real PR, not a draft. Drafts do not get review-bot coverage.
 * Rebase onto latest main before opening. Stale branches conflict and waste a review round.
-* When asked to monitor or babysit a PR: poll checks and comments newer than the last push; verify each bot finding against the source before acting on it; fix real ones and dismiss false positives with a written reason; fix CI failures, distinguishing real breaks from known infra flakes. If nothing is new, stay quiet — do not post filler comments. Stop when the repo's review bots are green on the latest commit.
+* Babysit only when asked, with the babysit-pr skill. Verify each bot finding against the source before acting on it, dismiss false positives with a written reason, and stay quiet while waiting.
 * Merge only per the disposition given in the request (merge when green, or stop and report). If none was given, report and ask.

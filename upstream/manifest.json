@@ -66,5 +66,22 @@
     "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
     "license": "MIT, kept in skills/blast-radius/LICENSE",
     "note": "Evidence ladder moved to evidence.md so review-pr shares it. References to the why and arena skills replaced with the gh commands they stood for."
+  },
+  "technical-writing": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/technical-writing",
+    "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
+    "license": "MIT, kept in skills/technical-writing/LICENSE",
+    "note": "Verbatim apart from a shorter description, the unslop pointer as a sibling link, and one pstack-specific formatting line removed."
+  },
+  "no-comments": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": [
+      "pstack/skills/no-comments",
+      "pstack/agents/comment-sicko.md"
+    ],
+    "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
+    "license": "MIT, kept in skills/no-comments/LICENSE",
+    "note": "The Comment Sicko subagent is gone; its keep list and flag rules are the skill body, applied by the agent itself. The /how, /why, and /architect calls became read-the-history and sketch-the-shape instructions; principle references point at ../principles files."
   }
 }
