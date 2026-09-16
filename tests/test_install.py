@@ -176,6 +176,30 @@ class InstallerTests(InstallerFixture):
         self.run_installer(success=False)
         self.assertFalse(self.home.exists())
 
+    def test_user_invoked_skill_gets_codex_policy(self):
+        (self.skill / "SKILL.md").write_text(
+            "---\nname: test-skill\ndescription: Manual only.\ndisable-model-invocation: true\n---\n"
+        )
+        self.run_installer("--target", "codex")
+        policy = self.home / ".agents/skills/test-skill/agents/openai.yaml"
+        self.assertIn("allow_implicit_invocation: false", policy.read_text())
+        self.run_installer(command="uninstall", *("--target", "codex"))
+        self.assertFalse(policy.exists())
+
+    def test_codex_policy_must_match_frontmatter(self):
+        policy = self.skill / "agents/openai.yaml"
+        policy.parent.mkdir()
+        policy.write_text("policy:\n  allow_implicit_invocation: false\n")
+        self.run_installer(success=False)
+        self.assertFalse(self.home.exists())
+
+    def test_broken_skill_link_fails_before_writes(self):
+        (self.skill / "SKILL.md").write_text(
+            "---\nname: test-skill\ndescription: Links.\n---\n\nSee [steps](steps.md).\n"
+        )
+        self.run_installer(success=False)
+        self.assertFalse(self.home.exists())
+
     def test_home_ignores_environment_overrides(self):
         outside = self.root / "outside"
         env = dict(os.environ, CODEX_HOME=str(outside), CLAUDE_CONFIG_DIR=str(outside),

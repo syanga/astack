@@ -67,6 +67,17 @@ def destination(spec, home, use_env):
 
 # Descriptions are loaded into every session; keep them short pointers, not summaries.
 DESCRIPTION_LIMIT = 200
+# Codex spells "user-invoked" in a sidecar file; generated from the frontmatter flag when absent.
+CODEX_POLICY = "policy:\n  allow_implicit_invocation: false\n"
+LINK = re.compile(r"\]\(([^)\s]+)\)")
+
+
+def check_links(path, text):
+    for target in LINK.findall(text):
+        if target.startswith(("http://", "https://", "mailto:", "#", "/")):
+            continue
+        if not (path.parent / target.split("#", 1)[0]).exists():
+            raise ValueError("Skill link target is missing: {} -> {}".format(path, target))
 
 
 def skill_files():
@@ -94,6 +105,14 @@ def skill_files():
             raise ValueError("Skill needs a matching name and description: {}".format(entry))
         if len(fields["description"]) > DESCRIPTION_LIMIT:
             raise ValueError("Skill description exceeds {} characters: {}".format(DESCRIPTION_LIMIT, entry))
+        user_invoked = fields.get("disable-model-invocation") == "true"
+        policy = folder / "agents/openai.yaml"
+        if policy.exists():
+            restricted = "allow_implicit_invocation: false" in policy.read_text(encoding="utf-8")
+            if restricted != user_invoked:
+                raise ValueError("agents/openai.yaml disagrees with disable-model-invocation: {}".format(policy))
+        elif user_invoked:
+            result.append((policy.relative_to(REPO / "skills"), CODEX_POLICY.encode(), 0o644))
         for source in sorted(folder.rglob("*")):
             if source.is_symlink():
                 raise ValueError("Skill source symlinks are unsupported: {}".format(source))
@@ -103,6 +122,8 @@ def skill_files():
                     continue
                 if source.suffix in (".pyc", ".pyo"):
                     continue
+                if source.suffix == ".md":
+                    check_links(source, source.read_text(encoding="utf-8"))
                 result.append((relative, source.read_bytes(), stat.S_IMODE(source.stat().st_mode)))
     return result
 

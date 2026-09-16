@@ -28,17 +28,21 @@ Local skill: `skills/writing-for-agents`. Upstream: mattpocock/skills,
   two without it produced 151 and 209. Record: `docs/evaluations/description-guidance-2026-09-15.md`.
   The installer now also rejects descriptions over 200 characters
   (`scripts/manage.py`, `DESCRIPTION_LIMIT`), so the bound is structural.
-- Skipped: none.
-- Deferred (candidates, not yet decided): fold pstack's
-  encode-lessons-in-structure into Pruning as one bullet; add an authoring
-  validation step (frontmatter valid, referenced files exist, links resolve)
-  as a completion criterion; add an "operational, not poetic" test from
-  pstack's automate-me guardrails; correct `SKILL-MECHANICS.md` for astack,
-  where sibling skills are reachable by relative path in every harness and
-  Codex needs `allow_implicit_invocation: false` in `agents/openai.yaml`,
-  while Gemini CLI and OpenCode list every skill regardless; add a pointer to
-  `skills/unslop` for the final prose pass; a one-line pointer to a future
-  eval procedure for testing skill changes.
+- Adapted (second pass): `SKILL-MECHANICS.md` corrected for astack. A
+  user-invoked skill is reachable by relative path because every harness
+  installs skills as siblings, so shared reference may live there; the router
+  sentence was narrowed to the skill tool; a Harnesses table records each
+  harness's user-invoked mechanism and catalog cost; a "Done when" criterion
+  closes the skill branch. `SKILL.md` gained a pointer to the sibling unslop
+  skill for the final prose pass and, in Pruning, pstack's
+  encode-lessons-in-structure as one bullet. The validation criterion is
+  backed by the installer, which now checks relative links and writes or
+  verifies the Codex policy file from the frontmatter flag.
+- Skipped: pstack's "operational, not poetic" guardrail. The leading-words
+  section plus the unslop pointer already cover it; a third statement would be
+  duplication.
+- Deferred: a pointer to an eval procedure for testing wording changes, until
+  an eval skill exists to point at.
 - Local validation: `python3 scripts/upstream.py diff writing-for-agents-mattpocock --local`
   shows only the unslop edits and the added LICENSE; scan for curly quotes,
   arrows, and long dashes is clean; `python3 -m unittest discover -s tests`
