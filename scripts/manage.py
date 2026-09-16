@@ -65,6 +65,10 @@ def destination(spec, home, use_env):
     return base / spec["suffix"]
 
 
+# Descriptions are loaded into every session; keep them short pointers, not summaries.
+DESCRIPTION_LIMIT = 200
+
+
 def skill_files():
     result = []
     for folder in sorted((REPO / "skills").iterdir()):
@@ -88,6 +92,8 @@ def skill_files():
                 fields[key] = value.strip().strip("\"'")
         if fields.get("name") != name or not fields.get("description"):
             raise ValueError("Skill needs a matching name and description: {}".format(entry))
+        if len(fields["description"]) > DESCRIPTION_LIMIT:
+            raise ValueError("Skill description exceeds {} characters: {}".format(DESCRIPTION_LIMIT, entry))
         for source in sorted(folder.rglob("*")):
             if source.is_symlink():
                 raise ValueError("Skill source symlinks are unsupported: {}".format(source))

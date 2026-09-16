@@ -86,7 +86,8 @@ cp -R templates/skill skills/my-skill
 
 Use lowercase letters, digits, and single hyphens for names (at most 64 characters).
 Each `SKILL.md` needs YAML frontmatter with `name` matching its directory and a
-specific `description`. The installer performs basic checks; each harness handles
+specific `description` of at most 200 characters, since every description is
+loaded into every session. The installer performs basic checks; each harness handles
 full YAML validation and skill activation. Use simple frontmatter as in the
 template for portability.
 
