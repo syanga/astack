@@ -59,11 +59,10 @@ instructions/
 skills/               Installable skills: <skill-name>/SKILL.md
 settings/             Selected harness settings to merge (JSON sources)
 templates/skill/      Starter to copy when creating a skill; never installed
-upstream/             Provenance, original snapshots, and upstream review decisions
+upstream/manifest.json  Source repository, path, and commit of each adapted skill
 harnesses.json        Destination paths and instruction overlays
 scripts/manage.py     Install/update/uninstall implementation
 scripts/astack_settings.py  Per-key JSON/TOML settings editing and restoration
-scripts/upstream.py   Track origins and compare upstream changes
 install.sh            Installation entry point
 uninstall.sh          Removal entry point
 AGENTS.md             Instructions for working on this repository only
@@ -299,19 +298,9 @@ Harnesses requiring different rule formats, plugin packages, or settings formats
 need a dedicated adapter. This repo distributes instructions, skills, and selected
 harness preferences; credentials and harness binaries stay machine-specific.
 
-## Customized upstream skills
+## Adapted skills
 
-Use [upstream/README.md](upstream/README.md) to track adaptations from gstack,
-pstack, Matt Pocock's skills, or other repositories. Each import pins the exact
-original commit and stores a snapshot of its relevant files, independently of
-your customized skill. No upstream skills have been imported yet.
-
-```sh
-python3 scripts/upstream.py list
-python3 scripts/upstream.py check
-```
-
-Agents working in this repo use the root `AGENTS.md` and `CLAUDE.md` to inspect
-upstream changes, preserve intentional customizations, and ask which specific
-changes you want to adopt. Checking for updates never changes installed skills
-or advances the original baseline; selective decisions have their own review log.
+Skills adapted from other repositories record their source repository, path, and
+commit in `upstream/manifest.json` and keep the upstream LICENSE in the skill
+directory. To see what changed upstream since, clone the source and diff from
+the pinned commit to its head.
