@@ -197,6 +197,8 @@ def main():
     if state.get("version") not in (1, 2):
         raise ValueError("Unsupported astack manifest version")
     state["version"] = 2
+    # Skills such as open-pr call tools in this checkout (scripts/git_hooks.py) after install.
+    state["source"] = str(REPO)
 
     skills = skill_files() if args.command == "install" else []
     settings = settings_operations(harnesses, selected, state, home, use_env, args)
