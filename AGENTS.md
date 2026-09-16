@@ -4,6 +4,18 @@ Global instruction sources live in `instructions/`. Reusable skills live in
 `skills/<skill-name>/SKILL.md`; `templates/skill/` is an uninstalled starter.
 This file and root `CLAUDE.md` govern work on astack and are not installed globally.
 
+## Adding a skill
+
+Read `skills/writing-for-agents/SKILL.md` and its `SKILL-MECHANICS.md` first;
+they are the single source of truth for how a skill is written. The decisions
+they own: user-invoked or model-invoked, a description that is a trigger rather
+than a summary, sibling files behind pointers for material only some runs need,
+and an unslop pass over the prose. For an adaptation of an upstream skill, run
+`python3 scripts/upstream.py track` before editing. Finish with
+`./install.sh --dry-run`, which enforces the structural rules: the name matches
+the directory, the description fits 200 characters, relative links resolve, and
+any shipped Codex policy file agrees with `disable-model-invocation`.
+
 ## Customized upstream skills
 
 Read `upstream/README.md` before importing skills or reviewing upstream updates.
