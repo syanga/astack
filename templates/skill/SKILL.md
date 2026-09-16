@@ -1,20 +1,15 @@
 ---
 name: replace-with-skill-name
-description: Replace with what this skill does and the specific requests that should activate it.
+# A trigger, not a summary: one clause naming the skill, then when to reach it. At most 200 characters.
+description: Replace with when this skill should be reached.
+# Uncomment for a skill only the human fires. The installer writes the matching Codex policy file.
+# disable-model-invocation: true
 ---
 
 # Skill title
 
 <!-- Copy this folder to skills/<skill-name>/ and replace the frontmatter before installing. -->
-
-## Purpose
-
-<!-- Describe the intended outcome. -->
-
-## Workflow
-
-<!-- Add the guidance needed to carry out this task. -->
-
-## Verification
-
-<!-- Explain how to check the outcome, where applicable. -->
+<!-- Steps first, in order, each ending in a condition that says when it is done. Reference the
+     agent consults on demand goes after the steps. Material only some runs need goes in a
+     sibling file behind a link; the installer checks that links resolve. Before finishing, run
+     the prose through ../unslop/SKILL.md. -->

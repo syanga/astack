@@ -87,7 +87,10 @@ cp -R templates/skill skills/my-skill
 Use lowercase letters, digits, and single hyphens for names (at most 64 characters).
 Each `SKILL.md` needs YAML frontmatter with `name` matching its directory and a
 specific `description` of at most 200 characters, since every description is
-loaded into every session. The installer performs basic checks; each harness handles
+loaded into every session. Relative links in a skill's Markdown must resolve.
+A skill with `disable-model-invocation: true` gets a Codex `agents/openai.yaml`
+with `allow_implicit_invocation: false` generated at install time unless it
+ships its own, which must agree with the flag. The installer performs basic checks; each harness handles
 full YAML validation and skill activation. Use simple frontmatter as in the
 template for portability.
 

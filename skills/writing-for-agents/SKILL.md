@@ -5,7 +5,7 @@ description: Writing documents for agents. Use when creating or editing skills, 
 
 Reference for writing any document an agent consumes: a skill, an `AGENTS.md` / `CLAUDE.md`, a doc reached by a pointer. The packaging differs. The writing does not. The same levers make each one predictable, because the agent takes the same _process_ every run rather than producing the same output.
 
-When the document you're writing is a skill, read [`SKILL-MECHANICS.md`](SKILL-MECHANICS.md) for frontmatter, invocation choice, and router skills.
+When the document you're writing is a skill, read [`SKILL-MECHANICS.md`](SKILL-MECHANICS.md) for frontmatter, invocation choice, and router skills. When a draft is done, run its prose through the sibling `unslop` skill at `../unslop/SKILL.md`.
 
 ## Context pointers
 
@@ -75,6 +75,7 @@ You win twice, with fewer tokens and a sharper anchor for the agent's thinking. 
 
 ## Pruning
 
+- Before writing a rule, ask whether a lint, a check, a script, or a hook can enforce it. If one can, build it and leave the sentence out. A structural check holds without the reader's cooperation; a sentence has to be noticed, remembered, and obeyed every time.
 - Keep each meaning in a **single source of truth**, one authoritative place, so changing the behaviour is a one-place edit. **Duplication** (the same meaning in more than one place) costs maintenance and tokens, and inflates a meaning's prominence on the ladder past its real rank. Duplication is the accidental inverse of a leading word, which repeats a token on purpose and never the meaning.
 - The **environment** is a source of truth too (`package.json` scripts, config files, the directory layout, `--help` output), and a document that restates it is a **cache**, a copy of a lookup that earns its load only when the lookup is expensive. Cache what the agent cannot find by looking: the unwritten convention, the reason behind a choice, the gotcha no config file states. Leave the one-file, one-command lookups to the environment, where they cannot go stale.
 - Check every line for **relevance**. Does it still bear on what the document does? A line loses relevance by never bearing on the task (mere exposition, or a branch that should be disclosed) or by going stale as the behaviour or world it describes changes. Shorter documents are easier to keep relevant. Without a pruning discipline the default fate is **sediment**, stale layers that settle because adding feels safe and removing feels risky, until the reader has to dig through them to find what is still live.
