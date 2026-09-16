@@ -1,5 +1,7 @@
 # Sequence work into verifiable units
 
+Apply to multi-step work (sweeps, migrations, runs of similar edits) and to how you stack commits and PRs.
+
 Order work as a sequence of small units, each ending in a state you can check, and don't advance until the current one is green.
 
 **Why:** A break caught at the unit that caused it is cheap to localize. A break caught after a batch is buried, and you have already built further on a broken base. Sequencing those same units into a delivery a reviewer can replay turns "trust me" into "watch it go red, then green."

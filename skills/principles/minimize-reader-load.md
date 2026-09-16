@@ -1,5 +1,7 @@
 # Minimize Reader Load
 
+Apply when reviewing or shaping code that's hard to trace.
+
 Maintainability is the work a reader must do to understand code. Track two axes:
 1. **Layers to trace.** How many indirections sit between the question and the answer.
 2. **State to hold.** How much hidden or mutable context the reader must keep in their head.

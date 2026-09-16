@@ -1,5 +1,7 @@
 # Subtract Before You Add
 
+Apply when sequencing an addition, refactor, or rewrite.
+
 When evolving a system, remove complexity first, then build.
 
 **Why:** Adding to a complex system compounds complexity. Removing first leaves less code, reveals the essential structure, and usually makes the next design obvious. Default to subtraction.
@@ -13,3 +15,5 @@ Make simplification a continual investment. Leave the design slightly simpler an
 - No speculative validators, parsers, or guards beyond what the spec demands
 - Simplify prompts (remove redundant instructions, excessive templates)
 - When a reference has no novel content, delete it rather than leaving a stub
+
+**The test:** the diff removes something before it adds, and you can name what you removed.

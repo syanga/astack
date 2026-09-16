@@ -1,5 +1,7 @@
 # Redesign From First Principles
 
+Apply when integrating a new requirement into an existing design.
+
 When integrating a change, don't bolt it onto the existing design. Redesign as if the requirement had been there from the start.
 
 - Read all affected files and understand the current design
@@ -7,4 +9,4 @@ When integrating a change, don't bolt it onto the existing design. Redesign as i
 - Propagate the change through every reference: types, docs, examples, rationale sections
 - Think about the whole redesign, then deliver it incrementally
 
-This is the method for preserving option value when integrating changes into an existing design.
+**The test:** a from-scratch design with this requirement would contain every branch the change adds. A branch it would not contain is bolted on.

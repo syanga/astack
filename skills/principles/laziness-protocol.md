@@ -1,5 +1,7 @@
 # Laziness Protocol
 
+Apply when refactoring, evaluating diff size, or tempted to add abstractions, layers, or signal threading.
+
 Aim for the most result with the least code and complexity.
 
 - **Prefer deletion.** When asked to refactor or improve, look for removals before additions.

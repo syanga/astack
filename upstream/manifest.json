@@ -18,7 +18,7 @@
     "path": "pstack/skills/principle-*",
     "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
     "license": "MIT, kept in skills/principles/LICENSE",
-    "note": "Sixteen of the 23 principle skills, bodies verbatim as plain files under one index skill instead of 23 skills. Frontmatter dropped, cross-links rewritten to sibling files, references to pstack-only skills (show-me-your-work, typescript-best-practices, brain) removed."
+    "note": "Sixteen of the 23 principle skills as plain files under one index skill. Frontmatter dropped, with each description's trigger sentence restored as the first body line. Cross-links rewritten to sibling files, references to pstack-only skills and to the upstream project's own subsystems removed. Edited beyond that: migrate-callers puts its preconditions before the rule, fix-root-causes bounds the pattern sweep to the change's scope and gives the why loop a stop, boundary-discipline bounds trust to the types and defines the shell, encode-lessons states its mechanism ladder once, and the files that lacked a test have one."
   },
   "open-pr": {
     "repository": "https://github.com/cursor/plugins.git",

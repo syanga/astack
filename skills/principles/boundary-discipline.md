@@ -1,6 +1,8 @@
 # Boundary Discipline
 
-Place validation, type narrowing, and error handling at system boundaries. Trust internal code unconditionally. Business logic lives in pure functions. The shell is thin and mechanical.
+Apply when wiring validation, error handling, or framework adapters.
+
+Place validation, type narrowing, and error handling at system boundaries. Inside the boundary, trust the types. Business logic lives in pure functions. The shell, the thin layer that does input and output, stays mechanical.
 
 **Why:** Scattered validation is noisy, redundant, and gives a false sense of safety. Keep logic out of framework wiring so it can be tested without the framework.
 
@@ -20,8 +22,6 @@ Validation and error handling:
 Code organization:
 - Business logic in pure functions with no framework dependencies
 - Parse functions: pure transforms from raw bytes to typed state
-- Prompt construction: structured state in, string out
-- Scoring and assessment: pure transforms from state to results
 
 **The tests:**
 - "Is this data crossing a system boundary right now?" If not, validation is redundant.
