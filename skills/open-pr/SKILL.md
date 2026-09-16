@@ -1,60 +1,59 @@
 ---
 name: open-pr
-description: Opening a pull request. Use when work is ready to publish for review, or when asked to open, file, or push up a PR.
+description: Opening a pull request. Use when work is ready for review, or when asked to open a PR.
 ---
 
 # Open a PR
 
-The policy lives in the global instructions under Pull Requests. This is the procedure. Run the steps in order. The skill ends with a link and a stop; babysitting is a separate request, handled by [`../babysit-pr/SKILL.md`](../babysit-pr/SKILL.md).
+The policy is the Pull Requests section of the global rules. This is the procedure that satisfies it.
 
-## 1. Rebase onto the base branch
+## 1. Rebase onto the base
 
-Work happens on a branch, never on the default branch. Unrelated changes that crept onto the branch go to their own branch first. Fetch, then rebase onto the latest base so every later check runs against what will actually merge. Done when `git status` is clean and `git log origin/<base>..HEAD --oneline` lists only this work's commits.
+When this PR is a child in a stack, the base is the parent branch. Otherwise it is the repository's default branch, which `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` prints. If unrelated changes are on the branch, move them to their own branch first. Fetch. Rebase onto `origin/<base>`. Done when `git status` is clean and `git log --oneline origin/<base>..HEAD` lists only this work's commits.
 
 ## 2. Prove the change
 
-Run the repo's checks the way CI runs them and keep each command and its result for the body. When the change has an observable effect, verify it on the real artifact, per [`../principles/prove-it-works.md`](../principles/prove-it-works.md). Done when every check the body will name ran in this session and passed.
+Run every check CI runs, the way CI runs it. Record each command and its result for the Verification section. If the change has an observable effect, verify that effect on the real thing, following [`../principles/prove-it-works.md`](../principles/prove-it-works.md). Done when every check passed in this session and you have recorded each command and its result.
 
 ## 3. Clean the diff
 
-Read the whole diff once as its reviewer. Remove debug output, dead paths, and guards against cases the code cannot reach. Then run [`../no-comments/SKILL.md`](../no-comments/SKILL.md) over the diff. For a change you do not fully trust, run [`../blast-radius/SKILL.md`](../blast-radius/SKILL.md). Done when a second read raises nothing you would ask about in review.
+Read the whole diff as its reviewer. Remove debug output, dead paths, and guards for cases the code cannot reach. Apply [`../no-comments/SKILL.md`](../no-comments/SKILL.md) to the diff. If the change reaches code outside the diff, or you cannot name the one fact it is safe because of, apply [`../blast-radius/SKILL.md`](../blast-radius/SKILL.md) and keep its result for the Blast radius section. Done when the diff has no debug output, no unreachable guard, and no comment outside the no-comments keep list, and any blast-radius result is kept.
 
 ## 4. Shape the commits
 
-Commit liberally while working; the shaping happens here, once. Rebase into small commits that each land on their own, ordered so the sequence proves the work: the failing test before the fix, the deletion before the reshape, per [`../principles/sequence-verifiable-units.md`](../principles/sequence-verifiable-units.md). Each commit is a future PR. Amend when a fix belongs to the commit just made; add a commit when it is separable. Done when `git log --oneline origin/<base>..HEAD` reads as the story of the change.
+Rebase the work into verifiable units, in the order that proves the work, following [`../principles/sequence-verifiable-units.md`](../principles/sequence-verifiable-units.md). If a fix belongs to the commit just made, amend it. If a fix is separable, give it its own commit. Done when the checks from step 2 pass at every commit.
 
-## 5. Guard the push against secrets
+## 5. Install the Gitleaks hook
 
-A pre-push secret scan belongs in every repo you push from. If the repo has none, install astack's Gitleaks hook. The astack checkout path is recorded in the install manifest:
-
-```bash
-ASTACK=$(python3 -c 'import json, os; print(json.load(open(os.path.expanduser("~/.local/state/astack/manifest.json")))["source"])')
-python3 "$ASTACK/scripts/git_hooks.py" install --repo .
-```
-
-The installer downloads a pinned Gitleaks release on first use and chains an existing pre-push hook rather than replacing it. It declines a repo with a custom `core.hooksPath` (Husky and similar); in that case say so in the reply and go on. Done when the repo's pre-push hook runs a secret scanner, or the decline is reported.
+Find out whether the repository's pre-push hook already runs a secret scanner. If it does not, run `scripts/install_gitleaks_hook.py` from this skill's directory. It locates the astack checkout through the astack state manifest and runs that checkout's `scripts/git_hooks.py`, which chains an existing hook and refuses the hook layouts that `docs/git-hooks.md` lists. If it refuses, record its message for the reply. Done when the pre-push hook runs a secret scanner, or you have recorded the refusal.
 
 ## 6. Write the title and body
 
-Write both with [`../technical-writing/SKILL.md`](../technical-writing/SKILL.md), then [`../unslop/SKILL.md`](../unslop/SKILL.md).
+Apply [`../technical-writing/SKILL.md`](../technical-writing/SKILL.md) to the title and the body.
 
-**Title.** The repo's convention. Where the log uses Conventional Commits, `type(scope): subject`: the changed area as the scope, an imperative subject, a real symbol when one carries the change, no trailing period. For example, `fix(installer): generate the Codex policy from disable-model-invocation`.
+Write the title in the repository's convention. When the log uses Conventional Commits, use the changed area as the scope and name the symbol the change is about.
 
-**Body.** A briefing for a reviewer who has the diff, and the squash commit body, so about forty lines at most. These sections in order; drop a section with nothing to say.
+The body is the briefing the global rules describe. It is also the squash commit body, so keep it to forty lines. Write only these sections, in this order, and link any other artifact.
 
-- `## Why`. The intent and approach in one or two short paragraphs. For a bug fix, the root cause. `Closes #<n>` when an issue exists. No SHAs, no rebase genealogy.
-- `## Scope`. Real symbols and paths, both sides of a rename. Only when the boundary matters.
-- `## Tradeoffs`. Rejected alternatives a reviewer would ask about. Skip when there was no real choice.
-- `## Blast radius`. One to three sentences: what the change touches, why it is safe or risky, the cost if it stays unfixed.
-- `## Verification`. Each check from step 2 and its outcome. A performance change gives one number, before and after. A screenshot or recording when it proves a claim.
-- The model and harness line the global rules ask for.
+- `## Why`. Give the intent and the approach in one or two short paragraphs. For a bug fix, give the root cause. Add `Closes #<n>` when an issue exists.
+- `## Scope`. Include it when the boundary matters. Name the symbols and paths that are in, what stays out, and both sides of a rename.
+- `## Tradeoffs`. Include it when there was a real choice. Name the alternative you rejected and why.
+- `## Blast radius`. Include it when the change reaches code outside the diff. Give the one fact it is safe because of, the rung it reached, and the proof, as blast-radius hands them back.
+- `## Verification`. List each check from step 2 with its command and result. For a performance change, give one number with its unit, before and after. Attach a screenshot or recording when it proves a claim.
+- Add the model and harness line that the global rules require.
 
-Leave out file-by-file lists, methodology, and "Summary" or "Test plan" headings. Done when the body says why the change exists, what is out of scope, and how it was proven.
+Done when the title follows the convention, the body has a Why section and a Verification section, every included section carries the content above, and `wc -l` on the body reports at most forty lines.
 
 ## 7. Open it
 
-Push the branch, then create the PR against the base branch with `gh pr create --title ... --body-file ...`, never as a draft. If the host opened it as a draft anyway, run `gh pr ready <n>`. A child PR in a stack targets its parent branch; retarget with `gh pr edit <n> --base <parent>`. Inside T3 Code, call `link_pull_request` with the URL. Done when `gh pr view <n> --json url,isDraft,baseRefName` shows the intended base and `isDraft` false.
+Push the branch. Create the PR:
 
-## 8. Stop
+```bash
+gh pr create --base <base> --title "<title>" --body-file <file>
+```
 
-Reply with the link and the verification line from step 2, then stop. Opening a PR does not start a babysit; finish the phase or the stack first, since a babysit per PR stalls the build. A subagent that opens a PR returns the URL to its parent and never babysits. Polling and review threads start only when the user asks, through [`../babysit-pr/SKILL.md`](../babysit-pr/SKILL.md).
+If the host opened it as a draft, run `gh pr ready <n>`. Inside T3 Code, call `link_pull_request` with the URL. Done when `gh pr view <n> --json url,isDraft,baseRefName` shows the base from step 1 and `isDraft` false. Inside T3 Code, done also requires that the link call returned.
+
+## 8. Reply
+
+Reply with the URL and the Verification section. Babysit only when the user asks, through [`../babysit-pr/SKILL.md`](../babysit-pr/SKILL.md). Done when the reply carries the URL and the Verification section.
