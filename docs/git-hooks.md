@@ -102,12 +102,13 @@ Each scan has a 120-second scanner deadline and a 150-second process timeout;
 expiration blocks rather than claiming a clean result.
 
 This is pattern-based detection, not proof that a push is free of secrets. Gitleaks'
-default rules skip some paths by extension, such as `.bin` and `.pdf`, so the guard
-does not report a secret in such a path. Archive
-coverage follows Gitleaks' Git-patch scanner; this integration does not
-enable archive traversal. It does not scan PR descriptions or rotate credentials.
-As with other local hooks, `git push --no-verify` bypasses it (and all other pre-push
-checks). Use that only as a deliberate decision after investigating the finding.
+default rules skip some paths, including extensions such as `.bin` and `.pdf`,
+dependency lock files such as `package-lock.json`, and anything under `node_modules`.
+The guard does not report a secret in a skipped path. Archive coverage follows
+Gitleaks' Git-patch scanner; this integration does not enable archive traversal. It
+does not scan PR descriptions or rotate credentials. As with other local hooks,
+`git push --no-verify` bypasses it (and all other pre-push checks). Use that only
+as a deliberate decision after investigating the finding.
 
 ## Verification and updates
 
