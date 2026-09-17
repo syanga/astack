@@ -95,8 +95,9 @@ def main(argv=None):
     }
     if args.kind == "code":
         values["{{TREE}}"] = ("The tree at {} contains this change. Read callers, callees, types, and tests there "
-                              "whenever a lens asks you to. You may run code there to prove a finding. Create or change no "
-                              "file.".format(args.tree) if args.tree
+                              "whenever a lens asks you to. To prove a finding you may run code inside that tree and "
+                              "nowhere else, with the packages already installed and with no network access. Create or "
+                              "change no file.".format(args.tree) if args.tree
                               else "No tree is available. Judge from the change shown.")
         values["{{RUBRIC}}"] = build_rubric((SKILL / "rubric.md").read_text(encoding="utf-8"), SKILL.parent / "principles",
                                             args.lenses.split(",") if args.lenses else None)

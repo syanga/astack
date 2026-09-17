@@ -36,7 +36,8 @@ class PromptTests(unittest.TestCase):
 
     def test_only_a_prompt_with_a_tree_allows_running_code_and_none_allows_writing(self):
         with_tree = self.build("--tree", "/tmp/tree")
-        self.assertIn("You may run code there to prove a finding. Create or change no file.", with_tree)
+        self.assertIn("you may run code inside that tree and nowhere else, with the packages already installed and with "
+                      "no network access. Create or change no file.", with_tree)
         without_tree = self.build()
         self.assertIn("No tree is available.", without_tree)
         self.assertNotIn("run code", without_tree)
