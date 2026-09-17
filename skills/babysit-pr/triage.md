@@ -11,7 +11,7 @@ A review thread from a bot or a person is a claim to verify against the code. Th
 
 When a claim is cheap to test, run the test before classifying. A red run confirms the claim. A green run is the evidence for a dismissal. When a comment asks for work outside the PR's intent, reply with the intent quoted rather than widening the change.
 
-A thread the snapshot marks `ours` is a review-pr finding, and its first line under the on-behalf-of header names its bucket. Fix an act-on finding. Fix a consider finding when the fix is small, otherwise defer it. When the snapshot's `our_reviews.last_round` is true, the review on the head is the last the cap allows: defer every consider finding, so the reviewed head stays reviewed and the run can end at `merge-ready`. An act-on finding on the last round is still fixed, and that push ends the run in `stop`, because a blocking defect on the last round needs the user. The ask-by-default categories below apply to `ours` threads too.
+A thread the snapshot marks `ours` is a review-pr finding, and its first line under the on-behalf-of header names its bucket. Fix an act-on finding. Fix a consider finding when the fix is small, otherwise defer it. When the snapshot's `our_reviews.last_round` is true, the review on the head is the last the cap allows: defer every consider finding, so the reviewed head stays reviewed and the run can end at `merge-ready`. An act-on finding on the last round is still fixed, and that push ends the run in `stop`, because a blocking defect on the last round needs the user. The ask-by-default categories below apply to `ours` threads too, except a consider finding on the last round, which is deferred and named in the report.
 
 ## Ask by default
 
@@ -21,10 +21,10 @@ These categories are ask by default: security, privacy, auth, billing, data rete
 
 `pr.py reply` adds the on-behalf-of header. Write only the body.
 
-- **Fixed.** The SHA, the changed lines or the first few of a longer change, one sentence on what was wrong.
+- **Fixed.** The SHA, the changed lines or the first few of a longer change, one sentence on what was wrong. For a fix made with `gh pr edit`, the new text in place of the SHA.
 - **Already fixed.** The SHA that addressed it and how.
 - **Dismissed.** One sentence stating why, then the evidence.
-- **Deferred.** That the claim holds, why it waits, and where the follow-up is recorded.
+- **Deferred.** That the claim holds, why it waits, and that the run's report lists it as a follow-up.
 - **Asked.** The question for the user, your read of the claim, and what you verified so far.
 
 Every reply cites code. From a bot's third pass on the same PR, lean toward dismissing the documented patterns. The snapshot counts passes, and the ask-by-default categories still go to the user. One exception to that rule: a test that pins prose (a regex over a doc, a snapshot of wording) drifts because earlier fix rounds edited the prose, so a drift claim on a late pass is often real.

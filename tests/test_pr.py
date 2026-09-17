@@ -116,6 +116,15 @@ class NextVerdictTests(unittest.TestCase):
     def test_green_unreviewed_head_asks_for_a_review(self):
         self.assertEqual(action(green_pr())["action"], "review")
 
+    def test_a_fresh_head_waits_for_checks_that_earlier_commits_had(self):
+        earlier = [{"commit": {"oid": "c1", "statusCheckRollup": {"state": "SUCCESS"}}}]
+        bare = green_pr(statusCheckRollup=[])
+        def verdict(recent, now):
+            return pr.summarize(bare, [], [], recent, SINCE, now)["next"]["action"]
+        self.assertEqual(verdict(earlier, "2026-09-15T10:05:00Z"), "wait")
+        self.assertEqual(verdict([], "2026-09-15T10:05:00Z"), "review")
+        self.assertEqual(verdict(earlier, "2026-09-15T10:11:00Z"), "review")
+
     def test_a_head_already_reviewed_is_never_reviewed_again(self):
         self.assertEqual(action(green_pr(), reviews=[our_review("abc123")])["action"], "merge-ready")
 
