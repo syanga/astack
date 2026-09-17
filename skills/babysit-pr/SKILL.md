@@ -22,7 +22,7 @@ Done when you have stated the mode and the words that picked it, or that the req
 
 ## 2. Take a snapshot
 
-From the repository root, run `python3 <this skill's directory>/scripts/pr.py status`. Pass `--pr <number>` for a PR other than the current branch's PR, and `--repo owner/name` for another repository. Read `next.action`, `next.blockers`, `next.handoff`, and `next.stop` first, then the fields behind them: `mergeable`, `draft`, `checks`, `recent_commits`, `threads.unresolved`, `our_reviews`, `bots`, `new_comments`, `new_reviews`. Exit code 2 means `gh` or the API failed, which is not a verdict: wait one minute, retry once, then report the failure. A head SHA you did not push means another actor is on the branch: report and stop.
+From the repository root, run `python3 <this skill's directory>/scripts/pr.py status`. Pass `--pr <number>` for a PR other than the current branch's PR, and `--repo owner/name` for another repository. Read `next.action`, `next.blockers`, `next.handoff`, and `next.stop` first, then the fields behind them: `mergeable`, `draft`, `checks`, `recent_commits`, `threads.unresolved`, `our_reviews`, `bots`, `new_comments`, `new_reviews`. Exit code 2 means `gh` or the API failed, which is not a verdict: wait one minute, retry once, then report the failure. In `drive` mode, if `head.sha` changed since your previous snapshot and you did not push in between, another actor is on the branch: report and stop.
 
 In `status` mode, report now and stop. In `threads` mode, go to the Threads part of step 3, then report and stop. In `drive` mode, do what `next.action` says:
 
@@ -47,9 +47,9 @@ Work `next.blockers` in this order: the draft state, the conflict, the threads, 
 
 **A folded review.** When `our_reviews.folded_act_on` is above zero, the head's act-on findings sit in a review body in `new_reviews` and opened no threads. Fix them. The push moves the head and clears the fold. A folded act-on finding that does not hold cannot be cleared from the PR: report it to the user with your evidence and stop.
 
-**Failed checks.** Classify before any retry. Fix a failure in the diff's own code in a commit. A failure in code the diff never touched means a stale base: run `git fetch origin <base>`, then `git merge-base --is-ancestor origin/<base> HEAD`, and rebase when that command exits non-zero. Rerun a workflow only when `gh run view <run id> --json attempt` shows attempt 1. A failure on a later attempt is not flake, so read the job log.
+**Failed checks.** Classify before any retry. Fix a failure in the diff's own code in a commit. A failure in code the diff never touched means a stale base: run `git fetch origin <base>`, then `git merge-base --is-ancestor origin/<base> HEAD`, and rebase when that command exits non-zero. Rerun a workflow only when `gh run view <run id> --json attempt` shows attempt 1. A failure on a later attempt is not flake, so read the job log. A failure that a fix in the diff, a rebase, and one rerun do not clear needs the user: report the check, the attempt, and the log lines, and stop.
 
-Done when a fresh snapshot's `next.blockers` is empty, or you stopped on a hunk or finding that needs the user. Return to step 2.
+Done when a fresh snapshot's `next.blockers` is empty, or you stopped on a hunk, a finding, or a check that needs the user. Return to step 2.
 
 ## 4. Wait
 

@@ -1,6 +1,6 @@
 # Reviewer prompts
 
-The lead fills the placeholders and sends the same filled prompt to every reviewer of that kind. Each prompt is the fenced block below. Nothing outside a fence reaches a reviewer. Reviewers run read-only. In a harness with typed subagents, pick the read-only type. `{RUBRIC}` is rubric.md with each linked principle's text pasted after its lens, first headings removed. `{LADDER}` is `../blast-radius/evidence.md`. `{TREE}` is the tree from step 1; for a pasted diff, delete that sentence. `{SOURCES}` is every source step 2 found, in step 2's order, or "none beyond the intent paragraph".
+The lead fills the placeholders and sends the same filled prompt to every reviewer of that kind. Fill `{DIFF}` last, so a placeholder name inside the diff is never filled. Each prompt is the fenced block below. Nothing outside a fence reaches a reviewer. Reviewers run read-only. In a harness with typed subagents, pick the read-only type. `{RUBRIC}` is rubric.md with each linked principle's text pasted after its lens, first headings removed. `{LADDER}` is `../blast-radius/evidence.md`. `{TREE}` is the tree from step 1; for a pasted diff, delete that sentence. `{SOURCES}` is every source step 2 found, in step 2's order, or "none beyond the intent paragraph".
 
 ## Code reviewer
 
