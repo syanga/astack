@@ -19,7 +19,11 @@ Every body this script posts opens with the on-behalf-of header:
 `status` ends with a `next` verdict computed from the PR alone (fix, wait,
 review, merge-ready, hand off, stop), so the babysit loop's bounds survive a
 lost transcript: the review-round cap, the CI-not-converging stop, and the
-stuck-check stop are all read from GitHub, never from memory.
+stuck-check stop are all read from GitHub, never from memory. The grace for
+checks to register runs from `head.pushed_at`, the time the repository activity
+API gives for the push of the head. So do the stuck limits for mergeability and
+for a check that reports no start time. All three run from `head.committed_at`
+when that API lists no push of the head.
 
 `wait` blocks until the verdict is no longer `wait`, then prints the snapshot.
 It needs no harness timer, so it works in a subagent and in any harness. It
@@ -60,7 +64,7 @@ CHECK_GRACE_MINUTES = 10
 FOLDED_ACT_ON = re.compile(r"^Folded act-on findings: (\d+)\r?$", re.M)
 
 PR_FIELDS = ("number,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
-             "headRefOid,headRefName,baseRefName,commits,statusCheckRollup,comments")
+             "headRefOid,headRefName,headRepository,baseRefName,commits,statusCheckRollup,comments")
 
 # Thread resolution, author kinds, the commit a review covers, and per-commit CI are GraphQL-only.
 THREADS_QUERY = """
@@ -136,6 +140,19 @@ def fetch_threads(owner, name, number):
         after = threads["pageInfo"]["endCursor"]
 
 
+def fetch_pushed_at(pr):
+    repo = (pr.get("headRepository") or {}).get("nameWithOwner")
+    if not repo:
+        return None
+    result = subprocess.run(["gh", "api", "--method", "GET", "repos/{}/activity".format(repo),
+                             "-f", "ref=refs/heads/" + pr["headRefName"], "-F", "per_page=1"],
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+    pushes = json.loads(result.stdout or "[]")
+    return pushes[0]["timestamp"] if pushes and pushes[0]["after"] == pr["headRefOid"] else None
+
+
 def classify_check(check):
     if check.get("__typename") == "StatusContext":
         name, state, link = check.get("context"), check.get("state"), check.get("targetUrl")
@@ -172,7 +189,7 @@ def minutes_between(start, now):
     return (datetime.fromisoformat(now.replace("Z", "+00:00")) - begun).total_seconds() / 60
 
 
-def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minutes=60):
+def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minutes=60, pushed_at=None):
     head = pr["headRefOid"]
     checks = [classify_check(check) for check in pr.get("statusCheckRollup") or []]
     unresolved = []
@@ -200,7 +217,8 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minu
     latest = max(ours, key=lambda review: review.get("submittedAt") or "", default=None)
     last_sha = (latest.get("commit") or {}).get("oid") if latest else None
     folded_act_on = sum(int(found) for review in on_head for found in FOLDED_ACT_ON.findall(review.get("body", "")))
-    head_time = max(commit["committedDate"] for commit in pr["commits"])
+    committed_at = max(commit["committedDate"] for commit in pr["commits"])
+    head_time = pushed_at or committed_at
     pending = [check for check in checks if check["kind"] == "pending"]
     snapshot = {
         "number": pr["number"], "url": pr["url"], "state": pr["state"], "draft": pr["isDraft"],
@@ -208,10 +226,9 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minu
         "review_decision": pr.get("reviewDecision") or None,
         "base": pr["baseRefName"],
         "head": {"sha": head, "ref": pr["headRefName"],
-                 "committed_at": max(commit["committedDate"] for commit in pr["commits"])},
+                 "committed_at": committed_at, "pushed_at": pushed_at},
         "since": since,
-        "mergeable_overdue": pr["mergeable"] == "UNKNOWN" and minutes_between(
-            max(commit["committedDate"] for commit in pr["commits"]), now) > stuck_minutes,
+        "mergeable_overdue": pr["mergeable"] == "UNKNOWN" and minutes_between(head_time, now) > stuck_minutes,
         "checks": {
             "counts": {kind: sum(1 for check in checks if check["kind"] == kind)
                        for kind in ("passed", "failed", "pending", "skipped")},
@@ -227,6 +244,7 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minu
         "threads": {"unresolved": unresolved,
                     "resolved": sum(1 for thread in threads if thread.get("isResolved"))},
         "our_reviews": {"total": len(ours), "on_head": len(on_head), "cap": review_cap,
+                        "first_round": len(ours) == 1,
                         "last_round": len(ours) >= review_cap,
                         "last_sha": last_sha,
                         "last_sha_in_pr": last_sha is not None and last_sha in {commit.get("oid") for commit in pr["commits"]},
@@ -254,6 +272,7 @@ def assess(snapshot):
     work = [thread for thread in threads if not thread["awaiting_user"]]
     waiting = [thread for thread in threads if thread["awaiting_user"]]
     streak = [commit["ci"] for commit in snapshot["recent_commits"] if commit["ci"]][-3:]
+    settling = checks["pending"] or checks["unregistered"] or snapshot["mergeable"] == "UNKNOWN"
     blockers = []
     if snapshot["draft"]:
         blockers.append("the PR is a draft")
@@ -280,19 +299,19 @@ def assess(snapshot):
     elif checks["stuck"]:
         stop = "a check has been pending past the stuck limit: " + ", ".join(check["name"] or "?" for check in checks["stuck"])
     elif snapshot["mergeable_overdue"]:
-        stop = "GitHub has not computed mergeability long after the head commit"
+        stop = "GitHub has not computed mergeability long after the push of the head"
     elif any(thread["bot"] and snapshot["bots"].get(thread["author"], {}).get("passes", 0) >= BOT_PASS_CAP
              for thread in work):
         stop = "a review bot has posted {} passes and threads still need work".format(BOT_PASS_CAP)
     elif len(streak) == 3 and all(state in ("FAILURE", "ERROR") for state in streak):
         stop = "the last three commits CI ran on failed, so the fixes are not converging"
-    elif not blockers and not checks["pending"] and ours["on_head"] == 0 and ours["total"] >= ours["cap"]:
+    elif not blockers and not settling and ours["on_head"] == 0 and ours["total"] >= ours["cap"]:
         stop = "the review cap of {} rounds is reached with the head unreviewed".format(ours["cap"])
     if stop:
         action = "stop"
     elif blockers:
         action = "fix"
-    elif checks["pending"] or checks["unregistered"] or snapshot["mergeable"] == "UNKNOWN":
+    elif settling:
         action = "wait"
     elif ours["on_head"] == 0:
         action = "review"
@@ -342,7 +361,8 @@ def take_snapshot(args):
     since = getattr(args, "since", None) or max(commit["committedDate"] for commit in pr["commits"])
     threads, reviews, recent = fetch_threads(owner, name, pr["number"])
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return summarize(pr, threads, reviews, recent, since, now, args.review_cap, args.stuck_minutes)
+    return summarize(pr, threads, reviews, recent, since, now, args.review_cap, args.stuck_minutes,
+                     fetch_pushed_at(pr))
 
 
 def command_status(args):
