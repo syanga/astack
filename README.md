@@ -70,15 +70,18 @@ Each push scans the commit patches it sends:
   A secret that a later commit deletes still blocks the push.
 - For a new branch or tag, the guard scans all history reachable from the pushed
   commit. That scan can report a finding that another branch already published.
-- A shallow clone or a missing remote tip blocks the push until you fetch. A tag
-  that points at a blob or a tree gets the same message, and the guard cannot
-  scan it.
+- A shallow clone blocks the push until you run `git fetch --unshallow`.
+- A missing remote tip blocks the push until you fetch it. A tag that points at
+  a blob or a tree gets that same message, but no fetch helps, because the guard
+  cannot scan such a tag.
 
 The guard uses the default Gitleaks rules. A `.gitleaks.toml`, a
 `gitleaks:allow` comment, or a `GITLEAKS_*` variable does not change them. The
-guard has one known gap. Gitleaks still reads a `.gitleaksignore` file at the
-root of the working tree, and a finding that the file lists does not block the
-push. That file is not a supported allowlist.
+guard has known gaps. Gitleaks still reads a `.gitleaksignore` file
+at the root of the working tree, and a finding that the file lists does not
+block the push. The guard scans patches, so a committed `.gitattributes` entry
+that marks a path `-diff` hides that path from the scan. Neither file is a
+supported allowlist.
 
 Any other finding blocks the push, and its message gives the rule, path, line,
 and commit without the secret. A scanner failure also blocks the push.
