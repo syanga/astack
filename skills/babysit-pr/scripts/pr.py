@@ -224,6 +224,7 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minu
         "threads": {"unresolved": unresolved,
                     "resolved": sum(1 for thread in threads if thread.get("isResolved"))},
         "our_reviews": {"total": len(ours), "on_head": len(on_head), "cap": review_cap,
+                        "last_round": len(ours) >= review_cap,
                         "last_sha": last_sha,
                         "last_sha_in_pr": last_sha is not None and last_sha in {commit.get("oid") for commit in pr["commits"]},
                         "folded_on_head": any(FOLD_MARK in review.get("body", "") for review in on_head),
@@ -237,6 +238,7 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minu
             {"author": login(review), "bot": is_bot(review), "ours": is_ours(review),
              "at": review["submittedAt"], "state": review["state"], "body": review.get("body", "")}
             for review in reviews if review.get("submittedAt") and review["submittedAt"] > since
+            and (review.get("body") or not review.get("viewerDidAuthor"))
         ],
     }
     snapshot["next"] = assess(snapshot)

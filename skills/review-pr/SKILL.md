@@ -34,7 +34,7 @@ Write one paragraph on what the change sets out to do, and save it to a file. Co
 5. The user's message.
 6. The code itself, when nothing else exists.
 
-If the intent is still unclear, ask the user now. That question is the only one the review asks. Done when the paragraph accounts for every source that exists and names which ones you found.
+On a later round, the Intent section of the first review in `pr.py history` is the first source. A request that only says to babysit or review carries no intent. If the intent is still unclear, ask the user now. That question is the only one the review asks. Done when the paragraph accounts for every source that exists and names which ones you found.
 
 ## 3. Spawn the reviewers
 
@@ -45,19 +45,19 @@ python3 <this skill's directory>/scripts/build_prompt.py code --intent <file> --
 python3 <this skill's directory>/scripts/build_prompt.py spec --intent <file> --diff <file> --commits <file> --sources <file> --out <spec prompt>
 ```
 
-Add `--prior <file>` whenever earlier rounds exist, and `--since <last_sha>` on a later round. Add `--lenses` to keep only the lenses of [`rubric.md`](rubric.md) the change can touch, named by the start of their headings: a change to prose alone keeps `correctness,verification,complexity`. Then spawn the reviewers in parallel, each told only to read its prompt file in full and follow it.
+Add `--prior <file>` whenever earlier rounds exist, and `--since <last_sha>` on a later round. Add `--lenses` to keep only the lenses of [`rubric.md`](rubric.md) the change can touch, named by the start of their headings. A change to prose alone keeps `correctness,verification,complexity`. A change that touches code keeps every lens. Then spawn the reviewers in parallel, each told only to read its prompt file in full and follow it.
 
 - On a full round, send the code prompt to three reviewers, each on a different model when the harness offers more than one, and to two when it offers one.
-- On a later round, send the code prompt to one reviewer.
-- Send the spec prompt to one reviewer on a full round. On a later round, send it only when the new commits change what the PR delivers.
+- On a later round, send the code prompt to one reviewer, on a different model from yours when the harness offers one.
+- Send the spec prompt to one reviewer on a full round. On a later round, send it only when the new commits add, remove, or change a behaviour the sources name. A commit that fixes a review finding does not.
 
-Name them code reviewer 1, 2, 3 and spec reviewer. Without a subagent tool, follow each prompt file yourself, one after the other. Leave the Agreement part out of the verdict whenever one code reviewer ran.
+Name them code reviewer 1, 2, 3 and spec reviewer. Without a subagent tool, follow each prompt file yourself, one after the other.
 
 Done when every reviewer has reported.
 
 ## 4. Judge
 
-Apply [`judgment.md`](judgment.md) to every finding. A spec finding is judged like a code finding: missing or wrong starts as act on, unrequested starts as consider. On the PR route, run `git worktree remove <tree>` now, before anything touches the network. Done when every finding has a bucket and a one-line rationale, every missing or wrong spec finding quotes its source line, and, on the PR route, the worktree is gone.
+Apply [`judgment.md`](judgment.md) to every finding. A spec finding is judged like a code finding: missing or wrong starts as act on, unrequested starts as consider. On the PR route, run `git worktree remove --force <tree>` now, before anything touches the network. A reviewer may have left a scratch file in it. Done when every finding has a bucket and a one-line rationale, every missing or wrong spec finding quotes its source line, and, on the PR route, the worktree is gone.
 
 ## The verdict
 
@@ -66,12 +66,12 @@ The verdict has these parts, whichever route delivers it.
 - **Intent.** The paragraph, the sources found, and whether this was a full or a later round.
 - **Reviewers.** One line each: name, model, number of findings.
 - **Act on**, **Consider**, **Noted**, **Dismissed**, as judgment.md defines them. Each finding carries its location with the quoted line, what is wrong, the evidence with its rung, and who raised it.
-- **Agreement.** Where reviewers agreed, where one contradicted another, and which findings came from one reviewer alone.
+- **Agreement.** Where reviewers agreed, where one contradicted another, and which findings came from one reviewer alone. Include it when more than one reviewer ran, the spec reviewer counted.
 - **Summary.** One line naming the worst finding, or saying there is nothing to act on.
 
 ## 5. Deliver
 
-On the PR route, write a findings file in the system's temporary directory. Its `comments` hold one entry per act-on and consider finding, with the `path`, the `line` in the head commit, the `bucket` (`act on` or `consider`), and a `body` whose first line is the bucket and severity. The `line` must be inside a diff hunk of the PR, because GitHub rejects the whole review otherwise. Anchor a finding about an unchanged line on the changed line that leads to it, and name the real `file:line` in the comment, so every act-on and consider finding opens a thread the babysit verdict can see. Its `body` holds the intent, the reviewers, the noted and dismissed findings, the agreement, and the summary. From the repository root, post it:
+On the PR route, write a findings file in the system's temporary directory. Its `comments` hold one entry per act-on and consider finding, with the `path`, the `line` in the head commit, the `bucket` (`act on` or `consider`), and a `body` whose first line is the bucket and severity. The `line` must be inside a diff hunk of the PR, because GitHub rejects the whole review otherwise. Anchor a finding about an unchanged line on the changed line that leads to it, and name the real `file:line` in the comment, so every act-on and consider finding opens a thread the babysit verdict can see. Its `body` holds the intent, the reviewers, the noted and dismissed findings, the agreement, and the summary. A finding about the PR's title or body has no line, so it goes in the `body` under its bucket. From the repository root, post it:
 
 ```bash
 python3 <this skill's directory>/../babysit-pr/scripts/pr.py review --pr <n> --commit <reviewed sha> --review-file <file> --model <your model id>

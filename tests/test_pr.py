@@ -88,7 +88,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["bots"], {"bugbot": {"passes": 2, "last": "2026-09-15T12:00:00Z", "since_head": True}})
         self.assertEqual(snapshot["recent_commits"], [{"sha": "old111", "ci": "FAILURE"}, {"sha": "abc123", "ci": None}])
         self.assertEqual(snapshot["our_reviews"],
-                         {"total": 0, "on_head": 0, "cap": 5, "last_sha": None, "last_sha_in_pr": False,
+                         {"total": 0, "on_head": 0, "cap": 5, "last_round": False, "last_sha": None, "last_sha_in_pr": False,
                           "folded_on_head": False, "folded_act_on": 0})
         self.assertEqual([comment["body"] for comment in snapshot["new_comments"]], ["after push"])
         self.assertEqual(snapshot["head"], {"sha": "abc123", "ref": "feature", "committed_at": "2026-09-15T10:00:00Z"})
@@ -146,6 +146,20 @@ class NextVerdictTests(unittest.TestCase):
             return {"next": {"action": result}}
         snapshot = pr.wait_until_settled(snapshot_once, lambda seconds: None, lambda: 0, 600, 30)
         self.assertEqual(snapshot["next"]["action"], "review")
+
+    def test_the_last_allowed_round_is_flagged_so_consider_findings_get_deferred(self):
+        four = [our_review("c{}".format(n)) for n in range(4)]
+        self.assertEqual(pr.summarize(green_pr(), [], four, [], SINCE, NOW)["our_reviews"]["last_round"], False)
+        five = four + [our_review("abc123")]
+        snapshot = pr.summarize(green_pr(), [], five, [], SINCE, NOW)
+        self.assertEqual((snapshot["our_reviews"]["last_round"], snapshot["next"]["action"]), (True, "merge-ready"))
+
+    def test_our_own_thread_replies_do_not_show_up_as_new_reviews(self):
+        reply_shell = {"author": ALAN, "viewerDidAuthor": True, "state": "COMMENTED",
+                       "submittedAt": "2026-09-15T12:00:00Z", "body": "", "commit": {"oid": "abc123"}}
+        human = dict(reply_shell, viewerDidAuthor=False, author={"login": "pat", "__typename": "User"})
+        snapshot = pr.summarize(green_pr(), [], [reply_shell, human], [], SINCE, NOW)
+        self.assertEqual([review["author"] for review in snapshot["new_reviews"]], ["pat"])
 
     def test_review_cap_stops_a_loop_that_always_finds_something(self):
         verdict = action(green_pr(), reviews=[our_review("c1"), our_review("c2"), our_review("c3")], review_cap=3)
