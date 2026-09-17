@@ -27,6 +27,6 @@ jobs:
         shell: bash
         run: |
           git init "$RUNNER_TEMP/gitleaks-probe"
-          python3 scripts/git_hooks.py install --repo "$RUNNER_TEMP/gitleaks-probe"
+          python3 skills/open-pr/scripts/git_hooks.py install --repo "$RUNNER_TEMP/gitleaks-probe"
           echo "ASTACK_TEST_GITLEAKS=$RUNNER_TEMP/gitleaks-probe/.git/hooks/astack-gitleaks/gitleaks" >> "$GITHUB_ENV"
       - run: python3 -m unittest discover -s tests -v

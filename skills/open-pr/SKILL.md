@@ -31,7 +31,7 @@ Rebase the unpushed work into verifiable units, in the order that proves the wor
 
 ## 5. Install the Gitleaks hook
 
-Run this skill's `scripts/install_gitleaks_hook.py` from the repository root. It does nothing when the hook is already installed. Git worktrees share one hooks directory, so the hook guards every worktree of the checkout. If the script refuses, record its message for the reply. Done when the script reported the hook installed or already present, or you have recorded the refusal.
+From the repository root, run `python3 <this skill's directory>/scripts/git_hooks.py install --repo .`. It does nothing when the hook is already installed. Git worktrees share one hooks directory, so the hook guards every worktree of the checkout. If the script refuses, record its message for the reply. Done when the script reported the hook installed or already present, or you have recorded the refusal.
 
 ## 6. Write the title and body
 
