@@ -68,7 +68,7 @@ sys.exit(code)
                 "--repo", str(repo or self.repo), *extra]
         if command == "install":
             args += ["--gitleaks", str(self.binary)]
-        result = subprocess.run(args, env=self.env, capture_output=True, text=True)
+        result = subprocess.run(args, cwd=self.root, env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
         return result
 
