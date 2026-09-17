@@ -22,7 +22,7 @@ Done when you have stated the mode and the words that picked it, or that the req
 
 From the repository root, run `python3 <this skill's directory>/scripts/pr.py status`. Pass `--pr <number>` for a PR other than the current branch's PR, and `--repo owner/name` for another repository. Read `next.action`, `next.blockers`, `next.handoff`, and `next.stop` first. When the first snapshot already lists a `next.handoff` reason, the run can end no better than `hand off` until the user answers, so say that at the top of the report. Read the fields behind them next: `mergeable`, `draft`, `checks`, `recent_commits`, `threads.unresolved`, `our_reviews`, `bots`, `new_comments`, `new_reviews`. Exit code 2 means `gh` or the API failed, which is not a verdict: run it once more, then report the failure. In `drive` mode, if `head.sha` changed since your previous snapshot and you did not push in between, another actor is on the branch: report and stop.
 
-In `status` mode, report now and stop. In `threads` mode, go to step 3's Pre-push check and Threads blocks, then report and stop. In `drive` mode, do what `next.action` says:
+In `status` mode, report now and stop. In `threads` mode, report `next.stop` and stop when it is set. Otherwise go to step 3's Pre-push check and Threads blocks, then report and stop. In `drive` mode, do what `next.action` says:
 
 | `next.action` | Do |
 | --- | --- |
@@ -37,7 +37,7 @@ Done when you have named the verdict, its blockers, any `next.handoff` reason, a
 
 ## 3. Fix the blockers
 
-Work `next.blockers` in this order: the draft state, the conflict, the threads, a folded review, then the failed checks. Clear a draft with `gh pr ready <n>`. Put the fixes in new commits, grouped by what they change. Amend or rebase only to resolve a conflict, because rewriting pushed commits outdates the open threads and hides what the last review covered. Batch the conflict and thread fixes into one push. CI fixes follow in their own push. Take a fresh snapshot after every push.
+Work `next.blockers` in this order: the draft state, the conflict, the threads, a folded review, then the failed checks. Clear a draft with `gh pr ready <n>`. Put the fixes in new commits, grouped by what they change. Amend or rebase only to resolve a conflict or to refresh a stale base as [`checks.md`](checks.md) directs, because rewriting pushed commits outdates the open threads and hides what the last review covered. Batch the conflict and thread fixes into one push. CI fixes follow in their own push. Take a fresh snapshot after every push.
 
 **Pre-push check.** A review round costs far more than this check, and a fix that needs fixing spends one. Before every push:
 
@@ -74,7 +74,7 @@ End every mode with a report to the user that carries:
 
 - the mode, the head SHA, and the last `next` verdict
 - the CI state, the review state, and the merge state from the last snapshot
-- `our_reviews.total`, and what each review round found
+- `our_reviews.total`, and what each review round found, which `pr.py history` prints
 - what you fixed, and what you dismissed or deferred with the reason for each
 - what is pending, including a bot pass that never arrived
 - what needs the user: the asks with their thread links, and any `stop` or `hand off` reason
