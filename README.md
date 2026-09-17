@@ -43,9 +43,48 @@ from any terminal or agent, across the selected repository's linked worktrees.
 The installer downloads a pinned, checksum-verified Gitleaks release for macOS
 or Linux (ARM64 or x64). It requires Python 3.10+ and Git 2.31+.
 
-To replace an existing gstack-managed guard, use `--replace-gstack`. Uninstall
-restores the original hook. See [Git hook installation and behavior](docs/git-hooks.md)
-for offline installation, hook chaining, scan coverage, and removal.
+To replace an existing gstack-managed guard, use `--replace-gstack`. To install
+offline, pass `--gitleaks /path/to/gitleaks` with a trusted Gitleaks 8.30.1
+executable. The installer checks its version and copies it without a download.
+
+The installer keeps an existing executable `pre-push` hook. The guard runs that
+hook first, with the original arguments and stdin, and a rejection from it still
+blocks the push. The installer refuses a custom `core.hooksPath`, such as
+Husky's, and a symlinked hooks directory.
+
+`uninstall.sh` does not remove the guard. Remove it with the same script, which
+restores the original hook:
+
+```sh
+python3 scripts/git_hooks.py uninstall --repo /path/to/project
+```
+
+Each push scans the commit patches it sends:
+
+- For an existing branch, the guard scans every commit the remote branch lacks.
+  A secret that a later commit deletes still blocks the push.
+- For a new branch or tag, the guard scans all history reachable from the pushed
+  commit. That scan can report a finding that another branch already published.
+- A shallow clone or a missing remote tip blocks the push until you fetch.
+
+The guard uses the default Gitleaks rules. A `.gitleaks.toml`, a
+`.gitleaksignore`, a `gitleaks:allow` comment, or a `GITLEAKS_*` variable does
+not change them. A finding or a scanner failure blocks the push, and the message
+gives the rule, path, line, and commit without the secret. `git push --no-verify`
+skips the guard along with every other pre-push check.
+
+To upgrade Gitleaks, update `VERSION` in `scripts/gitleaks_pre_push.py`, the
+version and checksums in `tools/gitleaks/releases.json`, and the version this
+section names. Then run the tests
+against the real scanner, as CI does:
+
+```sh
+ASTACK_TEST_GITLEAKS=/path/to/gitleaks \
+  python3 -m unittest discover -s tests -p test_git_hooks.py -v
+```
+
+Without `ASTACK_TEST_GITLEAKS`, the suite uses a fake scanner and skips the
+real pushes.
 
 ## What to edit
 
