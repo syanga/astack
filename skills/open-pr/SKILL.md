@@ -54,6 +54,7 @@ Done when:
 - the body has a Why section and a Verification section
 - every included section carries the content above
 - `wc -l` on the body reports at most forty lines
+- the body carries no count of tests, lines, or commits
 
 ## 7. Open the PR and reply
 
