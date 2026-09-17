@@ -27,7 +27,7 @@ review body and the review is retried. `review` prints {"url", "inline",
 "folded"} so the caller can tell which happened.
 
 Exit code 2 means gh or the GitHub API failed (auth, network, rate limit).
-Retry once before treating that as a result. Reviews are read up to the first 100.
+Retry once before treating that as a result. Only the latest 100 reviews are read.
 """
 
 import argparse
@@ -54,10 +54,10 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id isResolved isOutdated path line
-          comments(first: 50) { nodes { author { login __typename } body createdAt url } }
+          comments(first: 50) { nodes { author { login __typename } viewerDidAuthor body createdAt url } }
         }
       }
-      reviews(first: 100) { nodes { author { login __typename } state submittedAt body commit { oid } } }
+      reviews(last: 100) { nodes { author { login __typename } viewerDidAuthor state submittedAt body commit { oid } } }
       commits(last: 5) { nodes { commit { oid statusCheckRollup { state } } } }
     }
   }
@@ -144,9 +144,9 @@ def is_bot(node):
     return (node.get("author") or {}).get("__typename") == "Bot"
 
 
-def is_ours(body):
-    first = (body or "").split("\n", 1)[0].strip()
-    return first.startswith("[") and first.endswith("] " + HEADER_MARK)
+def is_ours(node):
+    first = (node.get("body") or "").split("\n", 1)[0].strip()
+    return bool(node.get("viewerDidAuthor")) and first.startswith("[") and first.endswith("] " + HEADER_MARK)
 
 
 def minutes_between(start, now):
@@ -166,8 +166,8 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=3, stuck_minu
         unresolved.append({
             "id": thread["id"], "path": thread.get("path"), "line": thread.get("line"),
             "outdated": bool(thread.get("isOutdated")), "author": login(first), "bot": is_bot(first),
-            "ours": is_ours(first.get("body")),
-            "awaiting_user": len(comments) > 1 and is_ours(comments[-1].get("body")),
+            "ours": is_ours(first),
+            "awaiting_user": len(comments) > 1 and is_ours(comments[-1]),
             "body": first.get("body", ""), "replies": max(len(comments) - 1, 0), "url": first.get("url"),
         })
     bots = {}
@@ -176,8 +176,8 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=3, stuck_minu
             entry = bots.setdefault(login(review), {"passes": 0, "last": None, "since_head": False})
             entry["passes"] += 1
             entry["last"] = max(entry["last"] or "", review["submittedAt"])
-            entry["since_head"] = entry["since_head"] or review["submittedAt"] > since
-    ours = [review for review in reviews if is_ours(review.get("body"))]
+            entry["since_head"] = entry["since_head"] or (review.get("commit") or {}).get("oid") == head
+    ours = [review for review in reviews if is_ours(review)]
     on_head = [review for review in ours if (review.get("commit") or {}).get("oid") == head]
     folded_act_on = sum(int(found) for review in on_head for found in FOLDED_ACT_ON.findall(review.get("body", "")))
     pending = [check for check in checks if check["kind"] == "pending"]
@@ -212,7 +212,7 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=3, stuck_minu
             for comment in pr.get("comments") or [] if comment["createdAt"] > since
         ],
         "new_reviews": [
-            {"author": login(review), "bot": is_bot(review), "ours": is_ours(review.get("body")),
+            {"author": login(review), "bot": is_bot(review), "ours": is_ours(review),
              "at": review["submittedAt"], "state": review["state"], "body": review.get("body", "")}
             for review in reviews if review.get("submittedAt") and review["submittedAt"] > since
         ],
@@ -248,7 +248,9 @@ def assess(snapshot):
     if ours["folded_on_head"] and not ours["folded_act_on"]:
         handoff.append("consider findings sit in a folded review body")
     stop = None
-    if checks["stuck"]:
+    if snapshot["state"] != "OPEN":
+        stop = "the PR is {}, not open".format(snapshot["state"])
+    elif checks["stuck"]:
         stop = "a check has been pending past the stuck limit: " + ", ".join(check["name"] or "?" for check in checks["stuck"])
     elif snapshot["mergeable_overdue"]:
         stop = "GitHub has not computed mergeability long after the head commit"
@@ -264,7 +266,7 @@ def assess(snapshot):
         action = "wait"
     elif ours["on_head"] == 0:
         action = "review"
-    elif handoff or snapshot["mergeable"] != "MERGEABLE":
+    elif handoff:
         action = "hand off"
     else:
         action = "merge-ready"

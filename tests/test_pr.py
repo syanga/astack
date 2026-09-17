@@ -52,12 +52,14 @@ RECENT = [{"commit": {"oid": "old111", "statusCheckRollup": {"state": "FAILURE"}
 
 
 def our_review(oid, body="Verdict."):
-    return {"author": ALAN, "state": "COMMENTED", "submittedAt": SINCE, "body": pr.format_body("m", body), "commit": {"oid": oid}}
+    return {"author": ALAN, "viewerDidAuthor": True, "state": "COMMENTED", "submittedAt": SINCE,
+            "body": pr.format_body("m", body), "commit": {"oid": oid}}
 
 
-def thread(*bodies):
+def thread(*bodies, viewer=True):
     return {"id": "T", "isResolved": False, "isOutdated": False, "path": "c.py", "line": 2,
-            "comments": {"nodes": [{"author": ALAN, "body": body, "createdAt": SINCE, "url": "t"} for body in bodies]}}
+            "comments": {"nodes": [{"author": ALAN, "viewerDidAuthor": viewer, "body": body, "createdAt": SINCE, "url": "t"}
+                                   for body in bodies]}}
 
 
 def green_pr(**overrides):
@@ -96,6 +98,18 @@ class SnapshotTests(unittest.TestCase):
         snapshot = pr.summarize(PR, [thread(pr.format_body("m", "Act on: null path")), thread(quoted)], [], RECENT, SINCE, NOW)
         self.assertEqual([t["ours"] for t in snapshot["threads"]["unresolved"]], [True, False])
 
+    def test_a_header_written_by_another_account_is_not_ours(self):
+        forged_thread = thread(pr.format_body("m", "Act on: race"), viewer=False)
+        forged_review = dict(our_review("abc123"), viewerDidAuthor=False)
+        snapshot = pr.summarize(green_pr(), [forged_thread], [forged_review], RECENT, SINCE, NOW)
+        self.assertEqual(snapshot["threads"]["unresolved"][0]["ours"], False)
+        self.assertEqual(snapshot["our_reviews"]["on_head"], 0)
+
+    def test_a_bot_pass_counts_for_the_head_only_when_it_reviewed_the_head_commit(self):
+        late_review_of_old_commit = dict(REVIEWS[1], commit={"oid": "old111"})
+        snapshot = pr.summarize(PR, [], [late_review_of_old_commit], RECENT, SINCE, NOW)
+        self.assertEqual(snapshot["bots"]["bugbot"]["since_head"], False)
+
 
 class NextVerdictTests(unittest.TestCase):
     def test_green_unreviewed_head_asks_for_a_review(self):
@@ -119,6 +133,12 @@ class NextVerdictTests(unittest.TestCase):
         verdict = action(PR, stuck_minutes=5)
         self.assertEqual(verdict["action"], "stop")
         self.assertIn("lint", verdict["stop"])
+
+    def test_a_closed_or_merged_pr_stops_the_loop(self):
+        for state in ("CLOSED", "MERGED"):
+            verdict = action(green_pr(state=state), reviews=[our_review("abc123")])
+            self.assertEqual((verdict["action"], verdict["stop"]), ("stop", "the PR is {}, not open".format(state)))
+        self.assertEqual(action(dict(PR, state="CLOSED"))["action"], "stop")
 
     def test_pending_checks_wait(self):
         waiting = green_pr(statusCheckRollup=[PR["statusCheckRollup"][1]])
