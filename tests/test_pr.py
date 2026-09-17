@@ -1,5 +1,3 @@
-"""Shape the PR snapshot, its next verdict, the review payload, and the comment header, without the network."""
-
 import copy
 import importlib.util
 from pathlib import Path
@@ -100,8 +98,6 @@ class SnapshotTests(unittest.TestCase):
 
 
 class NextVerdictTests(unittest.TestCase):
-    """One case per way the drive loop could otherwise run without end or merge too early."""
-
     def test_green_unreviewed_head_asks_for_a_review(self):
         self.assertEqual(action(green_pr())["action"], "review")
 

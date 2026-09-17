@@ -120,7 +120,6 @@ def fetch_threads(owner, name, number):
 
 
 def classify_check(check):
-    """Map a status context or check run from `gh pr view` onto passed, failed, pending, or skipped."""
     if check.get("__typename") == "StatusContext":
         name, state, link = check.get("context"), check.get("state"), check.get("targetUrl")
     else:
@@ -146,7 +145,6 @@ def is_bot(node):
 
 
 def is_ours(body):
-    """True when the body's first line is exactly the header this script writes. A quoted header further down does not count."""
     first = (body or "").split("\n", 1)[0].strip()
     return first.startswith("[") and first.endswith("] " + HEADER_MARK)
 
@@ -157,7 +155,6 @@ def minutes_between(start, now):
 
 
 def summarize(pr, threads, reviews, recent, since, now, review_cap=3, stuck_minutes=60):
-    """Pure: shape the gh payloads into the snapshot. `since` cuts new activity; `now` dates the pending checks."""
     head = pr["headRefOid"]
     checks = [classify_check(check) for check in pr.get("statusCheckRollup") or []]
     unresolved = []
@@ -170,7 +167,6 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=3, stuck_minu
             "id": thread["id"], "path": thread.get("path"), "line": thread.get("line"),
             "outdated": bool(thread.get("isOutdated")), "author": login(first), "bot": is_bot(first),
             "ours": is_ours(first.get("body")),
-            # We replied and left it open: that is an ask routed to the user.
             "awaiting_user": len(comments) > 1 and is_ours(comments[-1].get("body")),
             "body": first.get("body", ""), "replies": max(len(comments) - 1, 0), "url": first.get("url"),
         })
@@ -193,7 +189,6 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=3, stuck_minu
         "head": {"sha": head, "ref": pr["headRefName"],
                  "committed_at": max(commit["committedDate"] for commit in pr["commits"])},
         "since": since,
-        # Mergeability GitHub still has not computed this long after the head commit will not arrive by waiting.
         "mergeable_overdue": pr["mergeable"] == "UNKNOWN" and minutes_between(
             max(commit["committedDate"] for commit in pr["commits"]), now) > stuck_minutes,
         "checks": {
@@ -204,12 +199,10 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=3, stuck_minu
             "stuck": [check for check in pending
                       if check["started_at"] and minutes_between(check["started_at"], now) > stuck_minutes],
         },
-        # Oldest first. Three FAILURE or ERROR entries in a row at the end means the fixes are not converging.
         "recent_commits": [{"sha": node["commit"]["oid"],
                             "ci": (node["commit"].get("statusCheckRollup") or {}).get("state")} for node in recent],
         "threads": {"unresolved": unresolved,
                     "resolved": sum(1 for thread in threads if thread.get("isResolved"))},
-        # review-pr rounds, counted from the PR itself so a lost transcript cannot reset them.
         "our_reviews": {"total": len(ours), "on_head": len(on_head), "cap": review_cap,
                         "folded_on_head": any(FOLD_MARK in review.get("body", "") for review in on_head),
                         "folded_act_on": folded_act_on},
@@ -229,7 +222,6 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=3, stuck_minu
 
 
 def assess(snapshot):
-    """Pure: the drive loop's state machine, read only from the PR so a lost transcript cannot change it."""
     checks, ours = snapshot["checks"], snapshot["our_reviews"]
     threads = snapshot["threads"]["unresolved"]
     work = [thread for thread in threads if not thread["awaiting_user"]]
@@ -280,12 +272,10 @@ def assess(snapshot):
 
 
 def format_body(model, body):
-    """Every comment an agent posts carries this header so readers know who wrote it."""
     return "[{}] {}\n======\n\n{}".format(model, HEADER_MARK, body.rstrip("\n") + "\n")
 
 
 def build_review(model, review, commit):
-    """Pure: shape the findings file into GitHub's review payload, header on every body."""
     return {
         "event": "COMMENT", "commit_id": commit, "body": format_body(model, review["body"]),
         "comments": [{"path": c["path"], "line": int(c["line"]), "side": "RIGHT", "body": format_body(model, c["body"])}
@@ -294,7 +284,6 @@ def build_review(model, review, commit):
 
 
 def fold_comments(review):
-    """Move inline findings into the body for the retry after GitHub rejects a line outside the diff."""
     comments = review.get("comments", [])
     act_on = sum(1 for c in comments if c.get("bucket", "").lower() == "act on")
     moved = "\n\n".join("{}:{} ({})\n{}".format(c["path"], c["line"], c.get("bucket", "finding"), c["body"]) for c in comments)
@@ -330,8 +319,9 @@ def command_review(args):
         payload = build_review(args.model, attempt, pr["headRefOid"])
         result = subprocess.run(["gh", "api", "--method", "POST", endpoint, "--input", "-"],
                                 input=json.dumps(payload), capture_output=True, text=True)
-        if result.returncode != 0 and "422" not in result.stderr and "Unprocessable" not in result.stderr:
-            break  # not a rejected line: folding would hide a transient failure as a fold
+        line_outside_diff = "422" in result.stderr or "Unprocessable" in result.stderr
+        if result.returncode != 0 and not line_outside_diff:
+            break
         if result.returncode == 0:
             inline = len(payload["comments"])
             json.dump({"url": json.loads(result.stdout)["html_url"], "inline": inline,

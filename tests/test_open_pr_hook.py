@@ -1,5 +1,3 @@
-"""The open-pr hook launcher finds git_hooks.py through the state manifest, or says how to fix that."""
-
 import json
 import os
 from pathlib import Path
