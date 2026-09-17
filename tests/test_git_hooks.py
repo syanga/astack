@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,7 +13,8 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "skills/open-pr/scripts"))
+SCRIPTS = ROOT / "skills/open-pr/scripts"
+sys.path.insert(0, str(SCRIPTS))
 import git_hooks
 
 
@@ -61,8 +63,8 @@ sys.exit(code)
         self.git("commit", "-m", "fixture")
         return self.git("rev-parse", "HEAD").stdout.strip()
 
-    def manage(self, command="install", *extra, ok=True, repo=None):
-        args = [sys.executable, str(ROOT / "skills/open-pr/scripts/git_hooks.py"), command,
+    def manage(self, command="install", *extra, ok=True, repo=None, scripts=SCRIPTS):
+        args = [sys.executable, str(scripts / "git_hooks.py"), command,
                 "--repo", str(repo or self.repo), *extra]
         if command == "install":
             args += ["--gitleaks", str(self.binary)]
@@ -98,6 +100,14 @@ class HookTests(HookFixture):
         self.assertFalse((self.hooks / "pre-push").exists())
         self.assertFalse((self.hooks / git_hooks.PAYLOAD).exists())
         self.manage("uninstall")
+
+    def test_copy_outside_the_checkout_installs(self):
+        shipped = self.root / "shipped"
+        shutil.copytree(SCRIPTS, shipped)
+        self.manage(scripts=shipped)
+        payload = self.hooks / git_hooks.PAYLOAD
+        self.assertTrue((payload / "runner.py").is_file())
+        self.assertTrue((payload / "LICENSE").is_file())
 
     def test_existing_hook_receives_all_refs_and_is_restored(self):
         old = self.hooks / "pre-push"
