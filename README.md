@@ -72,19 +72,21 @@ Each push scans the commit patches it sends:
   commit. That scan can report a finding that another branch already published.
 - A shallow clone blocks the push until you run `git fetch --unshallow`.
 - A missing remote tip blocks the push with a message that says to fetch the
-  remote, and that fetch clears it. A tag that points at a blob or a tree gets
-  the same message, but no fetch helps, because the guard cannot scan such a
-  tag.
+  remote. That fetch clears it for a branch. It may not for a forced tag push,
+  when no fetched ref reaches the commit the remote tag points at. A tag that
+  points at a blob or a tree gets the same message, but no fetch helps, because
+  the guard cannot scan such a tag.
 
 The guard uses the default Gitleaks rules. A `.gitleaks.toml`, a
 `gitleaks:allow` comment, or a `GITLEAKS_*` variable does not change them. The
 guard has known gaps. Gitleaks still reads a `.gitleaksignore` file
 at the root of the working tree, and a finding that the file lists does not
 block the push. The guard scans patches, and Git builds them with the
-attributes of the local checkout, not those of the pushed commits. A `-diff` or
-`binary` attribute on a path hides that path from the scan. A `.gitattributes`
+attributes in effect on this machine, not those of the pushed commits. A `-diff`
+or `binary` attribute on a path hides that path from the scan. A `.gitattributes`
 file in the checkout can set it, committed or not, and so can
-`.git/info/attributes`. Neither the ignore file nor an attribute is a supported
+`.git/info/attributes`, the file `core.attributesFile` names, and the system
+attributes file. Neither the ignore file nor an attribute is a supported
 allowlist.
 
 Any other finding blocks the push, and its message gives the rule, path, line,
