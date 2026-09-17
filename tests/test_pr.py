@@ -1,6 +1,8 @@
 import copy
 import importlib.util
+import json
 from pathlib import Path
+import subprocess
 import unittest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "skills/babysit-pr/scripts/pr.py"
@@ -135,6 +137,16 @@ class NextVerdictTests(unittest.TestCase):
         self.assertEqual(verdict(None), "review")
         self.assertEqual(verdict("2026-09-15T10:25:00Z"), "wait")
 
+    def test_the_push_time_is_asked_for_again_while_the_latest_listed_push_is_not_the_head(self):
+        pull = {"headRepository": {"nameWithOwner": "o/r"}, "headRefName": "feature", "headRefOid": "abc123"}
+        listings = iter([[{"after": "old111", "timestamp": "2026-09-15T09:00:00Z"}],
+                         [{"after": "abc123", "timestamp": "2026-09-15T10:25:00Z"}]])
+        sleeps = []
+        def run(*args, **kwargs):
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps(next(listings)), stderr="")
+        self.assertEqual(pr.fetch_pushed_at(pull, run, sleeps.append), "2026-09-15T10:25:00Z")
+        self.assertEqual(sleeps, [pr.PUSH_LISTING_RETRY_SECONDS])
+
     def test_a_head_already_reviewed_is_never_reviewed_again(self):
         self.assertEqual(action(green_pr(), reviews=[our_review("abc123")])["action"], "merge-ready")
 
@@ -178,6 +190,8 @@ class NextVerdictTests(unittest.TestCase):
             return pr.summarize(green_pr(), [], reviews, [], SINCE, NOW)["our_reviews"]["first_round"]
         self.assertEqual((first_round([our_review("c1")]), first_round([our_review("c1"), our_review("abc123")])),
                          (True, False))
+        capped_at_one = pr.summarize(green_pr(), [], [our_review("c1")], [], SINCE, NOW, review_cap=1)["our_reviews"]
+        self.assertEqual((capped_at_one["first_round"], capped_at_one["last_round"]), (False, True))
 
     def test_our_own_thread_replies_do_not_show_up_as_new_reviews(self):
         reply_shell = {"author": ALAN, "viewerDidAuthor": True, "state": "COMMENTED",

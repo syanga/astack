@@ -23,7 +23,8 @@ stuck-check stop are all read from GitHub, never from memory. The grace for
 checks to register runs from `head.pushed_at`, the time the repository activity
 API gives for the push of the head. So do the stuck limits for mergeability and
 for a check that reports no start time. All three run from `head.committed_at`
-when that API lists no push of the head.
+when that API lists no push of the head. The API lists a push a few seconds
+late, so `status` asks again while the latest listed push is an older one.
 
 `wait` blocks until the verdict is no longer `wait`, then prints the snapshot.
 It needs no harness timer, so it works in a subagent and in any harness. It
@@ -61,6 +62,8 @@ HEADER_MARK = "RESPONDING ON BEHALF OF " + ON_BEHALF_OF
 FOLD_MARK = "Findings on lines outside the diff:"
 BOT_PASS_CAP = 6
 CHECK_GRACE_MINUTES = 10
+PUSH_LISTING_TRIES = 3
+PUSH_LISTING_RETRY_SECONDS = 2
 FOLDED_ACT_ON = re.compile(r"^Folded act-on findings: (\d+)\r?$", re.M)
 
 PR_FIELDS = ("number,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
@@ -140,17 +143,22 @@ def fetch_threads(owner, name, number):
         after = threads["pageInfo"]["endCursor"]
 
 
-def fetch_pushed_at(pr):
+def fetch_pushed_at(pr, run=subprocess.run, sleep=time.sleep):
     repo = (pr.get("headRepository") or {}).get("nameWithOwner")
     if not repo:
         return None
-    result = subprocess.run(["gh", "api", "--method", "GET", "repos/{}/activity".format(repo),
-                             "-f", "ref=refs/heads/" + pr["headRefName"], "-F", "per_page=1"],
-                            capture_output=True, text=True)
-    if result.returncode != 0:
-        return None
-    pushes = json.loads(result.stdout or "[]")
-    return pushes[0]["timestamp"] if pushes and pushes[0]["after"] == pr["headRefOid"] else None
+    for attempt in range(PUSH_LISTING_TRIES):
+        if attempt:
+            sleep(PUSH_LISTING_RETRY_SECONDS)
+        result = run(["gh", "api", "--method", "GET", "repos/{}/activity".format(repo),
+                      "-f", "ref=refs/heads/" + pr["headRefName"], "-F", "per_page=1"],
+                     capture_output=True, text=True)
+        pushes = json.loads(result.stdout or "[]") if result.returncode == 0 else []
+        if not pushes:
+            return None
+        if pushes[0]["after"] == pr["headRefOid"]:
+            return pushes[0]["timestamp"]
+    return None
 
 
 def classify_check(check):
@@ -244,7 +252,7 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minu
         "threads": {"unresolved": unresolved,
                     "resolved": sum(1 for thread in threads if thread.get("isResolved"))},
         "our_reviews": {"total": len(ours), "on_head": len(on_head), "cap": review_cap,
-                        "first_round": len(ours) == 1,
+                        "first_round": len(ours) == 1 and review_cap > 1,
                         "last_round": len(ours) >= review_cap,
                         "last_sha": last_sha,
                         "last_sha_in_pr": last_sha is not None and last_sha in {commit.get("oid") for commit in pr["commits"]},
