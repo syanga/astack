@@ -9,7 +9,7 @@ The policy is the Pull Requests section of the global rules. This is the procedu
 
 ## 1. Rebase onto the base
 
-Commit the work first. The base is the repository's default branch, which `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` prints. When this PR is a child in a stack, the base is the parent branch instead. If unrelated changes are on the branch, move them to their own branch first. Fetch `origin`. If the branch has no open PR yet, rebase onto `origin/<base>`. If it has one (`gh pr view` exits 0), leave the pushed commits as they are: a conflict on an open PR is babysit-pr's work. Done when `git status` is clean and `git log --oneline origin/<base>..HEAD` lists only this work's commits.
+Commit the work first. The base is the repository's default branch, which `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` prints. When this PR is a child in a stack, the base is the parent branch instead. If unrelated changes are on the branch, move them to their own branch first. Fetch `origin`. The branch has an open PR when `gh pr view --json state -q .state` prints `OPEN`. A merged or closed PR on a reused branch name also makes `gh pr view` exit 0, and it does not count. If the branch has no open PR yet, rebase onto `origin/<base>`. If it has one, leave the pushed commits as they are: a conflict on an open PR is babysit-pr's work. Done when `git status` is clean and `git log --oneline origin/<base>..HEAD` lists only this work's commits.
 
 ## 2. Prove the change
 
@@ -56,13 +56,13 @@ Done when:
 
 ## 7. Open the PR
 
-Push the branch. Run `gh pr view --json number,url`, which exits non-zero when the branch has no PR. If it has none, create one:
+Push the branch. Run `gh pr view --json number,url,state`. The branch has a PR only when `state` is `OPEN`: the command exits non-zero when the branch never had one, and prints `MERGED` or `CLOSED` for a reused branch name. If it has none, create one:
 
 ```bash
 gh pr create --base <base> --title "<title>" --body-file <file>
 ```
 
-If it has one, bring it up to date with `gh pr edit <n> --title "<title>" --body-file <file>`. If the host opened it as a draft, run `gh pr ready <n>`. Inside T3 Code, call `link_pull_request` with the URL. Done when `gh pr view <n> --json url,isDraft,baseRefName` shows the base from step 1 and `isDraft` false. Inside T3 Code, done also requires that the link call returned.
+If it has one, bring it up to date with `gh pr edit <n> --title "<title>" --body-file <file>`. If the host opened it as a draft, run `gh pr ready <n>`. Inside T3 Code, call `link_pull_request` with the URL. Done when `gh pr view <n> --json url,state,isDraft,baseRefName` shows `state` `OPEN`, the base from step 1, and `isDraft` false. Inside T3 Code, done also requires that the link call returned.
 
 ## 8. Reply
 
