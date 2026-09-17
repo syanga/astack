@@ -117,7 +117,7 @@ ASTACK_TEST_GITLEAKS=/path/to/gitleaks \
 ```
 
 CI provisions the verified release into a disposable repository and runs these
-tests on macOS and Linux. Tests cover install/reinstall/uninstall, worktrees,
+tests on Linux. Tests cover install/reinstall/uninstall, worktrees,
 hook chaining and gstack replacement, scanner failures, clean pushes, intermediate
 commits, force-pushes, merge resolutions, annotated tags, and multiple refs.
 
