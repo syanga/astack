@@ -8,7 +8,7 @@ The reviewers saw a diff and a paragraph. They do not know what was tried and re
 
 Each code finding lands in one bucket, with the reviewers who raised it and one line of rationale.
 
-- **Act on.** Would block the PR: a correctness or security defect, or a structural finding from the rubric's Structure or Complexity lens that the author cannot justify.
+- **Act on.** Would block the PR: a correctness or security defect, an instruction that would make its reader do the wrong thing, a requirement the change misses or gets wrong, or a structural finding from the rubric's Structure or Complexity lens that the author cannot justify.
 - **Consider.** Legitimate, and you are not sure the benefit outweighs the cost of addressing it now.
 - **Noted.** Valid and not actionable now: context-dependent, premature, low impact.
 - **Dismissed.** Wrong, nitpicky, or missing context, with one line of why. This bucket is how the user overrides you.
@@ -22,7 +22,7 @@ Severity is where a finding starts. `critical` starts in act on, `warning` start
 - **Premature abstraction.** An extraction is warranted when the code needs to change in a second way. Otherwise inline code that works beats the clean abstraction, and duplication beats an abstraction built too early.
 - **A different taste.** The commonest false positive. Without a concrete problem in the current approach, dismiss and say why.
 - **Missing context.** The finding targets code the author did not touch, a pattern consistent with the rest of the codebase, or an approach that conflicts with a constraint you know about. Dismiss it and name the context.
-- **Already answered.** The finding repeats an earlier thread on this PR that was replied to and resolved, and the code it points at has not changed since. Dismiss it and name that thread.
+- **Already answered.** The finding repeats one an earlier round fixed, dismissed, or deferred, in a thread or in a review body, and the code it points at has not changed since. Dismiss it and name where it was answered.
 - **Unverified.** Below rung 2 on the ladder. Move it to consider at most. Usually dismiss it and give the reason.
 
 ## Signals that a finding is right

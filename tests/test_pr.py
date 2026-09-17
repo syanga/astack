@@ -88,7 +88,8 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["bots"], {"bugbot": {"passes": 2, "last": "2026-09-15T12:00:00Z", "since_head": True}})
         self.assertEqual(snapshot["recent_commits"], [{"sha": "old111", "ci": "FAILURE"}, {"sha": "abc123", "ci": None}])
         self.assertEqual(snapshot["our_reviews"],
-                         {"total": 0, "on_head": 0, "cap": 3, "folded_on_head": False, "folded_act_on": 0})
+                         {"total": 0, "on_head": 0, "cap": 5, "last_sha": None, "last_sha_in_pr": False,
+                          "folded_on_head": False, "folded_act_on": 0})
         self.assertEqual([comment["body"] for comment in snapshot["new_comments"]], ["after push"])
         self.assertEqual(snapshot["head"], {"sha": "abc123", "ref": "feature", "committed_at": "2026-09-15T10:00:00Z"})
         self.assertEqual(snapshot["next"]["action"], "fix")
@@ -118,8 +119,25 @@ class NextVerdictTests(unittest.TestCase):
     def test_a_head_already_reviewed_is_never_reviewed_again(self):
         self.assertEqual(action(green_pr(), reviews=[our_review("abc123")])["action"], "merge-ready")
 
+    def test_the_last_reviewed_commit_is_reported_for_an_incremental_round(self):
+        pull = green_pr(commits=[{"oid": "c1", "committedDate": SINCE}, {"oid": "abc123", "committedDate": SINCE}])
+        older = dict(our_review("zzz"), submittedAt="2026-09-15T09:00:00Z")
+        newer = dict(our_review("c1"), submittedAt="2026-09-15T09:30:00Z")
+        ours = pr.summarize(pull, [], [newer, older], [], SINCE, NOW)["our_reviews"]
+        self.assertEqual((ours["last_sha"], ours["last_sha_in_pr"]), ("c1", True))
+
+    def test_wait_polls_until_the_verdict_changes(self):
+        verdicts = iter(["wait", "wait", "review"])
+        sleeps = []
+        snapshot = pr.wait_until_settled(lambda: {"next": {"action": next(verdicts)}}, lambda: sleeps.append(1), 10)
+        self.assertEqual((snapshot["next"]["action"], len(sleeps)), ("review", 2))
+
+    def test_wait_gives_up_after_its_polls(self):
+        snapshot = pr.wait_until_settled(lambda: {"next": {"action": "wait"}}, lambda: None, 3)
+        self.assertEqual(snapshot["next"]["action"], "wait")
+
     def test_review_cap_stops_a_loop_that_always_finds_something(self):
-        verdict = action(green_pr(), reviews=[our_review("c1"), our_review("c2"), our_review("c3")])
+        verdict = action(green_pr(), reviews=[our_review("c1"), our_review("c2"), our_review("c3")], review_cap=3)
         self.assertEqual(verdict["action"], "stop")
         self.assertIn("review cap", verdict["stop"])
 

@@ -8,13 +8,13 @@ disable-model-invocation: true
 
 The policy is the Pull Requests section of the global rules. The reviewer in the loop is [`../review-pr/SKILL.md`](../review-pr/SKILL.md), which posts its findings to the PR as threads.
 
-The loop's state lives on the PR, not in your memory. Every snapshot ends with a `next` verdict the script computes from GitHub alone: `fix`, `wait`, `review`, `merge-ready`, `hand off`, or `stop`. Follow it. It already applies the review-round cap, the CI-not-converging stop, and the stuck-check stop.
+The loop's state lives on the PR, not in your memory. Every snapshot ends with a `next` verdict the script computes from GitHub alone: `fix`, `wait`, `review`, `merge-ready`, `hand off`, or `stop`. Follow it. It already applies the review-round cap, the CI-not-converging stop, and the stuck-check stop. The first review round reads the whole PR. Later rounds read only the commits since the last reviewed one, so a small fix gets a small review.
 
 ## 1. Declare the mode
 
 The request picks one of three modes.
 
-- `status`. Take one snapshot and report. "Check on #12", "anything outstanding on X". Also the mode for a docs-only PR.
+- `status`. Take one snapshot and report. "Check on #12", "anything outstanding on X".
 - `threads`. Answer the review threads only. "Address the review comments".
 - `drive`. Follow `next` until it says `merge-ready`, `hand off`, or `stop`. "Babysit this", "get it green". The mode when the request names none of the others.
 
@@ -39,7 +39,7 @@ Done when, in `drive` mode, you have acted on `next.action`, and in the other tw
 
 ## 3. Fix the blockers
 
-Work `next.blockers` in this order: the draft state, the conflict, the threads, a folded review, then the failed checks. Clear a draft with `gh pr ready <n>`. Batch the conflict and thread fixes into one push. CI fixes follow in their own push. Take a fresh snapshot after every push.
+Work `next.blockers` in this order: the draft state, the conflict, the threads, a folded review, then the failed checks. Clear a draft with `gh pr ready <n>`. Make every fix a new commit. Amend or rebase only to resolve a conflict, because rewriting pushed commits outdates the open threads and hides what the last review covered. Batch the conflict and thread fixes into one push. CI fixes follow in their own push. Take a fresh snapshot after every push.
 
 **Conflict.** Rebase onto the base branch and resolve it following [`conflicts.md`](conflicts.md). If a hunk needs a product decision, stop and report the branch and the hunk. After the rebase, search the base for callers of every symbol the PR moves or deletes. The rebase restarts every check and outdates threads, so include it in the same push as every other fix.
 
@@ -53,7 +53,7 @@ Done when a fresh snapshot's `next.blockers` is empty, or you stopped on a hunk,
 
 ## 4. Wait
 
-Wait with the harness's timer, sized to the repository's usual check duration. In Claude Code that is `/loop` with no interval. Use one timer. When it fires, return to step 2. The snapshot turns `next.action` to `stop` when a check stays pending past the limit, or when GitHub has still not computed mergeability by then, so the wait is bounded. When a bot that reviewed an earlier commit has `since_head` false after the checks finish, name the missing bot pass in the report and go on. Answer a user question mid-loop and continue. Done when the timer has fired.
+Run `python3 <this skill's directory>/scripts/pr.py wait`, with the same `--pr` and `--repo` as the snapshot, and the longest timeout your shell allows. It blocks until the verdict is no longer `wait` and prints the new snapshot, so it works in a subagent and needs no timer. If it returns with `next.action` still `wait`, run it again. The snapshot turns `next.action` to `stop` when a check stays pending past the limit, or when GitHub has still not computed mergeability by then, so the wait is bounded. When a bot that reviewed an earlier commit has `since_head` false after the checks finish, name the missing bot pass in the report and go on. Done when the snapshot's `next.action` is no longer `wait`. Act on it as step 2 says.
 
 ## 5. Review the head
 

@@ -4,7 +4,9 @@
 Reads and writes through the GitHub CLI (gh). Bodies come from files and
 reach gh as JSON on stdin, so no comment text passes through a shell.
 
-    pr.py status  [--pr N] [--repo o/r] [--since ISO] [--review-cap 3] [--stuck-minutes 60]
+    pr.py status  [--pr N] [--repo o/r] [--since ISO] [--review-cap 5] [--stuck-minutes 60]
+    pr.py wait    [--pr N] [--repo o/r] [--max-minutes 9] [--interval 30]
+    pr.py history [--pr N] [--repo o/r]
     pr.py reply   --thread <id> --body-file <file> --model <id>
     pr.py resolve --thread <id>
     pr.py review  --review-file <json> --model <id> [--pr N] [--repo o/r]
@@ -18,6 +20,13 @@ Every body this script posts opens with the on-behalf-of header:
 review, merge-ready, hand off, stop), so the babysit loop's bounds survive a
 lost transcript: the review-round cap, the CI-not-converging stop, and the
 stuck-check stop are all read from GitHub, never from memory.
+
+`wait` blocks until the verdict is no longer `wait`, then prints the snapshot.
+It needs no harness timer, so it works in a subagent and in any harness. It
+returns after --max-minutes with the verdict still `wait`; run it again.
+
+`history` prints our earlier review bodies and every thread with its replies
+and resolution, as Markdown, for a later review round to read.
 
 The review file is {"body": "...", "comments": [{"path", "line", "bucket", "body"}, ...]}
 with bucket "act on" or "consider". It becomes one PR review on the head commit
@@ -37,6 +46,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 
 ON_BEHALF_OF = "ALAN"
 HEADER_MARK = "RESPONDING ON BEHALF OF " + ON_BEHALF_OF
@@ -155,7 +165,7 @@ def minutes_between(start, now):
     return (datetime.fromisoformat(now.replace("Z", "+00:00")) - begun).total_seconds() / 60
 
 
-def summarize(pr, threads, reviews, recent, since, now, review_cap=3, stuck_minutes=60):
+def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minutes=60):
     head = pr["headRefOid"]
     checks = [classify_check(check) for check in pr.get("statusCheckRollup") or []]
     unresolved = []
@@ -180,6 +190,8 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=3, stuck_minu
             entry["since_head"] = entry["since_head"] or (review.get("commit") or {}).get("oid") == head
     ours = [review for review in reviews if is_ours(review)]
     on_head = [review for review in ours if (review.get("commit") or {}).get("oid") == head]
+    latest = max(ours, key=lambda review: review.get("submittedAt") or "", default=None)
+    last_sha = (latest.get("commit") or {}).get("oid") if latest else None
     folded_act_on = sum(int(found) for review in on_head for found in FOLDED_ACT_ON.findall(review.get("body", "")))
     pending = [check for check in checks if check["kind"] == "pending"]
     snapshot = {
@@ -205,6 +217,8 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=3, stuck_minu
         "threads": {"unresolved": unresolved,
                     "resolved": sum(1 for thread in threads if thread.get("isResolved"))},
         "our_reviews": {"total": len(ours), "on_head": len(on_head), "cap": review_cap,
+                        "last_sha": last_sha,
+                        "last_sha_in_pr": last_sha is not None and last_sha in {commit.get("oid") for commit in pr["commits"]},
                         "folded_on_head": any(FOLD_MARK in review.get("body", "") for review in on_head),
                         "folded_act_on": folded_act_on},
         "bots": bots,
@@ -305,14 +319,61 @@ def fold_comments(review):
             "comments": []}
 
 
-def command_status(args):
+def take_snapshot(args):
     pr = fetch_pr(args)
     owner, name = pr["url"].split("/")[3:5]
-    since = args.since or max(commit["committedDate"] for commit in pr["commits"])
+    since = getattr(args, "since", None) or max(commit["committedDate"] for commit in pr["commits"])
     threads, reviews, recent = fetch_threads(owner, name, pr["number"])
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    json.dump(summarize(pr, threads, reviews, recent, since, now, args.review_cap, args.stuck_minutes), sys.stdout, indent=2)
+    return summarize(pr, threads, reviews, recent, since, now, args.review_cap, args.stuck_minutes)
+
+
+def command_status(args):
+    json.dump(take_snapshot(args), sys.stdout, indent=2)
     print()
+
+
+def wait_until_settled(snapshot_once, sleep, max_polls):
+    snapshot = snapshot_once()
+    for _ in range(max_polls):
+        if snapshot["next"]["action"] != "wait":
+            break
+        sleep()
+        snapshot = snapshot_once()
+    return snapshot
+
+
+def command_wait(args):
+    polls = max(int(args.max_minutes * 60 / args.interval), 1)
+    snapshot = wait_until_settled(lambda: take_snapshot(args), lambda: time.sleep(args.interval), polls)
+    json.dump(snapshot, sys.stdout, indent=2)
+    print()
+
+
+def render_history(threads, reviews):
+    lines = ["# Earlier review rounds on this PR", ""]
+    for review in reviews:
+        if is_ours(review) and review.get("body"):
+            lines += ["## Review of {} at {}".format((review.get("commit") or {}).get("oid", "?")[:7], review.get("submittedAt")),
+                      "", review["body"].strip(), ""]
+    lines += ["## Threads", ""]
+    for thread in threads:
+        comments = thread["comments"]["nodes"]
+        if not comments:
+            continue
+        lines.append("### {}:{} ({})".format(thread.get("path"), thread.get("line"),
+                                             "resolved" if thread.get("isResolved") else "open"))
+        for comment in comments:
+            lines += ["", "**{}**:".format(login(comment)), "", comment.get("body", "").strip()]
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def command_history(args):
+    pr = fetch_pr(args)
+    owner, name = pr["url"].split("/")[3:5]
+    threads, reviews, _ = fetch_threads(owner, name, pr["number"])
+    sys.stdout.write(render_history(threads, reviews))
 
 
 def command_reply(args):
@@ -367,9 +428,19 @@ def main(argv=None):
 
     status = scoped("status", help="print one JSON snapshot of the PR")
     status.add_argument("--since", help="ISO-8601 cut for new activity; defaults to the head commit time")
-    status.add_argument("--review-cap", type=int, default=3, help="review-pr rounds allowed before the loop stops")
-    status.add_argument("--stuck-minutes", type=int, default=60, help="a check pending longer than this is stuck")
     status.set_defaults(run=command_status)
+
+    wait = scoped("wait", help="block until the verdict is no longer wait, then print the snapshot")
+    wait.add_argument("--max-minutes", type=float, default=9, help="return after this long even if still waiting")
+    wait.add_argument("--interval", type=int, default=30, help="seconds between polls")
+    wait.set_defaults(run=command_wait)
+
+    for sub in (status, wait):
+        sub.add_argument("--review-cap", type=int, default=5, help="review-pr rounds allowed before the loop stops")
+        sub.add_argument("--stuck-minutes", type=int, default=60, help="a check pending longer than this is stuck")
+
+    history = scoped("history", help="print earlier review bodies and threads as Markdown")
+    history.set_defaults(run=command_history)
 
     reply = commands.add_parser("reply", help="reply on a review thread from a file")
     reply.add_argument("--thread", required=True, help="thread id from the status snapshot")

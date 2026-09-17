@@ -1,18 +1,19 @@
 # Triage a review thread
 
-A review thread from a bot or a person is a claim to verify against the code. A thread the snapshot marks `ours` is a review-pr finding whose first line names its bucket: fix an act-on finding, and fix a consider finding when the fix is small, otherwise dismiss it with the reason. The ask-by-default categories below apply to `ours` threads too. When a claim is cheap to test, run the test before classifying. When a finding admits a test, write one that fails first, then fix in the same commit. When a comment asks for work outside the PR's intent, reply with the intent quoted rather than widening the change. These are the classes, the evidence each needs, and the patterns that have repeated.
+A review thread from a bot or a person is a claim to verify against the code. A thread the snapshot marks `ours` is a review-pr finding whose first line names its bucket: fix an act-on finding, and fix a consider finding when the fix is small, otherwise defer it. The ask-by-default categories below apply to `ours` threads too. When a claim is cheap to test, run the test before classifying. When a finding admits a test, write one that fails first, then fix in the same commit. When a comment asks for work outside the PR's intent, reply with the intent quoted rather than widening the change. These are the classes, the evidence each needs, and the patterns that have repeated.
 
 ## Classes
 
 - **fix**. The claim holds against the current code.
 - **dismiss**. The current code proves the claim needs no change, and the reply carries the evidence: the file and line, the test that passes, or the invariant that covers it. A pattern below says where to look for the evidence. Matching a pattern is not itself evidence.
+- **defer**. The claim holds, and fixing it now costs more than this PR should carry: it is not small, or it belongs to other work. Reply with the reason and resolve the thread. Every deferral goes in the report to the user as a follow-up.
 - **ask**. The claim is novel or ambiguous, or it is in an ask-by-default category and you did not verify it by running code. Reply on the thread with the question and leave it unresolved. The snapshot then shows the thread as `awaiting_user` and the PR is handed off rather than merged.
 
 A red test run confirms a claim. A green run is the evidence for a dismissal.
 
 ## Ask by default
 
-These categories are ask by default: security, privacy, auth, billing, data retention, permission boundaries, migrations, schema, idempotency, concurrency, and cross-system behaviour. So is any comment whose suggested fix is small and reduces risk without changing intent. In these categories, fix only a claim you verified by running code. A prior dismissal of something similar does not carry over.
+These categories are ask by default: security, privacy, auth, billing, data retention, permission boundaries, migrations, schema, idempotency, concurrency, and cross-system behaviour. In these categories, fix only a claim you verified, by running code, or for a claim about prose by reading the text it quotes. A prior dismissal of something similar does not carry over.
 
 ## Reply shape
 
@@ -21,6 +22,7 @@ These categories are ask by default: security, privacy, auth, billing, data rete
 - **Fixed.** The SHA, a two-line diff of the change, one sentence on what was wrong.
 - **Already fixed.** The SHA that addressed it and how.
 - **Dismissed.** One sentence stating why, then the evidence.
+- **Deferred.** That the claim holds, why it waits, and where the follow-up is recorded.
 - **Asked.** The question for the user, your read of the claim, and what you verified so far.
 
 Every reply cites code. From a bot's third pass on the same PR, lean toward dismissing the documented patterns. The snapshot counts passes, and the ask-by-default categories still go to the user. One exception to that rule: a test that pins prose (a regex over a doc, a snapshot of wording) drifts because earlier fix rounds edited the prose, so a drift claim on a late pass is often real.

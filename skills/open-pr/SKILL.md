@@ -9,7 +9,7 @@ The policy is the Pull Requests section of the global rules. This is the procedu
 
 ## 1. Rebase onto the base
 
-The base is the repository's default branch, which `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` prints. When this PR is a child in a stack, the base is the parent branch instead. If unrelated changes are on the branch, move them to their own branch first. Fetch `origin`. Rebase onto `origin/<base>`. Done when `git status` is clean and `git log --oneline origin/<base>..HEAD` lists only this work's commits.
+Commit the work first. The base is the repository's default branch, which `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` prints. When this PR is a child in a stack, the base is the parent branch instead. If unrelated changes are on the branch, move them to their own branch first. Fetch `origin`. Rebase onto `origin/<base>`. Done when `git status` is clean and `git log --oneline origin/<base>..HEAD` lists only this work's commits.
 
 ## 2. Prove the change
 
@@ -26,11 +26,11 @@ Read the whole diff as its reviewer. Remove debug output, dead paths, and guards
 
 ## 4. Shape the commits
 
-Rebase the work into verifiable units, in the order that proves the work, following [`../principles/sequence-verifiable-units.md`](../principles/sequence-verifiable-units.md). If a fix belongs to the commit just made, amend it. If a fix is separable, give it its own commit. Done when the checks from step 2 pass at every commit.
+Rebase the unpushed work into verifiable units, in the order that proves the work, following [`../principles/sequence-verifiable-units.md`](../principles/sequence-verifiable-units.md). If a fix belongs to the commit just made, amend it. If a fix is separable, give it its own commit. Leave commits that are already pushed to an open PR as they are, and add new ones. Done when the checks from step 2 pass at every commit you shaped.
 
 ## 5. Install the Gitleaks hook
 
-Find out whether the repository's pre-push hook already runs a secret scanner. If it does not, run this skill's `scripts/install_gitleaks_hook.py` from the repository root. If it refuses, record its message for the reply. Done when the pre-push hook runs a secret scanner, or you have recorded the refusal.
+The global rules require the Gitleaks pre-push hook in every repository you push from. Find out whether the repository's pre-push hook already runs a secret scanner. If it does not, run this skill's `scripts/install_gitleaks_hook.py` from the repository root. Git worktrees share one hooks directory, so the hook then guards every worktree of the checkout. If the script refuses, record its message for the reply. Done when the pre-push hook runs a secret scanner, or you have recorded the refusal.
 
 ## 6. Write the title and body
 
@@ -56,13 +56,13 @@ Done when:
 
 ## 7. Open the PR
 
-Push the branch. Create the PR:
+Push the branch. Run `gh pr view --json number,url` to find out whether the branch already has a PR. If it has none, create one:
 
 ```bash
 gh pr create --base <base> --title "<title>" --body-file <file>
 ```
 
-If the host opened it as a draft, run `gh pr ready <n>`. Inside T3 Code, call `link_pull_request` with the URL. Done when `gh pr view <n> --json url,isDraft,baseRefName` shows the base from step 1 and `isDraft` false. Inside T3 Code, done also requires that the link call returned.
+If it has one, bring it up to date with `gh pr edit <n> --title "<title>" --body-file <file>`. If the host opened it as a draft, run `gh pr ready <n>`. Inside T3 Code, call `link_pull_request` with the URL. Done when `gh pr view <n> --json url,isDraft,baseRefName` shows the base from step 1 and `isDraft` false. Inside T3 Code, done also requires that the link call returned.
 
 ## 8. Reply
 
