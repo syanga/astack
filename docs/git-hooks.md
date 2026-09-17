@@ -101,7 +101,9 @@ redacted and kept in a private temporary directory that is removed after scannin
 Each scan has a 120-second scanner deadline and a 150-second process timeout;
 expiration blocks rather than claiming a clean result.
 
-This is pattern-based detection, not proof that a push is free of secrets. Archive
+This is pattern-based detection, not proof that a push is free of secrets. Gitleaks'
+default rules skip some paths by extension, such as `.bin` and `.pdf`, so the guard
+does not report a secret in such a path. Archive
 coverage follows Gitleaks' Git-patch scanner; this integration does not
 enable archive traversal. It does not scan PR descriptions or rotate credentials.
 As with other local hooks, `git push --no-verify` bypasses it (and all other pre-push
@@ -120,7 +122,8 @@ ASTACK_TEST_GITLEAKS=/path/to/gitleaks \
 CI provisions the verified release into a disposable repository and runs these
 tests on Linux. Tests cover install/reinstall/uninstall, worktrees,
 hook chaining and gstack replacement, scanner failures, clean pushes, intermediate
-commits, force-pushes, merge resolutions, annotated tags, and multiple refs.
+commits, force-pushes, merge resolutions, annotated tags, multiple refs, replacement
+objects, a working-tree `.gitleaksignore`, and files that Git treats as binary.
 
 To upgrade, review the upstream release and detection behavior, update `VERSION`
 in `scripts/gitleaks_pre_push.py`, the release checksums, and this documentation;
