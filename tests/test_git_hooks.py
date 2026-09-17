@@ -105,9 +105,14 @@ class HookTests(HookFixture):
         shipped = self.root / "shipped"
         shutil.copytree(SCRIPTS, shipped)
         self.manage(scripts=shipped)
+        self.commit("file.txt", "changed\n")
         self.assertEqual(self.invoke().returncode, 0)
-        unpinned = "import platform, git_hooks\nplatform.machine = lambda: 'unpinned'\ngit_hooks.download()\n"
-        result = subprocess.run([sys.executable, "-c", unpinned], cwd=shipped, env=self.env,
+        unpinned = ("import platform, git_hooks\n"
+                    "platform.machine = lambda: 'unpinned'\n"
+                    "git_hooks.urllib.request.urlopen = None\n"
+                    "git_hooks.download()\n")
+        result = subprocess.run([sys.executable, "-c", unpinned], cwd=self.repo,
+                                env={**self.env, "PYTHONPATH": str(shipped)},
                                 capture_output=True, text=True)
         self.assertIn("No pinned download", result.stderr)
 
