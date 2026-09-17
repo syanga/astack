@@ -25,8 +25,9 @@ stuck-check stop are all read from GitHub, never from memory.
 It needs no harness timer, so it works in a subagent and in any harness. It
 returns after --max-minutes with the verdict still `wait`; run it again.
 
-`history` prints our earlier review bodies and every thread with its replies
-and resolution, as Markdown, for a later review round to read.
+`history` prints every earlier review body and every thread with its replies
+and resolution, as Markdown, for a later review round to read. It marks each
+text as ours or as another account's.
 
 The review file is {"body": "...", "comments": [{"path", "line", "bucket", "body"}, ...]}
 with bucket "act on" or "consider". It becomes one PR review on --commit, the
@@ -274,7 +275,8 @@ def assess(snapshot):
         stop = "a check has been pending past the stuck limit: " + ", ".join(check["name"] or "?" for check in checks["stuck"])
     elif snapshot["mergeable_overdue"]:
         stop = "GitHub has not computed mergeability long after the head commit"
-    elif work and any(bot["passes"] >= BOT_PASS_CAP for bot in snapshot["bots"].values()):
+    elif any(thread["bot"] and snapshot["bots"].get(thread["author"], {}).get("passes", 0) >= BOT_PASS_CAP
+             for thread in work):
         stop = "a review bot has posted {} passes and threads still need work".format(BOT_PASS_CAP)
     elif len(streak) == 3 and all(state in ("FAILURE", "ERROR") for state in streak):
         stop = "the last three commits CI ran on failed, so the fixes are not converging"
@@ -308,10 +310,12 @@ def build_review(model, review, commit):
 
 
 def check_review(review):
-    if not isinstance(review.get("body"), str):
-        fail("review file: body must be a string")
+    if not isinstance(review, dict) or not isinstance(review.get("body"), str):
+        fail("review file: it must be an object whose body is a string")
+    if not isinstance(review.get("comments", []), list):
+        fail("review file: comments must be a list")
     for index, c in enumerate(review.get("comments", [])):
-        well_formed = (isinstance(c.get("path"), str) and isinstance(c.get("line"), int)
+        well_formed = (isinstance(c, dict) and isinstance(c.get("path"), str) and type(c.get("line")) is int
                        and isinstance(c.get("body"), str) and c.get("bucket") in ("act on", "consider"))
         if not well_formed:
             fail("review file: comment {} needs a path, an integer line, a body, and a bucket of "
@@ -340,28 +344,34 @@ def command_status(args):
     print()
 
 
-def wait_until_settled(snapshot_once, sleep, max_polls):
+def wait_until_settled(snapshot_once, sleep, clock, seconds, interval):
+    deadline = clock() + seconds
     snapshot = snapshot_once()
-    for _ in range(max_polls):
-        if snapshot["next"]["action"] != "wait":
-            break
-        sleep()
-        snapshot = snapshot_once()
+    while snapshot["next"]["action"] == "wait" and clock() + interval <= deadline:
+        sleep(interval)
+        try:
+            snapshot = snapshot_once()
+        except SystemExit:
+            continue
     return snapshot
 
 
 def command_wait(args):
-    polls = max(int(args.max_minutes * 60 / args.interval), 1)
-    snapshot = wait_until_settled(lambda: take_snapshot(args), lambda: time.sleep(args.interval), polls)
+    snapshot = wait_until_settled(lambda: take_snapshot(args), time.sleep, time.monotonic,
+                                  args.max_minutes * 60, max(args.interval, 1))
     json.dump(snapshot, sys.stdout, indent=2)
     print()
+
+
+def signed(node):
+    return "{} ({})".format(login(node), "ours" if is_ours(node) else "another account")
 
 
 def render_history(threads, reviews):
     lines = ["# Earlier review rounds on this PR", ""]
     for review in reviews:
         if review.get("body"):
-            lines += ["## Review by {} of {} at {}".format(login(review), (review.get("commit") or {}).get("oid", "?")[:7],
+            lines += ["## Review by {} of {} at {}".format(signed(review), (review.get("commit") or {}).get("oid", "?")[:7],
                                                          review.get("submittedAt")), "", review["body"].strip(), ""]
     lines += ["## Threads", ""]
     for thread in threads:
@@ -371,7 +381,7 @@ def render_history(threads, reviews):
         lines.append("### {}:{} ({})".format(thread.get("path"), thread.get("line") or "outdated line",
                                              "resolved" if thread.get("isResolved") else "open, not yet answered"))
         for comment in comments:
-            lines += ["", "**{}**:".format(login(comment)), "", comment.get("body", "").strip()]
+            lines += ["", "**{}**:".format(signed(comment)), "", comment.get("body", "").strip()]
         lines.append("")
     return "\n".join(lines) + "\n"
 

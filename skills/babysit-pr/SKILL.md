@@ -8,17 +8,17 @@ disable-model-invocation: true
 
 The policy is the Pull Requests section of the global rules. The reviewer in the loop is [`../review-pr/SKILL.md`](../review-pr/SKILL.md), which posts its findings to the PR as threads.
 
-The loop's state lives on the PR, not in your memory. Every snapshot ends with a `next` verdict the script computes from GitHub alone: `fix`, `wait`, `review`, `merge-ready`, `hand off`, or `stop`. Follow it. It already applies the review-round cap, the CI-not-converging stop, and the stuck-check stop. The first review round reads the whole PR. Later rounds read only the commits since the last reviewed one, so a small fix gets a small review.
+The loop's state lives on the PR, not in your memory. Every snapshot ends with a `next` verdict the script computes from GitHub alone: `fix`, `wait`, `review`, `merge-ready`, `hand off`, or `stop`. Follow it. It already applies the review-round cap, the CI-not-converging stop, the stuck-check stop, and the stop for a review bot that keeps opening threads pass after pass. The first review round reads the whole PR. Later rounds read only the commits since the last reviewed one, so a small fix gets a small review.
 
 ## 1. Declare the mode
 
 The request picks one of three modes.
 
-- `status`. Take one snapshot and report. "Check on #12", "anything outstanding on X". Also the mode when the request names none and the PR changes only human-facing documentation, such as a README, `docs/`, or a changelog. A Markdown file an agent loads, such as a skill or an instruction file, is not documentation.
+- `status`. Take one snapshot and report. "Check on #12", "anything outstanding on X". Also the mode when the request names none and the PR changes only human-facing documentation, such as a README, `docs/`, or a changelog. `gh pr view <n> --json files -q '.files[].path'` lists what the PR changes. A Markdown file an agent loads, such as a skill or an instruction file, is not documentation.
 - `threads`. Answer the review threads only. "Address the review comments".
 - `drive`. Follow `next` until it says `merge-ready`, `hand off`, or `stop`. "Babysit this", "get it green", "run the full loop". The mode when the request names none of the others and the PR changes more than documentation. Words in the request that name a mode always win.
 
-Done when you have stated the mode and the words that picked it, or that the request named none and defaulted to `drive`.
+Done when you have stated the mode and the words that picked it, or that the request named none and which default applied.
 
 ## 2. Take a snapshot
 

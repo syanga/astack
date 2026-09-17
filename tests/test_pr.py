@@ -129,12 +129,23 @@ class NextVerdictTests(unittest.TestCase):
     def test_wait_polls_until_the_verdict_changes(self):
         verdicts = iter(["wait", "wait", "review"])
         sleeps = []
-        snapshot = pr.wait_until_settled(lambda: {"next": {"action": next(verdicts)}}, lambda: sleeps.append(1), 10)
-        self.assertEqual((snapshot["next"]["action"], len(sleeps)), ("review", 2))
+        snapshot = pr.wait_until_settled(lambda: {"next": {"action": next(verdicts)}}, sleeps.append, lambda: 0, 600, 30)
+        self.assertEqual((snapshot["next"]["action"], sleeps), ("review", [30, 30]))
 
-    def test_wait_gives_up_after_its_polls(self):
-        snapshot = pr.wait_until_settled(lambda: {"next": {"action": "wait"}}, lambda: None, 3)
-        self.assertEqual(snapshot["next"]["action"], "wait")
+    def test_wait_counts_snapshot_time_against_its_deadline(self):
+        clock = iter(range(0, 1000, 20))
+        sleeps = []
+        snapshot = pr.wait_until_settled(lambda: {"next": {"action": "wait"}}, sleeps.append, lambda: next(clock), 100, 30)
+        self.assertEqual((snapshot["next"]["action"], len(sleeps)), ("wait", 3))
+
+    def test_wait_polls_again_after_a_failed_snapshot(self):
+        def snapshot_once(results=iter(["wait", SystemExit(2), "review"])):
+            result = next(results)
+            if isinstance(result, SystemExit):
+                raise result
+            return {"next": {"action": result}}
+        snapshot = pr.wait_until_settled(snapshot_once, lambda seconds: None, lambda: 0, 600, 30)
+        self.assertEqual(snapshot["next"]["action"], "review")
 
     def test_review_cap_stops_a_loop_that_always_finds_something(self):
         verdict = action(green_pr(), reviews=[our_review("c1"), our_review("c2"), our_review("c3")], review_cap=3)
@@ -175,6 +186,11 @@ class NextVerdictTests(unittest.TestCase):
         verdict = action(green_pr(), threads=[THREADS[1]], reviews=passes)
         self.assertEqual(verdict["action"], "stop")
         self.assertIn("review bot", verdict["stop"])
+
+    def test_a_chatty_bot_does_not_stop_work_on_a_thread_it_did_not_write(self):
+        passes = [dict(REVIEWS[0], submittedAt="2026-09-15T0{}:00:00Z".format(n)) for n in range(6)]
+        verdict = action(green_pr(), threads=[thread(pr.format_body("m", "Act on. Race."))], reviews=passes)
+        self.assertEqual((verdict["action"], verdict["stop"]), ("fix", None))
 
     def test_pending_checks_wait(self):
         waiting = green_pr(statusCheckRollup=[PR["statusCheckRollup"][1]])
@@ -241,6 +257,20 @@ class PostingTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as raised:
                 pr.check_review({"body": "Verdict.", "comments": [bad]})
             self.assertEqual(raised.exception.code, 2)
+
+    def test_a_findings_file_of_the_wrong_shape_exits_2(self):
+        good = {"path": "a.py", "line": 7, "bucket": "act on", "body": "Race."}
+        for bad in ([], {"body": "Verdict.", "comments": None}, {"body": "Verdict.", "comments": ["a.py:7 race"]},
+                    {"body": "Verdict.", "comments": [dict(good, line=True)]}):
+            with self.assertRaises(SystemExit) as raised:
+                pr.check_review(bad)
+            self.assertEqual(raised.exception.code, 2)
+
+    def test_history_marks_which_text_is_ours(self):
+        history = pr.render_history([thread(pr.format_body("m", "Act on. Race."), "A reply.")], [REVIEWS[0], our_review("c1")])
+        self.assertIn("## Review by bugbot (another account)", history)
+        self.assertIn("## Review by alan (ours)", history)
+        self.assertIn("**alan (ours)**:", history)
 
     def test_comment_header(self):
         self.assertEqual(pr.format_body("claude-fable-5-1", "Fixed in 1a2b3c.\n"),
