@@ -190,8 +190,6 @@ class NextVerdictTests(unittest.TestCase):
             return pr.summarize(green_pr(), [], reviews, [], SINCE, NOW)["our_reviews"]["first_round"]
         self.assertEqual((first_round([our_review("c1")]), first_round([our_review("c1"), our_review("abc123")])),
                          (True, False))
-        capped_at_one = pr.summarize(green_pr(), [], [our_review("c1")], [], SINCE, NOW, review_cap=1)["our_reviews"]
-        self.assertEqual((capped_at_one["first_round"], capped_at_one["last_round"]), (False, True))
 
     def test_our_own_thread_replies_do_not_show_up_as_new_reviews(self):
         reply_shell = {"author": ALAN, "viewerDidAuthor": True, "state": "COMMENTED",

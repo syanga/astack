@@ -252,7 +252,7 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minu
         "threads": {"unresolved": unresolved,
                     "resolved": sum(1 for thread in threads if thread.get("isResolved"))},
         "our_reviews": {"total": len(ours), "on_head": len(on_head), "cap": review_cap,
-                        "first_round": len(ours) == 1 and review_cap > 1,
+                        "first_round": len(ours) == 1,
                         "last_round": len(ours) >= review_cap,
                         "last_sha": last_sha,
                         "last_sha_in_pr": last_sha is not None and last_sha in {commit.get("oid") for commit in pr["commits"]},
