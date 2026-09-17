@@ -61,7 +61,7 @@ Run [`../review-pr/SKILL.md`](../review-pr/SKILL.md) on the PR. If review-pr rep
 
 ## 6. Merge or hand off
 
-Take one more snapshot and confirm `next.action` is still `merge-ready` on the `head.sha` you intend to merge. Then carry out the disposition from the request as the global rules describe, merging with `gh pr merge <n> --squash` when it says merge. If the merge command fails, report its message and stop. For a child PR in a stack, retarget the child to the parent's base before the parent branch is deleted, or GitHub closes the child. Done when the verdict was still `merge-ready` on that SHA and you have carried out the disposition or reported it.
+Take one more snapshot and confirm `next.action` is still `merge-ready` on the `head.sha` you intend to merge. Then carry out the disposition from the request as the global rules describe, merging with `gh pr merge <n> --squash --match-head-commit <head.sha>` when it says merge, so a push that lands after the snapshot fails the merge. If the merge command fails, report its message and stop. For a child PR in a stack, retarget the child to the parent's base before the parent branch is deleted, or GitHub closes the child. Done when the verdict was still `merge-ready` on that SHA and you have carried out the disposition or reported it.
 
 ## Report
 
