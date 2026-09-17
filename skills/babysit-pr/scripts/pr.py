@@ -9,7 +9,7 @@ reach gh as JSON on stdin, so no comment text passes through a shell.
     pr.py history [--pr N] [--repo o/r]
     pr.py reply   --thread <id> --body-file <file> --model <id>
     pr.py resolve --thread <id>
-    pr.py review  --review-file <json> --model <id> [--pr N] [--repo o/r]
+    pr.py review  --review-file <json> --model <id> --commit <sha> [--pr N] [--repo o/r]
 
 Every body this script posts opens with the on-behalf-of header:
 
@@ -29,8 +29,10 @@ returns after --max-minutes with the verdict still `wait`; run it again.
 and resolution, as Markdown, for a later review round to read.
 
 The review file is {"body": "...", "comments": [{"path", "line", "bucket", "body"}, ...]}
-with bucket "act on" or "consider". It becomes one PR review on the head commit
-with an inline comment per entry. A comment on a line outside the diff makes
+with bucket "act on" or "consider". It becomes one PR review on --commit, the
+commit the reviewers actually read, with an inline comment per entry. A push
+that lands during a review therefore stays unreviewed instead of being marked
+covered. A comment on a line outside the diff makes
 GitHub reject the whole review, so on rejection the comments move into the
 review body and the review is retried. `review` prints {"url", "inline",
 "folded"} so the caller can tell which happened.
@@ -51,6 +53,7 @@ import time
 ON_BEHALF_OF = "ALAN"
 HEADER_MARK = "RESPONDING ON BEHALF OF " + ON_BEHALF_OF
 FOLD_MARK = "Findings on lines outside the diff:"
+BOT_PASS_CAP = 6
 FOLDED_ACT_ON = re.compile(r"^Folded act-on findings: (\d+)\r?$", re.M)
 
 PR_FIELDS = ("number,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
@@ -144,7 +147,8 @@ def classify_check(check):
         kind = "pending"
     else:
         kind = "failed"
-    return {"name": name, "kind": kind, "state": state, "link": link, "started_at": check.get("startedAt")}
+    return {"name": name, "kind": kind, "state": state, "link": link,
+            "started_at": check.get("startedAt") or check.get("createdAt")}
 
 
 def login(node):
@@ -193,6 +197,7 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minu
     latest = max(ours, key=lambda review: review.get("submittedAt") or "", default=None)
     last_sha = (latest.get("commit") or {}).get("oid") if latest else None
     folded_act_on = sum(int(found) for review in on_head for found in FOLDED_ACT_ON.findall(review.get("body", "")))
+    head_time = max(commit["committedDate"] for commit in pr["commits"])
     pending = [check for check in checks if check["kind"] == "pending"]
     snapshot = {
         "number": pr["number"], "url": pr["url"], "state": pr["state"], "draft": pr["isDraft"],
@@ -210,7 +215,7 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minu
             "failed": [check for check in checks if check["kind"] == "failed"],
             "pending": pending,
             "stuck": [check for check in pending
-                      if check["started_at"] and minutes_between(check["started_at"], now) > stuck_minutes],
+                      if minutes_between(check["started_at"] or head_time, now) > stuck_minutes],
         },
         "recent_commits": [{"sha": node["commit"]["oid"],
                             "ci": (node["commit"].get("statusCheckRollup") or {}).get("state")} for node in recent],
@@ -269,6 +274,8 @@ def assess(snapshot):
         stop = "a check has been pending past the stuck limit: " + ", ".join(check["name"] or "?" for check in checks["stuck"])
     elif snapshot["mergeable_overdue"]:
         stop = "GitHub has not computed mergeability long after the head commit"
+    elif work and any(bot["passes"] >= BOT_PASS_CAP for bot in snapshot["bots"].values()):
+        stop = "a review bot has posted {} passes and threads still need work".format(BOT_PASS_CAP)
     elif len(streak) == 3 and all(state in ("FAILURE", "ERROR") for state in streak):
         stop = "the last three commits CI ran on failed, so the fixes are not converging"
     elif not blockers and not checks["pending"] and ours["on_head"] == 0 and ours["total"] >= ours["cap"]:
@@ -353,16 +360,16 @@ def command_wait(args):
 def render_history(threads, reviews):
     lines = ["# Earlier review rounds on this PR", ""]
     for review in reviews:
-        if is_ours(review) and review.get("body"):
-            lines += ["## Review of {} at {}".format((review.get("commit") or {}).get("oid", "?")[:7], review.get("submittedAt")),
-                      "", review["body"].strip(), ""]
+        if review.get("body"):
+            lines += ["## Review by {} of {} at {}".format(login(review), (review.get("commit") or {}).get("oid", "?")[:7],
+                                                         review.get("submittedAt")), "", review["body"].strip(), ""]
     lines += ["## Threads", ""]
     for thread in threads:
         comments = thread["comments"]["nodes"]
         if not comments:
             continue
-        lines.append("### {}:{} ({})".format(thread.get("path"), thread.get("line"),
-                                             "resolved" if thread.get("isResolved") else "open"))
+        lines.append("### {}:{} ({})".format(thread.get("path"), thread.get("line") or "outdated line",
+                                             "resolved" if thread.get("isResolved") else "open, not yet answered"))
         for comment in comments:
             lines += ["", "**{}**:".format(login(comment)), "", comment.get("body", "").strip()]
         lines.append("")
@@ -391,8 +398,10 @@ def command_review(args):
     check_review(review)
     endpoint = "repos/{}/{}/pulls/{}/reviews".format(owner, name, pr["number"])
     wanted = len(review.get("comments", []))
+    if args.commit not in {commit.get("oid") for commit in pr["commits"]}:
+        fail("commit {} is not in the PR; review the current commits again".format(args.commit))
     for attempt in (review, fold_comments(review)):
-        payload = build_review(args.model, attempt, pr["headRefOid"])
+        payload = build_review(args.model, attempt, args.commit)
         result = subprocess.run(["gh", "api", "--method", "POST", endpoint, "--input", "-"],
                                 input=json.dumps(payload), capture_output=True, text=True)
         line_outside_diff = "422" in result.stderr or "Unprocessable" in result.stderr
@@ -451,6 +460,7 @@ def main(argv=None):
     review = scoped("review", help="post a PR review with inline comments from a findings file")
     review.add_argument("--review-file", required=True, help="JSON with body and comments")
     review.add_argument("--model", required=True, help="model id for the on-behalf-of header")
+    review.add_argument("--commit", required=True, help="the SHA the reviewers read; the review is posted on it")
     review.set_defaults(run=command_review)
 
     resolve = commands.add_parser("resolve", help="resolve a review thread")

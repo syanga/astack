@@ -14,9 +14,9 @@ The loop's state lives on the PR, not in your memory. Every snapshot ends with a
 
 The request picks one of three modes.
 
-- `status`. Take one snapshot and report. "Check on #12", "anything outstanding on X".
+- `status`. Take one snapshot and report. "Check on #12", "anything outstanding on X". Also the mode when the request names none and the PR changes only human-facing documentation, such as a README, `docs/`, or a changelog. A Markdown file an agent loads, such as a skill or an instruction file, is not documentation.
 - `threads`. Answer the review threads only. "Address the review comments".
-- `drive`. Follow `next` until it says `merge-ready`, `hand off`, or `stop`. "Babysit this", "get it green". The mode when the request names none of the others.
+- `drive`. Follow `next` until it says `merge-ready`, `hand off`, or `stop`. "Babysit this", "get it green", "run the full loop". The mode when the request names none of the others and the PR changes more than documentation. Words in the request that name a mode always win.
 
 Done when you have stated the mode and the words that picked it, or that the request named none and defaulted to `drive`.
 
@@ -53,7 +53,7 @@ Done when a fresh snapshot's `next.blockers` is empty, or you stopped on a hunk,
 
 ## 4. Wait
 
-Run `python3 <this skill's directory>/scripts/pr.py wait`, with the same `--pr` and `--repo` as the snapshot, and the longest timeout your shell allows. It blocks until the verdict is no longer `wait` and prints the new snapshot, so it works in a subagent and needs no timer. If it returns with `next.action` still `wait`, run it again. The snapshot turns `next.action` to `stop` when a check stays pending past the limit, or when GitHub has still not computed mergeability by then, so the wait is bounded. When a bot that reviewed an earlier commit has `since_head` false after the checks finish, name the missing bot pass in the report and go on. Done when the snapshot's `next.action` is no longer `wait`. Act on it as step 2 says.
+Run `python3 <this skill's directory>/scripts/pr.py wait`, with the same `--pr` and `--repo` as the snapshot, and a shell timeout of ten minutes. Where the shell allows less, pass `--max-minutes` one minute under its limit. The command blocks until the verdict is no longer `wait` and prints the new snapshot, so it works in a subagent and needs no timer. If it returns with `next.action` still `wait`, run it again. If it exits 2, wait one minute and retry once, then report the failure and stop. The snapshot turns `next.action` to `stop` when a check stays pending past the limit, or when GitHub has still not computed mergeability by then, so the wait is bounded. When a bot that reviewed an earlier commit has `since_head` false after the checks finish, name the missing bot pass in the report and go on. Done when the snapshot's `next.action` is no longer `wait`. Act on it as step 2 says.
 
 ## 5. Review the head
 

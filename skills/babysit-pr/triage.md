@@ -1,6 +1,6 @@
 # Triage a review thread
 
-A review thread from a bot or a person is a claim to verify against the code. A thread the snapshot marks `ours` is a review-pr finding whose first line names its bucket: fix an act-on finding, and fix a consider finding when the fix is small, otherwise defer it. The ask-by-default categories below apply to `ours` threads too. When a claim is cheap to test, run the test before classifying. When a finding admits a test, write one that fails first, then fix in the same commit. When a comment asks for work outside the PR's intent, reply with the intent quoted rather than widening the change. These are the classes, the evidence each needs, and the patterns that have repeated.
+A review thread from a bot or a person is a claim to verify against the code. A thread the snapshot marks `ours` is a review-pr finding whose first line under the on-behalf-of header names its bucket: fix an act-on finding, and fix a consider finding when the fix is small, otherwise defer it. The ask-by-default categories below apply to `ours` threads too. When a claim is cheap to test, run the test before classifying. When a finding admits a test, write one that fails first, then fix in the same commit. When a comment asks for work outside the PR's intent, reply with the intent quoted rather than widening the change. These are the classes, the evidence each needs, and the patterns that have repeated.
 
 ## Classes
 

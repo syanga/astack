@@ -23,7 +23,7 @@ Severity is where a finding starts. `critical` starts in act on, `warning` start
 - **A different taste.** The commonest false positive. Without a concrete problem in the current approach, dismiss and say why.
 - **Missing context.** The finding targets code the author did not touch, a pattern consistent with the rest of the codebase, or an approach that conflicts with a constraint you know about. Dismiss it and name the context.
 - **Already answered.** The finding repeats one an earlier round fixed, dismissed, or deferred, in a thread or in a review body, and the code it points at has not changed since. Dismiss it and name where it was answered.
-- **Unverified.** Below rung 2 on the ladder. Move it to consider at most. Usually dismiss it and give the reason.
+- **Unverified.** The reviewer marked it unverified, or its evidence asserts a behaviour without walking the path to it. Move it to consider at most. Usually dismiss it and give the reason.
 
 ## Signals that a finding is right
 

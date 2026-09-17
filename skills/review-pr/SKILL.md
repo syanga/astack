@@ -6,21 +6,22 @@ disable-model-invocation: true
 
 # Review a PR
 
-The deliverable is a verdict the author can act on, posted to the PR as review comments when there is a PR. The review changes no code. Fixing is a separate request. The first round on a PR reviews the whole change. A later round reviews only the commits since the last reviewed one, and reads what the earlier rounds decided.
+The deliverable is a verdict the author can act on, posted to the PR as review comments when there is a PR. The review changes no code. Fixing is a separate request. The first round on a PR reviews the whole change. A later round reviews only the commits since the last reviewed one, and reads what the earlier rounds decided. When the user asks for a full review, run a full round whatever the PR's history.
 
 ## 1. Set the scope
 
 Take one of three routes.
 
 - For a PR number or URL, run `gh pr view <n> --json title,body,baseRefName,headRefName,commits,closingIssuesReferences`. Run `git fetch origin <base>`, then `git fetch origin pull/<n>/head`, and record `git rev-parse FETCH_HEAD` as the reviewed SHA. Run `python3 <this skill's directory>/../babysit-pr/scripts/pr.py status --pr <n>` and read `our_reviews`.
-  - When `last_sha_in_pr` is false, this is a full round. The diff is `gh pr diff <n>` and the commit list is `git log --oneline origin/<base>..<sha>`.
-  - When `last_sha_in_pr` is true, this is a later round. The diff is `git diff <last_sha>..<sha>`, the commit list is `git log --oneline <last_sha>..<sha>`, and the earlier rounds are the output of `pr.py history --pr <n>`.
+  - When `last_sha_in_pr` is false, this is a full round. The diff is `gh pr diff <n>` and the commit list is `git log --reverse --oneline origin/<base>..<sha>`.
+  - When `last_sha_in_pr` is true, this is a later round. The diff is `git diff <last_sha>..<sha>` and the commit list is `git log --reverse --oneline <last_sha>..<sha>`.
+  - When `total` is above zero, on either kind of round, the earlier rounds are the output of `pr.py history --pr <n>`.
 
   Then run `tree="$(mktemp -d)/review-<n>" && git worktree add --detach "$tree" <sha> && echo "$tree"` and record the path. Each run gets its own directory and no branch, so an interrupted review or a second session cannot block or delete this one.
-- For the current branch, run `git fetch origin <base>` and `git diff $(git merge-base origin/<base> HEAD)`. The tree is the repository root and the commit list is `git log --oneline origin/<base>..HEAD`.
-- For files or a pasted diff the user names, use those. There is no tree.
+- For the current branch, run `git fetch origin <base>` and `git diff $(git merge-base origin/<base> HEAD)`. The tree is the repository root and the commit list is `git log --reverse --oneline origin/<base>..HEAD`.
+- For files or a pasted diff the user names, use those. There is no tree, and the commit list is the one line "none".
 
-Write the diff, the commit list, and the earlier rounds each to a file in the system's temporary directory. Done when the diff is non-empty and the tree, when there is one, contains the change. Otherwise say so and stop.
+Write the diff and the commit list each to a file in the system's temporary directory, and the earlier rounds too when there are any. Done when the diff file is non-empty, the commit list file exists, and, on the PR route, `git -C <tree> rev-parse HEAD` prints the reviewed SHA. Otherwise say so and stop.
 
 ## 2. State the intent
 
@@ -44,19 +45,19 @@ python3 <this skill's directory>/scripts/build_prompt.py code --intent <file> --
 python3 <this skill's directory>/scripts/build_prompt.py spec --intent <file> --diff <file> --commits <file> --sources <file> --out <spec prompt>
 ```
 
-Add `--prior <file>` on a later round. Add `--lenses` to drop the lenses of [`rubric.md`](rubric.md) the change cannot touch: a change to prose alone keeps `correctness,verification,complexity`. Then spawn the reviewers in parallel, each told only to read its prompt file in full and follow it.
+Add `--prior <file>` whenever earlier rounds exist, and `--since <last_sha>` on a later round. Add `--lenses` to keep only the lenses of [`rubric.md`](rubric.md) the change can touch, named by the start of their headings: a change to prose alone keeps `correctness,verification,complexity`. Then spawn the reviewers in parallel, each told only to read its prompt file in full and follow it.
 
 - On a full round, send the code prompt to three reviewers, each on a different model when the harness offers more than one, and to two when it offers one.
 - On a later round, send the code prompt to one reviewer.
 - Send the spec prompt to one reviewer on a full round. On a later round, send it only when the new commits change what the PR delivers.
 
-Name them code reviewer 1, 2, 3 and spec reviewer. Without a subagent tool, follow each prompt file yourself, one after the other, and leave the Agreement part out of the verdict.
+Name them code reviewer 1, 2, 3 and spec reviewer. Without a subagent tool, follow each prompt file yourself, one after the other. Leave the Agreement part out of the verdict whenever one code reviewer ran.
 
 Done when every reviewer has reported.
 
 ## 4. Judge
 
-Apply [`judgment.md`](judgment.md) to every finding. A spec finding is judged like a code finding: missing or wrong starts as act on, unrequested starts as consider. On the PR route, run `git worktree remove <tree>` now, before anything touches the network. Done when every finding has a bucket and a one-line rationale, every spec finding quotes its source line, and, on the PR route, the worktree is gone.
+Apply [`judgment.md`](judgment.md) to every finding. A spec finding is judged like a code finding: missing or wrong starts as act on, unrequested starts as consider. On the PR route, run `git worktree remove <tree>` now, before anything touches the network. Done when every finding has a bucket and a one-line rationale, every missing or wrong spec finding quotes its source line, and, on the PR route, the worktree is gone.
 
 ## The verdict
 
@@ -73,10 +74,10 @@ The verdict has these parts, whichever route delivers it.
 On the PR route, write a findings file in the system's temporary directory. Its `comments` hold one entry per act-on and consider finding, with the `path`, the `line` in the head commit, the `bucket` (`act on` or `consider`), and a `body` whose first line is the bucket and severity. The `line` must be inside a diff hunk of the PR, because GitHub rejects the whole review otherwise. Anchor a finding about an unchanged line on the changed line that leads to it, and name the real `file:line` in the comment, so every act-on and consider finding opens a thread the babysit verdict can see. Its `body` holds the intent, the reviewers, the noted and dismissed findings, the agreement, and the summary. From the repository root, post it:
 
 ```bash
-python3 <this skill's directory>/../babysit-pr/scripts/pr.py review --pr <n> --review-file <file> --model <your model id>
+python3 <this skill's directory>/../babysit-pr/scripts/pr.py review --pr <n> --commit <reviewed sha> --review-file <file> --model <your model id>
 ```
 
-The script adds the on-behalf-of header to every body and posts one review on the head commit. It prints `url`, `inline`, and `folded`. `folded` true means GitHub rejected the inline comments as unprocessable, so every finding went into the review body and no thread was opened: say so in the reply. Exit code 2 means the post failed: retry once, then say the review could not be posted and put the whole verdict in the reply.
+The script adds the on-behalf-of header to every body and posts one review on the reviewed SHA, so a commit pushed while you were reviewing stays unreviewed. It prints `url`, `inline`, and `folded`. `folded` true means GitHub rejected the inline comments as unprocessable, so every finding went into the review body and no thread was opened: say so in the reply. Exit code 2 with a message about the review file means the file is malformed: fix it and post again. Any other exit code 2 means the post failed: retry once, then say the review could not be posted and put the whole verdict in the reply.
 
 Reply on the PR route with the review URL, the number of findings per bucket, the titles of the act-on findings, and whether the review was folded. On the other two routes, reply with the whole verdict.
 

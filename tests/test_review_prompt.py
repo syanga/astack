@@ -41,10 +41,16 @@ class PromptTests(unittest.TestCase):
         self.assertNotIn("## Security", prompt)
         self.assertNotIn("#### Principle: laziness-protocol.md", prompt)
 
-    def test_a_later_round_carries_the_earlier_verdicts(self):
-        prompt = self.build("--prior", self.write("prior", "Round 1 dismissed the StatusContext claim."))
-        self.assertIn("Review only the change shown here.", prompt)
+    def test_a_later_round_carries_the_earlier_verdicts_and_its_starting_commit(self):
+        prompt = self.build("--prior", self.write("prior", "Round 1 dismissed the StatusContext claim."), "--since", "abc1234")
+        self.assertIn("reviewed the pull request up to commit abc1234", prompt)
         self.assertIn("Round 1 dismissed the StatusContext claim.", prompt)
+        self.assertNotIn("first review round", prompt)
+
+    def test_an_unknown_lens_is_an_error(self):
+        with self.assertRaises(SystemExit) as raised:
+            self.build("--lenses", "performance")
+        self.assertIn("unknown lens: performance", str(raised.exception))
 
 
 if __name__ == "__main__":

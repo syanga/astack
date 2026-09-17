@@ -5,8 +5,11 @@ The template is read line by line. A line that is exactly a marker such as
 {{DIFF}} is replaced by a file's content, and that content is never scanned
 again, so a diff that itself contains a marker survives intact.
 
-    build_prompt.py code --intent F --diff F --commits F --out F [--tree PATH] [--prior F] [--lenses a,b]
-    build_prompt.py spec --intent F --diff F --commits F --sources F --out F [--prior F]
+    build_prompt.py code --intent F --diff F --commits F --out F [--tree PATH] [--prior F] [--since SHA] [--lenses a,b]
+    build_prompt.py spec --intent F --diff F --commits F --sources F --out F [--prior F] [--since SHA]
+
+--prior is the output of `pr.py history`. --since marks a later round, which
+reviews only the commits after that SHA.
 
 --lenses keeps only the named rubric lenses, matched by the start of their
 heading (correctness, root, structure, verification, complexity, security).
@@ -21,8 +24,11 @@ import sys
 SKILL = Path(__file__).resolve().parent.parent
 PRINCIPLE_LINK = re.compile(r"\]\(\.\./principles/([a-z-]+\.md)\)")
 FIRST_ROUND = "This is the first review round on this change."
-LATER_ROUND = ("Earlier rounds reviewed this pull request up to the first commit listed above. Review only the change "
-               "shown here. A finding already answered below is raised again only when the new commits reopen it.\n\n")
+PRIOR = ("Earlier rounds on this pull request follow. A finding they fixed, dismissed, or deferred is raised again only "
+         "when the change shown reopens it. A thread marked open there has not been answered yet.\n\n")
+SINCE = ("This is a later round. Earlier rounds reviewed the pull request up to commit {}. The change shown is only what "
+         "came after it. Judge that change, and read the rest of the tree as context: a defect in how the new commits "
+         "interact with older code is in scope.\n\n")
 
 
 def without_first_heading(text):
@@ -33,17 +39,21 @@ def without_first_heading(text):
 def build_rubric(rubric_text, principles_dir, lenses=None):
     preamble, *sections = re.split(r"(?m)^(?=## )", rubric_text)
     wanted = [lens.strip().lower() for lens in lenses] if lenses else None
-    parts, pasted = [without_first_heading(preamble)], set()
+    parts, pasted, matched = [without_first_heading(preamble)], set(), set()
     for section in sections:
         heading = section.split("\n", 1)[0][3:].strip().lower()
         if wanted is not None and not any(heading.startswith(lens) for lens in wanted):
             continue
+        matched.add(heading)
         parts.append(section.strip())
         for name in PRINCIPLE_LINK.findall(section):
             if name not in pasted:
                 pasted.add(name)
                 body = without_first_heading((principles_dir / name).read_text(encoding="utf-8"))
                 parts.append("#### Principle: {}\n\n{}".format(name, body))
+    unknown = [lens for lens in wanted or [] if not any(heading.startswith(lens) for heading in matched)]
+    if unknown:
+        sys.exit("unknown lens: {}. The lenses are the headings of rubric.md.".format(", ".join(unknown)))
     return "\n\n".join(parts)
 
 
@@ -69,6 +79,7 @@ def main(argv=None):
     parser.add_argument("--tree")
     parser.add_argument("--sources")
     parser.add_argument("--prior")
+    parser.add_argument("--since")
     parser.add_argument("--lenses")
     args = parser.parse_args(argv)
     if args.kind == "spec" and not args.sources:
@@ -78,7 +89,8 @@ def main(argv=None):
         "{{INTENT}}": "\n".join("> " + line for line in read(args.intent).split("\n")),
         "{{DIFF}}": read(args.diff),
         "{{COMMITS}}": read(args.commits),
-        "{{PRIOR}}": LATER_ROUND + read(args.prior) if args.prior else FIRST_ROUND,
+        "{{PRIOR}}": ((SINCE.format(args.since) if args.since else "") + (PRIOR + read(args.prior) if args.prior else "")
+                      or FIRST_ROUND),
     }
     if args.kind == "code":
         values["{{TREE}}"] = ("The tree at {} contains this change. Read callers, callees, types, and tests there "

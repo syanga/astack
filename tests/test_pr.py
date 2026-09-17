@@ -165,6 +165,17 @@ class NextVerdictTests(unittest.TestCase):
             self.assertEqual((verdict["action"], verdict["stop"]), ("stop", "the PR is {}, not open".format(state)))
         self.assertEqual(action(dict(PR, state="CLOSED"))["action"], "stop")
 
+    def test_a_pending_status_without_a_start_time_is_dated_from_the_head_commit(self):
+        legacy = green_pr(statusCheckRollup=[{"__typename": "StatusContext", "context": "deploy", "state": "PENDING"}])
+        self.assertEqual(action(legacy)["action"], "wait")
+        self.assertEqual(action(legacy, stuck_minutes=5)["action"], "stop")
+
+    def test_a_chatty_bot_cannot_keep_the_fix_loop_running(self):
+        passes = [dict(REVIEWS[0], submittedAt="2026-09-15T0{}:00:00Z".format(n)) for n in range(6)]
+        verdict = action(green_pr(), threads=[THREADS[1]], reviews=passes)
+        self.assertEqual(verdict["action"], "stop")
+        self.assertIn("review bot", verdict["stop"])
+
     def test_pending_checks_wait(self):
         waiting = green_pr(statusCheckRollup=[PR["statusCheckRollup"][1]])
         self.assertEqual(action(waiting)["action"], "wait")

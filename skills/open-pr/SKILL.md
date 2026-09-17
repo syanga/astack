@@ -9,7 +9,7 @@ The policy is the Pull Requests section of the global rules. This is the procedu
 
 ## 1. Rebase onto the base
 
-Commit the work first. The base is the repository's default branch, which `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` prints. When this PR is a child in a stack, the base is the parent branch instead. If unrelated changes are on the branch, move them to their own branch first. Fetch `origin`. Rebase onto `origin/<base>`. Done when `git status` is clean and `git log --oneline origin/<base>..HEAD` lists only this work's commits.
+Commit the work first. The base is the repository's default branch, which `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` prints. When this PR is a child in a stack, the base is the parent branch instead. If unrelated changes are on the branch, move them to their own branch first. Fetch `origin`. If the branch has no open PR yet, rebase onto `origin/<base>`. If it has one (`gh pr view` exits 0), leave the pushed commits as they are: a conflict on an open PR is babysit-pr's work. Done when `git status` is clean and `git log --oneline origin/<base>..HEAD` lists only this work's commits.
 
 ## 2. Prove the change
 
@@ -30,7 +30,7 @@ Rebase the unpushed work into verifiable units, in the order that proves the wor
 
 ## 5. Install the Gitleaks hook
 
-The global rules require the Gitleaks pre-push hook in every repository you push from. Find out whether the repository's pre-push hook already runs a secret scanner. If it does not, run this skill's `scripts/install_gitleaks_hook.py` from the repository root. Git worktrees share one hooks directory, so the hook then guards every worktree of the checkout. If the script refuses, record its message for the reply. Done when the pre-push hook runs a secret scanner, or you have recorded the refusal.
+The global rules require the Gitleaks pre-push hook in every repository you push from. Run this skill's `scripts/install_gitleaks_hook.py` from the repository root. It does nothing when the hook is already installed. Git worktrees share one hooks directory, so the hook guards every worktree of the checkout. If the script refuses, record its message for the reply. Done when the script reported the hook installed or already present, or you have recorded the refusal.
 
 ## 6. Write the title and body
 
@@ -56,7 +56,7 @@ Done when:
 
 ## 7. Open the PR
 
-Push the branch. Run `gh pr view --json number,url` to find out whether the branch already has a PR. If it has none, create one:
+Push the branch. Run `gh pr view --json number,url`, which exits non-zero when the branch has no PR. If it has none, create one:
 
 ```bash
 gh pr create --base <base> --title "<title>" --body-file <file>
