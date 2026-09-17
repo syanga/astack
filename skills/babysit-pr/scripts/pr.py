@@ -36,7 +36,8 @@ the commits since only merge the base, counts as reviewed:
 reviews of that SHA. Local git decides it. It merges the last reviewed SHA with
 the merge base of the base branch and the head, and compares the result with
 the head's tree. It fetches from `origin` when a commit is missing. When that
-merge conflicts, or git fails, the head counts as unreviewed.
+merge conflicts, git fails, or the `origin` of the working directory is not the
+PR's repository, the head counts as unreviewed.
 
 `history` prints every earlier review body and every thread with its replies
 and resolution, as Markdown, for a later review round to read. It marks each
@@ -175,6 +176,9 @@ def git(*args):
 
 
 def adds_nothing_since(pr, last_sha, git=git):
+    origin = (git("remote", "get-url", "origin") or "").lower().removesuffix(".git")
+    if re.split("[:/]", origin)[-2:] != pr["url"].lower().split("/")[3:5]:
+        return False
     head, base = pr["headRefOid"], pr["baseRefOid"]
     local = all(git("cat-file", "-e", sha + "^{commit}") is not None for sha in (last_sha, head, base))
     if not local and git("fetch", "--quiet", "origin", pr["baseRefName"], "pull/{}/head".format(pr["number"])) is None:

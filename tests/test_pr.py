@@ -313,6 +313,7 @@ class AddsNothingSinceTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.repo = directory.name
         self.git("init", "--quiet", "--initial-branch=main")
+        self.git("remote", "add", "origin", "git@github.com:O/r.git")
         self.commit("shared.txt", "one\ntwo\nthree\n")
         self.git("checkout", "--quiet", "-b", "feature")
         self.reviewed = self.commit("feature.txt", "the PR's own work\n")
@@ -330,7 +331,7 @@ class AddsNothingSinceTests(unittest.TestCase):
         return self.git("rev-parse", "HEAD")
 
     def adds_nothing(self):
-        pull = {"number": 12, "baseRefName": "main", "baseRefOid": self.git("rev-parse", "main"),
+        pull = {"number": 12, "url": PR["url"], "baseRefName": "main", "baseRefOid": self.git("rev-parse", "main"),
                 "headRefOid": self.git("rev-parse", "feature")}
         return pr.adds_nothing_since(pull, self.reviewed, lambda *args: pr.git("-C", self.repo, *args))
 
@@ -355,8 +356,19 @@ class AddsNothingSinceTests(unittest.TestCase):
         self.assertFalse(self.adds_nothing())
 
     def test_the_head_counts_as_unreviewed_when_git_cannot_answer(self):
-        pull = {"number": 12, "baseRefName": "main", "baseRefOid": "b", "headRefOid": "h"}
-        self.assertFalse(pr.adds_nothing_since(pull, "r", lambda *args: None))
+        pull = {"number": 12, "url": PR["url"], "baseRefName": "main", "baseRefOid": "b", "headRefOid": "h"}
+        def git(*args):
+            return "https://github.com/o/r" if args[0] == "remote" else None
+        self.assertFalse(pr.adds_nothing_since(pull, "r", git))
+
+    def test_a_checkout_of_another_repository_is_never_fetched(self):
+        pull = {"number": 12, "url": PR["url"], "baseRefName": "main", "baseRefOid": "b", "headRefOid": "h"}
+        calls = []
+        def git(*args):
+            calls.append(args[0])
+            return "https://github.com/o/another.git" if args[0] == "remote" else None
+        self.assertFalse(pr.adds_nothing_since(pull, "r", git))
+        self.assertEqual(calls, ["remote"])
 
 
 class PostingTests(unittest.TestCase):
