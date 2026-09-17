@@ -89,7 +89,8 @@ Missing remote-tip objects and shallow history block the push with a fetch/retry
 message. The hook does not silently fetch, change refs, or widen permissions.
 Git replacement objects are disabled during history selection and scanning so the
 guard checks the original objects that Git will transfer, including annotated tags.
-Git diff drivers and text conversions are disabled during scanning. The guard
+Git diff drivers and text conversions are disabled during scanning, and every
+file is scanned as text whatever `.gitattributes` says. The guard
 uses Gitleaks' bundled default rules; working-tree `.gitleaks.toml`, `.gitleaksignore`,
 `gitleaks:allow` comments, and `GITLEAKS_*` environment overrides cannot silently
 weaken this guard. Custom allowlists are not part of this first version.

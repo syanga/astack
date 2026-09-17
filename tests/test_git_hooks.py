@@ -318,6 +318,25 @@ class RealScannerTests(HookFixture):
         self.assertIn("secret detected", result.stderr)
         self.assertEqual(self.git("ls-remote", "origin", "refs/tags/secret-tag").stdout, "")
 
+    def test_real_worktree_gitleaksignore_cannot_suppress_a_finding(self):
+        head = self.commit("credential.txt", self.secret() + "\n")
+        (self.repo / ".gitleaksignore").write_text(
+            "".join("{}:credential.txt:{}:1\n".format(head, rule)
+                    for rule in ("github-pat", "generic-api-key")))
+        result = self.git("push", "origin", "main", ok=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("secret detected", result.stderr)
+
+    def test_real_gitattributes_cannot_hide_a_path_from_the_scan(self):
+        for attribute in ("-diff", "binary"):
+            with self.subTest(attribute=attribute):
+                self.commit(".gitattributes", "credential-{0}.txt {0}\n".format(attribute))
+                self.commit("credential-{}.txt".format(attribute), self.secret() + "\n")
+                result = self.git("push", "origin", "main", ok=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("secret detected", result.stderr)
+                self.git("reset", "--hard", self.base)
+
     def test_real_clean_push_and_deleted_secret_in_intermediate_commit(self):
         self.commit("file.txt", "clean change\n")
         self.git("push", "origin", "main")
