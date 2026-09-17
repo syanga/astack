@@ -33,7 +33,7 @@ In `status` mode, report now and stop. In `threads` mode, report `next.stop` and
 | `hand off` | report `next.handoff` to the user and stop |
 | `stop` | report `next.stop` and what you tried, and stop |
 
-Done when you have named the verdict, its blockers, any `next.handoff` reason, and the step the table sends you to.
+Done when you have named the verdict, its blockers, any `next.handoff` reason, and, in `drive` mode, the step the table sends you to.
 
 ## 3. Fix the blockers
 
@@ -41,14 +41,14 @@ Work `next.blockers` in this order: the draft state, the conflict, the threads, 
 
 **Pre-push check.** A review round costs far more than this check, and a fix that needs fixing spends one. Before every push:
 
-1. Read the fix's diff against the thread it answers, and confirm it answers the whole finding.
-2. Apply the Clean the diff step of [`../open-pr/SKILL.md`](../open-pr/SKILL.md) to that diff, except its blast-radius hand-back, which has no section here.
+1. Read the fix's diff against what it answers, the thread's finding or the failed check, and confirm it answers the whole of it.
+2. Apply the Clean the diff step of [`../open-pr/SKILL.md`](../open-pr/SKILL.md) to that diff, with one difference: when blast-radius runs, put its safety fact in the thread reply, since there is no PR-body section here.
 3. Apply [`../technical-writing/SKILL.md`](../technical-writing/SKILL.md) to new prose.
 4. Run `git fetch origin <head ref>` and confirm the remote head is still the snapshot's `head.sha`.
 
-**Conflict.** Rebase onto the base branch and resolve it following [`conflicts.md`](conflicts.md). If a hunk needs a product decision, stop and report the branch and the hunk. After the rebase, search the base for callers of every symbol the PR moves or deletes. The rebase restarts every check and outdates threads, so include it in the same push as every other fix.
+**Conflict.** Rebase onto the base branch and resolve it following [`conflicts.md`](conflicts.md). If a hunk needs a product decision, stop and report the branch and the hunk. After the rebase, search the base for callers of every symbol the PR moves or deletes. The rebase restarts every check and outdates threads, so include it in the conflict-and-thread push.
 
-**Threads.** Work every unresolved thread whose `awaiting_user` is false, following [`triage.md`](triage.md). Reply with `python3 <this skill's directory>/scripts/pr.py reply --thread <id> --body-file <file> --model <your model id>`. Resolve a fixed, dismissed, or deferred thread with `pr.py resolve --thread <id>`, which exits 2 when the thread did not resolve. Push before replying, so the reply cites a commit that exists. A noted finding sits in the latest review body and opens no thread. Fix it in the same push when you are already changing that file and `our_reviews.last_round` is false. Otherwise list it in the report. Fix a finding about the PR's title or body with `gh pr edit`.
+**Threads.** Work every unresolved thread whose `awaiting_user` is false, following [`triage.md`](triage.md). Reply with `python3 <this skill's directory>/scripts/pr.py reply --thread <id> --body-file <file> --model <your model id>`. Resolve a fixed, dismissed, or deferred thread with `pr.py resolve --thread <id>`, which exits 2 when the thread did not resolve. Push before replying, so the reply cites a commit that exists. A noted finding, a bucket [`../review-pr/judgment.md`](../review-pr/judgment.md) defines, sits in the latest review body in `new_reviews` and opens no thread. Fix it in the same push when you are already changing that file and `our_reviews.last_round` is false. Otherwise list it in the report. Fix a finding about the PR's title or body with `gh pr edit`.
 
 **A folded review.** When `our_reviews.folded_act_on` is above zero, the head's act-on findings sit in a review body in `new_reviews` and opened no threads. Fix them. The push moves the head and clears the fold. A folded act-on finding that does not hold cannot be cleared from the PR: report it to the user with your evidence and stop.
 

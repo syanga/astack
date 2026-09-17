@@ -9,7 +9,7 @@ Trace every problem to its root cause and fix it there.
 **Pattern:**
 - Reproduce first
 - Ask "why" until you can name the line or the input that first produced the wrong value
-- Do not add guards (adding a nil check to silence a crash is a symptom fix)
+- Fix where the wrong value was first produced. A nil check added where the crash surfaced is a symptom fix, and validation belongs at the boundary, per [`boundary-discipline.md`](boundary-discipline.md)
 - If a workaround needs a paragraph-long comment to justify it, the code is wrong (fix the code, not the comment)
 - Search for the same pattern with grep. Fix every instance inside the change's scope and note the rest
 - When stuck, instrument. Don't guess (add logging, read the actual error)

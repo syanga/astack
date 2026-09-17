@@ -14,7 +14,7 @@ Use the files or diff the caller names. With no caller scope, use the current di
 
 ## Keep list
 
-Only these comments survive, and each one only with proof that it concerns something outside this repository or a contract this repository publishes:
+Only these comments survive. Each of the first four survives only with proof that it concerns something outside this repository or a contract this repository publishes. The fifth needs the rule lookup it describes:
 
 - A legal or license header.
 - Behaviour forced by an external dependency, platform, vendor, or protocol we cannot change. Behaviour a reader would not expect from the names and types in our own code does not qualify. Delete that comment and flag the symbol.

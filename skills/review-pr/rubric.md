@@ -51,7 +51,7 @@ Can you tell it works from reading it?
 
 Is the complexity paid for by what the code does? Look for the restructuring that makes a branch, helper, mode, or layer disappear while behaviour stays the same, and say so when one exists. Working code is not the bar. A change that keeps incidental complexity a restructuring would delete is a finding.
 
-- Is there an abstraction with one call site, a parameter for a case that does not exist, dead code, a vestigial parameter, or a compatibility path whose migration is done? Principles: [`laziness-protocol.md`](../principles/laziness-protocol.md), [`subtract-before-you-add.md`](../principles/subtract-before-you-add.md).
+- Is there a parameter for a case that does not exist, dead code, a vestigial parameter, or a compatibility path whose migration is done? Principles: [`laziness-protocol.md`](../principles/laziness-protocol.md), [`subtract-before-you-add.md`](../principles/subtract-before-you-add.md).
 - How many layers must a reader trace and how much state must a reader hold? A pass-through wrapper, a one-caller helper, or mutable scope wider than needed adds to both. Principle: [`minimize-reader-load.md`](../principles/minimize-reader-load.md).
 - Does a generic or magical mechanism hide a simple data-shape assumption?
 - Was an ad hoc conditional added to an unrelated flow? A scattered special case is a design problem, not a style nit, and the remedy is a helper, a state machine, or a module.

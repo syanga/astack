@@ -44,7 +44,7 @@ The body is the briefing the global rules describe. It is also the squash commit
 - `## Why`. Give the intent and the approach in one or two short paragraphs. For a bug fix, give the root cause. Add `Closes #<n>` when an issue exists.
 - `## Scope`. Include it when the boundary matters. Name the symbols and paths that are in, what stays out, and both sides of a rename.
 - `## Tradeoffs`. Include it when there was a real choice. Name the alternative you rejected and why.
-- `## Blast radius`. Include it when the change reaches code outside the diff. Give the safety fact, the rung it reached, and the proof, as blast-radius hands them back.
+- `## Blast radius`. Include it when blast-radius ran. Give the safety fact, the rung it reached, and the proof, as blast-radius hands them back.
 - `## Verification`. List each check from step 2 with its command and result. For a performance change, give one number with its unit, before and after. Attach a screenshot or recording when it proves a claim.
 - Add the model and harness line that the global rules require.
 
@@ -57,7 +57,7 @@ Done when:
 
 ## 7. Open the PR and reply
 
-Push the branch. Apply step 1's open-PR test. If the branch has no open PR, create one:
+Push the branch, with `--force-with-lease` when step 1's rebase moved commits that were already pushed. Apply step 1's open-PR test. If the branch has no open PR, create one:
 
 ```bash
 gh pr create --base <base> --title "<title>" --body-file <file>

@@ -13,8 +13,8 @@ The deliverable is a verdict the author can act on, posted to the PR as review c
 Take one of three routes.
 
 - For a PR number or URL, run `gh pr view <n> --json title,body,baseRefName,headRefName,commits,closingIssuesReferences`. Run `git fetch origin <base>`, then `git fetch origin pull/<n>/head`, and record `git rev-parse FETCH_HEAD` as the reviewed SHA. Run `python3 <this skill's directory>/../babysit-pr/scripts/pr.py status --pr <n>` and read `our_reviews`.
-  - When `last_sha_in_pr` is false, this is a full round. The diff is `gh pr diff <n>` and the commit list is `git log --reverse --oneline origin/<base>..<sha>`.
-  - When `last_sha_in_pr` is true, this is a later round. The diff is `git diff <last_sha>..<sha>` and the commit list is `git log --reverse --oneline <last_sha>..<sha>`.
+  - When `last_sha_in_pr` is false, or the user asked for a full review, this is a full round. The diff is `gh pr diff <n>` and the commit list is `git log --reverse --oneline origin/<base>..<sha>`.
+  - Otherwise this is a later round. The diff is `git diff <last_sha>..<sha>` and the commit list is `git log --reverse --oneline <last_sha>..<sha>`.
   - When `total` is above zero, on either kind of round, the earlier rounds are the output of `pr.py history --pr <n>`.
 
   Then run `tree="$(mktemp -d)/review-<n>" && git worktree add --detach "$tree" <sha> && echo "$tree"` and record the path.
@@ -47,8 +47,8 @@ python3 <this skill's directory>/scripts/build_prompt.py spec --intent <file> --
 
 Add `--prior <file>` whenever earlier rounds exist, and `--since <last_sha>` on a later round. Add `--lenses` to keep only the lenses of [`rubric.md`](rubric.md) the change can touch, named by the start of their headings. A change to prose alone keeps `correctness,verification,complexity`. Omit `--lenses` when the change touches code, and omit `--tree` on the route that has none. Then spawn the reviewers in parallel, each told only to read its prompt file in full and follow it.
 
-- On a full round, send the code prompt to three reviewers, each on a different model when the harness offers more than one, and to two when it offers one.
-- On a later round, send the code prompt to one reviewer, on a different model from yours when the harness offers one.
+- On a full round, send the code prompt to three reviewers, spread over as many models as the harness offers. Send it to two when the harness offers one model.
+- On a later round, send the code prompt to one reviewer, on a model other than yours when the harness offers one.
 - Send the spec prompt to one reviewer on a full round. On a later round, send it only when the new commits add, remove, or change a behaviour the sources name. A commit that fixes a review finding does not.
 
 Name them code reviewer 1, 2, 3 and spec reviewer. Without a subagent tool, follow each prompt file yourself, one after the other.
@@ -77,8 +77,8 @@ On the PR route, write a findings file in the system's temporary directory, in t
 python3 <this skill's directory>/../babysit-pr/scripts/pr.py review --pr <n> --commit <reviewed sha> --review-file <file> --model <your model id>
 ```
 
-It prints `url`, `inline`, and `folded`. `folded` true means every finding went into the review body and no thread was opened: say so in the reply. Exit code 2 with a message about the review file means the file is malformed: fix it and post again. Any other exit code 2 means the post failed: retry once, then say the review could not be posted and put the whole verdict in the reply.
+It prints `url`, `inline`, and `folded`. `folded` true means every finding went into the review body and no thread was opened: say so in the reply. Exit code 2 with a message about the review file means the file is malformed: fix it and post again. Exit code 2 with a message that the commit is not in the PR means the head moved: start again at step 1. Any other exit code 2 means the post failed: retry once, then say the review could not be posted and put the whole verdict in the reply.
 
 Reply on the PR route with the review URL, the number of findings per bucket, the titles of the act-on findings, and whether the review was folded. On the other two routes, reply with the whole verdict.
 
-Done, on the PR route, when the posted review body carries every other part of the verdict, and the script printed an `inline` count equal to the act-on plus consider count, or you reported the fold or the failed post in the reply. Done, on the other routes, when the reply carries every part of the verdict.
+Done, on the PR route, when the posted review body carries every other part of the verdict, and the script printed an `inline` count equal to the number of act-on and consider findings that carry a line, or you reported the fold or the failed post in the reply. Done, on the other routes, when the reply carries every part of the verdict.
