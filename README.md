@@ -48,12 +48,16 @@ offline, pass `--gitleaks /path/to/gitleaks` with a trusted Gitleaks 8.30.1
 executable. The installer checks its version and copies it without a download.
 
 The installer keeps an existing executable `pre-push` hook. The guard runs that
-hook first, with the original arguments and stdin, and a rejection from it still
-blocks the push. The installer refuses a custom `core.hooksPath`, such as
-Husky's, and a symlinked hooks directory.
+hook before the scan, with the original arguments and stdin, and a rejection
+from it still blocks the push. A gstack-managed hook is the exception. With
+`--replace-gstack`, the installer saves the gstack wrapper and the guard does
+not run it. The guard runs only the wrapper's executable `pre-push.local`. The
+installer refuses a custom `core.hooksPath`, such as Husky's, and a symlinked
+hooks directory.
 
-`uninstall.sh` does not remove the guard. Remove it with the same script, which
-restores the original hook:
+`uninstall.sh` does not remove the guard. Remove it with `scripts/git_hooks.py`,
+which restores the earlier hook, or deletes `pre-push` when no earlier hook
+existed:
 
 ```sh
 python3 scripts/git_hooks.py uninstall --repo /path/to/project
@@ -68,15 +72,17 @@ Each push scans the commit patches it sends:
 - A shallow clone or a missing remote tip blocks the push until you fetch.
 
 The guard uses the default Gitleaks rules. A `.gitleaks.toml`, a
-`.gitleaksignore`, a `gitleaks:allow` comment, or a `GITLEAKS_*` variable does
-not change them. A finding or a scanner failure blocks the push, and the message
+`gitleaks:allow` comment, or a `GITLEAKS_*` variable does not change them. A
+`.gitleaksignore` file at the root of the working tree is the exception.
+Gitleaks still reads that file, and a finding that it lists does not block the
+push. Any other finding, or a scanner failure, blocks the push, and the message
 gives the rule, path, line, and commit without the secret. `git push --no-verify`
 skips the guard along with every other pre-push check.
 
 To upgrade Gitleaks, update `VERSION` in `scripts/gitleaks_pre_push.py`, the
-version and checksums in `tools/gitleaks/releases.json`, and the version this
-section names. Then run the tests
-against the real scanner, as CI does:
+version and checksums in `tools/gitleaks/releases.json`, the version that the
+fake scanner in `tests/test_git_hooks.py` prints, and the version this section
+names. Then run the hook tests against the real scanner:
 
 ```sh
 ASTACK_TEST_GITLEAKS=/path/to/gitleaks \
@@ -84,7 +90,11 @@ ASTACK_TEST_GITLEAKS=/path/to/gitleaks \
 ```
 
 Without `ASTACK_TEST_GITLEAKS`, the suite uses a fake scanner and skips the
-real pushes.
+real pushes. CI sets the variable and runs the whole suite.
+
+An installed guard keeps its own copy of the scanner, and `install` over an
+intact installation changes nothing. To upgrade a guarded repository, run
+`uninstall`, then `install`.
 
 ## What to edit
 
