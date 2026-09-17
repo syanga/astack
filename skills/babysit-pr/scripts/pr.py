@@ -30,6 +30,14 @@ late, so `status` asks again while the latest listed push is an older one.
 It needs no harness timer, so it works in a subagent and in any harness. It
 returns after --max-minutes with the verdict still `wait`; run it again.
 
+A head that adds nothing of the PR's own since the last reviewed SHA, as when
+the commits since only merge the base, counts as reviewed:
+`our_reviews.head_adds_nothing` is true and `our_reviews.on_head` counts the
+reviews of that SHA. Local git decides it. It merges the last reviewed SHA with
+the merge base of the base branch and the head, and compares the result with
+the head's tree. It fetches from `origin` when a commit is missing. When that
+merge conflicts, or git fails, the head counts as unreviewed.
+
 `history` prints every earlier review body and every thread with its replies
 and resolution, as Markdown, for a later review round to read. It marks each
 text as ours, as this account's by hand, or as another account's, and quotes
@@ -67,7 +75,7 @@ PUSH_LISTING_RETRY_SECONDS = 2
 FOLDED_ACT_ON = re.compile(r"^Folded act-on findings: (\d+)\r?$", re.M)
 
 PR_FIELDS = ("number,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
-             "headRefOid,headRefName,headRepository,baseRefName,commits,statusCheckRollup,comments")
+             "headRefOid,headRefName,headRepository,baseRefName,baseRefOid,commits,statusCheckRollup,comments")
 
 # Thread resolution, author kinds, the commit a review covers, and per-commit CI are GraphQL-only.
 THREADS_QUERY = """
@@ -161,6 +169,21 @@ def fetch_pushed_at(pr, run=subprocess.run, sleep=time.sleep):
     return None
 
 
+def git(*args):
+    result = subprocess.run(["git", *args], capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def adds_nothing_since(pr, last_sha, git=git):
+    head, base = pr["headRefOid"], pr["baseRefOid"]
+    local = all(git("cat-file", "-e", sha + "^{commit}") is not None for sha in (last_sha, head, base))
+    if not local and git("fetch", "--quiet", "origin", pr["baseRefName"], "pull/{}/head".format(pr["number"])) is None:
+        return False
+    merge_base = git("merge-base", base, head)
+    merged = merge_base and git("merge-tree", "--write-tree", last_sha, merge_base)
+    return bool(merged) and merged == git("rev-parse", head + "^{tree}")
+
+
 def classify_check(check):
     if check.get("__typename") == "StatusContext":
         name, state, link = check.get("context"), check.get("state"), check.get("targetUrl")
@@ -197,7 +220,8 @@ def minutes_between(start, now):
     return (datetime.fromisoformat(now.replace("Z", "+00:00")) - begun).total_seconds() / 60
 
 
-def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minutes=60, pushed_at=None):
+def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minutes=60, pushed_at=None,
+              adds_nothing_since=lambda last_sha: False):
     head = pr["headRefOid"]
     checks = [classify_check(check) for check in pr.get("statusCheckRollup") or []]
     unresolved = []
@@ -221,9 +245,12 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minu
             entry["last"] = max(entry["last"] or "", review["submittedAt"])
             entry["since_head"] = entry["since_head"] or (review.get("commit") or {}).get("oid") == head
     ours = [review for review in reviews if is_ours(review)]
-    on_head = [review for review in ours if (review.get("commit") or {}).get("oid") == head]
     latest = max(ours, key=lambda review: review.get("submittedAt") or "", default=None)
     last_sha = (latest.get("commit") or {}).get("oid") if latest else None
+    last_sha_in_pr = last_sha is not None and last_sha in {commit.get("oid") for commit in pr["commits"]}
+    head_adds_nothing = last_sha_in_pr and last_sha != head and adds_nothing_since(last_sha)
+    reviewed_sha = last_sha if head_adds_nothing else head
+    on_head = [review for review in ours if (review.get("commit") or {}).get("oid") == reviewed_sha]
     folded_act_on = sum(int(found) for review in on_head for found in FOLDED_ACT_ON.findall(review.get("body", "")))
     committed_at = max(commit["committedDate"] for commit in pr["commits"])
     head_time = pushed_at or committed_at
@@ -255,7 +282,8 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minu
                         "first_round": len(ours) == 1,
                         "last_round": len(ours) >= review_cap,
                         "last_sha": last_sha,
-                        "last_sha_in_pr": last_sha is not None and last_sha in {commit.get("oid") for commit in pr["commits"]},
+                        "last_sha_in_pr": last_sha_in_pr,
+                        "head_adds_nothing": head_adds_nothing,
                         "folded_on_head": any(FOLD_MARK in review.get("body", "") for review in on_head),
                         "folded_act_on": folded_act_on},
         "bots": bots,
@@ -370,7 +398,7 @@ def take_snapshot(args):
     threads, reviews, recent = fetch_threads(owner, name, pr["number"])
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return summarize(pr, threads, reviews, recent, since, now, args.review_cap, args.stuck_minutes,
-                     fetch_pushed_at(pr))
+                     fetch_pushed_at(pr), lambda last_sha: adds_nothing_since(pr, last_sha))
 
 
 def command_status(args):

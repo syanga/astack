@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "skills/babysit-pr/scripts/pr.py"
@@ -91,7 +92,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["recent_commits"], [{"sha": "old111", "ci": "FAILURE"}, {"sha": "abc123", "ci": None}])
         self.assertEqual(snapshot["our_reviews"],
                          {"total": 0, "on_head": 0, "cap": 5, "first_round": False, "last_round": False,
-                          "last_sha": None, "last_sha_in_pr": False,
+                          "last_sha": None, "last_sha_in_pr": False, "head_adds_nothing": False,
                           "folded_on_head": False, "folded_act_on": 0})
         self.assertEqual([comment["body"] for comment in snapshot["new_comments"]], ["after push"])
         self.assertEqual(snapshot["head"], {"sha": "abc123", "ref": "feature", "committed_at": "2026-09-15T10:00:00Z",
@@ -203,6 +204,13 @@ class NextVerdictTests(unittest.TestCase):
         self.assertEqual(verdict["action"], "stop")
         self.assertIn("review cap", verdict["stop"])
 
+    def test_a_head_that_adds_nothing_since_the_last_review_is_reviewed_even_at_the_cap(self):
+        pull = green_pr(commits=[{"oid": "c3", "committedDate": SINCE}, {"oid": "abc123", "committedDate": SINCE}])
+        capped = [our_review("c1"), our_review("c2"), dict(our_review("c3"), submittedAt="2026-09-15T10:10:00Z")]
+        snapshot = pr.summarize(pull, [], capped, [], SINCE, NOW, review_cap=3, adds_nothing_since=lambda sha: sha == "c3")
+        self.assertEqual((snapshot["our_reviews"]["on_head"], snapshot["our_reviews"]["total"]), (1, 3))
+        self.assertEqual(snapshot["next"]["action"], "merge-ready")
+
     def test_review_cap_waits_for_the_checks_of_a_fresh_head_to_register(self):
         earlier = [{"commit": {"oid": "c1", "statusCheckRollup": {"state": "SUCCESS"}}}]
         capped = [our_review("c1"), our_review("c2"), our_review("c3")]
@@ -297,6 +305,58 @@ class NextVerdictTests(unittest.TestCase):
     def test_requested_changes_hand_off(self):
         verdict = action(green_pr(reviewDecision="CHANGES_REQUESTED"), reviews=[our_review("abc123")])
         self.assertEqual(verdict["action"], "hand off")
+
+
+class AddsNothingSinceTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.repo = directory.name
+        self.git("init", "--quiet", "--initial-branch=main")
+        self.commit("shared.txt", "one\ntwo\nthree\n")
+        self.git("checkout", "--quiet", "-b", "feature")
+        self.reviewed = self.commit("feature.txt", "the PR's own work\n")
+        self.git("checkout", "--quiet", "main")
+
+    def git(self, *args):
+        out = pr.git("-C", self.repo, "-c", "user.name=t", "-c", "user.email=t@example.com", *args)
+        self.assertIsNotNone(out, args)
+        return out
+
+    def commit(self, path, text):
+        Path(self.repo, path).write_text(text, encoding="utf-8")
+        self.git("add", path)
+        self.git("commit", "--quiet", "-m", path)
+        return self.git("rev-parse", "HEAD")
+
+    def adds_nothing(self):
+        pull = {"number": 12, "baseRefName": "main", "baseRefOid": self.git("rev-parse", "main"),
+                "headRefOid": self.git("rev-parse", "feature")}
+        return pr.adds_nothing_since(pull, self.reviewed, lambda *args: pr.git("-C", self.repo, *args))
+
+    def test_a_clean_merge_of_the_base_adds_nothing(self):
+        self.commit("base.txt", "the base moved on\n")
+        self.git("checkout", "--quiet", "feature")
+        self.git("merge", "--quiet", "--no-edit", "main")
+        self.assertTrue(self.adds_nothing())
+
+    def test_a_merge_that_carries_a_conflict_resolution_needs_review(self):
+        self.commit("feature.txt", "the base wrote this file too\n")
+        self.git("checkout", "--quiet", "feature")
+        self.assertIsNone(pr.git("-C", self.repo, "merge", "--quiet", "main"))
+        self.commit("feature.txt", "the resolution\n")
+        self.assertFalse(self.adds_nothing())
+
+    def test_a_commit_of_the_prs_own_after_the_merge_needs_review(self):
+        self.commit("base.txt", "the base moved on\n")
+        self.git("checkout", "--quiet", "feature")
+        self.git("merge", "--quiet", "--no-edit", "main")
+        self.commit("feature.txt", "more of the PR's own work\n")
+        self.assertFalse(self.adds_nothing())
+
+    def test_the_head_counts_as_unreviewed_when_git_cannot_answer(self):
+        pull = {"number": 12, "baseRefName": "main", "baseRefOid": "b", "headRefOid": "h"}
+        self.assertFalse(pr.adds_nothing_since(pull, "r", lambda *args: None))
 
 
 class PostingTests(unittest.TestCase):
