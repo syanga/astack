@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Review a PR
 
-This review changes no code. The deliverable is a verdict the author can act on, posted to the PR as review comments when there is a PR. Fixing is a separate request. The one write to the repository is a worktree for the PR head, so reviewers read the code the diff describes.
+The deliverable is a verdict the author can act on, posted to the PR as review comments when there is a PR. The review changes no code. Fixing is a separate request. It creates one local branch and worktree for the PR head, so reviewers read the code the diff describes, and removes both.
 
 ## 1. Set the scope
 
@@ -33,7 +33,7 @@ If the intent is still unclear, ask the user now. That question is the only one 
 
 ## 3. Spawn the reviewers
 
-1. Assemble the code reviewer prompt from [`reviewer.md`](reviewer.md) with the intent, the diff, the commit list, the tree, the rubric, and the ladder. The rubric is [`rubric.md`](rubric.md) with the text of every principle file it links pasted after the lens that names it, each pasted file's first heading removed. The ladder is [`../blast-radius/evidence.md`](../blast-radius/evidence.md).
+1. Assemble the code reviewer prompt from [`reviewer.md`](reviewer.md), which says how to fill each placeholder from [`rubric.md`](rubric.md), the principle files it links, and [`../blast-radius/evidence.md`](../blast-radius/evidence.md).
 2. When the harness offers more than one model, send the identical prompt to three read-only reviewers, each on a different model. With one model, send it to two.
 3. Assemble the spec reviewer prompt with the intent, every source step 2 found in that order, the diff, and the commit list. Send it to one read-only reviewer.
 4. Run all of them in parallel. Name them code reviewer 1, 2, 3 and spec reviewer.
@@ -44,7 +44,7 @@ Done when every reviewer has reported and each prompt carried everything listed 
 
 ## 4. Judge
 
-Apply [`judgment.md`](judgment.md) to the code findings, using the earlier review comments from step 1 for its already-answered filter. Keep the spec findings separate from the code findings. On the PR route, run `git worktree remove ../review-<n>` and `git branch -D review/<n>` now, before anything touches the network. Done when every code finding has a bucket and a one-line rationale, every spec finding quotes its source line, and the worktree and branch are gone.
+Apply [`judgment.md`](judgment.md) to the code findings, using the earlier review comments from step 1 for its already-answered filter. Keep the spec findings separate from the code findings. On the PR route, run `git worktree remove ../review-<n>` and `git branch -D review/<n>` now, before anything touches the network. Done when every code finding has a bucket and a one-line rationale, every spec finding quotes its source line, and, on the PR route, the worktree and branch are gone.
 
 ## The verdict
 
@@ -59,14 +59,14 @@ The verdict has these parts, whichever route delivers it.
 
 ## 5. Deliver
 
-On the PR route, write a findings file in the system's temporary directory. Its `comments` hold one entry per act-on and consider finding, with the `path`, the `line` in the head commit, and a `body` whose first line is the bucket and severity. Its `body` holds every other part of the verdict. From the repository root, post it with the sibling skill's script, which sits at `babysit-pr/scripts/pr.py` beside this skill's directory:
+On the PR route, write a findings file in the system's temporary directory. Its `comments` hold one entry per act-on and consider finding, with the `path`, the `line` in the head commit, the `bucket` (`act on` or `consider`), and a `body` whose first line is the bucket and severity. Its `body` holds every other part of the verdict. From the repository root, post it with the sibling skill's script, which sits at `babysit-pr/scripts/pr.py` beside this skill's directory:
 
 ```bash
 python3 <skills directory>/babysit-pr/scripts/pr.py review --pr <n> --review-file <file> --model <your model id>
 ```
 
-The script adds the on-behalf-of header to every body and posts one review on the head commit. It prints `url`, `inline`, and `folded`. Each inline comment is a thread the author can resolve. `folded` true means GitHub rejected a line outside the diff, so every finding went into the review body and no thread was opened: say so in the reply. Exit code 2 means the post failed: retry once, then put the whole verdict in the reply instead.
+The script adds the on-behalf-of header to every body and posts one review on the head commit. It prints `url`, `inline`, and `folded`. `folded` true means GitHub rejected a line outside the diff, so every finding went into the review body and no thread was opened: say so in the reply. Exit code 2 means the post failed: retry once, then say the review could not be posted and put the whole verdict in the reply.
 
 Reply on the PR route with the review URL, the number of findings per bucket, the titles of the act-on findings, and whether the review was folded. On the other two routes, reply with the whole verdict.
 
-Done when the script printed an `inline` count equal to the act-on plus consider count, or you reported the fold or the failure in the reply.
+Done, on the PR route, when the script printed an `inline` count equal to the act-on plus consider count, or you reported the fold or the failed post in the reply. Done, on the other routes, when the reply carries every part of the verdict.

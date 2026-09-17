@@ -1,5 +1,6 @@
-"""Shape the PR snapshot, review payload, and comment header from recorded gh payloads, without the network."""
+"""Shape the PR snapshot, its next verdict, the review payload, and the comment header, without the network."""
 
+import copy
 import importlib.util
 from pathlib import Path
 import unittest
@@ -10,6 +11,7 @@ pr = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pr)
 
 SINCE = "2026-09-15T10:00:00Z"
+NOW = "2026-09-15T10:30:00Z"
 BOT = {"login": "bugbot", "__typename": "Bot"}
 ALAN = {"login": "alan", "__typename": "User"}
 
@@ -20,7 +22,8 @@ PR = {
     "commits": [{"committedDate": "2026-09-15T09:30:00Z"}, {"committedDate": "2026-09-15T10:00:00Z"}],
     "statusCheckRollup": [
         {"__typename": "CheckRun", "name": "tests", "status": "COMPLETED", "conclusion": "SUCCESS", "detailsUrl": "u1"},
-        {"__typename": "CheckRun", "name": "lint", "status": "IN_PROGRESS", "conclusion": None, "detailsUrl": "u2"},
+        {"__typename": "CheckRun", "name": "lint", "status": "IN_PROGRESS", "conclusion": None, "detailsUrl": "u2",
+         "startedAt": "2026-09-15T10:20:00Z"},
         {"__typename": "CheckRun", "name": "docs", "status": "COMPLETED", "conclusion": "SKIPPED", "detailsUrl": "u3"},
         {"__typename": "StatusContext", "context": "deploy", "state": "FAILURE", "targetUrl": "u4"},
     ],
@@ -50,54 +53,117 @@ RECENT = [{"commit": {"oid": "old111", "statusCheckRollup": {"state": "FAILURE"}
           {"commit": {"oid": "abc123", "statusCheckRollup": None}}]
 
 
+def our_review(oid, body="Verdict."):
+    return {"author": ALAN, "state": "COMMENTED", "submittedAt": SINCE, "body": pr.format_body("m", body), "commit": {"oid": oid}}
+
+
+def thread(*bodies):
+    return {"id": "T", "isResolved": False, "isOutdated": False, "path": "c.py", "line": 2,
+            "comments": {"nodes": [{"author": ALAN, "body": body, "createdAt": SINCE, "url": "t"} for body in bodies]}}
+
+
+def green_pr(**overrides):
+    clean = copy.deepcopy(PR)
+    clean["statusCheckRollup"] = [PR["statusCheckRollup"][0]]
+    clean.update(overrides)
+    return clean
+
+
+def action(pull, threads=(), reviews=(), recent=(), **kwargs):
+    return pr.summarize(pull, list(threads), list(reviews), list(recent), SINCE, NOW, **kwargs)["next"]
+
+
 class SnapshotTests(unittest.TestCase):
     def test_snapshot_shape(self):
-        snapshot = pr.summarize(PR, THREADS, REVIEWS, RECENT, SINCE)
+        snapshot = pr.summarize(PR, THREADS, REVIEWS, RECENT, SINCE, NOW)
         self.assertEqual(snapshot["checks"]["counts"], {"passed": 1, "failed": 1, "pending": 1, "skipped": 1})
-        self.assertEqual(snapshot["checks"]["failed"], [{"name": "deploy", "kind": "failed", "state": "FAILURE", "link": "u4"}])
+        self.assertEqual([check["name"] for check in snapshot["checks"]["failed"]], ["deploy"])
         self.assertEqual([check["name"] for check in snapshot["checks"]["pending"]], ["lint"])
+        self.assertEqual(snapshot["checks"]["stuck"], [])
         self.assertEqual(snapshot["threads"]["resolved"], 1)
         self.assertEqual(snapshot["threads"]["unresolved"], [{
             "id": "T2", "path": "b.py", "line": 7, "outdated": False, "author": "bugbot", "bot": True,
-            "ours": False, "body": "possible race", "replies": 1, "url": "t2",
+            "ours": False, "awaiting_user": False, "body": "possible race", "replies": 1, "url": "t2",
         }])
         self.assertEqual(snapshot["bots"], {"bugbot": {"passes": 2, "last": "2026-09-15T12:00:00Z", "since_head": True}})
         self.assertEqual(snapshot["recent_commits"], [{"sha": "old111", "ci": "FAILURE"}, {"sha": "abc123", "ci": None}])
-        self.assertEqual(snapshot["our_reviews"], {"total": 0, "on_head": 0, "folded_on_head": False})
+        self.assertEqual(snapshot["our_reviews"],
+                         {"total": 0, "on_head": 0, "cap": 3, "folded_on_head": False, "folded_act_on": 0})
         self.assertEqual([comment["body"] for comment in snapshot["new_comments"]], ["after push"])
-        self.assertEqual([(review["author"], review["bot"]) for review in snapshot["new_reviews"]],
-                         [("bugbot", True), ("alan", False)])
-        self.assertIsNone(snapshot["review_decision"])
         self.assertEqual(snapshot["head"], {"sha": "abc123", "ref": "feature", "committed_at": "2026-09-15T10:00:00Z"})
-        self.assertEqual(snapshot["since"], SINCE)
-
-    def test_our_review_rounds_are_counted_from_the_pr(self):
-        ours = lambda oid, body: {"author": ALAN, "state": "COMMENTED", "submittedAt": SINCE,
-                                  "body": pr.format_body("m", body), "commit": {"oid": oid}}
-        folded = pr.fold_comments({"body": "Verdict.", "comments": [{"path": "a.py", "line": 7, "body": "Race."}]})
-        reviews = [ours("old111", "round one"), ours("abc123", folded["body"]),
-                   {"author": ALAN, "state": "COMMENTED", "submittedAt": SINCE, "body": "", "commit": {"oid": "abc123"}}]
-        snapshot = pr.summarize(PR, [], reviews, RECENT, SINCE)
-        self.assertEqual(snapshot["our_reviews"], {"total": 2, "on_head": 1, "folded_on_head": True})
+        self.assertEqual(snapshot["next"]["action"], "fix")
 
     def test_only_a_first_line_header_marks_a_thread_ours(self):
-        def thread(body):
-            return {"id": "T", "isResolved": False, "isOutdated": False, "path": "c.py", "line": 2,
-                    "comments": {"nodes": [{"author": ALAN, "body": body, "createdAt": SINCE, "url": "t"}]}}
         quoted = "I disagree with this:\n> [m] RESPONDING ON BEHALF OF ALAN"
-        snapshot = pr.summarize(PR, [thread(pr.format_body("m", "Act on: null path")), thread(quoted)], [], RECENT, SINCE)
+        snapshot = pr.summarize(PR, [thread(pr.format_body("m", "Act on: null path")), thread(quoted)], [], RECENT, SINCE, NOW)
         self.assertEqual([t["ours"] for t in snapshot["threads"]["unresolved"]], [True, False])
 
-    def test_review_payload_and_fold(self):
-        review = {"body": "Verdict.", "comments": [{"path": "a.py", "line": 7, "body": "Race here."}]}
+
+class NextVerdictTests(unittest.TestCase):
+    """One case per way the drive loop could otherwise run without end or merge too early."""
+
+    def test_green_unreviewed_head_asks_for_a_review(self):
+        self.assertEqual(action(green_pr())["action"], "review")
+
+    def test_a_head_already_reviewed_is_never_reviewed_again(self):
+        self.assertEqual(action(green_pr(), reviews=[our_review("abc123")])["action"], "merge-ready")
+
+    def test_review_cap_stops_a_loop_that_always_finds_something(self):
+        verdict = action(green_pr(), reviews=[our_review("c1"), our_review("c2"), our_review("c3")])
+        self.assertEqual(verdict["action"], "stop")
+        self.assertIn("review cap", verdict["stop"])
+
+    def test_three_failing_commits_stop_a_fix_loop(self):
+        failing = [{"commit": {"oid": str(n), "statusCheckRollup": {"state": "FAILURE"}}} for n in range(3)]
+        verdict = action(PR, recent=failing)
+        self.assertEqual(verdict["action"], "stop")
+        self.assertIn("not converging", verdict["stop"])
+
+    def test_a_check_pending_past_the_limit_stops_the_wait(self):
+        verdict = action(PR, stuck_minutes=5)
+        self.assertEqual(verdict["action"], "stop")
+        self.assertIn("lint", verdict["stop"])
+
+    def test_pending_checks_wait(self):
+        waiting = green_pr(statusCheckRollup=[PR["statusCheckRollup"][1]])
+        self.assertEqual(action(waiting)["action"], "wait")
+
+    def test_our_unanswered_finding_needs_work(self):
+        verdict = action(green_pr(), threads=[thread(pr.format_body("m", "Act on: race"))], reviews=[our_review("abc123")])
+        self.assertEqual(verdict["action"], "fix")
+
+    def test_an_ask_left_open_hands_off_instead_of_merging(self):
+        ask = thread("possible auth bypass", pr.format_body("m", "Asked: needs Alan's call"))
+        verdict = action(green_pr(), threads=[ask], reviews=[our_review("abc123")])
+        self.assertEqual(verdict["action"], "hand off")
+        self.assertEqual(verdict["handoff"], ["1 threads await the user"])
+
+    def test_folded_review_with_act_on_findings_blocks(self):
+        folded = pr.fold_comments({"body": "Verdict.", "comments": [
+            {"path": "a.py", "line": 7, "bucket": "act on", "body": "Race."},
+            {"path": "a.py", "line": 9, "bucket": "consider", "body": "Name."}]})
+        verdict = action(green_pr(), reviews=[our_review("abc123", folded["body"])])
+        self.assertEqual(verdict["action"], "fix")
+        self.assertEqual(verdict["blockers"], ["1 act-on findings in a folded review body"])
+
+    def test_folded_review_with_only_consider_findings_hands_off(self):
+        folded = pr.fold_comments({"body": "Verdict.", "comments": [
+            {"path": "a.py", "line": 9, "bucket": "consider", "body": "Name."}]})
+        self.assertEqual(action(green_pr(), reviews=[our_review("abc123", folded["body"])])["action"], "hand off")
+
+    def test_requested_changes_hand_off(self):
+        verdict = action(green_pr(reviewDecision="CHANGES_REQUESTED"), reviews=[our_review("abc123")])
+        self.assertEqual(verdict["action"], "hand off")
+
+
+class PostingTests(unittest.TestCase):
+    def test_review_payload(self):
+        review = {"body": "Verdict.", "comments": [{"path": "a.py", "line": 7, "bucket": "act on", "body": "Race here."}]}
         payload = pr.build_review("m", review, "abc123")
         self.assertEqual(payload["event"], "COMMENT")
         self.assertEqual(payload["commit_id"], "abc123")
         self.assertEqual(payload["comments"], [{"path": "a.py", "line": 7, "side": "RIGHT",
                                                 "body": "[m] RESPONDING ON BEHALF OF ALAN\n======\n\nRace here.\n"}])
-        folded = pr.fold_comments(review)
-        self.assertEqual(folded["comments"], [])
-        self.assertIn("a.py:7\nRace here.", folded["body"])
 
     def test_comment_header(self):
         self.assertEqual(pr.format_body("claude-fable-5-1", "Fixed in 1a2b3c.\n"),

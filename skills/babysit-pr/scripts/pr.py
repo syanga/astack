@@ -4,7 +4,7 @@
 Reads and writes through the GitHub CLI (gh). Bodies come from files and
 reach gh as JSON on stdin, so no comment text passes through a shell.
 
-    pr.py status  [--pr N] [--repo o/r] [--since ISO]
+    pr.py status  [--pr N] [--repo o/r] [--since ISO] [--review-cap 3] [--stuck-minutes 60]
     pr.py reply   --thread <id> --body-file <file> --model <id>
     pr.py resolve --thread <id>
     pr.py review  --review-file <json> --model <id> [--pr N] [--repo o/r]
@@ -14,24 +14,33 @@ Every body this script posts opens with the on-behalf-of header:
     [<model id>] RESPONDING ON BEHALF OF ALAN
     ======
 
-The review file is {"body": "...", "comments": [{"path", "line", "body"}, ...]}.
-It becomes one PR review on the head commit with an inline comment per entry.
-A comment on a line outside the diff makes GitHub reject the whole review, so
-on rejection the comments move into the review body and the review is retried.
-`review` prints {"url", "inline", "folded"} so the caller can tell which happened.
+`status` ends with a `next` verdict computed from the PR alone (fix, wait,
+review, merge-ready, hand off, stop), so the babysit loop's bounds survive a
+lost transcript: the review-round cap, the CI-not-converging stop, and the
+stuck-check stop are all read from GitHub, never from memory.
+
+The review file is {"body": "...", "comments": [{"path", "line", "bucket", "body"}, ...]}
+with bucket "act on" or "consider". It becomes one PR review on the head commit
+with an inline comment per entry. A comment on a line outside the diff makes
+GitHub reject the whole review, so on rejection the comments move into the
+review body and the review is retried. `review` prints {"url", "inline",
+"folded"} so the caller can tell which happened.
 
 Exit code 2 means gh or the GitHub API failed (auth, network, rate limit).
 Retry once before treating that as a result. Reviews are read up to the first 100.
 """
 
 import argparse
+from datetime import datetime, timezone
 import json
+import re
 import subprocess
 import sys
 
 ON_BEHALF_OF = "ALAN"
 HEADER_MARK = "RESPONDING ON BEHALF OF " + ON_BEHALF_OF
 FOLD_MARK = "Findings on lines outside the diff:"
+FOLDED_ACT_ON = re.compile(r"^Folded act-on findings: (\d+)$", re.M)
 
 PR_FIELDS = ("number,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
              "headRefOid,headRefName,baseRefName,commits,statusCheckRollup,comments,autoMergeRequest")
@@ -125,7 +134,7 @@ def classify_check(check):
         kind = "pending"
     else:
         kind = "failed"
-    return {"name": name, "kind": kind, "state": state, "link": link}
+    return {"name": name, "kind": kind, "state": state, "link": link, "started_at": check.get("startedAt")}
 
 
 def login(node):
@@ -142,8 +151,13 @@ def is_ours(body):
     return first.startswith("[") and first.endswith("] " + HEADER_MARK)
 
 
-def summarize(pr, threads, reviews, recent, since):
-    """Pure: shape the gh payloads into the snapshot. `since` is the ISO-8601 UTC cut for new activity."""
+def minutes_between(start, now):
+    begun = datetime.fromisoformat(start.replace("Z", "+00:00"))
+    return (datetime.fromisoformat(now.replace("Z", "+00:00")) - begun).total_seconds() / 60
+
+
+def summarize(pr, threads, reviews, recent, since, now, review_cap=3, stuck_minutes=60):
+    """Pure: shape the gh payloads into the snapshot. `since` cuts new activity; `now` dates the pending checks."""
     head = pr["headRefOid"]
     checks = [classify_check(check) for check in pr.get("statusCheckRollup") or []]
     unresolved = []
@@ -156,6 +170,8 @@ def summarize(pr, threads, reviews, recent, since):
             "id": thread["id"], "path": thread.get("path"), "line": thread.get("line"),
             "outdated": bool(thread.get("isOutdated")), "author": login(first), "bot": is_bot(first),
             "ours": is_ours(first.get("body")),
+            # We replied and left it open: that is an ask routed to the user.
+            "awaiting_user": len(comments) > 1 and is_ours(comments[-1].get("body")),
             "body": first.get("body", ""), "replies": max(len(comments) - 1, 0), "url": first.get("url"),
         })
     bots = {}
@@ -167,7 +183,9 @@ def summarize(pr, threads, reviews, recent, since):
             entry["since_head"] = entry["since_head"] or review["submittedAt"] > since
     ours = [review for review in reviews if is_ours(review.get("body"))]
     on_head = [review for review in ours if (review.get("commit") or {}).get("oid") == head]
-    return {
+    folded_act_on = sum(int(found) for review in on_head for found in FOLDED_ACT_ON.findall(review.get("body", "")))
+    pending = [check for check in checks if check["kind"] == "pending"]
+    snapshot = {
         "number": pr["number"], "url": pr["url"], "state": pr["state"], "draft": pr["isDraft"],
         "mergeable": pr["mergeable"], "merge_state": pr["mergeStateStatus"],
         "review_decision": pr.get("reviewDecision") or None,
@@ -180,7 +198,9 @@ def summarize(pr, threads, reviews, recent, since):
             "counts": {kind: sum(1 for check in checks if check["kind"] == kind)
                        for kind in ("passed", "failed", "pending", "skipped")},
             "failed": [check for check in checks if check["kind"] == "failed"],
-            "pending": [check for check in checks if check["kind"] == "pending"],
+            "pending": pending,
+            "stuck": [check for check in pending
+                      if check["started_at"] and minutes_between(check["started_at"], now) > stuck_minutes],
         },
         # Oldest first. Three FAILURE or ERROR entries in a row at the end means the fixes are not converging.
         "recent_commits": [{"sha": node["commit"]["oid"],
@@ -188,8 +208,9 @@ def summarize(pr, threads, reviews, recent, since):
         "threads": {"unresolved": unresolved,
                     "resolved": sum(1 for thread in threads if thread.get("isResolved"))},
         # review-pr rounds, counted from the PR itself so a lost transcript cannot reset them.
-        "our_reviews": {"total": len(ours), "on_head": len(on_head),
-                        "folded_on_head": any(FOLD_MARK in review.get("body", "") for review in on_head)},
+        "our_reviews": {"total": len(ours), "on_head": len(on_head), "cap": review_cap,
+                        "folded_on_head": any(FOLD_MARK in review.get("body", "") for review in on_head),
+                        "folded_act_on": folded_act_on},
         "bots": bots,
         "new_comments": [
             {"author": login(comment), "at": comment["createdAt"], "body": comment["body"], "url": comment.get("url")}
@@ -201,6 +222,53 @@ def summarize(pr, threads, reviews, recent, since):
             for review in reviews if review.get("submittedAt") and review["submittedAt"] > since
         ],
     }
+    snapshot["next"] = assess(snapshot)
+    return snapshot
+
+
+def assess(snapshot):
+    """Pure: the drive loop's state machine, read only from the PR so a lost transcript cannot change it."""
+    checks, ours = snapshot["checks"], snapshot["our_reviews"]
+    threads = snapshot["threads"]["unresolved"]
+    work = [thread for thread in threads if not thread["awaiting_user"]]
+    waiting = [thread for thread in threads if thread["awaiting_user"]]
+    streak = [commit["ci"] for commit in snapshot["recent_commits"]][-3:]
+    blockers = []
+    if snapshot["mergeable"] == "CONFLICTING":
+        blockers.append("conflict with the base branch")
+    if checks["failed"]:
+        blockers.append("{} failed checks".format(len(checks["failed"])))
+    if work:
+        blockers.append("{} threads need work".format(len(work)))
+    if ours["folded_act_on"]:
+        blockers.append("{} act-on findings in a folded review body".format(ours["folded_act_on"]))
+    handoff = []
+    if waiting:
+        handoff.append("{} threads await the user".format(len(waiting)))
+    if snapshot["review_decision"] == "CHANGES_REQUESTED":
+        handoff.append("a human reviewer requested changes")
+    if ours["folded_on_head"] and not ours["folded_act_on"]:
+        handoff.append("consider findings sit in a folded review body")
+    stop = None
+    if checks["stuck"]:
+        stop = "a check has been pending past the stuck limit: " + ", ".join(check["name"] or "?" for check in checks["stuck"])
+    elif len(streak) == 3 and all(state in ("FAILURE", "ERROR") for state in streak):
+        stop = "the last three commits failed CI, so the fixes are not converging"
+    elif not blockers and not checks["pending"] and ours["on_head"] == 0 and ours["total"] >= ours["cap"]:
+        stop = "the review cap of {} rounds is reached with the head unreviewed".format(ours["cap"])
+    if stop:
+        action = "stop"
+    elif blockers:
+        action = "fix"
+    elif checks["pending"] or snapshot["mergeable"] == "UNKNOWN":
+        action = "wait"
+    elif ours["on_head"] == 0:
+        action = "review"
+    elif handoff or snapshot["mergeable"] != "MERGEABLE":
+        action = "hand off"
+    else:
+        action = "merge-ready"
+    return {"action": action, "blockers": blockers, "handoff": handoff, "stop": stop}
 
 
 def format_body(model, body):
@@ -219,8 +287,11 @@ def build_review(model, review, commit):
 
 def fold_comments(review):
     """Move inline findings into the body for the retry after GitHub rejects a line outside the diff."""
-    moved = "\n\n".join("{}:{}\n{}".format(c["path"], c["line"], c["body"]) for c in review.get("comments", []))
-    return {"body": review["body"] + "\n\n" + FOLD_MARK + "\n\n" + moved, "comments": []}
+    comments = review.get("comments", [])
+    act_on = sum(1 for c in comments if c.get("bucket", "").lower() == "act on")
+    moved = "\n\n".join("{}:{} ({})\n{}".format(c["path"], c["line"], c.get("bucket", "finding"), c["body"]) for c in comments)
+    return {"body": "{}\n\n{}\nFolded act-on findings: {}\n\n{}".format(review["body"], FOLD_MARK, act_on, moved),
+            "comments": []}
 
 
 def command_status(args):
@@ -228,7 +299,8 @@ def command_status(args):
     owner, name = pr["url"].split("/")[3:5]
     since = args.since or max(commit["committedDate"] for commit in pr["commits"])
     threads, reviews, recent = fetch_threads(owner, name, pr["number"])
-    json.dump(summarize(pr, threads, reviews, recent, since), sys.stdout, indent=2)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    json.dump(summarize(pr, threads, reviews, recent, since, now, args.review_cap, args.stuck_minutes), sys.stdout, indent=2)
     print()
 
 
@@ -278,6 +350,8 @@ def main(argv=None):
 
     status = scoped("status", help="print one JSON snapshot of the PR")
     status.add_argument("--since", help="ISO-8601 cut for new activity; defaults to the head commit time")
+    status.add_argument("--review-cap", type=int, default=3, help="review-pr rounds allowed before the loop stops")
+    status.add_argument("--stuck-minutes", type=int, default=60, help="a check pending longer than this is stuck")
     status.set_defaults(run=command_status)
 
     reply = commands.add_parser("reply", help="reply on a review thread from a file")
