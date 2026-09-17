@@ -205,6 +205,14 @@ class PostingTests(unittest.TestCase):
         self.assertEqual(payload["comments"], [{"path": "a.py", "line": 7, "side": "RIGHT",
                                                 "body": "[m] RESPONDING ON BEHALF OF ALAN\n======\n\nRace here.\n"}])
 
+    def test_a_malformed_findings_file_exits_2_before_any_post(self):
+        good = {"path": "a.py", "line": 7, "bucket": "act on", "body": "Race."}
+        pr.check_review({"body": "Verdict.", "comments": [good, dict(good, bucket="consider")]})
+        for bad in (dict(good, bucket="act-on"), dict(good, line="seven"), {k: v for k, v in good.items() if k != "path"}):
+            with self.assertRaises(SystemExit) as raised:
+                pr.check_review({"body": "Verdict.", "comments": [bad]})
+            self.assertEqual(raised.exception.code, 2)
+
     def test_comment_header(self):
         self.assertEqual(pr.format_body("claude-fable-5-1", "Fixed in 1a2b3c.\n"),
                          "[claude-fable-5-1] RESPONDING ON BEHALF OF ALAN\n======\n\nFixed in 1a2b3c.\n")

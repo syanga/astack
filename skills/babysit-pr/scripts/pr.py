@@ -26,7 +26,8 @@ GitHub reject the whole review, so on rejection the comments move into the
 review body and the review is retried. `review` prints {"url", "inline",
 "folded"} so the caller can tell which happened.
 
-Exit code 2 means gh or the GitHub API failed (auth, network, rate limit).
+Exit code 2 means gh or the GitHub API failed (auth, network, rate limit), or
+the review file is malformed.
 Retry once before treating that as a result. Only the latest 100 reviews are read.
 """
 
@@ -280,15 +281,26 @@ def format_body(model, body):
 def build_review(model, review, commit):
     return {
         "event": "COMMENT", "commit_id": commit, "body": format_body(model, review["body"]),
-        "comments": [{"path": c["path"], "line": int(c["line"]), "side": "RIGHT", "body": format_body(model, c["body"])}
+        "comments": [{"path": c["path"], "line": c["line"], "side": "RIGHT", "body": format_body(model, c["body"])}
                      for c in review.get("comments", [])],
     }
 
 
+def check_review(review):
+    if not isinstance(review.get("body"), str):
+        fail("review file: body must be a string")
+    for index, c in enumerate(review.get("comments", [])):
+        well_formed = (isinstance(c.get("path"), str) and isinstance(c.get("line"), int)
+                       and isinstance(c.get("body"), str) and c.get("bucket") in ("act on", "consider"))
+        if not well_formed:
+            fail("review file: comment {} needs a path, an integer line, a body, and a bucket of "
+                 "'act on' or 'consider': {}".format(index, json.dumps(c)))
+
+
 def fold_comments(review):
     comments = review.get("comments", [])
-    act_on = sum(1 for c in comments if c.get("bucket", "").lower() == "act on")
-    moved = "\n\n".join("{}:{} ({})\n{}".format(c["path"], c["line"], c.get("bucket", "finding"), c["body"]) for c in comments)
+    act_on = sum(1 for c in comments if c["bucket"] == "act on")
+    moved = "\n\n".join("{}:{} ({})\n{}".format(c["path"], c["line"], c["bucket"], c["body"]) for c in comments)
     return {"body": "{}\n\n{}\nFolded act-on findings: {}\n\n{}".format(review["body"], FOLD_MARK, act_on, moved),
             "comments": []}
 
@@ -315,6 +327,7 @@ def command_review(args):
     owner, name = pr["url"].split("/")[3:5]
     with open(args.review_file, encoding="utf-8") as handle:
         review = json.load(handle)
+    check_review(review)
     endpoint = "repos/{}/{}/pulls/{}/reviews".format(owner, name, pr["number"])
     wanted = len(review.get("comments", []))
     for attempt in (review, fold_comments(review)):
