@@ -10,6 +10,8 @@ Report the breakage a symbol search cannot find, before the change ships. Prove 
 
 ## Steps
 
+For a wide change, hand steps 2 to 4 to parallel reviewers on different models and merge their answers, the way [`../review-pr/SKILL.md`](../review-pr/SKILL.md) does.
+
 1. **Read the change.** Take the diff, the symbols it adds, changes, and deletes, and what the code now does differently, including what the diff does not spell out. For a PR, run `gh pr view <n> --json title,body,commits,comments,reviews` and `gh pr diff <n>`. For history, run `git log --follow -p` on the files and `git blame -L <start>,<end> <file>` on the changed lines. Done when you have written one paragraph stating what changed.
 2. **Find the safety fact.** Most risky-looking changes are safe because of one fact, such as "this call only drops cache entries that are already dead". Name it. If it holds, most of the risky cases clear at once. Spend the time here. Done when the safety fact is one sentence that names the `file:line` making it true.
 3. **Look where grep stops.** Verify each channel and record a `file:line`, or state that the channel does not apply.
@@ -24,7 +26,7 @@ Report the breakage a symbol search cannot find, before the change ships. Prove 
 
    Done when every channel has a `file:line` or a stated reason it does not apply.
 4. **Weigh each risk.** Keep a risk when it has a real chance of happening and a real cost if it does. Cite a real `file:line` for each and state the rung it reached on [`evidence.md`](evidence.md). Report the searches that found nothing. Never invent a caller or an API. Done when every kept risk carries a `file:line`, a likelihood, a cost, and a rung, and every cleared risk says why.
-5. **Prove the safety fact.** Write a script or test that calls the real code, run it, and paste what happened. That is rung 4. A safety fact below rung 4 is unproven. Mark it unproven only after you attempted the script and can say why it could not run. For a wide change, run steps 2 to 4 in parallel reviewers on different models and merge their answers, the way [`../review-pr/SKILL.md`](../review-pr/SKILL.md) does. Done when the proof is pasted, or the fact is marked unproven with the reason.
+5. **Prove the safety fact.** Write a script or test that calls the real code, run it, and paste what happened. That is rung 4. A safety fact below rung 4 is unproven. Mark it unproven only after you attempted the script and can say why it could not run. Done when the proof is pasted, or the fact is marked unproven with the reason.
 
 ## Hand back
 

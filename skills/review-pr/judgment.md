@@ -13,7 +13,7 @@ Each code finding lands in one bucket, with the reviewers who raised it and one 
 - **Noted.** Valid and not actionable now: context-dependent, premature, low impact. It opens no thread.
 - **Dismissed.** Wrong, nitpicky, or missing context, with one line of why. This bucket is how the user overrides you.
 
-A spec finding is judged like a code finding: missing or wrong starts as act on, and unrequested starts as consider. Severity is where a code finding starts. `critical` starts in act on, `warning` starts in consider, and `nit` starts in noted. The filters below move a finding from there. Act on holds five items or fewer. If more survive, say why.
+A spec finding is judged like a code finding: missing or wrong starts as act on, and unrequested starts as consider. A code finding that meets the Act on definition starts in act on whatever its severity. Otherwise severity sets where it starts: `critical` in act on, `warning` in consider, and `nit` in noted. The filters below move a finding from there. Act on holds five items or fewer. If more survive, say why.
 
 ## Filters that move a finding down
 
