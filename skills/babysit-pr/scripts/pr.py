@@ -56,6 +56,7 @@ ON_BEHALF_OF = "ALAN"
 HEADER_MARK = "RESPONDING ON BEHALF OF " + ON_BEHALF_OF
 FOLD_MARK = "Findings on lines outside the diff:"
 BOT_PASS_CAP = 6
+CHECK_GRACE_MINUTES = 10
 FOLDED_ACT_ON = re.compile(r"^Folded act-on findings: (\d+)\r?$", re.M)
 
 PR_FIELDS = ("number,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
@@ -218,6 +219,8 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minu
             "pending": pending,
             "stuck": [check for check in pending
                       if minutes_between(check["started_at"] or head_time, now) > stuck_minutes],
+            "unregistered": not checks and minutes_between(head_time, now) <= CHECK_GRACE_MINUTES and any(
+                node["commit"]["oid"] != head and node["commit"].get("statusCheckRollup") for node in recent),
         },
         "recent_commits": [{"sha": node["commit"]["oid"],
                             "ci": (node["commit"].get("statusCheckRollup") or {}).get("state")} for node in recent],
@@ -289,7 +292,7 @@ def assess(snapshot):
         action = "stop"
     elif blockers:
         action = "fix"
-    elif checks["pending"] or snapshot["mergeable"] == "UNKNOWN":
+    elif checks["pending"] or checks["unregistered"] or snapshot["mergeable"] == "UNKNOWN":
         action = "wait"
     elif ours["on_head"] == 0:
         action = "review"

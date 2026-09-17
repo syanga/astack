@@ -43,9 +43,70 @@ from any terminal or agent, across the selected repository's linked worktrees.
 The installer downloads a pinned, checksum-verified Gitleaks release for macOS
 or Linux (ARM64 or x64). It requires Python 3.10+ and Git 2.31+.
 
-To replace an existing gstack-managed guard, use `--replace-gstack`. Uninstall
-restores the original hook. See [Git hook installation and behavior](docs/git-hooks.md)
-for offline installation, hook chaining, scan coverage, and removal.
+To replace an existing gstack-managed guard, use `--replace-gstack`. To install
+offline, pass `--gitleaks /path/to/gitleaks` with a trusted executable of the
+Gitleaks version that `VERSION` in `scripts/gitleaks_pre_push.py` pins. The
+installer checks its version and copies it without a download.
+
+The installer keeps an existing `pre-push` hook. If that hook is executable, the
+guard runs it before the scan, with the original arguments and stdin, and a
+rejection from it still blocks the push. A gstack-managed hook is the exception.
+With `--replace-gstack`, the installer saves the gstack wrapper and the guard
+does not run it. The guard runs only the wrapper's `pre-push.local`, if that
+file exists and is executable. The installer refuses a custom `core.hooksPath`,
+such as Husky's, and a symlinked hooks directory.
+
+`uninstall.sh` does not remove the guard. Remove it with `scripts/git_hooks.py`,
+which restores the earlier hook, or deletes `pre-push` when no earlier hook
+existed:
+
+```sh
+python3 scripts/git_hooks.py uninstall --repo /path/to/project
+```
+
+Each push scans the commit patches it sends:
+
+- For an existing branch, the guard scans every commit the remote branch lacks.
+  A secret that a later commit deletes still blocks the push.
+- For a new branch or tag, the guard scans all history reachable from the pushed
+  commit. That scan can report a finding that another branch already published.
+- A shallow clone blocks the push until you run `git fetch --unshallow`.
+- A missing remote tip blocks the push with a message that says to fetch the
+  remote. The block clears once a fetch brings in that tip, which a
+  single-branch clone needs `git fetch origin <branch>` for. A fetch may not
+  bring it in for a forced tag push,
+  when no fetched ref reaches the commit the remote tag points at. A tag that
+  points at a blob or a tree gets the same message, but no fetch helps, because
+  the guard cannot scan such a tag.
+
+The guard uses the default Gitleaks rules. A `.gitleaks.toml`, a
+`.gitleaksignore` file in the working tree, a `gitleaks:allow` comment, or a
+`GITLEAKS_*` variable does not change them. A `-diff` or `binary` attribute does
+not hide a path from the scan. The default rules skip some paths, including
+extensions such as `.bin` and `.pdf`, lock files such as `package-lock.json`,
+and anything under `node_modules`. The guard does not report a secret in a
+skipped path.
+
+A finding blocks the push, and its message gives the rule, path, line,
+and commit without the secret. A scanner failure also blocks the push.
+`git push --no-verify` skips the guard along with every other pre-push check.
+
+To upgrade Gitleaks, update `VERSION` in `scripts/gitleaks_pre_push.py`, the
+version, checksums, and `checksums_source` URL in `tools/gitleaks/releases.json`,
+and the version that the fake scanner in `tests/test_git_hooks.py` prints. Then
+run the hook tests against the real scanner:
+
+```sh
+ASTACK_TEST_GITLEAKS=/path/to/gitleaks \
+  python3 -m unittest discover -s tests -p test_git_hooks.py -v
+```
+
+Without `ASTACK_TEST_GITLEAKS`, the suite uses a fake scanner and skips the
+real pushes. CI sets the variable and runs the whole suite.
+
+An installed guard keeps its own copy of the scanner, and `install` over an
+intact installation changes nothing. To upgrade a guarded repository, run
+`uninstall`, then `install`.
 
 ## What to edit
 

@@ -14,7 +14,7 @@ Take one of three routes.
 
 - For a PR number or URL, run `gh pr view <n> --json title,body,baseRefName,headRefName,commits,closingIssuesReferences`. Run `git fetch origin <base>`, then `git fetch origin pull/<n>/head`, and record `git rev-parse FETCH_HEAD` as the reviewed SHA. Run `python3 <this skill's directory>/../babysit-pr/scripts/pr.py status --pr <n>` and read `our_reviews`.
   - When `last_sha_in_pr` is false, or the user asked for a full review, this is a full round. The diff is `gh pr diff <n>` and the commit list is `git log --reverse --oneline origin/<base>..<sha>`.
-  - Otherwise this is a later round. The diff is `git diff <last_sha>..<sha>` and the commit list is `git log --reverse --oneline <last_sha>..<sha>`.
+  - Otherwise this is a later round. The diff is `git diff "$(git merge-tree --write-tree <last_sha> $(git merge-base origin/<base> <sha>) | head -1)" <sha>`, which leaves out what a merge of the base brought in. When that diff shows conflict markers, use `git diff <last_sha>..<sha>` and tell the reviewers the base merge is included. The commit list is `git log --reverse --oneline --first-parent <last_sha>..<sha>`.
   - When `total` is above zero, on either kind of round, the earlier rounds are the output of `pr.py history --pr <n>`.
 
   Then run `tree="$(mktemp -d)/review-<n>" && git worktree add --detach "$tree" <sha> && echo "$tree"` and record the path.
@@ -34,7 +34,7 @@ Write one paragraph on what the change sets out to do, and save it to a file. Co
 5. The user's message.
 6. The code itself, when nothing else exists.
 
-On a later round, the Intent section of the first review in `pr.py history` is the first source. A request that only says to babysit or review carries no intent. If the intent is still unclear, ask the user now. That question is the only one the review asks. Done when the paragraph accounts for every source that exists and names which ones you found.
+On a later round, the Intent section of the first review `pr.py history` marks as ours is the first source. A request that only says to babysit or review carries no intent. If the intent is still unclear, ask the user now. That question is the only one the review asks. Done when the paragraph accounts for every source that exists and names which ones you found.
 
 ## 3. Spawn the reviewers
 
@@ -71,14 +71,23 @@ The verdict has these parts, whichever route delivers it.
 
 ## 5. Deliver
 
-On the PR route, write a findings file in the system's temporary directory, in the shape the module docstring of `pr.py` documents. Its `comments` hold one entry per act-on and consider finding, and each `body` opens with the bucket and severity. The `line` must be inside a diff hunk of the PR, because GitHub rejects the whole review otherwise. Anchor a finding about an unchanged line on the changed line that leads to it, and name the real `file:line` in the comment, so every act-on and consider finding opens a thread the babysit verdict can see. Its `body` holds the intent, the reviewers, the noted and dismissed findings, the agreement, and the summary. A finding about the PR's title or body has no line, so it goes in the `body` under its bucket. From the repository root, post it:
+On the PR route, write a findings file in the system's temporary directory, in the shape the module docstring of `pr.py` documents. Its `comments` hold one entry per act-on and consider finding, and each `body` opens with the bucket and severity. The `line` must be inside a diff hunk of the PR, because GitHub rejects the whole review otherwise. Anchor a finding about an unchanged line on the changed line that leads to it, and name the real `file:line` in the comment, so every act-on and consider finding opens a thread the babysit verdict can see. Its `body` holds the intent, the reviewers, the noted and dismissed findings, the agreement, and the summary. An act-on or consider finding about the PR's title or body has no line of its own. Anchor it on any line inside a diff hunk, and say in the comment that it is about the title or the body. From the repository root, post it:
 
 ```bash
 python3 <this skill's directory>/../babysit-pr/scripts/pr.py review --pr <n> --commit <reviewed sha> --review-file <file> --model <your model id>
 ```
 
-It prints `url`, `inline`, and `folded`. `folded` true means every finding went into the review body and no thread was opened: say so in the reply. Exit code 2 with a message about the review file means the file is malformed: fix it and post again. Exit code 2 with a message that the commit is not in the PR means the head moved: start again at step 1. Any other exit code 2 means the post failed: retry once, then say the review could not be posted and put the whole verdict in the reply.
+It prints `url`, `inline`, and `folded`. `folded` true means every finding went into the review body and no thread was opened. Exit code 2 with a message about the review file means the file is malformed: fix it and post again. Exit code 2 with a message that the commit is not in the PR means the head moved: start again at step 1. Any other exit code 2 means the post failed: retry once, then say the review could not be posted and put the whole verdict in the reply.
 
-Reply on the PR route with the review URL, the number of findings per bucket, the titles of the act-on findings, and whether the review was folded. On the other two routes, reply with the whole verdict.
+Reply on the PR route in this shape, with one title line per act-on finding and the last line only when the review was folded:
 
-Done, on the PR route, when the posted review body carries every other part of the verdict, and the script printed an `inline` count equal to the number of act-on and consider findings that carry a line, or you reported the fold or the failed post in the reply. Done, on the other routes, when the reply carries every part of the verdict.
+```
+<review URL>
+Act on <n> · Consider <n> · Noted <n> · Dismissed <n>
+Act on: <title>
+Folded: no thread was opened.
+```
+
+On the other two routes, reply with the whole verdict.
+
+Done, on the PR route, when the posted review body carries every other part of the verdict, and the script printed an `inline` count equal to the number of act-on and consider findings, or you reported the fold or the failed post in the reply. Done, on the other routes, when the reply carries every part of the verdict.

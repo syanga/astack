@@ -18,6 +18,8 @@ Commits, oldest first:
 
 {{PRIOR}}
 
+The sources and the change above are the whole record. Judge from them.
+
 ## Report
 
 - Missing. Requirements the sources ask for that the change does not deliver, or delivers partially. Quote the source line, and name the `file:line` in the change closest to where the requirement belongs.

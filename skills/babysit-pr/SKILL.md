@@ -44,7 +44,8 @@ Work `next.blockers` in this order: the draft state, the conflict, the threads, 
 1. Read the fix's diff against what it answers, the thread's finding or the failed check, and confirm it answers the whole of it.
 2. Apply the Clean the diff step of [`../open-pr/SKILL.md`](../open-pr/SKILL.md) to that diff, with one difference: when blast-radius runs, put its safety fact in the thread reply, since there is no PR-body section here.
 3. Apply [`../technical-writing/SKILL.md`](../technical-writing/SKILL.md) to new prose.
-4. Run `git fetch origin <head ref>` and confirm the remote head is still the snapshot's `head.sha`.
+4. Run `git fetch origin <head ref>` and confirm `git rev-parse FETCH_HEAD` prints the snapshot's `head.sha`.
+5. Correct with `gh pr edit` any sentence in the PR's title or body that this fix made false.
 
 **Conflict.** Rebase onto the base branch and resolve it following [`conflicts.md`](conflicts.md). If a hunk needs a product decision, stop and report the branch and the hunk. After the rebase, search the base for callers of every symbol the PR moves or deletes. The rebase restarts every check and outdates threads, so include it in the conflict-and-thread push.
 
