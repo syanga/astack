@@ -25,7 +25,7 @@
     "path": "pstack/skills/poteto-mode/playbooks/opening-a-pr.md",
     "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
     "license": "MIT, kept in skills/open-pr/LICENSE",
-    "note": "Rewritten as eight steps with done-when criteria. Cursor forge, deslop, no-comments, technical-writing, and stack machinery removed; global Pull Requests rules are the policy source; Gitleaks hook install and T3 Code PR linking added."
+    "note": "Rewritten as eight steps with done-when criteria. Cursor forge, deslop, and stack machinery removed; no-comments and technical-writing became sibling skills the steps link; global Pull Requests rules are the policy source; Gitleaks hook install and T3 Code PR linking added."
   },
   "babysit-pr": {
     "repository": [
@@ -42,7 +42,7 @@
       "959a8e9f1edc3adbe2f7e3054bb6fbefa6696260"
     ],
     "license": "MIT, kept in skills/babysit-pr/LICENSE-pstack and LICENSE-mattpocock",
-    "note": "Single PR, three modes, conflicts-threads-CI order, CI classification, triage rubric with the dismissal patterns and their sources. Stack, merge-queue, Origin forge, and the TypeScript watch-pr replaced by scripts/pr.py (stdlib + gh: status, reply, resolve, comment). Merge-conflict steps from Matt live in conflicts.md."
+    "note": "Single PR, three modes, conflicts-threads-CI order, CI classification, triage rubric with the dismissal patterns and their sources. Stack, merge-queue, Origin forge, and the TypeScript watch-pr replaced by scripts/pr.py (stdlib + gh: status, reply, review, resolve). Merge-conflict steps from Matt live in conflicts.md."
   },
   "review-pr": {
     "repository": [

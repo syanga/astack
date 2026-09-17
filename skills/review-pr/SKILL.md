@@ -12,7 +12,7 @@ The deliverable is a verdict the author can act on, posted to the PR as review c
 
 Take one of three routes.
 
-- For a PR number or URL, run `gh pr view <n> --json title,body,baseRefName,headRefName,commits,closingIssuesReferences` and `gh pr diff <n>`. Run `gh api "repos/{owner}/{repo}/pulls/<n>/comments" --paginate` and keep the result: it is every earlier review comment and reply on the PR. Then run `git fetch origin pull/<n>/head:review/<n>` and `git worktree add ../review-<n> review/<n>`. The tree is `../review-<n>` and the commit list is `git log --oneline origin/<base>..review/<n>`.
+- For a PR number or URL, run `gh pr view <n> --json title,body,baseRefName,headRefName,commits,closingIssuesReferences` and `gh pr diff <n>`. Run `gh api "repos/{owner}/{repo}/pulls/<n>/comments" --paginate` and keep the result: it is every earlier review comment and reply on the PR. An interrupted review leaves its worktree and branch behind, and the fetch then fails. Remove them first with `git worktree remove --force ../review-<n>` and `git branch -D review/<n>`, and ignore the error when either does not exist. Then run `git fetch origin pull/<n>/head:review/<n>` and `git worktree add ../review-<n> review/<n>`. The tree is `../review-<n>` and the commit list is `git log --oneline origin/<base>..review/<n>`.
 - For the current branch, run `git fetch origin <base>` and `git diff $(git merge-base origin/<base> HEAD)`. The tree is the repository root and the commit list is `git log --oneline origin/<base>..HEAD`.
 - For files or a pasted diff the user names, use those. There is no tree.
 
@@ -59,7 +59,7 @@ The verdict has these parts, whichever route delivers it.
 
 ## 5. Deliver
 
-On the PR route, write a findings file in the system's temporary directory. Its `comments` hold one entry per act-on and consider finding, with the `path`, the `line` in the head commit, the `bucket` (`act on` or `consider`), and a `body` whose first line is the bucket and severity. Its `body` holds every other part of the verdict. From the repository root, post it with the sibling skill's script:
+On the PR route, write a findings file in the system's temporary directory. Its `comments` hold one entry per act-on and consider finding, with the `path`, the `line` in the head commit, the `bucket` (`act on` or `consider`), and a `body` whose first line is the bucket and severity. The `line` must be inside a diff hunk, because GitHub rejects the whole review otherwise. A finding on any other line goes in the review `body`. Its `body` holds every other part of the verdict. From the repository root, post it with the sibling skill's script:
 
 ```bash
 python3 <this skill's directory>/../babysit-pr/scripts/pr.py review --pr <n> --review-file <file> --model <your model id>

@@ -66,4 +66,4 @@ If the host opened it as a draft, run `gh pr ready <n>`. Inside T3 Code, call `l
 
 ## 8. Reply
 
-Reply with the URL, the Verification section, and the flags and constraints no-comments left open. Babysit through [`../babysit-pr/SKILL.md`](../babysit-pr/SKILL.md). Done when the reply carries the URL, the Verification section, and the open flags and constraints.
+Reply with the URL, the Verification section, and the flags and constraints no-comments left open. When the request also asks you to babysit, continue with [`../babysit-pr/SKILL.md`](../babysit-pr/SKILL.md). Done when the reply carries the URL, the Verification section, and the open flags and constraints.
