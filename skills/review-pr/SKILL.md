@@ -34,7 +34,7 @@ Write one paragraph on what the change sets out to do, and save it to a file. Co
 5. The user's message.
 6. The code itself, when nothing else exists.
 
-On a later round, the Intent section of the first review `pr.py history` marks as ours is the first source. A request that only says to babysit or review carries no intent. If the intent is still unclear, ask the user now. That question is the only one the review asks. Done when the paragraph accounts for every source that exists and names which ones you found.
+On a later round, the Intent section of the first review `pr.py history` marks as ours is the first source. The intent file holds the paragraph alone on either kind of round. `--since` tells the reviewers the round kind, and the verdict's Intent part tells the author. A request that only says to babysit or review carries no intent. If the intent is still unclear, ask the user now. That question is the only one the review asks. Done when the paragraph accounts for every source that exists and names which ones you found.
 
 ## 3. Spawn the reviewers
 
@@ -45,10 +45,10 @@ python3 <this skill's directory>/scripts/build_prompt.py code --intent <file> --
 python3 <this skill's directory>/scripts/build_prompt.py spec --intent <file> --diff <file> --commits <file> --sources <file> --out <spec prompt>
 ```
 
-Add `--prior <file>` whenever earlier rounds exist, and `--since <last_sha>` on a later round. Add `--lenses` to keep only the lenses of [`rubric.md`](rubric.md) the change can touch, named by the start of their headings. A change to prose alone keeps `correctness,verification,complexity`. Omit `--lenses` when the change touches code, and omit `--tree` on the route that has none. Then spawn the reviewers in parallel, each told only to read its prompt file in full and follow it.
+Add `--prior <file>` whenever earlier rounds exist, and `--since <last_sha>` on a later round. Add `--lenses` to keep only the lenses of [`rubric.md`](rubric.md) the change can touch, named by the start of their headings. A change to prose alone keeps `correctness,verification,complexity`. Omit `--lenses` when the change touches code, and omit `--tree` on the route that has none. Then spawn the reviewers in parallel, each told only to read its prompt file in full and follow it. The models the harness offers are the values that its subagent tool accepts for a model parameter. A tool without that parameter offers one model, yours.
 
-- On a full round, `git apply --numstat <diff file> | awk '{n += $1 + $2} END {print n + 0}'` prints the number of changed lines. A count of 0 means the command could not read the diff. At 200 or more, or at 0, send the code prompt to three reviewers, spread over as many models as the harness offers. Send it to two when the harness offers one model.
-- On a full round under 200 changed lines, and on every later round, send the code prompt to one reviewer, on a model other than yours when the harness offers one.
+- On a full round, `git apply --numstat <diff file> | awk '{n += $1 + $2} END {print n + 0}'` prints the number of changed lines. The count is 0 when the command could not read the diff, and when the diff changes no line of text, as a rename-only diff does. At 200 or more, or at 0, send the code prompt to three reviewers, each on a different model, the most capable first. When the harness offers two models, the third reviewer takes the most capable. Send the code prompt to two reviewers when the harness offers one model.
+- On a full round under 200 changed lines, and on every later round, send the code prompt to one reviewer, on the most capable model other than yours when the harness offers one.
 - Send the spec prompt to one reviewer when step 2 found a linked issue, a spec file, or a user's message that carries intent. Those are the sources the author of the change did not write, so a spec reviewer can check the change against them. On a later round, send it only when the new commits also add, remove, or change a behaviour the sources name. A commit that fixes a review finding does not.
 
 Name them code reviewer 1, 2, 3 and spec reviewer. Without a subagent tool, follow each prompt file yourself, one after the other.

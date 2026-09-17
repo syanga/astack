@@ -58,7 +58,7 @@ Done when:
 
 ## 7. Open the PR and reply
 
-Push the branch, with `--force-with-lease` when step 1's rebase moved commits that were already pushed. Apply step 1's open-PR test. If the branch has no open PR, create one:
+Push with `git push -u origin <branch>`, where `<branch>` is the name `git branch --show-current` prints. A bare `git push` reads the branch's upstream, and a worktree branch can track another branch. Add `--force-with-lease` when step 1's rebase moved commits that were already pushed. Apply step 1's open-PR test. If the branch has no open PR, create one:
 
 ```bash
 gh pr create --base <base> --title "<title>" --body-file <file>
