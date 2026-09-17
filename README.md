@@ -72,24 +72,22 @@ Each push scans the commit patches it sends:
   commit. That scan can report a finding that another branch already published.
 - A shallow clone blocks the push until you run `git fetch --unshallow`.
 - A missing remote tip blocks the push with a message that says to fetch the
-  remote. That fetch clears it for a branch. It may not for a forced tag push,
+  remote. The block clears once a fetch brings in that tip, which a
+  single-branch clone needs `git fetch origin <branch>` for. A fetch may not
+  bring it in for a forced tag push,
   when no fetched ref reaches the commit the remote tag points at. A tag that
   points at a blob or a tree gets the same message, but no fetch helps, because
   the guard cannot scan such a tag.
 
 The guard uses the default Gitleaks rules. A `.gitleaks.toml`, a
-`gitleaks:allow` comment, or a `GITLEAKS_*` variable does not change them. The
-guard has known gaps. Gitleaks still reads a `.gitleaksignore` file
-at the root of the working tree, and a finding that the file lists does not
-block the push. The guard scans patches, and Git builds them with the
-attributes in effect on this machine, not those of the pushed commits. A `-diff`
-or `binary` attribute on a path hides that path from the scan. A `.gitattributes`
-file in the checkout can set it, committed or not, and so can
-`.git/info/attributes`, the file `core.attributesFile` names, and the system
-attributes file. Neither the ignore file nor an attribute is a supported
-allowlist.
+`.gitleaksignore` file in the working tree, a `gitleaks:allow` comment, or a
+`GITLEAKS_*` variable does not change them. A `-diff` or `binary` attribute does
+not hide a path from the scan. The default rules skip some paths, including
+extensions such as `.bin` and `.pdf`, lock files such as `package-lock.json`,
+and anything under `node_modules`. The guard does not report a secret in a
+skipped path.
 
-Any other finding blocks the push, and its message gives the rule, path, line,
+A finding blocks the push, and its message gives the rule, path, line,
 and commit without the secret. A scanner failure also blocks the push.
 `git push --no-verify` skips the guard along with every other pre-push check.
 
