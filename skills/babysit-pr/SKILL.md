@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Babysit a PR
 
-The policy is the Pull Requests section of the global rules. This is the procedure for one PR. The reviewer in the loop is [`../review-pr/SKILL.md`](../review-pr/SKILL.md), which posts its findings to the PR as threads.
+The policy is the Pull Requests section of the global rules. The reviewer in the loop is [`../review-pr/SKILL.md`](../review-pr/SKILL.md), which posts its findings to the PR as threads.
 
 The loop's state lives on the PR, not in your memory. Every snapshot ends with a `next` verdict the script computes from GitHub alone: `fix`, `wait`, `review`, `merge-ready`, `hand off`, or `stop`. Follow it. It already applies the review-round cap, the CI-not-converging stop, and the stuck-check stop.
 
@@ -35,33 +35,33 @@ In `status` mode, report now and stop. In `threads` mode, go to the Threads part
 | `hand off` | report `next.handoff` to the user and stop |
 | `stop` | report `next.stop` and what you tried, and stop |
 
-Done when you have acted on `next.action`.
+Done when, in `drive` mode, you have acted on `next.action`, and in the other two modes you have reported.
 
 ## 3. Fix the blockers
 
-Work `next.blockers` in this order: the conflict, then the threads, then the failed checks. Batch the conflict and thread fixes into one push. CI fixes follow in their own push. On a draft PR, run `gh pr ready <n>` first, because a draft never merges. Take a fresh snapshot after every push.
+Work `next.blockers` in this order: the draft state, the conflict, the threads, a folded review, then the failed checks. Clear a draft with `gh pr ready <n>`. Batch the conflict and thread fixes into one push. CI fixes follow in their own push. Take a fresh snapshot after every push.
 
 **Conflict.** Rebase onto the base branch and resolve it following [`conflicts.md`](conflicts.md). If a hunk needs a product decision, stop and report the branch and the hunk. After the rebase, search the base for callers of every symbol the PR moves or deletes. The rebase restarts every check and outdates threads, so include it in the same push as every other fix.
 
-**Threads.** Work every unresolved thread whose `awaiting_user` is false, following [`triage.md`](triage.md). Reply with `python3 <this skill's directory>/scripts/pr.py reply --thread <id> --body-file <file> --model <your model id>`. Resolve a fixed or dismissed thread with `pr.py resolve --thread <id>`. Leave an ask unresolved after replying: the snapshot then shows it as `awaiting_user`, and `next` hands the PR off rather than merging over it. Push before replying, so the reply cites a commit that exists.
+**Threads.** Work every unresolved thread whose `awaiting_user` is false, following [`triage.md`](triage.md). Reply with `python3 <this skill's directory>/scripts/pr.py reply --thread <id> --body-file <file> --model <your model id>`. Resolve a fixed or dismissed thread with `pr.py resolve --thread <id>`, which exits 2 when the thread did not resolve. Push before replying, so the reply cites a commit that exists.
 
-**A folded review.** When `our_reviews.folded_act_on` is above zero, the head's act-on findings sit in a review body in `new_reviews` and opened no threads. Fix them. The push moves the head and clears the fold.
+**A folded review.** When `our_reviews.folded_act_on` is above zero, the head's act-on findings sit in a review body in `new_reviews` and opened no threads. Fix them. The push moves the head and clears the fold. A folded act-on finding that does not hold cannot be cleared from the PR: report it to the user with your evidence and stop.
 
 **Failed checks.** Classify before any retry. Fix a failure in the diff's own code in a commit. A failure in code the diff never touched means a stale base: run `git fetch origin <base>`, then `git merge-base --is-ancestor origin/<base> HEAD`, and rebase when that command exits non-zero. Rerun a workflow only when `gh run view <run id> --json attempt` shows attempt 1. A failure on a later attempt is not flake, so read the job log.
 
-Done when a fresh snapshot's `next.blockers` is empty. Return to step 2.
+Done when a fresh snapshot's `next.blockers` is empty, or you stopped on a hunk or finding that needs the user. Return to step 2.
 
 ## 4. Wait
 
-Wait with the harness's timer, sized to the repository's usual check duration. In Claude Code that is `/loop` with no interval. Use one timer. When it fires, return to step 2. The snapshot marks a check pending past the limit as stuck and turns `next.action` to `stop`, so the wait cannot run on. When a bot in `bots` has `since_head` false after the checks finish, name the missing bot pass in the report and go on. Answer a user question mid-loop and continue. Done when the timer has fired.
+Wait with the harness's timer, sized to the repository's usual check duration. In Claude Code that is `/loop` with no interval. Use one timer. When it fires, return to step 2. The snapshot turns `next.action` to `stop` when a check stays pending past the limit, or when GitHub has still not computed mergeability by then, so the wait is bounded. When a bot that reviewed an earlier commit has `since_head` false after the checks finish, name the missing bot pass in the report and go on. Answer a user question mid-loop and continue. Done when the timer has fired.
 
 ## 5. Review the head
 
-Run [`../review-pr/SKILL.md`](../review-pr/SKILL.md) on the PR. Its findings arrive as threads marked `ours`. If review-pr reports that it could not post the review, report that and stop, since an unposted review is not counted and would be run again. Otherwise return to step 2. Done when `our_reviews.on_head` is at least 1, or the failed post is reported.
+Run [`../review-pr/SKILL.md`](../review-pr/SKILL.md) on the PR. If review-pr reports that it could not post the review, report that and stop, since an unposted review is not counted and would be run again. Otherwise return to step 2. Done when `our_reviews.on_head` is at least 1, or the failed post is reported.
 
 ## 6. Merge or hand off
 
-Take one more snapshot and confirm `next.action` is still `merge-ready` on the `head.sha` you intend to merge. Then carry out the disposition from the request as the global rules describe, merging with `gh pr merge <n> --squash` when it says merge. If the merge command fails, report its message and stop. For a child PR in a stack, retarget the child to the parent's base before the parent branch is deleted, or GitHub closes the child. Before reporting, reread the dismissals you made this run. When one repeated, add its pattern to `triage.md` in its own PR. Done when you have carried out the disposition or reported it.
+Take one more snapshot and confirm `next.action` is still `merge-ready` on the `head.sha` you intend to merge. Then carry out the disposition from the request as the global rules describe, merging with `gh pr merge <n> --squash` when it says merge. If the merge command fails, report its message and stop. For a child PR in a stack, retarget the child to the parent's base before the parent branch is deleted, or GitHub closes the child. Done when the verdict was still `merge-ready` on that SHA and you have carried out the disposition or reported it.
 
 ## Report
 
@@ -73,3 +73,4 @@ End every mode with a report to the user that carries:
 - what you fixed, and what you dismissed with the reason for each
 - what is pending, including a bot pass that never arrived
 - what needs the user: the asks with their thread links, and any `stop` or `hand off` reason
+- any dismissal that repeated during the run, as a pattern proposed for `triage.md` in its own PR

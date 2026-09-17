@@ -40,10 +40,10 @@ import sys
 ON_BEHALF_OF = "ALAN"
 HEADER_MARK = "RESPONDING ON BEHALF OF " + ON_BEHALF_OF
 FOLD_MARK = "Findings on lines outside the diff:"
-FOLDED_ACT_ON = re.compile(r"^Folded act-on findings: (\d+)$", re.M)
+FOLDED_ACT_ON = re.compile(r"^Folded act-on findings: (\d+)\r?$", re.M)
 
 PR_FIELDS = ("number,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
-             "headRefOid,headRefName,baseRefName,commits,statusCheckRollup,comments,autoMergeRequest")
+             "headRefOid,headRefName,baseRefName,commits,statusCheckRollup,comments")
 
 # Thread resolution, author kinds, the commit a review covers, and per-commit CI are GraphQL-only.
 THREADS_QUERY = """
@@ -189,11 +189,13 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=3, stuck_minu
         "number": pr["number"], "url": pr["url"], "state": pr["state"], "draft": pr["isDraft"],
         "mergeable": pr["mergeable"], "merge_state": pr["mergeStateStatus"],
         "review_decision": pr.get("reviewDecision") or None,
-        "auto_merge": bool(pr.get("autoMergeRequest")),
         "base": pr["baseRefName"],
         "head": {"sha": head, "ref": pr["headRefName"],
                  "committed_at": max(commit["committedDate"] for commit in pr["commits"])},
         "since": since,
+        # Mergeability GitHub still has not computed this long after the head commit will not arrive by waiting.
+        "mergeable_overdue": pr["mergeable"] == "UNKNOWN" and minutes_between(
+            max(commit["committedDate"] for commit in pr["commits"]), now) > stuck_minutes,
         "checks": {
             "counts": {kind: sum(1 for check in checks if check["kind"] == kind)
                        for kind in ("passed", "failed", "pending", "skipped")},
@@ -234,6 +236,8 @@ def assess(snapshot):
     waiting = [thread for thread in threads if thread["awaiting_user"]]
     streak = [commit["ci"] for commit in snapshot["recent_commits"]][-3:]
     blockers = []
+    if snapshot["draft"]:
+        blockers.append("the PR is a draft")
     if snapshot["mergeable"] == "CONFLICTING":
         blockers.append("conflict with the base branch")
     if checks["failed"]:
@@ -247,11 +251,15 @@ def assess(snapshot):
         handoff.append("{} threads await the user".format(len(waiting)))
     if snapshot["review_decision"] == "CHANGES_REQUESTED":
         handoff.append("a human reviewer requested changes")
+    if snapshot["review_decision"] == "REVIEW_REQUIRED":
+        handoff.append("a required human approval is missing")
     if ours["folded_on_head"] and not ours["folded_act_on"]:
         handoff.append("consider findings sit in a folded review body")
     stop = None
     if checks["stuck"]:
         stop = "a check has been pending past the stuck limit: " + ", ".join(check["name"] or "?" for check in checks["stuck"])
+    elif snapshot["mergeable_overdue"]:
+        stop = "GitHub has not computed mergeability long after the head commit"
     elif len(streak) == 3 and all(state in ("FAILURE", "ERROR") for state in streak):
         stop = "the last three commits failed CI, so the fixes are not converging"
     elif not blockers and not checks["pending"] and ours["on_head"] == 0 and ours["total"] >= ours["cap"]:
@@ -322,6 +330,8 @@ def command_review(args):
         payload = build_review(args.model, attempt, pr["headRefOid"])
         result = subprocess.run(["gh", "api", "--method", "POST", endpoint, "--input", "-"],
                                 input=json.dumps(payload), capture_output=True, text=True)
+        if result.returncode != 0 and "422" not in result.stderr and "Unprocessable" not in result.stderr:
+            break  # not a rejected line: folding would hide a transient failure as a fold
         if result.returncode == 0:
             inline = len(payload["comments"])
             json.dump({"url": json.loads(result.stdout)["html_url"], "inline": inline,
@@ -335,7 +345,9 @@ def command_review(args):
 
 def command_resolve(args):
     result = graphql(RESOLVE_MUTATION, thread=args.thread)
-    print("resolved" if result["resolveReviewThread"]["thread"]["isResolved"] else "not resolved")
+    if not result["resolveReviewThread"]["thread"]["isResolved"]:
+        fail("thread {} did not resolve".format(args.thread))
+    print("resolved")
 
 
 def main(argv=None):

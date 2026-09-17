@@ -151,6 +151,23 @@ class NextVerdictTests(unittest.TestCase):
             {"path": "a.py", "line": 9, "bucket": "consider", "body": "Name."}]})
         self.assertEqual(action(green_pr(), reviews=[our_review("abc123", folded["body"])])["action"], "hand off")
 
+    def test_a_clean_draft_is_a_blocker_not_merge_ready(self):
+        verdict = action(green_pr(isDraft=True), reviews=[our_review("abc123")])
+        self.assertEqual((verdict["action"], verdict["blockers"]), ("fix", ["the PR is a draft"]))
+
+    def test_a_conflict_needs_fixing(self):
+        self.assertEqual(action(green_pr(mergeable="CONFLICTING"))["blockers"], ["conflict with the base branch"])
+
+    def test_unknown_mergeability_waits_then_stops(self):
+        self.assertEqual(action(green_pr(mergeable="UNKNOWN"))["action"], "wait")
+        verdict = action(green_pr(mergeable="UNKNOWN"), stuck_minutes=5)
+        self.assertEqual(verdict["action"], "stop")
+        self.assertIn("mergeability", verdict["stop"])
+
+    def test_a_missing_required_approval_hands_off(self):
+        verdict = action(green_pr(reviewDecision="REVIEW_REQUIRED"), reviews=[our_review("abc123")])
+        self.assertEqual(verdict["action"], "hand off")
+
     def test_requested_changes_hand_off(self):
         verdict = action(green_pr(reviewDecision="CHANGES_REQUESTED"), reviews=[our_review("abc123")])
         self.assertEqual(verdict["action"], "hand off")

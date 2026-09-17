@@ -35,7 +35,7 @@ If the intent is still unclear, ask the user now. That question is the only one 
 
 1. Assemble the code reviewer prompt from [`reviewer.md`](reviewer.md), which says how to fill each placeholder from [`rubric.md`](rubric.md), the principle files it links, and [`../blast-radius/evidence.md`](../blast-radius/evidence.md).
 2. When the harness offers more than one model, send the identical prompt to three read-only reviewers, each on a different model. With one model, send it to two.
-3. Assemble the spec reviewer prompt with the intent, every source step 2 found in that order, the diff, and the commit list. Send it to one read-only reviewer.
+3. Assemble the spec reviewer prompt from the same file. Send it to one read-only reviewer.
 4. Run all of them in parallel. Name them code reviewer 1, 2, 3 and spec reviewer.
 
 Without a subagent tool, run the code reviewer prompt once and the spec reviewer prompt once yourself. Then skip the consensus and contradiction signals in [`judgment.md`](judgment.md) and leave the Agreement part out of the verdict.
@@ -59,13 +59,13 @@ The verdict has these parts, whichever route delivers it.
 
 ## 5. Deliver
 
-On the PR route, write a findings file in the system's temporary directory. Its `comments` hold one entry per act-on and consider finding, with the `path`, the `line` in the head commit, the `bucket` (`act on` or `consider`), and a `body` whose first line is the bucket and severity. Its `body` holds every other part of the verdict. From the repository root, post it with the sibling skill's script, which sits at `babysit-pr/scripts/pr.py` beside this skill's directory:
+On the PR route, write a findings file in the system's temporary directory. Its `comments` hold one entry per act-on and consider finding, with the `path`, the `line` in the head commit, the `bucket` (`act on` or `consider`), and a `body` whose first line is the bucket and severity. Its `body` holds every other part of the verdict. From the repository root, post it with the sibling skill's script:
 
 ```bash
-python3 <skills directory>/babysit-pr/scripts/pr.py review --pr <n> --review-file <file> --model <your model id>
+python3 <this skill's directory>/../babysit-pr/scripts/pr.py review --pr <n> --review-file <file> --model <your model id>
 ```
 
-The script adds the on-behalf-of header to every body and posts one review on the head commit. It prints `url`, `inline`, and `folded`. `folded` true means GitHub rejected a line outside the diff, so every finding went into the review body and no thread was opened: say so in the reply. Exit code 2 means the post failed: retry once, then say the review could not be posted and put the whole verdict in the reply.
+The script adds the on-behalf-of header to every body and posts one review on the head commit. It prints `url`, `inline`, and `folded`. `folded` true means GitHub rejected the inline comments as unprocessable, usually a line outside the diff, so every finding went into the review body and no thread was opened: say so in the reply. Exit code 2 means the post failed: retry once, then say the review could not be posted and put the whole verdict in the reply.
 
 Reply on the PR route with the review URL, the number of findings per bucket, the titles of the act-on findings, and whether the review was folded. On the other two routes, reply with the whole verdict.
 
