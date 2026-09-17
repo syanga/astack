@@ -129,6 +129,13 @@ class NextVerdictTests(unittest.TestCase):
         self.assertEqual(verdict["action"], "stop")
         self.assertIn("not converging", verdict["stop"])
 
+    def test_commits_that_ci_never_ran_on_do_not_break_the_failing_streak(self):
+        failing = [{"commit": {"oid": str(n), "statusCheckRollup": {"state": "FAILURE"}}} for n in range(3)]
+        pushed_with_the_tip = {"commit": {"oid": "mid", "statusCheckRollup": None}}
+        verdict = action(PR, recent=[failing[0], pushed_with_the_tip, failing[1], pushed_with_the_tip, failing[2]])
+        self.assertEqual(verdict["action"], "stop")
+        self.assertIn("not converging", verdict["stop"])
+
     def test_a_check_pending_past_the_limit_stops_the_wait(self):
         verdict = action(PR, stuck_minutes=5)
         self.assertEqual(verdict["action"], "stop")

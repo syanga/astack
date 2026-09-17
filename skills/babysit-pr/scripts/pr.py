@@ -58,7 +58,7 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
         }
       }
       reviews(last: 100) { nodes { author { login __typename } viewerDidAuthor state submittedAt body commit { oid } } }
-      commits(last: 5) { nodes { commit { oid statusCheckRollup { state } } } }
+      commits(last: 20) { nodes { commit { oid statusCheckRollup { state } } } }
     }
   }
 }
@@ -226,7 +226,7 @@ def assess(snapshot):
     threads = snapshot["threads"]["unresolved"]
     work = [thread for thread in threads if not thread["awaiting_user"]]
     waiting = [thread for thread in threads if thread["awaiting_user"]]
-    streak = [commit["ci"] for commit in snapshot["recent_commits"]][-3:]
+    streak = [commit["ci"] for commit in snapshot["recent_commits"] if commit["ci"]][-3:]
     blockers = []
     if snapshot["draft"]:
         blockers.append("the PR is a draft")
@@ -255,7 +255,7 @@ def assess(snapshot):
     elif snapshot["mergeable_overdue"]:
         stop = "GitHub has not computed mergeability long after the head commit"
     elif len(streak) == 3 and all(state in ("FAILURE", "ERROR") for state in streak):
-        stop = "the last three commits failed CI, so the fixes are not converging"
+        stop = "the last three commits CI ran on failed, so the fixes are not converging"
     elif not blockers and not checks["pending"] and ours["on_head"] == 0 and ours["total"] >= ours["cap"]:
         stop = "the review cap of {} rounds is reached with the head unreviewed".format(ours["cap"])
     if stop:
