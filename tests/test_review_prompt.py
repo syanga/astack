@@ -34,6 +34,13 @@ class PromptTests(unittest.TestCase):
         self.assertIn("The tree at /tmp/tree contains this change.", prompt)
         self.assertIn("This is the first review round on this change.", prompt)
 
+    def test_only_a_prompt_with_a_tree_allows_running_code_and_none_allows_writing(self):
+        with_tree = self.build("--tree", "/tmp/tree")
+        self.assertIn("You may run code there to prove a finding. Create or change no file.", with_tree)
+        without_tree = self.build()
+        self.assertIn("No tree is available.", without_tree)
+        self.assertNotIn("run code", without_tree)
+
     def test_lenses_prune_the_rubric_and_its_principles(self):
         prompt = self.build("--lenses", "verification")
         self.assertIn("## Verification", prompt)

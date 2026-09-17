@@ -16,8 +16,6 @@ Commits, oldest first:
 
 {{TREE}}
 
-You may run code in that tree to prove a finding. Change nothing outside it.
-
 ## Earlier rounds
 
 {{PRIOR}}
