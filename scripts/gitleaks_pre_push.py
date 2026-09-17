@@ -53,9 +53,9 @@ def scan(payload, revs):
     with tempfile.TemporaryDirectory(prefix="astack-gitleaks-") as tmp:
         report = Path(tmp) / "report.json"
         opts = ["--full-history", "--diff-merges=separate", "--root", "--format=medium",
-                "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", *revs]
+                "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "--text", *revs]
         result = subprocess.run([
-            str(payload / "gitleaks"), "git", ".", "--no-banner", "--redact=100",
+            str(payload / "gitleaks"), "git", git("rev-parse", "--absolute-git-dir"), "--no-banner", "--redact=100",
             "--exit-code=10", "--log-level=error", "--timeout=120",
             "--config", str(payload / "rules.toml"),
             "--gitleaks-ignore-path", str(payload / "ignore"), "--ignore-gitleaks-allow",

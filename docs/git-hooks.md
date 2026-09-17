@@ -89,7 +89,8 @@ Missing remote-tip objects and shallow history block the push with a fetch/retry
 message. The hook does not silently fetch, change refs, or widen permissions.
 Git replacement objects are disabled during history selection and scanning so the
 guard checks the original objects that Git will transfer, including annotated tags.
-Git diff drivers and text conversions are disabled during scanning. The guard
+Git diff drivers and text conversions are disabled during scanning, and the
+content of a file that Git treats as binary reaches the scanner as text. The guard
 uses Gitleaks' bundled default rules; working-tree `.gitleaks.toml`, `.gitleaksignore`,
 `gitleaks:allow` comments, and `GITLEAKS_*` environment overrides cannot silently
 weaken this guard. Custom allowlists are not part of this first version.
@@ -100,11 +101,14 @@ redacted and kept in a private temporary directory that is removed after scannin
 Each scan has a 120-second scanner deadline and a 150-second process timeout;
 expiration blocks rather than claiming a clean result.
 
-This is pattern-based detection, not proof that a push is free of secrets. Binary
-and archive coverage follows Gitleaks' Git-patch scanner; this integration does not
-enable archive traversal. It does not scan PR descriptions or rotate credentials.
-As with other local hooks, `git push --no-verify` bypasses it (and all other pre-push
-checks). Use that only as a deliberate decision after investigating the finding.
+This is pattern-based detection, not proof that a push is free of secrets. Gitleaks'
+default rules skip some paths, including extensions such as `.bin` and `.pdf`,
+dependency lock files such as `package-lock.json`, and anything under `node_modules`.
+The guard does not report a secret in a skipped path. Archive coverage follows
+Gitleaks' Git-patch scanner; this integration does not enable archive traversal. It
+does not scan PR descriptions or rotate credentials. As with other local hooks,
+`git push --no-verify` bypasses it (and all other pre-push checks). Use that only
+as a deliberate decision after investigating the finding.
 
 ## Verification and updates
 
@@ -119,7 +123,8 @@ ASTACK_TEST_GITLEAKS=/path/to/gitleaks \
 CI provisions the verified release into a disposable repository and runs these
 tests on Linux. Tests cover install/reinstall/uninstall, worktrees,
 hook chaining and gstack replacement, scanner failures, clean pushes, intermediate
-commits, force-pushes, merge resolutions, annotated tags, and multiple refs.
+commits, force-pushes, merge resolutions, annotated tags, multiple refs, replacement
+objects, a working-tree `.gitleaksignore`, and files that Git treats as binary.
 
 To upgrade, review the upstream release and detection behavior, update `VERSION`
 in `scripts/gitleaks_pre_push.py`, the release checksums, and this documentation;
