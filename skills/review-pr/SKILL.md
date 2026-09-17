@@ -14,14 +14,14 @@ Take one of three routes.
 
 - For a PR number or URL, run `gh pr view <n> --json title,body,baseRefName,headRefName,commits,closingIssuesReferences`. Run `git fetch origin <base>`, then `git fetch origin pull/<n>/head`, and record `git rev-parse FETCH_HEAD` as the reviewed SHA. Run `python3 <this skill's directory>/../babysit-pr/scripts/pr.py status --pr <n>` and read `our_reviews`.
   - When `last_sha_in_pr` is false, or the user asked for a full review, this is a full round. The diff is `gh pr diff <n>` and the commit list is `git log --reverse --oneline origin/<base>..<sha>`.
-  - Otherwise this is a later round. The diff is `git diff "$(git merge-tree --write-tree <last_sha> $(git merge-base origin/<base> <sha>) | head -1)" <sha>`, which leaves out what a merge of the base brought in. When that diff shows conflict markers, use `git diff <last_sha>..<sha>` and tell the reviewers the base merge is included. The commit list is `git log --reverse --oneline --first-parent <last_sha>..<sha>`.
+  - Otherwise this is a later round. The diff is `git diff "$(git merge-tree --write-tree <last_sha> $(git merge-base origin/<base> <sha>) | head -1)" <sha>`, which leaves out what a merge of the base brought in. When that diff shows conflict markers, use `git diff <last_sha>..<sha>` and tell the reviewers the base merge is included. The commit list is `git log --reverse --oneline --first-parent <last_sha>..<sha>`. When the diff command exits 0 and prints nothing, and the commit list is not empty, this is an empty later round: the new commits change nothing that the earlier rounds did not read, as when they only merge the base. Skip the rest of this step and steps 2 to 4, and go to step 5.
   - When `total` is above zero, on either kind of round, the earlier rounds are the output of `pr.py history --pr <n>`.
 
   Then run `tree="$(mktemp -d)/review-<n>" && git worktree add --detach "$tree" <sha> && echo "$tree"` and record the path.
 - For the current branch, run `git fetch origin <base>` and `git diff $(git merge-base origin/<base> HEAD)`. The tree is the repository root and the commit list is `git log --reverse --oneline origin/<base>..HEAD`.
 - For files or a pasted diff the user names, use those. There is no tree, and the commit list is the one line "none".
 
-Write the diff and the commit list each to a file in the system's temporary directory, and the earlier rounds too when there are any. Done when the diff file is non-empty, the commit list file exists, and, on the PR route, `git -C <tree> rev-parse HEAD` prints the reviewed SHA. Otherwise say so and stop.
+Write the diff and the commit list each to a file in the system's temporary directory, and the earlier rounds too when there are any. Done when this is an empty later round, or the diff file is non-empty, the commit list file exists, and, on the PR route, `git -C <tree> rev-parse HEAD` prints the reviewed SHA. Otherwise say so and stop.
 
 ## 2. State the intent
 
@@ -47,9 +47,9 @@ python3 <this skill's directory>/scripts/build_prompt.py spec --intent <file> --
 
 Add `--prior <file>` whenever earlier rounds exist, and `--since <last_sha>` on a later round. Add `--lenses` to keep only the lenses of [`rubric.md`](rubric.md) the change can touch, named by the start of their headings. A change to prose alone keeps `correctness,verification,complexity`. Omit `--lenses` when the change touches code, and omit `--tree` on the route that has none. Then spawn the reviewers in parallel, each told only to read its prompt file in full and follow it.
 
-- On a full round, send the code prompt to three reviewers, spread over as many models as the harness offers. Send it to two when the harness offers one model.
-- On a later round, send the code prompt to one reviewer, on a model other than yours when the harness offers one.
-- Send the spec prompt to one reviewer on a full round. On a later round, send it only when the new commits add, remove, or change a behaviour the sources name. A commit that fixes a review finding does not.
+- On a full round, `git apply --numstat <diff file> | awk '{n += $1 + $2} END {print n + 0}'` prints the number of changed lines. A count of 0 means the command could not read the diff. At 200 or more, or at 0, send the code prompt to three reviewers, spread over as many models as the harness offers. Send it to two when the harness offers one model.
+- On a full round under 200 changed lines, and on every later round, send the code prompt to one reviewer, on a model other than yours when the harness offers one.
+- Send the spec prompt to one reviewer when step 2 found a linked issue, a spec file, or a user's message that carries intent. Those are the sources the author of the change did not write, so a spec reviewer can check the change against them. On a later round, send it only when the new commits also add, remove, or change a behaviour the sources name. A commit that fixes a review finding does not.
 
 Name them code reviewer 1, 2, 3 and spec reviewer. Without a subagent tool, follow each prompt file yourself, one after the other.
 
@@ -71,7 +71,7 @@ The verdict has these parts, whichever route delivers it.
 
 ## 5. Deliver
 
-On the PR route, write a findings file in the system's temporary directory, in the shape the module docstring of `pr.py` documents. Its `comments` hold one entry per act-on and consider finding, and each `body` opens with the bucket and severity. The `line` must be inside a diff hunk of the PR, because GitHub rejects the whole review otherwise. Anchor a finding about an unchanged line on the changed line that leads to it, and name the real `file:line` in the comment, so every act-on and consider finding opens a thread the babysit verdict can see. Its `body` holds the intent, the reviewers, the noted and dismissed findings, the agreement, and the summary. An act-on or consider finding about the PR's title or body has no line of its own. Anchor it on any line inside a diff hunk, and say in the comment that it is about the title or the body. From the repository root, post it:
+On the PR route, write a findings file in the system's temporary directory, in the shape the module docstring of `pr.py` documents. Its `comments` hold one entry per act-on and consider finding, and each `body` opens with the bucket and severity. The `line` must be inside a diff hunk of the PR, because GitHub rejects the whole review otherwise. Anchor a finding about an unchanged line on the changed line that leads to it, and name the real `file:line` in the comment, so every act-on and consider finding opens a thread the babysit verdict can see. Its `body` holds the intent, the reviewers, the noted and dismissed findings, the agreement, and the summary. An act-on or consider finding about the PR's title or body has no line of its own. Anchor it on any line inside a diff hunk, and say in the comment that it is about the title or the body. For an empty later round, the file has no `comments`, and its `body` is the one sentence that the commits since `<last_sha>` change nothing the earlier rounds did not read. From the repository root, post it:
 
 ```bash
 python3 <this skill's directory>/../babysit-pr/scripts/pr.py review --pr <n> --commit <reviewed sha> --review-file <file> --model <your model id>
@@ -88,6 +88,6 @@ Act on: <title>
 Folded: no thread was opened.
 ```
 
-On the other two routes, reply with the whole verdict.
+For an empty later round, reply with the review URL and the sentence in its body. On the other two routes, reply with the whole verdict.
 
-Done, on the PR route, when the posted review body carries every other part of the verdict, and the script printed an `inline` count equal to the number of act-on and consider findings, or you reported the fold or the failed post in the reply. Done, on the other routes, when the reply carries every part of the verdict.
+Done, on the PR route, when the posted review body carries every other part of the verdict, or the one sentence of an empty later round, and the script printed an `inline` count equal to the number of act-on and consider findings, or you reported the fold or the failed post in the reply. Done, on the other routes, when the reply carries every part of the verdict.

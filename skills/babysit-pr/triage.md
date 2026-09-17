@@ -4,14 +4,14 @@ A review thread from a bot or a person is a claim to verify against the code. Th
 
 ## Classes
 
-- **fix**. The claim holds against the current code. Change only what the finding asks for, because each added sentence is new text for the next round to review. When the finding admits a test, write one that fails first, then fix in the same commit.
+- **fix**. The claim holds against the current code. Change only what the finding asks for, because each added sentence is new text for the next round to review. A noted finding that the Threads block of `SKILL.md` sends into the same push is the one addition. When the finding admits a test, write one that fails first, then fix in the same commit.
 - **dismiss**. The current code proves the claim needs no change, and the reply carries the evidence: the file and line, the test that passes, or the invariant that covers it. A pattern below says where to look for the evidence. Matching a pattern is not itself evidence.
-- **defer**. The claim holds, and fixing it now costs more than this PR should carry: it is not small, or it belongs to other work. Reply with the reason and resolve the thread. Every deferral goes in the report to the user as a follow-up.
+- **defer**. The claim holds, and fixing it now costs more than this PR should carry: it is not small, or it belongs to other work. A consider finding that the `ours` rule below defers needs no verification. Reply with the reason and resolve the thread. Every deferral goes in the report to the user as a follow-up.
 - **ask**. The claim is novel or ambiguous, or it is in an ask-by-default category and you did not verify it. Reply on the thread with the question and leave it unresolved. The snapshot then shows the thread as `awaiting_user` and the PR is handed off rather than merged.
 
 When a claim is cheap to test, run the test before classifying. A red run confirms the claim. A green run is the evidence for a dismissal. When a comment asks for work outside the PR's intent, reply with the intent quoted rather than widening the change.
 
-A thread the snapshot marks `ours` is a review-pr finding, and its first line under the on-behalf-of header names its bucket. Fix an act-on finding. Fix a consider finding when the fix is small, otherwise defer it. When the snapshot's `our_reviews.last_round` is true, the review on the head is the last the cap allows: defer every consider finding, so the reviewed head stays reviewed and the run can end at `merge-ready`. An act-on finding on the last round is still fixed, and that push ends the run in `stop`, because a blocking defect on the last round needs the user. The ask-by-default categories below apply to `ours` threads too, except a consider finding on the last round, which is deferred and named in the report.
+A thread the snapshot marks `ours` is a review-pr finding, and its first line under the on-behalf-of header names its bucket. Fix an act-on finding on every round. When the snapshot's `our_reviews.first_round` is true and `our_reviews.last_round` is false, fix each consider finding whose fix is small, in the same push as any act-on fixes, and defer the others. Otherwise defer every consider finding, because each fix is new text in which the next round finds another consider finding. When `our_reviews.last_round` is true, the review on the head is the last the cap allows. A fix on the last round that pushes a commit ends the run in `stop`, because a blocking defect on the last round needs the user. A fix made with `gh pr edit` pushes nothing, so the head stays reviewed and the run goes on. The ask-by-default categories below apply to `ours` threads too, except a consider finding that this paragraph defers, which is named in the report.
 
 ## Ask by default
 
@@ -24,7 +24,7 @@ These categories are ask by default: security, privacy, auth, billing, data rete
 - **Fixed.** The SHA, the changed lines or the first few of a longer change, one sentence on what was wrong. For a fix made with `gh pr edit`, the new text in place of the SHA.
 - **Already fixed.** The SHA that addressed it and how.
 - **Dismissed.** One sentence stating why, then the evidence.
-- **Deferred.** That the claim holds, why it waits, and that the run's report lists it as a follow-up.
+- **Deferred.** That the claim holds, or that you did not verify it, why it waits, and that the run's report lists it as a follow-up.
 - **Asked.** The question for the user, your read of the claim, and what you verified so far.
 
 Every reply cites code. From a bot's third pass on the same PR, lean toward dismissing the documented patterns. The snapshot counts passes, and the ask-by-default categories still go to the user. One exception to that rule: a test that pins prose (a regex over a doc, a snapshot of wording) drifts because earlier fix rounds edited the prose, so a drift claim on a late pass is often real.

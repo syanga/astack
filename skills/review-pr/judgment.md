@@ -17,7 +17,7 @@ A spec finding is judged like a code finding: missing or wrong starts as act on,
 
 ## Filters that move a finding down
 
-When the change under review is a babysitter's fix, from this run or an earlier one, a filter needs evidence that the claim is wrong. The cost of another round is never a reason to move a finding down.
+On a later round, the commits under review follow a review marked ours, so they hold a babysitter's fix, and a filter needs evidence that the claim is wrong. The cost of another round is never a reason to move a finding down.
 
 - **All nits.** An adversarial reviewer with nothing to find reports style. A report of nits says the code is fine. Say so.
 - **Hypothetical or actual.** Trace the call site. If a type or an upstream check rules the case out, dismiss and say where.

@@ -39,7 +39,7 @@ Apply [`../technical-writing/SKILL.md`](../technical-writing/SKILL.md) to the ti
 
 For the title, when the log uses Conventional Commits, use the changed area as the scope and name the symbol the change is about.
 
-The body is the briefing the global rules describe. It is also the squash commit body, so keep it to forty lines. Write only these sections, in this order, and link any other artifact.
+The body is the briefing the global rules describe. It is also the squash commit body, so keep it to forty lines. A count of tests, lines, or commits goes stale at the next push, so name the command that was run and its result in place of the count. Write only these sections, in this order, and link any other artifact.
 
 - `## Why`. Give the intent and the approach in one or two short paragraphs. For a bug fix, give the root cause. Add `Closes #<n>` when an issue exists.
 - `## Scope`. Include it when the boundary matters. Name the symbols and paths that are in, what stays out, and both sides of a rename.
@@ -54,6 +54,7 @@ Done when:
 - the body has a Why section and a Verification section
 - every included section carries the content above
 - `wc -l` on the body reports at most forty lines
+- the body carries no count of tests, lines, or commits
 
 ## 7. Open the PR and reply
 

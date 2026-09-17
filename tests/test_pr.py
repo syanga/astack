@@ -1,6 +1,8 @@
 import copy
 import importlib.util
+import json
 from pathlib import Path
+import subprocess
 import unittest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "skills/babysit-pr/scripts/pr.py"
@@ -88,10 +90,12 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["bots"], {"bugbot": {"passes": 2, "last": "2026-09-15T12:00:00Z", "since_head": True}})
         self.assertEqual(snapshot["recent_commits"], [{"sha": "old111", "ci": "FAILURE"}, {"sha": "abc123", "ci": None}])
         self.assertEqual(snapshot["our_reviews"],
-                         {"total": 0, "on_head": 0, "cap": 5, "last_round": False, "last_sha": None, "last_sha_in_pr": False,
+                         {"total": 0, "on_head": 0, "cap": 5, "first_round": False, "last_round": False,
+                          "last_sha": None, "last_sha_in_pr": False,
                           "folded_on_head": False, "folded_act_on": 0})
         self.assertEqual([comment["body"] for comment in snapshot["new_comments"]], ["after push"])
-        self.assertEqual(snapshot["head"], {"sha": "abc123", "ref": "feature", "committed_at": "2026-09-15T10:00:00Z"})
+        self.assertEqual(snapshot["head"], {"sha": "abc123", "ref": "feature", "committed_at": "2026-09-15T10:00:00Z",
+                                            "pushed_at": None})
         self.assertEqual(snapshot["next"]["action"], "fix")
 
     def test_only_a_first_line_header_marks_a_thread_ours(self):
@@ -125,6 +129,24 @@ class NextVerdictTests(unittest.TestCase):
         self.assertEqual(verdict([], "2026-09-15T10:05:00Z"), "review")
         self.assertEqual(verdict(earlier, "2026-09-15T10:11:00Z"), "review")
 
+    def test_the_grace_for_checks_runs_from_the_push_not_the_commit(self):
+        earlier = [{"commit": {"oid": "c1", "statusCheckRollup": {"state": "SUCCESS"}}}]
+        bare = green_pr(statusCheckRollup=[])
+        def verdict(pushed_at):
+            return pr.summarize(bare, [], [], earlier, SINCE, NOW, pushed_at=pushed_at)["next"]["action"]
+        self.assertEqual(verdict(None), "review")
+        self.assertEqual(verdict("2026-09-15T10:25:00Z"), "wait")
+
+    def test_the_push_time_is_asked_for_again_while_the_latest_listed_push_is_not_the_head(self):
+        pull = {"headRepository": {"nameWithOwner": "o/r"}, "headRefName": "feature", "headRefOid": "abc123"}
+        listings = iter([[{"after": "old111", "timestamp": "2026-09-15T09:00:00Z"}],
+                         [{"after": "abc123", "timestamp": "2026-09-15T10:25:00Z"}]])
+        sleeps = []
+        def run(*args, **kwargs):
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps(next(listings)), stderr="")
+        self.assertEqual(pr.fetch_pushed_at(pull, run, sleeps.append), "2026-09-15T10:25:00Z")
+        self.assertEqual(sleeps, [pr.PUSH_LISTING_RETRY_SECONDS])
+
     def test_a_head_already_reviewed_is_never_reviewed_again(self):
         self.assertEqual(action(green_pr(), reviews=[our_review("abc123")])["action"], "merge-ready")
 
@@ -156,12 +178,18 @@ class NextVerdictTests(unittest.TestCase):
         snapshot = pr.wait_until_settled(snapshot_once, lambda seconds: None, lambda: 0, 600, 30)
         self.assertEqual(snapshot["next"]["action"], "review")
 
-    def test_the_last_allowed_round_is_flagged_so_consider_findings_get_deferred(self):
+    def test_the_last_allowed_round_is_flagged(self):
         four = [our_review("c{}".format(n)) for n in range(4)]
         self.assertEqual(pr.summarize(green_pr(), [], four, [], SINCE, NOW)["our_reviews"]["last_round"], False)
         five = four + [our_review("abc123")]
         snapshot = pr.summarize(green_pr(), [], five, [], SINCE, NOW)
         self.assertEqual((snapshot["our_reviews"]["last_round"], snapshot["next"]["action"]), (True, "merge-ready"))
+
+    def test_only_the_first_round_is_flagged_so_later_consider_findings_get_deferred(self):
+        def first_round(reviews):
+            return pr.summarize(green_pr(), [], reviews, [], SINCE, NOW)["our_reviews"]["first_round"]
+        self.assertEqual((first_round([our_review("c1")]), first_round([our_review("c1"), our_review("abc123")])),
+                         (True, False))
 
     def test_our_own_thread_replies_do_not_show_up_as_new_reviews(self):
         reply_shell = {"author": ALAN, "viewerDidAuthor": True, "state": "COMMENTED",
@@ -174,6 +202,13 @@ class NextVerdictTests(unittest.TestCase):
         verdict = action(green_pr(), reviews=[our_review("c1"), our_review("c2"), our_review("c3")], review_cap=3)
         self.assertEqual(verdict["action"], "stop")
         self.assertIn("review cap", verdict["stop"])
+
+    def test_review_cap_waits_for_the_checks_of_a_fresh_head_to_register(self):
+        earlier = [{"commit": {"oid": "c1", "statusCheckRollup": {"state": "SUCCESS"}}}]
+        capped = [our_review("c1"), our_review("c2"), our_review("c3")]
+        snapshot = pr.summarize(green_pr(statusCheckRollup=[]), [], capped, earlier, SINCE, "2026-09-15T10:05:00Z",
+                                review_cap=3)
+        self.assertEqual(snapshot["next"]["action"], "wait")
 
     def test_three_failing_commits_stop_a_fix_loop(self):
         failing = [{"commit": {"oid": str(n), "statusCheckRollup": {"state": "FAILURE"}}} for n in range(3)]
@@ -199,7 +234,7 @@ class NextVerdictTests(unittest.TestCase):
             self.assertEqual((verdict["action"], verdict["stop"]), ("stop", "the PR is {}, not open".format(state)))
         self.assertEqual(action(dict(PR, state="CLOSED"))["action"], "stop")
 
-    def test_a_pending_status_without_a_start_time_is_dated_from_the_head_commit(self):
+    def test_a_pending_status_without_a_start_time_is_dated_from_the_head(self):
         legacy = green_pr(statusCheckRollup=[{"__typename": "StatusContext", "context": "deploy", "state": "PENDING"}])
         self.assertEqual(action(legacy)["action"], "wait")
         self.assertEqual(action(legacy, stuck_minutes=5)["action"], "stop")
