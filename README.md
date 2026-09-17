@@ -45,7 +45,7 @@ or Linux (ARM64 or x64). It requires Python 3.10+ and Git 2.31+.
 
 To replace an existing gstack-managed guard, use `--replace-gstack`. To install
 offline, pass `--gitleaks /path/to/gitleaks` with a trusted executable of the
-Gitleaks version that `VERSION` in `scripts/gitleaks_pre_push.py` pins. The
+Gitleaks version that `VERSION` in `skills/open-pr/scripts/gitleaks_pre_push.py` pins. The
 installer checks its version and copies it without a download.
 
 The installer keeps an existing `pre-push` hook. If that hook is executable, the
@@ -56,12 +56,12 @@ does not run it. The guard runs only the wrapper's `pre-push.local`, if that
 file exists and is executable. The installer refuses a custom `core.hooksPath`,
 such as Husky's, and a symlinked hooks directory.
 
-`uninstall.sh` does not remove the guard. Remove it with `scripts/git_hooks.py`,
+`uninstall.sh` does not remove the guard. Remove it with `skills/open-pr/scripts/git_hooks.py`,
 which restores the earlier hook, or deletes `pre-push` when no earlier hook
 existed:
 
 ```sh
-python3 scripts/git_hooks.py uninstall --repo /path/to/project
+python3 skills/open-pr/scripts/git_hooks.py uninstall --repo /path/to/project
 ```
 
 Each push scans the commit patches it sends:
@@ -91,8 +91,8 @@ A finding blocks the push, and its message gives the rule, path, line,
 and commit without the secret. A scanner failure also blocks the push.
 `git push --no-verify` skips the guard along with every other pre-push check.
 
-To upgrade Gitleaks, update `VERSION` in `scripts/gitleaks_pre_push.py`, the
-version, checksums, and `checksums_source` URL in `tools/gitleaks/releases.json`,
+To upgrade Gitleaks, update `VERSION` in `skills/open-pr/scripts/gitleaks_pre_push.py`, the
+version, checksums, and `checksums_source` URL in `skills/open-pr/scripts/gitleaks/releases.json`,
 and the version that the fake scanner in `tests/test_git_hooks.py` prints. Then
 run the hook tests against the real scanner:
 
