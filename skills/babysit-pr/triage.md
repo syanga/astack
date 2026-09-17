@@ -1,6 +1,6 @@
 # Triage a review thread
 
-A review thread, from a bot or a person, is a claim to verify against the code. These are the classes, the evidence each needs, and the patterns that have repeated.
+A review thread from a bot or a person is a claim to verify against the code. A thread the snapshot marks `ours` is a review-pr finding and is handled in the babysit procedure, not here. These are the classes, the evidence each needs, and the patterns that have repeated.
 
 ## Classes
 

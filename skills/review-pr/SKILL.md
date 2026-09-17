@@ -1,12 +1,12 @@
 ---
 name: review-pr
-description: Adversarial review of a diff or pull request. Findings, no fixes.
+description: Adversarial review of a diff or pull request. Findings posted to the PR, no fixes.
 disable-model-invocation: true
 ---
 
 # Review a PR
 
-This review is read-only. The deliverable is a verdict the author can act on. Fixing is a separate request. The one write this skill makes is a worktree for the PR head, so reviewers read the code the diff describes.
+This review changes no code. The deliverable is a verdict the author can act on, posted to the PR as review comments when there is a PR. Fixing is a separate request. The one write to the working tree is a worktree for the PR head, so reviewers read the code the diff describes.
 
 ## 1. Set the scope
 
@@ -44,9 +44,23 @@ Done when every reviewer has reported and each prompt carried everything listed 
 
 ## 4. Judge
 
-Apply [`judgment.md`](judgment.md) to the code findings. Keep the spec findings separate from the code findings. For the PR route, run `git worktree remove ../review-<n>` and `git branch -D review/<n>`. Done when every code finding has a bucket and a one-line rationale, every spec finding quotes its source line, and, for the PR route, the worktree and the branch are gone.
+Apply [`judgment.md`](judgment.md) to the code findings. Keep the spec findings separate from the code findings. Done when every code finding has a bucket and a one-line rationale, and every spec finding quotes its source line.
 
-## Output
+## 5. Post the review
+
+On the PR route, write a findings file and post it with the sibling script:
+
+```bash
+python3 ../babysit-pr/scripts/pr.py review --pr <n> --review-file <file> --model <your model id>
+```
+
+The file is `{"body": ..., "comments": [...]}`. Put one comment per act-on and consider finding, with its `path`, its `line` in the head commit, and a body that opens with the bucket and severity, then the finding, the evidence with its rung, and the suggestion. Put the rest in `body`: the intent and its sources, the spec findings with their quoted source lines, the noted and dismissed findings with their reasons, the agreement map, and the summary line. The script adds the on-behalf-of header to every body and posts one review on the head commit. Each comment becomes a review thread the author can resolve.
+
+Then run `git worktree remove ../review-<n>` and `git branch -D review/<n>`. On the other two routes, skip the post and put the whole verdict in the reply.
+
+Done when, on the PR route, `gh pr view <n> --json reviews` lists the review, and the worktree and branch are gone.
+
+## Reply
 
 - **Intent.** The paragraph, and the sources found.
 - **Reviewers.** One line each: name, model, number of findings.
@@ -54,3 +68,4 @@ Apply [`judgment.md`](judgment.md) to the code findings. Keep the spec findings 
 - **Spec.** Missing, unrequested, and wrong, each quoting the source line.
 - **Agreement.** Where reviewers agreed, where one contradicted another, and which findings came from one reviewer alone.
 - **Summary.** One line naming the worst code finding and the worst spec finding. Do not rank one against the other.
+- **Posted.** On the PR route, the review URL.

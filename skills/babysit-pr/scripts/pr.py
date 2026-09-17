@@ -7,6 +7,12 @@ and reach gh as JSON on stdin, so no comment text passes through a shell.
     pr.py status  [--pr N] [--repo o/r] [--since ISO]
     pr.py reply   --thread <id> --body-file <file> --model <id>
     pr.py resolve --thread <id>
+    pr.py review  --review-file <json> --model <id> [--pr N] [--repo o/r]
+
+The review file is {"body": "...", "comments": [{"path", "line", "body"}, ...]}.
+It becomes one PR review on the head commit with an inline comment per entry.
+A comment on a line outside the diff makes GitHub reject the whole review, so
+on rejection the comments move into the review body and the review is retried.
 
 Exit code 2 means gh itself failed (auth, network, rate limit). Retry once
 before treating that as a result. Reviews are read up to the first 100.
@@ -18,6 +24,7 @@ import subprocess
 import sys
 
 ON_BEHALF_OF = "ALAN"
+HEADER_MARK = "RESPONDING ON BEHALF OF " + ON_BEHALF_OF
 
 PR_FIELDS = ("number,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
              "headRefOid,headRefName,baseRefName,commits,statusCheckRollup,comments,autoMergeRequest")
@@ -128,6 +135,7 @@ def summarize(pr, threads, reviews, since):
         unresolved.append({
             "id": thread["id"], "path": thread.get("path"), "line": thread.get("line"),
             "outdated": bool(thread.get("isOutdated")), "author": login(first), "bot": is_bot(first),
+            "ours": HEADER_MARK in first.get("body", ""),
             "body": first.get("body", ""), "replies": max(len(comments) - 1, 0), "url": first.get("url"),
         })
     bots = {}
@@ -168,8 +176,23 @@ def summarize(pr, threads, reviews, since):
 
 
 def format_body(model, body):
-    """Every reply an agent posts carries this header so readers know who wrote it."""
-    return "[{}] RESPONDING ON BEHALF OF {}\n======\n\n{}".format(model, ON_BEHALF_OF, body.rstrip("\n") + "\n")
+    """Every comment an agent posts carries this header so readers know who wrote it."""
+    return "[{}] {}\n======\n\n{}".format(model, HEADER_MARK, body.rstrip("\n") + "\n")
+
+
+def build_review(model, review, commit):
+    """Pure: shape the findings file into GitHub's review payload, header on every body."""
+    return {
+        "event": "COMMENT", "commit_id": commit, "body": format_body(model, review["body"]),
+        "comments": [{"path": c["path"], "line": int(c["line"]), "side": "RIGHT", "body": format_body(model, c["body"])}
+                     for c in review.get("comments", [])],
+    }
+
+
+def fold_comments(review):
+    """Move inline findings into the body for the retry after GitHub rejects a line outside the diff."""
+    moved = "\n\n".join("{}:{}\n{}".format(c["path"], c["line"], c["body"]) for c in review.get("comments", []))
+    return {"body": review["body"] + "\n\nFindings on lines outside the diff:\n\n" + moved, "comments": []}
 
 
 def command_status(args):
@@ -186,6 +209,25 @@ def command_reply(args):
         body = format_body(args.model, handle.read())
     result = graphql(REPLY_MUTATION, thread=args.thread, body=body)
     print(result["addPullRequestReviewThreadReply"]["comment"]["url"])
+
+
+def command_review(args):
+    pr = fetch_pr(args)
+    owner, name = pr["url"].split("/")[3:5]
+    with open(args.review_file, encoding="utf-8") as handle:
+        review = json.load(handle)
+    endpoint = "repos/{}/{}/pulls/{}/reviews".format(owner, name, pr["number"])
+    for attempt in (review, fold_comments(review)):
+        payload = build_review(args.model, attempt, pr["headRefOid"])
+        result = subprocess.run(["gh", "api", "--method", "POST", endpoint, "--input", "-"],
+                                input=json.dumps(payload), capture_output=True, text=True)
+        if result.returncode == 0:
+            print(json.loads(result.stdout)["html_url"])
+            return
+        if not payload["comments"]:
+            break
+    print("gh api {} failed: {}".format(endpoint, result.stderr.strip()), file=sys.stderr)
+    sys.exit(2)
 
 
 def command_resolve(args):
@@ -208,6 +250,13 @@ def main(argv=None):
     reply.add_argument("--body-file", required=True)
     reply.add_argument("--model", required=True, help="model id for the on-behalf-of header")
     reply.set_defaults(run=command_reply)
+
+    review = commands.add_parser("review", help="post a PR review with inline comments from a findings file")
+    review.add_argument("--pr", help="PR number or URL; defaults to the current branch's PR")
+    review.add_argument("--repo", help="owner/name; defaults to the current repository")
+    review.add_argument("--review-file", required=True, help="JSON with body and comments")
+    review.add_argument("--model", required=True, help="model id for the on-behalf-of header")
+    review.set_defaults(run=command_review)
 
     resolve = commands.add_parser("resolve", help="resolve a review thread")
     resolve.add_argument("--thread", required=True, help="thread id from the status snapshot")

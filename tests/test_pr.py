@@ -56,7 +56,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["threads"]["resolved"], 1)
         self.assertEqual(snapshot["threads"]["unresolved"], [{
             "id": "T2", "path": "b.py", "line": 7, "outdated": False, "author": "bugbot", "bot": True,
-            "body": "possible race", "replies": 1, "url": "t2",
+            "ours": False, "body": "possible race", "replies": 1, "url": "t2",
         }])
         self.assertEqual(snapshot["bots"], {"bugbot": {"passes": 2, "last": "2026-09-15T12:00:00Z", "since_head": True}})
         self.assertEqual([comment["body"] for comment in snapshot["new_comments"]], ["after push"])
@@ -65,6 +65,23 @@ class SnapshotTests(unittest.TestCase):
         self.assertIsNone(snapshot["review_decision"])
         self.assertEqual(snapshot["head"], {"sha": "abc123", "ref": "feature", "committed_at": "2026-09-15T10:00:00Z"})
         self.assertEqual(snapshot["since"], SINCE)
+
+    def test_own_review_threads_are_flagged(self):
+        ours = {"id": "T3", "isResolved": False, "isOutdated": False, "path": "c.py", "line": 2,
+                "comments": {"nodes": [{"author": ALAN, "body": pr.format_body("m", "Act on: null path"), "createdAt": SINCE, "url": "t3"}]}}
+        snapshot = pr.summarize(PR, [ours], [], SINCE)
+        self.assertEqual([t["ours"] for t in snapshot["threads"]["unresolved"]], [True])
+
+    def test_review_payload_and_fold(self):
+        review = {"body": "Verdict.", "comments": [{"path": "a.py", "line": 7, "body": "Race here."}]}
+        payload = pr.build_review("m", review, "abc123")
+        self.assertEqual(payload["event"], "COMMENT")
+        self.assertEqual(payload["commit_id"], "abc123")
+        self.assertEqual(payload["comments"], [{"path": "a.py", "line": 7, "side": "RIGHT",
+                                                "body": "[m] RESPONDING ON BEHALF OF ALAN\n======\n\nRace here.\n"}])
+        folded = pr.fold_comments(review)
+        self.assertEqual(folded["comments"], [])
+        self.assertIn("a.py:7\nRace here.", folded["body"])
 
     def test_comment_header(self):
         self.assertEqual(pr.format_body("claude-fable-5-1", "Fixed in 1a2b3c.\n"),
