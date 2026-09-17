@@ -36,5 +36,5 @@ I wanted to share some of my preferences here so we can be more aligned as we wo
 * The body is a briefing a reviewer reads in under a minute: why the change exists, then how it was verified. End with a blurb naming the model and harness that made the changes.
 * Open a real PR, not a draft. Drafts do not get review-bot coverage.
 * Rebase onto latest main before opening. Stale branches conflict and waste a review round.
-* Babysit only when asked, with the babysit-pr skill. It reviews with review-pr, fixes, and waits for CI until the PR is merge-ready. Verify each review finding against the source before acting on it, dismiss false positives with a written reason, and stay quiet while waiting.
+* Babysit only when asked, with the babysit-pr skill, and stay quiet while waiting.
 * Merge only per the disposition given in the request (merge when green, or stop and report). If none was given, report and ask.

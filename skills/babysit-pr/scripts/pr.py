@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
-"""GitHub pull request helper for the babysit-pr skill.
+"""GitHub pull request helper for the babysit-pr and review-pr skills.
 
-Reads and writes through the GitHub CLI (gh). Reply bodies come from a file
-and reach gh as JSON on stdin, so no comment text passes through a shell.
+Reads and writes through the GitHub CLI (gh). Bodies come from files and
+reach gh as JSON on stdin, so no comment text passes through a shell.
 
     pr.py status  [--pr N] [--repo o/r] [--since ISO]
     pr.py reply   --thread <id> --body-file <file> --model <id>
     pr.py resolve --thread <id>
     pr.py review  --review-file <json> --model <id> [--pr N] [--repo o/r]
 
+Every body this script posts opens with the on-behalf-of header:
+
+    [<model id>] RESPONDING ON BEHALF OF ALAN
+    ======
+
 The review file is {"body": "...", "comments": [{"path", "line", "body"}, ...]}.
 It becomes one PR review on the head commit with an inline comment per entry.
 A comment on a line outside the diff makes GitHub reject the whole review, so
 on rejection the comments move into the review body and the review is retried.
+`review` prints {"url", "inline", "folded"} so the caller can tell which happened.
 
-Exit code 2 means gh itself failed (auth, network, rate limit). Retry once
-before treating that as a result. Reviews are read up to the first 100.
+Exit code 2 means gh or the GitHub API failed (auth, network, rate limit).
+Retry once before treating that as a result. Reviews are read up to the first 100.
 """
 
 import argparse
@@ -25,11 +31,12 @@ import sys
 
 ON_BEHALF_OF = "ALAN"
 HEADER_MARK = "RESPONDING ON BEHALF OF " + ON_BEHALF_OF
+FOLD_MARK = "Findings on lines outside the diff:"
 
 PR_FIELDS = ("number,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
              "headRefOid,headRefName,baseRefName,commits,statusCheckRollup,comments,autoMergeRequest")
 
-# Thread resolution and author kinds are only exposed through GraphQL.
+# Thread resolution, author kinds, the commit a review covers, and per-commit CI are GraphQL-only.
 THREADS_QUERY = """
 query($owner: String!, $name: String!, $number: Int!, $after: String) {
   repository(owner: $owner, name: $name) {
@@ -41,7 +48,8 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
           comments(first: 50) { nodes { author { login __typename } body createdAt url } }
         }
       }
-      reviews(first: 100) { nodes { author { login __typename } state submittedAt body } }
+      reviews(first: 100) { nodes { author { login __typename } state submittedAt body commit { oid } } }
+      commits(last: 5) { nodes { commit { oid statusCheckRollup { state } } } }
     }
   }
 }
@@ -65,18 +73,22 @@ PASSED = {"SUCCESS", "NEUTRAL"}
 PENDING = {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED", None}
 
 
+def fail(message):
+    print(message, file=sys.stderr)
+    sys.exit(2)
+
+
 def gh(args, stdin=None):
     result = subprocess.run(["gh", *args], input=stdin, capture_output=True, text=True)
     if result.returncode != 0:
-        print("gh {} failed: {}".format(" ".join(args[:2]), result.stderr.strip()), file=sys.stderr)
-        sys.exit(2)
+        fail("gh {} failed: {}".format(" ".join(args[:2]), result.stderr.strip()))
     return json.loads(result.stdout) if result.stdout.strip() else {}
 
 
 def graphql(query, **variables):
     data = gh(["api", "graphql", "--input", "-"], stdin=json.dumps({"query": query, "variables": variables}))
     if data.get("errors"):
-        sys.exit("GraphQL error: {}".format(data["errors"][0].get("message")))
+        fail("GraphQL error: {}".format(data["errors"][0].get("message")))
     return data["data"]
 
 
@@ -86,14 +98,15 @@ def fetch_pr(args):
 
 
 def fetch_threads(owner, name, number):
-    nodes, reviews, after = [], None, None
+    nodes, reviews, recent, after = [], None, None, None
     while True:
         pull = graphql(THREADS_QUERY, owner=owner, name=name, number=number, after=after)["repository"]["pullRequest"]
         threads = pull["reviewThreads"]
         nodes += threads["nodes"]
-        reviews = reviews if reviews is not None else pull["reviews"]["nodes"]
+        if reviews is None:
+            reviews, recent = pull["reviews"]["nodes"], pull["commits"]["nodes"]
         if not threads["pageInfo"]["hasNextPage"]:
-            return nodes, reviews
+            return nodes, reviews, recent
         after = threads["pageInfo"]["endCursor"]
 
 
@@ -123,8 +136,15 @@ def is_bot(node):
     return (node.get("author") or {}).get("__typename") == "Bot"
 
 
-def summarize(pr, threads, reviews, since):
+def is_ours(body):
+    """True when the body's first line is exactly the header this script writes. A quoted header further down does not count."""
+    first = (body or "").split("\n", 1)[0].strip()
+    return first.startswith("[") and first.endswith("] " + HEADER_MARK)
+
+
+def summarize(pr, threads, reviews, recent, since):
     """Pure: shape the gh payloads into the snapshot. `since` is the ISO-8601 UTC cut for new activity."""
+    head = pr["headRefOid"]
     checks = [classify_check(check) for check in pr.get("statusCheckRollup") or []]
     unresolved = []
     for thread in threads:
@@ -135,7 +155,7 @@ def summarize(pr, threads, reviews, since):
         unresolved.append({
             "id": thread["id"], "path": thread.get("path"), "line": thread.get("line"),
             "outdated": bool(thread.get("isOutdated")), "author": login(first), "bot": is_bot(first),
-            "ours": HEADER_MARK in first.get("body", ""),
+            "ours": is_ours(first.get("body")),
             "body": first.get("body", ""), "replies": max(len(comments) - 1, 0), "url": first.get("url"),
         })
     bots = {}
@@ -145,13 +165,15 @@ def summarize(pr, threads, reviews, since):
             entry["passes"] += 1
             entry["last"] = max(entry["last"] or "", review["submittedAt"])
             entry["since_head"] = entry["since_head"] or review["submittedAt"] > since
+    ours = [review for review in reviews if is_ours(review.get("body"))]
+    on_head = [review for review in ours if (review.get("commit") or {}).get("oid") == head]
     return {
         "number": pr["number"], "url": pr["url"], "state": pr["state"], "draft": pr["isDraft"],
         "mergeable": pr["mergeable"], "merge_state": pr["mergeStateStatus"],
         "review_decision": pr.get("reviewDecision") or None,
         "auto_merge": bool(pr.get("autoMergeRequest")),
         "base": pr["baseRefName"],
-        "head": {"sha": pr["headRefOid"], "ref": pr["headRefName"],
+        "head": {"sha": head, "ref": pr["headRefName"],
                  "committed_at": max(commit["committedDate"] for commit in pr["commits"])},
         "since": since,
         "checks": {
@@ -160,16 +182,22 @@ def summarize(pr, threads, reviews, since):
             "failed": [check for check in checks if check["kind"] == "failed"],
             "pending": [check for check in checks if check["kind"] == "pending"],
         },
+        # Oldest first. Three FAILURE or ERROR entries in a row at the end means the fixes are not converging.
+        "recent_commits": [{"sha": node["commit"]["oid"],
+                            "ci": (node["commit"].get("statusCheckRollup") or {}).get("state")} for node in recent],
         "threads": {"unresolved": unresolved,
                     "resolved": sum(1 for thread in threads if thread.get("isResolved"))},
+        # review-pr rounds, counted from the PR itself so a lost transcript cannot reset them.
+        "our_reviews": {"total": len(ours), "on_head": len(on_head),
+                        "folded_on_head": any(FOLD_MARK in review.get("body", "") for review in on_head)},
         "bots": bots,
         "new_comments": [
             {"author": login(comment), "at": comment["createdAt"], "body": comment["body"], "url": comment.get("url")}
             for comment in pr.get("comments") or [] if comment["createdAt"] > since
         ],
         "new_reviews": [
-            {"author": login(review), "bot": is_bot(review), "at": review["submittedAt"],
-             "state": review["state"], "body": review.get("body", "")}
+            {"author": login(review), "bot": is_bot(review), "ours": is_ours(review.get("body")),
+             "at": review["submittedAt"], "state": review["state"], "body": review.get("body", "")}
             for review in reviews if review.get("submittedAt") and review["submittedAt"] > since
         ],
     }
@@ -192,15 +220,15 @@ def build_review(model, review, commit):
 def fold_comments(review):
     """Move inline findings into the body for the retry after GitHub rejects a line outside the diff."""
     moved = "\n\n".join("{}:{}\n{}".format(c["path"], c["line"], c["body"]) for c in review.get("comments", []))
-    return {"body": review["body"] + "\n\nFindings on lines outside the diff:\n\n" + moved, "comments": []}
+    return {"body": review["body"] + "\n\n" + FOLD_MARK + "\n\n" + moved, "comments": []}
 
 
 def command_status(args):
     pr = fetch_pr(args)
     owner, name = pr["url"].split("/")[3:5]
     since = args.since or max(commit["committedDate"] for commit in pr["commits"])
-    threads, reviews = fetch_threads(owner, name, pr["number"])
-    json.dump(summarize(pr, threads, reviews, since), sys.stdout, indent=2)
+    threads, reviews, recent = fetch_threads(owner, name, pr["number"])
+    json.dump(summarize(pr, threads, reviews, recent, since), sys.stdout, indent=2)
     print()
 
 
@@ -217,17 +245,20 @@ def command_review(args):
     with open(args.review_file, encoding="utf-8") as handle:
         review = json.load(handle)
     endpoint = "repos/{}/{}/pulls/{}/reviews".format(owner, name, pr["number"])
+    wanted = len(review.get("comments", []))
     for attempt in (review, fold_comments(review)):
         payload = build_review(args.model, attempt, pr["headRefOid"])
         result = subprocess.run(["gh", "api", "--method", "POST", endpoint, "--input", "-"],
                                 input=json.dumps(payload), capture_output=True, text=True)
         if result.returncode == 0:
-            print(json.loads(result.stdout)["html_url"])
+            inline = len(payload["comments"])
+            json.dump({"url": json.loads(result.stdout)["html_url"], "inline": inline,
+                       "folded": wanted > 0 and inline == 0}, sys.stdout)
+            print()
             return
         if not payload["comments"]:
             break
-    print("gh api {} failed: {}".format(endpoint, result.stderr.strip()), file=sys.stderr)
-    sys.exit(2)
+    fail("gh api {} failed: {}".format(endpoint, result.stderr.strip()))
 
 
 def command_resolve(args):
@@ -239,9 +270,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
 
-    status = commands.add_parser("status", help="print one JSON snapshot of the PR")
-    status.add_argument("--pr", help="PR number or URL; defaults to the current branch's PR")
-    status.add_argument("--repo", help="owner/name; defaults to the current repository")
+    def scoped(name, **kwargs):
+        sub = commands.add_parser(name, **kwargs)
+        sub.add_argument("--pr", help="PR number or URL; defaults to the current branch's PR")
+        sub.add_argument("--repo", help="owner/name; defaults to the current repository")
+        return sub
+
+    status = scoped("status", help="print one JSON snapshot of the PR")
     status.add_argument("--since", help="ISO-8601 cut for new activity; defaults to the head commit time")
     status.set_defaults(run=command_status)
 
@@ -251,9 +286,7 @@ def main(argv=None):
     reply.add_argument("--model", required=True, help="model id for the on-behalf-of header")
     reply.set_defaults(run=command_reply)
 
-    review = commands.add_parser("review", help="post a PR review with inline comments from a findings file")
-    review.add_argument("--pr", help="PR number or URL; defaults to the current branch's PR")
-    review.add_argument("--repo", help="owner/name; defaults to the current repository")
+    review = scoped("review", help="post a PR review with inline comments from a findings file")
     review.add_argument("--review-file", required=True, help="JSON with body and comments")
     review.add_argument("--model", required=True, help="model id for the on-behalf-of header")
     review.set_defaults(run=command_review)

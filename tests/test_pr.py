@@ -1,4 +1,4 @@
-"""Shape the babysit-pr snapshot and comment bodies from recorded gh payloads, without the network."""
+"""Shape the PR snapshot, review payload, and comment header from recorded gh payloads, without the network."""
 
 import importlib.util
 from pathlib import Path
@@ -41,15 +41,18 @@ THREADS = [
 ]
 
 REVIEWS = [
-    {"author": BOT, "state": "COMMENTED", "submittedAt": "2026-09-15T08:00:00Z", "body": "pass 1"},
-    {"author": BOT, "state": "COMMENTED", "submittedAt": "2026-09-15T12:00:00Z", "body": "pass 2"},
-    {"author": ALAN, "state": "APPROVED", "submittedAt": "2026-09-15T13:00:00Z", "body": ""},
+    {"author": BOT, "state": "COMMENTED", "submittedAt": "2026-09-15T08:00:00Z", "body": "pass 1", "commit": {"oid": "old111"}},
+    {"author": BOT, "state": "COMMENTED", "submittedAt": "2026-09-15T12:00:00Z", "body": "pass 2", "commit": {"oid": "abc123"}},
+    {"author": ALAN, "state": "APPROVED", "submittedAt": "2026-09-15T13:00:00Z", "body": "", "commit": {"oid": "abc123"}},
 ]
+
+RECENT = [{"commit": {"oid": "old111", "statusCheckRollup": {"state": "FAILURE"}}},
+          {"commit": {"oid": "abc123", "statusCheckRollup": None}}]
 
 
 class SnapshotTests(unittest.TestCase):
     def test_snapshot_shape(self):
-        snapshot = pr.summarize(PR, THREADS, REVIEWS, SINCE)
+        snapshot = pr.summarize(PR, THREADS, REVIEWS, RECENT, SINCE)
         self.assertEqual(snapshot["checks"]["counts"], {"passed": 1, "failed": 1, "pending": 1, "skipped": 1})
         self.assertEqual(snapshot["checks"]["failed"], [{"name": "deploy", "kind": "failed", "state": "FAILURE", "link": "u4"}])
         self.assertEqual([check["name"] for check in snapshot["checks"]["pending"]], ["lint"])
@@ -59,6 +62,8 @@ class SnapshotTests(unittest.TestCase):
             "ours": False, "body": "possible race", "replies": 1, "url": "t2",
         }])
         self.assertEqual(snapshot["bots"], {"bugbot": {"passes": 2, "last": "2026-09-15T12:00:00Z", "since_head": True}})
+        self.assertEqual(snapshot["recent_commits"], [{"sha": "old111", "ci": "FAILURE"}, {"sha": "abc123", "ci": None}])
+        self.assertEqual(snapshot["our_reviews"], {"total": 0, "on_head": 0, "folded_on_head": False})
         self.assertEqual([comment["body"] for comment in snapshot["new_comments"]], ["after push"])
         self.assertEqual([(review["author"], review["bot"]) for review in snapshot["new_reviews"]],
                          [("bugbot", True), ("alan", False)])
@@ -66,11 +71,22 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["head"], {"sha": "abc123", "ref": "feature", "committed_at": "2026-09-15T10:00:00Z"})
         self.assertEqual(snapshot["since"], SINCE)
 
-    def test_own_review_threads_are_flagged(self):
-        ours = {"id": "T3", "isResolved": False, "isOutdated": False, "path": "c.py", "line": 2,
-                "comments": {"nodes": [{"author": ALAN, "body": pr.format_body("m", "Act on: null path"), "createdAt": SINCE, "url": "t3"}]}}
-        snapshot = pr.summarize(PR, [ours], [], SINCE)
-        self.assertEqual([t["ours"] for t in snapshot["threads"]["unresolved"]], [True])
+    def test_our_review_rounds_are_counted_from_the_pr(self):
+        ours = lambda oid, body: {"author": ALAN, "state": "COMMENTED", "submittedAt": SINCE,
+                                  "body": pr.format_body("m", body), "commit": {"oid": oid}}
+        folded = pr.fold_comments({"body": "Verdict.", "comments": [{"path": "a.py", "line": 7, "body": "Race."}]})
+        reviews = [ours("old111", "round one"), ours("abc123", folded["body"]),
+                   {"author": ALAN, "state": "COMMENTED", "submittedAt": SINCE, "body": "", "commit": {"oid": "abc123"}}]
+        snapshot = pr.summarize(PR, [], reviews, RECENT, SINCE)
+        self.assertEqual(snapshot["our_reviews"], {"total": 2, "on_head": 1, "folded_on_head": True})
+
+    def test_only_a_first_line_header_marks_a_thread_ours(self):
+        def thread(body):
+            return {"id": "T", "isResolved": False, "isOutdated": False, "path": "c.py", "line": 2,
+                    "comments": {"nodes": [{"author": ALAN, "body": body, "createdAt": SINCE, "url": "t"}]}}
+        quoted = "I disagree with this:\n> [m] RESPONDING ON BEHALF OF ALAN"
+        snapshot = pr.summarize(PR, [thread(pr.format_body("m", "Act on: null path")), thread(quoted)], [], RECENT, SINCE)
+        self.assertEqual([t["ours"] for t in snapshot["threads"]["unresolved"]], [True, False])
 
     def test_review_payload_and_fold(self):
         review = {"body": "Verdict.", "comments": [{"path": "a.py", "line": 7, "body": "Race here."}]}

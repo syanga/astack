@@ -22,6 +22,7 @@ Severity is where a finding starts. `critical` starts in act on, `warning` start
 - **Premature abstraction.** An extraction is warranted when the code needs to change in a second way. Otherwise inline code that works beats the clean abstraction, and duplication beats an abstraction built too early.
 - **A different taste.** The commonest false positive. Without a concrete problem in the current approach, dismiss and say why.
 - **Missing context.** The finding targets code the author did not touch, a pattern consistent with the rest of the codebase, or an approach that conflicts with a constraint you know about. Dismiss it and name the context.
+- **Already answered.** The finding repeats an earlier thread on this PR that was replied to and resolved, and the code it points at has not changed since. Dismiss it and name that thread.
 - **Unverified.** Below rung 2 on the ladder. Move it to consider at most. Usually dismiss it and give the reason.
 
 ## Signals that a finding is right
