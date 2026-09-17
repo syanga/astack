@@ -1,6 +1,6 @@
 # Review rubric
 
-Lenses for a code reviewer. Apply the ones the change touches. Where a principle sets a lens's standard, the lens names it, and the principle's text follows the lens in the prompt you received. Each principle is written for the author of a change. Read it as the standard the change is judged against, not as work for you to do. A coding standard the repository documents in `CONTRIBUTING.md`, `CODING_STANDARDS.md`, or `AGENTS.md` overrides a principle where they conflict. Skip anything a linter or formatter already enforces.
+Lenses for a code reviewer. Apply every lens below. Where a principle sets a lens's standard, the lens names it, and the principle's text follows the lens in the prompt you received. Each principle is written for the author of a change. Read it as the standard the change is judged against, not as work for you to do. A coding standard the repository documents in `CONTRIBUTING.md`, `CODING_STANDARDS.md`, or `AGENTS.md` overrides a principle where they conflict. Skip anything a linter or formatter already enforces.
 
 ## Correctness
 

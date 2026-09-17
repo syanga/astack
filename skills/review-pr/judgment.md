@@ -10,10 +10,10 @@ Each code finding lands in one bucket, with the reviewers who raised it and one 
 
 - **Act on.** Would block the PR: a correctness or security defect, an instruction that would make its reader do the wrong thing, a requirement the change misses or gets wrong, or a structural finding from the rubric's Structure or Complexity lens that the author cannot justify.
 - **Consider.** Legitimate, and you are not sure the benefit outweighs the cost of addressing it now.
-- **Noted.** Valid and not actionable now: context-dependent, premature, low impact. It opens no thread. The babysitter fixes it only when it is already changing that file.
+- **Noted.** Valid and not actionable now: context-dependent, premature, low impact. It opens no thread.
 - **Dismissed.** Wrong, nitpicky, or missing context, with one line of why. This bucket is how the user overrides you.
 
-Severity is where a finding starts. `critical` starts in act on, `warning` starts in consider, and `nit` starts in noted. The filters below move a finding from there. Act on holds five items or fewer. If more survive, say why.
+A spec finding is judged like a code finding: missing or wrong starts as act on, and unrequested starts as consider. Severity is where a code finding starts. `critical` starts in act on, `warning` starts in consider, and `nit` starts in noted. The filters below move a finding from there. Act on holds five items or fewer. If more survive, say why.
 
 ## Filters that move a finding down
 
