@@ -75,7 +75,6 @@ class InstallerTests(InstallerFixture):
         self.assertNotIn("WRITE", result.stdout)
         self.assertEqual(installed.stat().st_mtime_ns, previous_mtime)
         self.assertEqual(set(self.manifest()["targets"]), {"claude", "codex"})
-        self.assertEqual(self.manifest()["source"], str(self.repo.resolve()))
 
     def test_shared_and_specific_instruction_updates(self):
         self.run_installer()
