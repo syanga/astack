@@ -101,13 +101,15 @@ class HookTests(HookFixture):
         self.assertFalse((self.hooks / git_hooks.PAYLOAD).exists())
         self.manage("uninstall")
 
-    def test_copy_outside_the_checkout_installs(self):
+    def test_copy_outside_the_checkout_installs_and_reads_its_pins(self):
         shipped = self.root / "shipped"
         shutil.copytree(SCRIPTS, shipped)
         self.manage(scripts=shipped)
-        payload = self.hooks / git_hooks.PAYLOAD
-        self.assertTrue((payload / "runner.py").is_file())
-        self.assertTrue((payload / "LICENSE").is_file())
+        self.assertEqual(self.invoke().returncode, 0)
+        unpinned = "import platform, git_hooks\nplatform.machine = lambda: 'unpinned'\ngit_hooks.download()\n"
+        result = subprocess.run([sys.executable, "-c", unpinned], cwd=shipped, env=self.env,
+                                capture_output=True, text=True)
+        self.assertIn("No pinned download", result.stderr)
 
     def test_existing_hook_receives_all_refs_and_is_restored(self):
         old = self.hooks / "pre-push"
