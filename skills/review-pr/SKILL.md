@@ -71,7 +71,7 @@ The verdict has these parts, whichever route delivers it.
 
 ## 5. Deliver
 
-On the PR route, write a findings file in the system's temporary directory, in the shape the module docstring of `pr.py` documents. Its `comments` hold one entry per act-on and consider finding, and each `body` opens with the bucket and severity. The `line` must be inside a diff hunk of the PR, because GitHub rejects the whole review otherwise. Anchor a finding about an unchanged line on the changed line that leads to it, and name the real `file:line` in the comment, so every act-on and consider finding opens a thread the babysit verdict can see. Its `body` holds the intent, the reviewers, the noted and dismissed findings, the agreement, and the summary. A finding about the PR's title or body has no line, so it goes in the `body` under its bucket. From the repository root, post it:
+On the PR route, write a findings file in the system's temporary directory, in the shape the module docstring of `pr.py` documents. Its `comments` hold one entry per act-on and consider finding, and each `body` opens with the bucket and severity. The `line` must be inside a diff hunk of the PR, because GitHub rejects the whole review otherwise. Anchor a finding about an unchanged line on the changed line that leads to it, and name the real `file:line` in the comment, so every act-on and consider finding opens a thread the babysit verdict can see. Its `body` holds the intent, the reviewers, the noted and dismissed findings, the agreement, and the summary. An act-on or consider finding about the PR's title or body has no line of its own. Anchor it on any line inside a diff hunk, and say in the comment that it is about the title or the body. From the repository root, post it:
 
 ```bash
 python3 <this skill's directory>/../babysit-pr/scripts/pr.py review --pr <n> --commit <reviewed sha> --review-file <file> --model <your model id>
@@ -81,4 +81,4 @@ It prints `url`, `inline`, and `folded`. `folded` true means every finding went 
 
 Reply on the PR route with the review URL, the number of findings per bucket, the titles of the act-on findings, and whether the review was folded. On the other two routes, reply with the whole verdict.
 
-Done, on the PR route, when the posted review body carries every other part of the verdict, and the script printed an `inline` count equal to the number of act-on and consider findings that carry a line, or you reported the fold or the failed post in the reply. Done, on the other routes, when the reply carries every part of the verdict.
+Done, on the PR route, when the posted review body carries every other part of the verdict, and the script printed an `inline` count equal to the number of act-on and consider findings, or you reported the fold or the failed post in the reply. Done, on the other routes, when the reply carries every part of the verdict.
