@@ -13,4 +13,4 @@ Steps for a preview that needs a backend, a dev server, or browser automation. U
 
 ## When the tunnel route is unavailable
 
-`cloudflared` is needed only for this route. When it is absent, or a public URL is unsuitable for the content, use an already authorized preview channel. Otherwise deliver self-contained HTML when it covers the need, or report that a reachable server is still required. A static file verifies nothing about the backend or the browser, so name those checks as still open.
+`cloudflared` is needed only for this route. When it is absent, or a public URL is unsuitable for the content, ask the user which preview channel to use. When they name none, deliver self-contained HTML when it covers the need, or report that a reachable server is still required. A static file verifies nothing about the backend or the browser, so name those checks as still open.

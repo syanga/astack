@@ -10,7 +10,7 @@ Edit text to remove AI patterns.
 
 ## Process
 
-1. Scan for the patterns below.
+1. Scan for the patterns below. Done when every rule has been applied to the text or ruled out.
 2. Rewrite. Preserve meaning, match intended tone.
 3. Self-audit: "What makes this obviously AI generated?" Fix remaining tells.
 
