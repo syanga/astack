@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,7 +13,8 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
+SCRIPTS = ROOT / "skills/open-pr/scripts"
+sys.path.insert(0, str(SCRIPTS))
 import git_hooks
 
 
@@ -61,12 +63,12 @@ sys.exit(code)
         self.git("commit", "-m", "fixture")
         return self.git("rev-parse", "HEAD").stdout.strip()
 
-    def manage(self, command="install", *extra, ok=True, repo=None):
-        args = [sys.executable, str(ROOT / "scripts/git_hooks.py"), command,
+    def manage(self, command="install", *extra, ok=True, repo=None, scripts=SCRIPTS):
+        args = [sys.executable, str(scripts / "git_hooks.py"), command,
                 "--repo", str(repo or self.repo), *extra]
         if command == "install":
             args += ["--gitleaks", str(self.binary)]
-        result = subprocess.run(args, env=self.env, capture_output=True, text=True)
+        result = subprocess.run(args, cwd=self.root, env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
         return result
 
@@ -98,6 +100,21 @@ class HookTests(HookFixture):
         self.assertFalse((self.hooks / "pre-push").exists())
         self.assertFalse((self.hooks / git_hooks.PAYLOAD).exists())
         self.manage("uninstall")
+
+    def test_copy_outside_the_checkout_installs_and_reads_its_pins(self):
+        shipped = self.root / "shipped"
+        shutil.copytree(SCRIPTS, shipped)
+        self.manage(scripts=shipped)
+        self.commit("file.txt", "changed\n")
+        self.assertEqual(self.invoke().returncode, 0)
+        unpinned = ("import platform, git_hooks\n"
+                    "platform.machine = lambda: 'unpinned'\n"
+                    "git_hooks.urllib.request.urlopen = None\n"
+                    "git_hooks.download()\n")
+        result = subprocess.run([sys.executable, "-c", unpinned], cwd=self.repo,
+                                env={**self.env, "PYTHONPATH": str(shipped)},
+                                capture_output=True, text=True)
+        self.assertIn("No pinned download", result.stderr)
 
     def test_existing_hook_receives_all_refs_and_is_restored(self):
         old = self.hooks / "pre-push"
@@ -317,6 +334,39 @@ class RealScannerTests(HookFixture):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("secret detected", result.stderr)
         self.assertEqual(self.git("ls-remote", "origin", "refs/tags/secret-tag").stdout, "")
+
+    def test_real_worktree_gitleaksignore_cannot_suppress_a_finding(self):
+        head = self.commit("credential.txt", self.secret() + "\n")
+        (self.repo / ".gitleaksignore").write_text(
+            "".join("{}:credential.txt:{}:1\n".format(head, rule)
+                    for rule in ("github-pat", "generic-api-key")))
+        result = self.git("push", "origin", "main", ok=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("secret detected", result.stderr)
+
+    def test_real_gitattributes_cannot_hide_a_path_from_the_scan(self):
+        for attribute in ("-diff", "binary"):
+            with self.subTest(attribute=attribute):
+                self.git("reset", "--hard", self.base)
+                self.commit(".gitattributes", "credential-{0}.txt {0}\n".format(attribute))
+                self.commit("credential-{}.txt".format(attribute), self.secret() + "\n")
+                result = self.git("push", "origin", "main", ok=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("secret detected", result.stderr)
+
+    def test_real_info_attributes_cannot_hide_a_path_from_the_scan(self):
+        (self.repo / ".git/info").mkdir(exist_ok=True)
+        (self.repo / ".git/info/attributes").write_text("credential.txt -diff\n")
+        self.commit("credential.txt", self.secret() + "\n")
+        result = self.git("push", "origin", "main", ok=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("secret detected", result.stderr)
+
+    def test_real_file_with_a_nul_byte_is_scanned_as_text(self):
+        self.commit("credential.txt", self.secret() + "\n\0\n")
+        result = self.git("push", "origin", "main", ok=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("secret detected", result.stderr)
 
     def test_real_clean_push_and_deleted_secret_in_intermediate_commit(self):
         self.commit("file.txt", "clean change\n")

@@ -11,6 +11,77 @@
     "path": "pstack/skills/unslop",
     "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
     "license": "MIT, kept in skills/unslop/LICENSE",
-    "note": "Rules verbatim; rule numbers are stable ids other skills cite. Description shortened to a human-facing line; Codex agents/openai.yaml added to keep it user-invoked."
+    "note": "Rules verbatim; rule numbers are stable ids other skills cite. Description shortened to a human-facing line; disable-model-invocation set, from which the installer generates the Codex policy."
+  },
+  "principles": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/principle-*",
+    "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
+    "license": "MIT, kept in skills/principles/LICENSE",
+    "note": "Sixteen of the 23 principle skills as plain files under one index skill. Frontmatter dropped, with each description's trigger sentence restored as the first body line. Cross-links rewritten to sibling files, references to pstack-only skills and to the upstream project's own subsystems removed. Edited beyond that: migrate-callers puts its preconditions before the rule, fix-root-causes bounds the pattern sweep to the change's scope and gives the why loop a stop, boundary-discipline bounds trust to the types and defines the shell, encode-lessons states its mechanism ladder once, and the files that lacked a test have one."
+  },
+  "open-pr": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/poteto-mode/playbooks/opening-a-pr.md",
+    "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
+    "license": "MIT, kept in skills/open-pr/LICENSE",
+    "note": "Rewritten as eight steps with done-when criteria. Cursor forge, deslop, and stack machinery removed; no-comments and technical-writing became sibling skills the steps link; global Pull Requests rules are the policy source; Gitleaks hook install and T3 Code PR linking added."
+  },
+  "babysit-pr": {
+    "repository": [
+      "https://github.com/cursor/plugins.git",
+      "https://github.com/mattpocock/skills.git"
+    ],
+    "path": [
+      "pstack/skills/poteto-mode/playbooks/babysit.md",
+      "pstack/skills/poteto-mode/references/bugbot-triage.md",
+      "skills/engineering/resolving-merge-conflicts"
+    ],
+    "commit": [
+      "c1c0a32802223f4be824112dd83d33ad29a8b26c",
+      "959a8e9f1edc3adbe2f7e3054bb6fbefa6696260"
+    ],
+    "license": "MIT, kept in skills/babysit-pr/LICENSE-pstack and LICENSE-mattpocock",
+    "note": "Single PR, three modes, conflicts-threads-CI order, CI classification, triage rubric with fix, dismiss, defer, and ask, and the dismissal patterns with their sources. Stack, merge-queue, Origin forge, and the TypeScript watch-pr replaced by scripts/pr.py (stdlib + gh: status with a computed next verdict, a blocking wait, history, reply, resolve, review). Merge-conflict steps from Matt live in conflicts.md."
+  },
+  "review-pr": {
+    "repository": [
+      "https://github.com/cursor/plugins.git",
+      "https://github.com/mattpocock/skills.git"
+    ],
+    "path": [
+      "pstack/skills/interrogate",
+      "skills/engineering/code-review"
+    ],
+    "commit": [
+      "c1c0a32802223f4be824112dd83d33ad29a8b26c",
+      "959a8e9f1edc3adbe2f7e3054bb6fbefa6696260"
+    ],
+    "license": "MIT, kept in skills/review-pr/LICENSE-pstack and LICENSE-mattpocock",
+    "note": "Interrogate's shape (intent, parallel reviewers, rubric, lead judgment), with the code-quality lens folded into the rubric and judgment, the evidence ladder from blast-radius, and Matt's spec axis and spec-source order as a separate reviewer. scripts/build_prompt.py writes each reviewer prompt to a file from prompts/code.md and prompts/spec.md, pasting the principle files the kept lenses link. The first round reviews the whole PR in a temporary worktree of its head; later rounds review only the commits since the last reviewed one and read the earlier verdicts. Model table and Cursor config removed."
+  },
+  "blast-radius": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/blast-radius",
+    "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
+    "license": "MIT, kept in skills/blast-radius/LICENSE",
+    "note": "Evidence ladder moved to evidence.md so review-pr shares it. References to the why and arena skills replaced with the gh commands they stood for."
+  },
+  "technical-writing": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/technical-writing",
+    "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
+    "license": "MIT, kept in skills/technical-writing/LICENSE",
+    "note": "Verbatim apart from a shorter description, the unslop pointer as a sibling link, and one pstack-specific formatting line removed."
+  },
+  "no-comments": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": [
+      "pstack/skills/no-comments",
+      "pstack/agents/comment-sicko.md"
+    ],
+    "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
+    "license": "MIT, kept in skills/no-comments/LICENSE",
+    "note": "The Comment Sicko subagent is gone; its keep list and flag rules are the skill body, applied by the agent itself. The /how, /why, and /architect calls became read-the-history and sketch-the-shape instructions; principle references point at ../principles files."
   }
 }

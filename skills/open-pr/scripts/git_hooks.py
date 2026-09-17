@@ -20,7 +20,7 @@ import urllib.request
 from gitleaks_pre_push import MARKER, PAYLOAD, VERSION
 
 
-ROOT = Path(__file__).resolve().parent.parent
+HERE = Path(__file__).resolve().parent
 ORIGINAL = "pre-push.astack-original"
 GSTACK_MARKER = b"# gstack-redact pre-push (managed)"
 WRAPPER = ("#!/usr/bin/env python3\n" + MARKER + "\n"
@@ -82,7 +82,7 @@ def atomic_write(path, data, mode):
 
 
 def download():
-    pins = json.loads((ROOT / "tools/gitleaks/releases.json").read_text())
+    pins = json.loads((HERE / "gitleaks/releases.json").read_text())
     arch = {"aarch64": "arm64", "amd64": "x64", "x86_64": "x64"}.get(
         platform.machine().lower(), platform.machine().lower())
     key = platform.system().lower() + "_" + arch
@@ -163,8 +163,8 @@ def install(hooks, binary=None, replace_gstack=False, dry_run=False):
                                  text=True, timeout=10)
         if version.returncode or version.stdout.strip().removeprefix("v") != VERSION:
             raise ValueError("Expected Gitleaks {}; no hook installed.".format(VERSION))
-        shutil.copyfile(ROOT / "scripts/gitleaks_pre_push.py", stage / "runner.py")
-        shutil.copyfile(ROOT / "tools/gitleaks/LICENSE", stage / "LICENSE")
+        shutil.copyfile(HERE / "gitleaks_pre_push.py", stage / "runner.py")
+        shutil.copyfile(HERE / "gitleaks/LICENSE", stage / "LICENSE")
         (stage / "rules.toml").write_text("[extend]\nuseDefault = true\n")
         (stage / "ignore").write_text("")
         files = {p.name: record(p) for p in stage.iterdir()}
