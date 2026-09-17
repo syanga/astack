@@ -341,6 +341,13 @@ class AddsNothingSinceTests(unittest.TestCase):
         self.git("merge", "--quiet", "--no-edit", "main")
         self.assertTrue(self.adds_nothing())
 
+    def test_a_fork_checkout_that_holds_the_commits_answers_without_a_fetch(self):
+        self.git("remote", "set-url", "origin", "git@github.com:fork/r.git")
+        self.commit("base.txt", "the base moved on\n")
+        self.git("checkout", "--quiet", "feature")
+        self.git("merge", "--quiet", "--no-edit", "main")
+        self.assertTrue(self.adds_nothing())
+
     def test_a_merge_that_carries_a_conflict_resolution_needs_review(self):
         self.commit("feature.txt", "the base wrote this file too\n")
         self.git("checkout", "--quiet", "feature")
@@ -368,7 +375,7 @@ class AddsNothingSinceTests(unittest.TestCase):
             calls.append(args[0])
             return "https://github.com/o/another.git" if args[0] == "remote" else None
         self.assertFalse(pr.adds_nothing_since(pull, "r", git))
-        self.assertEqual(calls, ["remote"])
+        self.assertNotIn("fetch", calls)
 
 
 class PostingTests(unittest.TestCase):
