@@ -324,7 +324,7 @@ updates, and uninstall for all four harnesses. They check local edits, unrelated
 files, backup restoration, custom environment paths, moved checkouts, executable
 helpers, binary assets, Unicode paths, symlinks, blocked state directories, and
 retry after an injected file-write failure. GitHub Actions runs the suite on
-macOS and Ubuntu with Python 3.10 and 3.14.
+Ubuntu with Python 3.10 and 3.14. Run it locally for macOS.
 
 Settings tests temporarily configure both Claude and Codex, reinstall updates,
 then uninstall and check exact restoration. They also cover unrelated edits,
