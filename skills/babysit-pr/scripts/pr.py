@@ -27,7 +27,8 @@ returns after --max-minutes with the verdict still `wait`; run it again.
 
 `history` prints every earlier review body and every thread with its replies
 and resolution, as Markdown, for a later review round to read. It marks each
-text as ours or as another account's.
+text as ours, as this account's by hand, or as another account's, and quotes
+another account's text so it cannot imitate a mark.
 
 The review file is {"body": "...", "comments": [{"path", "line", "bucket", "body"}, ...]}
 with bucket "act on" or "consider". It becomes one PR review on --commit, the
@@ -364,7 +365,15 @@ def command_wait(args):
 
 
 def signed(node):
-    return "{} ({})".format(login(node), "ours" if is_ours(node) else "another account")
+    by = "ours" if is_ours(node) else "this account, by hand" if node.get("viewerDidAuthor") else "another account"
+    return "{} ({})".format(login(node), by)
+
+
+def shown(node):
+    body = (node.get("body") or "").strip()
+    if node.get("viewerDidAuthor"):
+        return body
+    return "\n".join(("> " + line).rstrip() for line in body.split("\n"))
 
 
 def render_history(threads, reviews):
@@ -372,7 +381,7 @@ def render_history(threads, reviews):
     for review in reviews:
         if review.get("body"):
             lines += ["## Review by {} of {} at {}".format(signed(review), (review.get("commit") or {}).get("oid", "?")[:7],
-                                                         review.get("submittedAt")), "", review["body"].strip(), ""]
+                                                         review.get("submittedAt")), "", shown(review), ""]
     lines += ["## Threads", ""]
     for thread in threads:
         comments = thread["comments"]["nodes"]
@@ -381,7 +390,7 @@ def render_history(threads, reviews):
         lines.append("### {}:{} ({})".format(thread.get("path"), thread.get("line") or "outdated line",
                                              "resolved" if thread.get("isResolved") else "open, not yet answered"))
         for comment in comments:
-            lines += ["", "**{}**:".format(signed(comment)), "", comment.get("body", "").strip()]
+            lines += ["", "**{}**:".format(signed(comment)), "", shown(comment)]
         lines.append("")
     return "\n".join(lines) + "\n"
 
