@@ -1,0 +1,12 @@
+# Redesign From First Principles
+
+Apply when integrating a new requirement into an existing design.
+
+When integrating a change, don't bolt it onto the existing design. Redesign as if the requirement had been there from the start.
+
+- Read all affected files and understand the current design
+- Ask: "if we were writing this from scratch with this new requirement, what would we build?"
+- Propagate the change through every reference: types, docs, examples, rationale sections
+- Think about the whole redesign, then deliver it incrementally
+
+**The test:** a from-scratch design with this requirement would contain every branch the change adds. A branch it would not contain is bolted on.

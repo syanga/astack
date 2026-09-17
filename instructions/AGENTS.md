@@ -16,8 +16,7 @@ I wanted to share some of my preferences here so we can be more aligned as we wo
 * Don't be scared to propose bold ideas if they can meaningfully benefit our work.
 * Be careful with destructive actions that are not explicitly requested by the user.
 * Tests are good! Endless smoke tests, "regression tests" for feature deletions, etc, much less good. Tests should be focused, not slop.
-* Comments are a great way to clarify functionality and how code is used. Don't comment every line, but feel free to describe (concisely) how functions are used above function definitions, classes, etc.
-* Keep comments up to date! When making changes, it's important to keep things in sync.
+* Names, types, and structure carry meaning. Comments do not. Keep a comment only for a legal or license header, behaviour forced by an external dependency, platform, vendor, or protocol we cannot change, a doc comment that defines a public API contract, an issue or RFC link that explains a constraint the code cannot express, or a lint or type suppression whose rule is faulty, pedantic, or style-only. When unsure, delete the comment. The no-comments skill's keep list is the authority.
 
 ## Questions are read-only
 * A question is a request for an answer, not for changes. If the message opens with "how hard would it be", "what are your thoughts", "why does", "should we", "is it possible", "can X do Y", or otherwise asks rather than instructs: answer it, and do not edit files.
@@ -28,14 +27,15 @@ I wanted to share some of my preferences here so we can be more aligned as we wo
 * Standing constraints: dark mode, true black (#000) background, white primary text. Information-dense, no decorative card/pill chrome, no light-gray subtitle lines above sections. Minimal copy. No em dashes.
 * Avoid continuously repainting CSS animations (pulse, shimmer, blur, spinners); they peg the GPU on high-refresh displays.
 
-## Blast radius
+## Live systems
 * Never touch production, live databases, or daily-driver build/preview channels unless explicitly told to. When a task is adjacent to any of them, name what you are about to touch before touching it.
 
 ## Pull Requests
-* Make sure titles follow conventions from the repo. They should be simple and easy to understand. Conventional commit styles in projects that use them, i.e. "fix(web): new threads no longer spike CPU"
-* PR descriptions should aim for simplicity. Open with a minimal, clear description of the problem. Follow up with how you solved it.
-* Add a blurb to the end of the PR description about what model and harness is making the changes.
+* Open PRs with the open-pr skill. Prefer several narrow PRs to one large one.
+* Titles follow the repo's convention. Conventional Commits in projects that use them, i.e. "fix(web): new threads no longer spike CPU"
+* The body is a briefing a reviewer reads in under a minute: why the change exists, then how it was verified. End with a blurb naming the model and harness that made the changes.
 * Open a real PR, not a draft. Drafts do not get review-bot coverage.
 * Rebase onto latest main before opening. Stale branches conflict and waste a review round.
-* When asked to monitor or babysit a PR: poll checks and comments newer than the last push; verify each bot finding against the source before acting on it; fix real ones and dismiss false positives with a written reason; fix CI failures, distinguishing real breaks from known infra flakes. If nothing is new, stay quiet — do not post filler comments. Stop when the repo's review bots are green on the latest commit.
+* Every repository you push from carries the Gitleaks pre-push hook. The open-pr skill installs it when it is missing.
+* Babysit only when asked, with the babysit-pr skill, and stay quiet while waiting.
 * Merge only per the disposition given in the request (merge when green, or stop and report). If none was given, report and ask.

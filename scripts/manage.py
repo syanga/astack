@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -70,6 +71,16 @@ DESCRIPTION_LIMIT = 200
 # Codex spells "user-invoked" in a sidecar file; generated from the frontmatter flag when absent.
 CODEX_POLICY = "policy:\n  allow_implicit_invocation: false\n"
 LINK = re.compile(r"\]\(([^)\s]+)\)")
+
+
+def main_checkout():
+    try:
+        common = subprocess.run(["git", "-C", str(REPO), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                                capture_output=True, text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return REPO
+    parent = Path(common).parent
+    return parent if (parent / "scripts/manage.py").is_file() else REPO
 
 
 def check_links(path, text):
@@ -197,6 +208,7 @@ def main():
     if state.get("version") not in (1, 2):
         raise ValueError("Unsupported astack manifest version")
     state["version"] = 2
+    state["source"] = str(main_checkout())
 
     skills = skill_files() if args.command == "install" else []
     settings = settings_operations(harnesses, selected, state, home, use_env, args)
