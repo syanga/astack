@@ -34,8 +34,8 @@ They install configuration files even if a harness is not installed yet.
 Install a Gitleaks pre-push guard in a repository you choose:
 
 ```sh
-python3 scripts/git_hooks.py install --repo /path/to/project --dry-run
-python3 scripts/git_hooks.py install --repo /path/to/project
+python3 skills/open-pr/scripts/git_hooks.py install --repo /path/to/project --dry-run
+python3 skills/open-pr/scripts/git_hooks.py install --repo /path/to/project
 ```
 
 This is separate from `install.sh` and agent configuration. It runs on pushes

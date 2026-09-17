@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "skills/open-pr/scripts"))
 import git_hooks
 
 
@@ -62,7 +62,7 @@ sys.exit(code)
         return self.git("rev-parse", "HEAD").stdout.strip()
 
     def manage(self, command="install", *extra, ok=True, repo=None):
-        args = [sys.executable, str(ROOT / "scripts/git_hooks.py"), command,
+        args = [sys.executable, str(ROOT / "skills/open-pr/scripts/git_hooks.py"), command,
                 "--repo", str(repo or self.repo), *extra]
         if command == "install":
             args += ["--gitleaks", str(self.binary)]

@@ -9,26 +9,26 @@ explicit per repository; the ordinary astack installer does not enable it.
 From an astack checkout:
 
 ```sh
-python3 scripts/git_hooks.py install --repo /path/to/project --dry-run
-python3 scripts/git_hooks.py install --repo /path/to/project
+python3 skills/open-pr/scripts/git_hooks.py install --repo /path/to/project --dry-run
+python3 skills/open-pr/scripts/git_hooks.py install --repo /path/to/project
 
 # Replace gstack's managed guard while retaining it for restoration:
-python3 scripts/git_hooks.py install --repo /path/to/project --replace-gstack
+python3 skills/open-pr/scripts/git_hooks.py install --repo /path/to/project --replace-gstack
 
-python3 scripts/git_hooks.py uninstall --repo /path/to/project --dry-run
-python3 scripts/git_hooks.py uninstall --repo /path/to/project
+python3 skills/open-pr/scripts/git_hooks.py uninstall --repo /path/to/project --dry-run
+python3 skills/open-pr/scripts/git_hooks.py uninstall --repo /path/to/project
 ```
 
 Requirements: Python 3.10+, Git 2.31+, and macOS or Linux. Online installation
 downloads Gitleaks 8.30.1 for ARM64 or x64 from its official GitHub release and
-checks the archive against the committed SHA-256 in `tools/gitleaks/releases.json`.
+checks the archive against the committed SHA-256 in `skills/open-pr/scripts/gitleaks/releases.json`.
 Only the executable is read from the archive; arbitrary archive paths are not
 extracted. The MIT license is bundled beside the installed executable.
 
 For offline installation, provide a trusted executable of that exact version:
 
 ```sh
-python3 scripts/git_hooks.py install --repo /path/to/project \
+python3 skills/open-pr/scripts/git_hooks.py install --repo /path/to/project \
   --gitleaks /path/to/gitleaks
 ```
 
@@ -122,7 +122,7 @@ hook chaining and gstack replacement, scanner failures, clean pushes, intermedia
 commits, force-pushes, merge resolutions, annotated tags, and multiple refs.
 
 To upgrade, review the upstream release and detection behavior, update `VERSION`
-in `scripts/gitleaks_pre_push.py`, the release checksums, and this documentation;
+in `skills/open-pr/scripts/gitleaks_pre_push.py`, the release checksums, and this documentation;
 run both lifecycle and real-scanner tests before publishing. Download pins are
 release provenance, not an imported astack skill or a gstack runtime dependency.
 
