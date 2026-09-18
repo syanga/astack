@@ -1,11 +1,92 @@
-"""Plan reversible, per-key JSON/TOML edits; preserve unrelated configuration."""
-
 import copy
+from dataclasses import dataclass
 import json
 import math
+from pathlib import Path
+import stat
 
+import astack_files as files
 from _vendor.tomllib import loads as toml_loads
 from _vendor.tomllib._parser import parse_key, parse_value, skip_chars
+
+
+@dataclass
+class SettingsChange:
+    target: str
+    path: Path
+    conflicts: list[str]
+    _original_hash: str | None
+    _original: bytes
+    _mode: int
+    _rendered: str | None
+    _record: dict | None
+    _changed_keys: list[str]
+
+    def check_unchanged(self, stage):
+        if files.current_hash(self.path) != self._original_hash:
+            raise ValueError("Settings changed during {}; retry: {}".format(stage, self.path))
+
+    def apply(self, state, state_path, backup_root, dry_run=False):
+        """Apply this change and save ownership; restore its payload if saving fails."""
+        self.check_unchanged("installation")
+        if self.conflicts:
+            backup = backup_root / str(self.path).lstrip("/")
+            print("BACKUP {} -> {}".format(self.path, backup))
+            if not dry_run and self._original_hash is not None:
+                files.atomic_write(backup, self._original, self._mode)
+        action = "REMOVE" if self._rendered is None else "MERGE" if self._rendered.encode() != self._original else "KEEP"
+        print("{} SETTINGS {}{}".format(
+            action, self.path, " [" + ", ".join(self._changed_keys) + "]" if self._changed_keys else ""))
+        if dry_run:
+            return
+        old_settings = state.get("settings", {})
+        new_settings = {name: dict(records) for name, records in old_settings.items()}
+        records = new_settings.setdefault(self.target, {})
+        if self._record is None:
+            records.pop(str(self.path), None)
+        else:
+            records[str(self.path)] = self._record
+        if not records:
+            new_settings.pop(self.target, None)
+        if action == "MERGE":
+            files.atomic_write(self.path, self._rendered.encode(), self._mode)
+        elif action == "REMOVE" and self.path.exists():
+            self.path.unlink()
+        state["settings"] = new_settings
+        try:
+            files.atomic_write(state_path, (json.dumps(state, indent=2) + "\n").encode(), 0o600)
+        except OSError:
+            state["settings"] = old_settings
+            if self._original_hash is None:
+                if self.path.exists():
+                    self.path.unlink()
+            else:
+                files.atomic_write(self.path, self._original, self._mode)
+            raise
+
+
+def prepare(target, previous, desired, force=False):
+    """Prepare changes without writing. Desired paths map to (format, values) pairs."""
+    operations = []
+    for filename in sorted(set(previous) | set(desired)):
+        path = Path(filename)
+        files.validate_parents(path)
+        actual = files.current_hash(path)
+        if actual == "symlink":
+            raise ValueError("Settings destination symlinks are unsupported, even with --force: {}".format(path))
+        data = path.read_bytes() if path.exists() else b""
+        mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
+        old = previous.get(filename)
+        format_name, values = desired.get(filename, (old["format"] if old else None, {}))
+        try:
+            rendered, record, changes, conflicts = plan(
+                format_name, data.decode("utf-8"), values, old, path.exists(), force)
+        except ValueError as error:
+            raise ValueError("Cannot merge settings at {} ({})".format(path, type(error).__name__)) from None
+        operations.append(SettingsChange(
+            target=target, path=path, conflicts=conflicts, _original_hash=actual,
+            _original=data, _mode=mode, _rendered=rendered, _record=record, _changed_keys=changes))
+    return operations
 
 
 def json_loads(text):

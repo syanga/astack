@@ -212,7 +212,7 @@ class InstallerLifecycleTests(InstallerFixture):
                 self.run_with_config(module, {}, "install", "--target", "claude")
         self.assertEqual(target.read_bytes(), original)
         self.assertEqual(self.manifest()["targets"]["claude"][str(target)],
-                         module.fingerprint(original, 0o644))
+                         module.files.fingerprint(original, 0o644))
         self.assertFalse(list(self.home.rglob(".astack-*")))
         self.run_installer("--target", "claude")
         self.assertEqual(target.read_bytes(), (self.skill / "SKILL.md").read_bytes())
