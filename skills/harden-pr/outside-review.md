@@ -4,7 +4,11 @@ Choose a provider different from the current host: Claude when running in Codex,
 
 Check the installed CLI's help before invocation. Missing CLI, authentication failure, or an unsupported option means unavailable coverage; report the cause. Keep the configured model unless the user specified one.
 
-Save the complete prompt, diff, and relevant source context in a private file. Use a fresh output directory for each pass. Run from the reviewed repository, pass the prompt through stdin, and preserve stdout, stderr, and the final response.
+Use a fresh output directory for each pass. Run from the reviewed repository and preserve stdout, stderr, and the final response.
+
+## Prompted review
+
+Save the complete prompt, diff, and relevant source context in a private file. Pass the prompt through stdin.
 
 For Codex:
 
@@ -23,6 +27,20 @@ claude --print --safe-mode \
   < '<prompt-file>' > '<response-file>' 2> '<stderr-file>'
 ```
 
-Claude's result is a JSON envelope; read its result text and error status. Supply the diff explicitly because this invocation has no shell tool. For either provider, successful process exit alone does not establish a completed review. Validate the response as described in [adversarial.md](sections/adversarial.md).
+Claude's result is a JSON envelope; read its result text and error status. Supply the diff explicitly because this invocation has no shell tool.
 
-Use a bounded execution timeout, nine minutes by default, and terminate the process on timeout. Preserve partial output as incomplete evidence. The same provider, timeout, and result checks apply to the built-in Codex structured review. If the reviewed source changes while a pass runs, repeat it against the updated source before claiming convergence.
+## Codex built-in structured review
+
+For a structured review with Codex, use its built-in review when its base comparison covers the requested changes:
+
+```bash
+codex review --base '<fixed-point>' -c 'sandbox_mode="read-only"'
+```
+
+`--base` and a positional prompt are mutually exclusive. Keep `--base` when resolving an argument error; dropping it changes the diff scope. If the built-in comparison does not cover the requested changes, use the prompted review above with the captured diff and structured prompt.
+
+## Results and limits
+
+Successful process exit alone does not establish a completed review. Validate the response as described in [adversarial.md](sections/adversarial.md).
+
+Use a bounded execution timeout, nine minutes by default, and terminate the process on timeout. Preserve partial output as incomplete evidence. If the reviewed source changes while a pass runs, repeat it against the updated source before claiming convergence.

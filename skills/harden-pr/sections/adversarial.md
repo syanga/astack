@@ -44,15 +44,7 @@ If an outside provider is available and either `DIFF_TOTAL >= 200` or the user r
 
 Prepare a structured review prompt requesting severity-tagged findings ([P0], [P1], [P2], [P3]) or an explicit NO_FINDINGS conclusion. Use the same captured diff and source.
 
-With Codex, use its built-in structured review when its base comparison covers the requested changes:
-
-```bash
-codex review --base '<fixed-point>' -c 'sandbox_mode="read-only"'
-```
-
-The Codex backend uses `codex review --base` without a positional prompt: those arguments are mutually exclusive. Never drop --base to resolve an argv error; prompt-only review changes the diff scope. If the built-in comparison does not cover the requested changes, supply the captured diff and structured prompt through [outside-review.md](../outside-review.md).
-
-With another outside provider, supply the structured prompt, the complete checklist, and the same captured source using [outside-review.md](../outside-review.md). Request severity-tagged findings, including native P0:/P1:/P2: labels, or an explicit no-findings conclusion.
+Follow [outside-review.md](../outside-review.md) to invoke the provider. For a prompted review, supply the structured prompt, the complete checklist, and the same captured source.
 
 Present the full output under `OUTSIDE STRUCTURED REVIEW:` inside a `tool-output` fence.
 Assess completion and the gate using the rules below.

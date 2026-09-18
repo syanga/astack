@@ -22,6 +22,8 @@ Write a JSON file with this shape:
 
 Post the assessment and actionable findings for the commit reviewed. Keep findings open on the PR until their fixes are pushed. Include source citations, reviewer models, verification results, and per-pass coverage limits. Put each remaining blocking finding in `comments` with bucket `act on`; use `consider` for suggestions. A review with no remaining findings has no inline comments.
 
+When screenshots or recordings demonstrate a finding, follow [open-pr's attachment guidance](../open-pr/SKILL.md).
+
 If fixes remain local, report them in the conversation. Post an assessment of those fixes after they have been pushed and reviewed, when pushing is authorized.
 
 For a two-axis review, preserve the Standards and Spec reports as separate sections and label inline findings with their axis.
