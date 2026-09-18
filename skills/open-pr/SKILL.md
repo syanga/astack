@@ -33,7 +33,9 @@ Use these sections in this order by default. Omit sections that have nothing use
 - `## Blast radius`. In one to three sentences, name who or what the change affects and why it is safe or risky. Include the cost of leaving the problem unresolved when it helps assess the change.
 - `## Verification`. Name the commands or real run paths and their results. For a performance change, give a primary measured result with its unit, before and after.
 
-Attach screenshots or recordings when they demonstrate the change. Keep logs, SHAs, exhaustive file inventories, and bulky evidence in linked artifacts. End with the model and harness attribution. Use commit bodies to explain what the subject leaves unsaid.
+When screenshots or recordings demonstrate the change, upload them as GitHub attachments using `gh pr edit --attach` or GitHub's editor.
+
+Keep logs, SHAs, exhaustive file inventories, and bulky evidence in linked artifacts. End with the model and harness attribution. Use commit bodies to explain what the subject leaves unsaid.
 
 Create or update the PR using a file for the body. Confirm that it targets the intended base and is open for review, not a draft. In T3 Code, link it with `link_pull_request` when available. Return the URL, a brief verification summary, and any unresolved findings or limitations.
 
