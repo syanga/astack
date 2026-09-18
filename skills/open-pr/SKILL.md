@@ -39,4 +39,4 @@ Keep logs, SHAs, exhaustive file inventories, and bulky evidence in linked artif
 
 Create or update the PR using a file for the body. Confirm that it targets the intended base and is open for review, not a draft. In T3 Code, link it with `link_pull_request` when available. Return the URL, a brief verification summary, and any unresolved findings or limitations.
 
-Opening a PR does not start a babysit. Finish the requested phase or stack first. If the user also requested babysitting, then continue with [babysit-pr](../babysit-pr/SKILL.md).
+Finish the requested phase or stack first. If the user also requested hardening or PR follow-through, continue with [harden-pr](../harden-pr/SKILL.md) for that work.

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-SCRIPT = Path(__file__).resolve().parent.parent / "skills/babysit-pr/scripts/pr.py"
+SCRIPT = Path(__file__).resolve().parent.parent / "skills/harden-pr/scripts/pr.py"
 spec = importlib.util.spec_from_file_location("pr", SCRIPT)
 pr = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pr)
@@ -75,9 +75,6 @@ def green_pr(**overrides):
     return clean
 
 
-def action(pull, threads=(), reviews=(), recent=(), **kwargs):
-    return pr.summarize(pull, list(threads), list(reviews), list(recent), SINCE, NOW, **kwargs)["next"]
-
 
 class SnapshotTests(unittest.TestCase):
     def test_snapshot_shape(self):
@@ -89,18 +86,17 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["threads"]["resolved"], 1)
         self.assertEqual(snapshot["threads"]["unresolved"], [{
             "id": "T2", "path": "b.py", "line": 7, "outdated": False, "author": "bugbot", "bot": True,
-            "ours": False, "awaiting_user": False, "body": "possible race", "replies": 1, "url": "t2",
+            "ours": False, "body": "possible race", "replies": 1, "url": "t2",
         }])
         self.assertEqual(snapshot["bots"], {"bugbot": {"passes": 2, "last": "2026-09-15T12:00:00Z", "since_head": True}})
         self.assertEqual(snapshot["recent_commits"], [{"sha": "old111", "ci": "FAILURE"}, {"sha": "abc123", "ci": None}])
         self.assertEqual(snapshot["our_reviews"],
-                         {"total": 0, "on_head": 0, "cap": 5, "first_round": False, "last_round": False,
+                         {"total": 0, "on_head": 0,
                           "last_sha": None, "last_sha_in_pr": False,
                           "folded_on_head": False, "folded_act_on": 0})
         self.assertEqual([comment["body"] for comment in snapshot["new_comments"]], ["after push"])
         self.assertEqual(snapshot["head"], {"sha": "abc123", "ref": "feature", "committed_at": "2026-09-15T10:00:00Z",
                                             "pushed_at": None})
-        self.assertEqual(snapshot["next"]["action"], "fix")
 
     def test_only_a_first_line_header_marks_a_thread_ours(self):
         quoted = "I disagree with this:\n> [m] RESPONDING ON BEHALF OF ALAN"
@@ -120,27 +116,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["bots"]["bugbot"]["since_head"], False)
 
 
-class NextVerdictTests(unittest.TestCase):
-    def test_green_unreviewed_head_asks_for_a_review(self):
-        self.assertEqual(action(green_pr())["action"], "review")
-
-    def test_a_fresh_head_waits_for_checks_that_earlier_commits_had(self):
-        earlier = [{"commit": {"oid": "c1", "statusCheckRollup": {"state": "SUCCESS"}}}]
-        bare = green_pr(statusCheckRollup=[])
-        def verdict(recent, now):
-            return pr.summarize(bare, [], [], recent, SINCE, now)["next"]["action"]
-        self.assertEqual(verdict(earlier, "2026-09-15T10:05:00Z"), "wait")
-        self.assertEqual(verdict([], "2026-09-15T10:05:00Z"), "review")
-        self.assertEqual(verdict(earlier, "2026-09-15T10:11:00Z"), "review")
-
-    def test_the_grace_for_checks_runs_from_the_push_not_the_commit(self):
-        earlier = [{"commit": {"oid": "c1", "statusCheckRollup": {"state": "SUCCESS"}}}]
-        bare = green_pr(statusCheckRollup=[])
-        def verdict(pushed_at):
-            return pr.summarize(bare, [], [], earlier, SINCE, NOW, pushed_at=pushed_at)["next"]["action"]
-        self.assertEqual(verdict(None), "review")
-        self.assertEqual(verdict("2026-09-15T10:25:00Z"), "wait")
-
+class StateTests(unittest.TestCase):
     def test_the_push_time_is_asked_for_again_while_the_latest_listed_push_is_not_the_head(self):
         pull = {"headRepository": {"nameWithOwner": "o/r"}, "headRefName": "feature", "headRefOid": "abc123"}
         listings = iter([[{"after": "old111", "timestamp": "2026-09-15T09:00:00Z"}],
@@ -151,8 +127,6 @@ class NextVerdictTests(unittest.TestCase):
         self.assertEqual(pr.fetch_pushed_at(pull, run, sleeps.append), "2026-09-15T10:25:00Z")
         self.assertEqual(sleeps, [pr.PUSH_LISTING_RETRY_SECONDS])
 
-    def test_a_head_already_reviewed_is_never_reviewed_again(self):
-        self.assertEqual(action(green_pr(), reviews=[our_review("abc123")])["action"], "merge-ready")
 
     def test_the_last_reviewed_commit_is_reported_for_an_incremental_round(self):
         pull = green_pr(commits=[{"oid": "c1", "committedDate": SINCE}, {"oid": "abc123", "committedDate": SINCE}])
@@ -161,39 +135,6 @@ class NextVerdictTests(unittest.TestCase):
         ours = pr.summarize(pull, [], [newer, older], [], SINCE, NOW)["our_reviews"]
         self.assertEqual((ours["last_sha"], ours["last_sha_in_pr"]), ("c1", True))
 
-    def test_wait_polls_until_the_verdict_changes(self):
-        verdicts = iter(["wait", "wait", "review"])
-        sleeps = []
-        snapshot = pr.wait_until_settled(lambda: {"next": {"action": next(verdicts)}}, sleeps.append, lambda: 0, 600, 30)
-        self.assertEqual((snapshot["next"]["action"], sleeps), ("review", [30, 30]))
-
-    def test_wait_counts_snapshot_time_against_its_deadline(self):
-        clock = iter(range(0, 1000, 20))
-        sleeps = []
-        snapshot = pr.wait_until_settled(lambda: {"next": {"action": "wait"}}, sleeps.append, lambda: next(clock), 100, 30)
-        self.assertEqual((snapshot["next"]["action"], len(sleeps)), ("wait", 3))
-
-    def test_wait_polls_again_after_a_failed_snapshot(self):
-        def snapshot_once(results=iter(["wait", SystemExit(2), "review"])):
-            result = next(results)
-            if isinstance(result, SystemExit):
-                raise result
-            return {"next": {"action": result}}
-        snapshot = pr.wait_until_settled(snapshot_once, lambda seconds: None, lambda: 0, 600, 30)
-        self.assertEqual(snapshot["next"]["action"], "review")
-
-    def test_the_last_allowed_round_is_flagged(self):
-        four = [our_review("c{}".format(n)) for n in range(4)]
-        self.assertEqual(pr.summarize(green_pr(), [], four, [], SINCE, NOW)["our_reviews"]["last_round"], False)
-        five = four + [our_review("abc123")]
-        snapshot = pr.summarize(green_pr(), [], five, [], SINCE, NOW)
-        self.assertEqual((snapshot["our_reviews"]["last_round"], snapshot["next"]["action"]), (True, "merge-ready"))
-
-    def test_only_the_first_round_is_flagged_so_later_consider_findings_get_deferred(self):
-        def first_round(reviews):
-            return pr.summarize(green_pr(), [], reviews, [], SINCE, NOW)["our_reviews"]["first_round"]
-        self.assertEqual((first_round([our_review("c1")]), first_round([our_review("c1"), our_review("abc123")])),
-                         (True, False))
 
     def test_our_own_thread_replies_do_not_show_up_as_new_reviews(self):
         reply_shell = {"author": ALAN, "viewerDidAuthor": True, "state": "COMMENTED",
@@ -202,105 +143,108 @@ class NextVerdictTests(unittest.TestCase):
         snapshot = pr.summarize(green_pr(), [], [reply_shell, human], [], SINCE, NOW)
         self.assertEqual([review["author"] for review in snapshot["new_reviews"]], ["pat"])
 
-    def test_review_cap_stops_a_loop_that_always_finds_something(self):
-        verdict = action(green_pr(), reviews=[our_review("c1"), our_review("c2"), our_review("c3")], review_cap=3)
-        self.assertEqual(verdict["action"], "stop")
-        self.assertIn("review cap", verdict["stop"])
 
-    def test_review_cap_waits_for_the_checks_of_a_fresh_head_to_register(self):
+    def test_push_time_controls_registration_grace_and_stalled_mergeability(self):
         earlier = [{"commit": {"oid": "c1", "statusCheckRollup": {"state": "SUCCESS"}}}]
-        capped = [our_review("c1"), our_review("c2"), our_review("c3")]
-        snapshot = pr.summarize(green_pr(statusCheckRollup=[]), [], capped, earlier, SINCE, "2026-09-15T10:05:00Z",
-                                review_cap=3)
-        self.assertEqual(snapshot["next"]["action"], "wait")
-
-    def test_three_failing_commits_stop_a_fix_loop(self):
-        failing = [{"commit": {"oid": str(n), "statusCheckRollup": {"state": "FAILURE"}}} for n in range(3)]
-        verdict = action(PR, recent=failing)
-        self.assertEqual(verdict["action"], "stop")
-        self.assertIn("not converging", verdict["stop"])
-
-    def test_commits_that_ci_never_ran_on_do_not_break_the_failing_streak(self):
-        failing = [{"commit": {"oid": str(n), "statusCheckRollup": {"state": "FAILURE"}}} for n in range(3)]
-        pushed_with_the_tip = {"commit": {"oid": "mid", "statusCheckRollup": None}}
-        verdict = action(PR, recent=[failing[0], pushed_with_the_tip, failing[1], pushed_with_the_tip, failing[2]])
-        self.assertEqual(verdict["action"], "stop")
-        self.assertIn("not converging", verdict["stop"])
-
-    def test_a_check_pending_past_the_limit_stops_the_wait(self):
-        verdict = action(PR, stuck_minutes=5)
-        self.assertEqual(verdict["action"], "stop")
-        self.assertIn("lint", verdict["stop"])
-
-    def test_a_closed_or_merged_pr_stops_the_loop(self):
-        for state in ("CLOSED", "MERGED"):
-            verdict = action(green_pr(state=state), reviews=[our_review("abc123")])
-            self.assertEqual((verdict["action"], verdict["stop"]), ("stop", "the PR is {}, not open".format(state)))
-        self.assertEqual(action(dict(PR, state="CLOSED"))["action"], "stop")
+        pull = green_pr(statusCheckRollup=[], mergeable="UNKNOWN")
+        fresh = pr.summarize(pull, [], [], earlier, SINCE, NOW,
+                             stuck_minutes=5, pushed_at="2026-09-15T10:25:00Z")
+        old = pr.summarize(pull, [], [], earlier, SINCE, NOW, stuck_minutes=5)
+        self.assertTrue(fresh["checks"]["unregistered"])
+        self.assertFalse(fresh["mergeable_overdue"])
+        self.assertFalse(old["checks"]["unregistered"])
+        self.assertTrue(old["mergeable_overdue"])
 
     def test_a_pending_status_without_a_start_time_is_dated_from_the_head(self):
         legacy = green_pr(statusCheckRollup=[{"__typename": "StatusContext", "context": "deploy", "state": "PENDING"}])
-        self.assertEqual(action(legacy)["action"], "wait")
-        self.assertEqual(action(legacy, stuck_minutes=5)["action"], "stop")
+        fresh = pr.summarize(legacy, [], [], [], SINCE, NOW, stuck_minutes=5,
+                             pushed_at="2026-09-15T10:25:00Z")
+        old = pr.summarize(legacy, [], [], [], SINCE, NOW, stuck_minutes=5)
+        self.assertEqual(fresh["checks"]["stuck"], [])
+        self.assertEqual([check["name"] for check in old["checks"]["stuck"]], ["deploy"])
 
-    def test_a_chatty_bot_cannot_keep_the_fix_loop_running(self):
-        passes = [dict(REVIEWS[0], submittedAt="2026-09-15T0{}:00:00Z".format(n)) for n in range(6)]
-        verdict = action(green_pr(), threads=[THREADS[1]], reviews=passes)
-        self.assertEqual(verdict["action"], "stop")
-        self.assertIn("review bot", verdict["stop"])
+    def test_a_repo_without_earlier_checks_does_not_wait_for_registration(self):
+        bare = green_pr(statusCheckRollup=[])
+        snapshot = pr.summarize(bare, [], [], [], SINCE, "2026-09-15T10:05:00Z")
+        self.assertFalse(snapshot["checks"]["unregistered"])
 
-    def test_a_chatty_bot_does_not_stop_work_on_a_thread_it_did_not_write(self):
-        passes = [dict(REVIEWS[0], submittedAt="2026-09-15T0{}:00:00Z".format(n)) for n in range(6)]
-        verdict = action(green_pr(), threads=[thread(pr.format_body("m", "Act on. Race.", "ALAN"))], reviews=passes)
-        self.assertEqual((verdict["action"], verdict["stop"]), ("fix", None))
-
-    def test_pending_checks_wait(self):
-        waiting = green_pr(statusCheckRollup=[PR["statusCheckRollup"][1]])
-        self.assertEqual(action(waiting)["action"], "wait")
-
-    def test_our_unanswered_finding_needs_work(self):
-        verdict = action(green_pr(), threads=[thread(pr.format_body("m", "Act on: race", "ALAN"))], reviews=[our_review("abc123")])
-        self.assertEqual(verdict["action"], "fix")
-
-    def test_an_ask_left_open_hands_off_instead_of_merging(self):
-        ask = thread("possible auth bypass", pr.format_body("m", "Asked: needs Alan's call", "ALAN"))
-        verdict = action(green_pr(), threads=[ask], reviews=[our_review("abc123")])
-        self.assertEqual(verdict["action"], "hand off")
-        self.assertEqual(verdict["handoff"], ["1 threads await the user"])
-
-    def test_folded_review_with_act_on_findings_blocks(self):
+    def test_folded_findings_are_reported_on_the_reviewed_head(self):
         folded = pr.fold_comments({"body": "Verdict.", "comments": [
             {"path": "a.py", "line": 7, "bucket": "act on", "body": "Race."},
             {"path": "a.py", "line": 9, "bucket": "consider", "body": "Name."}]})
-        verdict = action(green_pr(), reviews=[our_review("abc123", folded["body"])])
-        self.assertEqual(verdict["action"], "fix")
-        self.assertEqual(verdict["blockers"], ["1 act-on findings in a folded review body"])
+        reviews = [our_review("abc123", folded["body"])]
+        current = pr.summarize(green_pr(), [], reviews, [], SINCE, NOW)["our_reviews"]
+        advanced = pr.summarize(green_pr(headRefOid="new"), [], reviews, [], SINCE, NOW)["our_reviews"]
+        self.assertEqual((current["on_head"], current["folded_act_on"]), (1, 1))
+        self.assertEqual((advanced["on_head"], advanced["folded_act_on"]), (0, 0))
 
-    def test_folded_review_with_only_consider_findings_hands_off(self):
-        folded = pr.fold_comments({"body": "Verdict.", "comments": [
-            {"path": "a.py", "line": 9, "bucket": "consider", "body": "Name."}]})
-        self.assertEqual(action(green_pr(), reviews=[our_review("abc123", folded["body"])])["action"], "hand off")
 
-    def test_a_clean_draft_is_a_blocker_not_merge_ready(self):
-        verdict = action(green_pr(isDraft=True), reviews=[our_review("abc123")])
-        self.assertEqual((verdict["action"], verdict["blockers"]), ("fix", ["the PR is a draft"]))
+class WaitTests(unittest.TestCase):
+    def snapshot(self, **overrides):
+        pull = green_pr(statusCheckRollup=[PR["statusCheckRollup"][1]], **overrides)
+        return pr.summarize(pull, [], [], [], SINCE, NOW)
 
-    def test_a_conflict_needs_fixing(self):
-        self.assertEqual(action(green_pr(mergeable="CONFLICTING"))["blockers"], ["conflict with the base branch"])
+    def wait(self, snapshots, seconds=60):
+        pending = iter(snapshots)
+        self.sleeps = []
+        return pr.wait_until_settled(lambda: next(pending), self.sleeps.append, lambda: 0, seconds, 30)
 
-    def test_unknown_mergeability_waits_then_stops(self):
-        self.assertEqual(action(green_pr(mergeable="UNKNOWN"))["action"], "wait")
-        verdict = action(green_pr(mergeable="UNKNOWN"), stuck_minutes=5)
-        self.assertEqual(verdict["action"], "stop")
-        self.assertIn("mergeability", verdict["stop"])
+    def test_wait_returns_when_checks_settle(self):
+        ready = pr.summarize(green_pr(), [], [], [], SINCE, NOW)
+        result = self.wait([self.snapshot(), self.snapshot(), ready])
+        self.assertEqual(result["checks"]["counts"]["passed"], 1)
+        self.assertEqual(self.sleeps, [30, 30])
 
-    def test_a_missing_required_approval_hands_off(self):
-        verdict = action(green_pr(reviewDecision="REVIEW_REQUIRED"), reviews=[our_review("abc123")])
-        self.assertEqual(verdict["action"], "hand off")
+    def test_wait_returns_new_head_even_with_pending_checks(self):
+        result = self.wait([self.snapshot(), self.snapshot(headRefOid="new")])
+        self.assertEqual(result["head"]["sha"], "new")
+        self.assertTrue(result["checks"]["pending"])
+        self.assertEqual(self.sleeps, [30])
 
-    def test_requested_changes_hand_off(self):
-        verdict = action(green_pr(reviewDecision="CHANGES_REQUESTED"), reviews=[our_review("abc123")])
-        self.assertEqual(verdict["action"], "hand off")
+    def test_wait_returns_when_pr_closes(self):
+        result = self.wait([self.snapshot(), self.snapshot(state="CLOSED")])
+        self.assertEqual(result["state"], "CLOSED")
+        self.assertEqual(self.sleeps, [30])
+
+    def test_wait_preserves_pending_state_on_deadline(self):
+        clock = iter(range(0, 1000, 20))
+        sleeps = []
+        result = pr.wait_until_settled(self.snapshot, sleeps.append, lambda: next(clock), 100, 30)
+        self.assertTrue(result["checks"]["pending"])
+        self.assertEqual(sleeps, [30, 30, 30, 20])
+
+    def test_wait_returns_failed_or_stalled_checks_without_sleeping(self):
+        failed = pr.summarize(PR, [], [], [], SINCE, NOW)
+        stalled = pr.summarize(green_pr(statusCheckRollup=[PR["statusCheckRollup"][1]]),
+                               [], [], [], SINCE, NOW, stuck_minutes=5)
+        for snapshot in (failed, stalled):
+            self.assertEqual(self.wait([snapshot]), snapshot)
+            self.assertEqual(self.sleeps, [])
+
+    def test_short_wait_uses_the_time_left_after_fetching(self):
+        clock = iter([0, 2, 31])
+        sleeps = []
+        result = pr.wait_until_settled(self.snapshot, sleeps.append, lambda: next(clock), 30, 30)
+        self.assertEqual(sleeps, [28])
+        self.assertTrue(result["checks"]["pending"])
+
+    def test_wait_polls_unknown_mergeability(self):
+        unknown = pr.summarize(green_pr(mergeable="UNKNOWN"), [], [], [], SINCE, NOW)
+        ready = pr.summarize(green_pr(), [], [], [], SINCE, NOW)
+        result = self.wait([unknown, ready])
+        self.assertEqual(result["mergeable"], "MERGEABLE")
+        self.assertEqual(self.sleeps, [30])
+
+    def test_wait_failure_does_not_return_a_stale_snapshot(self):
+        calls = []
+        def snapshot_once():
+            calls.append(1)
+            if len(calls) > 1:
+                raise SystemExit(2)
+            return self.snapshot()
+        with self.assertRaises(SystemExit) as raised:
+            pr.wait_until_settled(snapshot_once, lambda _: None, lambda: 0, 60, 30)
+        self.assertEqual(raised.exception.code, 2)
 
 
 class PostingTests(unittest.TestCase):

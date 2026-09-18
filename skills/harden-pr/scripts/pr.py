@@ -1,52 +1,14 @@
 #!/usr/bin/env python3
-"""GitHub pull request helper for the babysit-pr and review-pr skills.
+"""GitHub state, review history, and posting for harden-pr and review-pr.
 
-Reads and writes through the GitHub CLI (gh). Bodies come from files and
-reach gh as JSON on stdin, so no comment text passes through a shell.
+Bodies come from files and reach gh as JSON on stdin. Reviews are attributed
+and posted against the commit actually reviewed. GitHub can reject inline
+locations; review then folds findings into the body and reports that fallback.
 
-    pr.py status  [--pr N] [--repo o/r] [--since ISO] [--review-cap 5] [--stuck-minutes 60]
-    pr.py wait    [--pr N] [--repo o/r] [--max-minutes 9] [--interval 30]
-    pr.py history [--pr N] [--repo o/r]
-    pr.py reply   --thread <id> --body-file <file> --model <id>
-    pr.py resolve --thread <id>
-    pr.py review  --review-file <json> --model <id> --commit <sha> [--pr N] [--repo o/r]
-
-Every body this script posts opens with the on-behalf-of header:
-
-    [<model id>] RESPONDING ON BEHALF OF <git config user.name>
-    ======
-
-`status` ends with a `next` verdict computed from the PR alone (fix, wait,
-review, merge-ready, hand off, stop), so the babysit loop's bounds survive a
-lost transcript: the review-round cap, the CI-not-converging stop, and the
-stuck-check stop are all read from GitHub, never from memory. The grace for
-checks to register runs from `head.pushed_at`, the time the repository activity
-API gives for the push of the head. So do the stuck limits for mergeability and
-for a check that reports no start time. All three run from `head.committed_at`
-when that API lists no push of the head. The API lists a push a few seconds
-late, so `status` asks again while the latest listed push is an older one.
-
-`wait` blocks until the verdict is no longer `wait`, then prints the snapshot.
-It needs no harness timer, so it works in a subagent and in any harness. It
-returns after --max-minutes with the verdict still `wait`; run it again.
-
-`history` prints every earlier review body and every thread with its replies
-and resolution, as Markdown, for a later review round to read. It marks each
-text as ours, as this account's by hand, or as another account's, and quotes
-another account's text so it cannot imitate a mark.
-
-The review file is {"body": "...", "comments": [{"path", "line", "bucket", "body"}, ...]}
-with bucket "act on" or "consider". It becomes one PR review on --commit, the
-commit the reviewers actually read, with an inline comment per entry. A push
-that lands during a review therefore stays unreviewed instead of being marked
-covered. A comment on a line outside the diff makes
-GitHub reject the whole review, so on rejection the comments move into the
-review body and the review is retried. `review` prints {"url", "inline",
-"folded"} so the caller can tell which happened.
-
-Exit code 2 means gh or the GitHub API failed (auth, network, rate limit), or
-the review file is malformed.
-Retry once before treating that as a result. Only the latest 100 reviews are read.
+Status reports observations, including review coverage and stalled checks.
+Wait polls pending checks and mergeability for a bounded interval. It returns
+on changed state that needs attention; callers assess the resulting snapshot.
+Exit code 2 means the API failed or the supplied review was invalid.
 """
 
 import argparse
@@ -60,7 +22,6 @@ import time
 HEADER_MARK = "RESPONDING ON BEHALF OF "
 ATTRIBUTION_HEADER = re.compile(r"\[[^\]\r\n]+\] " + HEADER_MARK + r"\S[^\r\n]*")
 FOLD_MARK = "Findings on lines outside the diff:"
-BOT_PASS_CAP = 6
 CHECK_GRACE_MINUTES = 10
 PUSH_LISTING_TRIES = 3
 PUSH_LISTING_RETRY_SECONDS = 2
@@ -197,7 +158,7 @@ def minutes_between(start, now):
     return (datetime.fromisoformat(now.replace("Z", "+00:00")) - begun).total_seconds() / 60
 
 
-def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minutes=60, pushed_at=None):
+def summarize(pr, threads, reviews, recent, since, now, stuck_minutes=60, pushed_at=None):
     head = pr["headRefOid"]
     checks = [classify_check(check) for check in pr.get("statusCheckRollup") or []]
     unresolved = []
@@ -210,7 +171,6 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minu
             "id": thread["id"], "path": thread.get("path"), "line": thread.get("line"),
             "outdated": bool(thread.get("isOutdated")), "author": login(first), "bot": is_bot(first),
             "ours": is_ours(first),
-            "awaiting_user": len(comments) > 1 and is_ours(comments[-1]),
             "body": first.get("body", ""), "replies": max(len(comments) - 1, 0), "url": first.get("url"),
         })
     bots = {}
@@ -251,9 +211,7 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minu
                             "ci": (node["commit"].get("statusCheckRollup") or {}).get("state")} for node in recent],
         "threads": {"unresolved": unresolved,
                     "resolved": sum(1 for thread in threads if thread.get("isResolved"))},
-        "our_reviews": {"total": len(ours), "on_head": len(on_head), "cap": review_cap,
-                        "first_round": len(ours) == 1,
-                        "last_round": len(ours) >= review_cap,
+        "our_reviews": {"total": len(ours), "on_head": len(on_head),
                         "last_sha": last_sha,
                         "last_sha_in_pr": last_sha is not None and last_sha in {commit.get("oid") for commit in pr["commits"]},
                         "folded_on_head": any(FOLD_MARK in review.get("body", "") for review in on_head),
@@ -270,64 +228,8 @@ def summarize(pr, threads, reviews, recent, since, now, review_cap=5, stuck_minu
             and (review.get("body") or not review.get("viewerDidAuthor"))
         ],
     }
-    snapshot["next"] = assess(snapshot)
     return snapshot
 
-
-def assess(snapshot):
-    checks, ours = snapshot["checks"], snapshot["our_reviews"]
-    threads = snapshot["threads"]["unresolved"]
-    work = [thread for thread in threads if not thread["awaiting_user"]]
-    waiting = [thread for thread in threads if thread["awaiting_user"]]
-    streak = [commit["ci"] for commit in snapshot["recent_commits"] if commit["ci"]][-3:]
-    settling = checks["pending"] or checks["unregistered"] or snapshot["mergeable"] == "UNKNOWN"
-    blockers = []
-    if snapshot["draft"]:
-        blockers.append("the PR is a draft")
-    if snapshot["mergeable"] == "CONFLICTING":
-        blockers.append("conflict with the base branch")
-    if checks["failed"]:
-        blockers.append("{} failed checks".format(len(checks["failed"])))
-    if work:
-        blockers.append("{} threads need work".format(len(work)))
-    if ours["folded_act_on"]:
-        blockers.append("{} act-on findings in a folded review body".format(ours["folded_act_on"]))
-    handoff = []
-    if waiting:
-        handoff.append("{} threads await the user".format(len(waiting)))
-    if snapshot["review_decision"] == "CHANGES_REQUESTED":
-        handoff.append("a human reviewer requested changes")
-    if snapshot["review_decision"] == "REVIEW_REQUIRED":
-        handoff.append("a required human approval is missing")
-    if ours["folded_on_head"] and not ours["folded_act_on"]:
-        handoff.append("consider findings sit in a folded review body")
-    stop = None
-    if snapshot["state"] != "OPEN":
-        stop = "the PR is {}, not open".format(snapshot["state"])
-    elif checks["stuck"]:
-        stop = "a check has been pending past the stuck limit: " + ", ".join(check["name"] or "?" for check in checks["stuck"])
-    elif snapshot["mergeable_overdue"]:
-        stop = "GitHub has not computed mergeability long after the push of the head"
-    elif any(thread["bot"] and snapshot["bots"].get(thread["author"], {}).get("passes", 0) >= BOT_PASS_CAP
-             for thread in work):
-        stop = "a review bot has posted {} passes and threads still need work".format(BOT_PASS_CAP)
-    elif len(streak) == 3 and all(state in ("FAILURE", "ERROR") for state in streak):
-        stop = "the last three commits CI ran on failed, so the fixes are not converging"
-    elif not blockers and not settling and ours["on_head"] == 0 and ours["total"] >= ours["cap"]:
-        stop = "the review cap of {} rounds is reached with the head unreviewed".format(ours["cap"])
-    if stop:
-        action = "stop"
-    elif blockers:
-        action = "fix"
-    elif settling:
-        action = "wait"
-    elif ours["on_head"] == 0:
-        action = "review"
-    elif handoff:
-        action = "hand off"
-    else:
-        action = "merge-ready"
-    return {"action": action, "blockers": blockers, "handoff": handoff, "stop": stop}
 
 
 def git_user_name():
@@ -377,7 +279,7 @@ def take_snapshot(args):
     since = getattr(args, "since", None) or max(commit["committedDate"] for commit in pr["commits"])
     threads, reviews, recent = fetch_threads(owner, name, pr["number"])
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return summarize(pr, threads, reviews, recent, since, now, args.review_cap, args.stuck_minutes,
+    return summarize(pr, threads, reviews, recent, since, now, args.stuck_minutes,
                      fetch_pushed_at(pr))
 
 
@@ -389,12 +291,17 @@ def command_status(args):
 def wait_until_settled(snapshot_once, sleep, clock, seconds, interval):
     deadline = clock() + seconds
     snapshot = snapshot_once()
-    while snapshot["next"]["action"] == "wait" and clock() + interval <= deadline:
-        sleep(interval)
-        try:
-            snapshot = snapshot_once()
-        except SystemExit:
-            continue
+    head = snapshot["head"]["sha"]
+    while (snapshot["state"] == "OPEN" and snapshot["head"]["sha"] == head
+           and not snapshot["checks"]["failed"] and not snapshot["checks"]["stuck"]
+           and not snapshot["mergeable_overdue"]
+           and (snapshot["checks"]["pending"] or snapshot["checks"]["unregistered"]
+                or snapshot["mergeable"] == "UNKNOWN")):
+        remaining = deadline - clock()
+        if remaining <= 0:
+            break
+        sleep(min(interval, remaining))
+        snapshot = snapshot_once()
     return snapshot
 
 
@@ -429,7 +336,7 @@ def render_history(threads, reviews):
         if not comments:
             continue
         lines.append("### {}:{} ({})".format(thread.get("path"), thread.get("line") or "outdated line",
-                                             "resolved" if thread.get("isResolved") else "open, not yet answered"))
+                                             "resolved" if thread.get("isResolved") else "open"))
         for comment in comments:
             lines += ["", "**{}**:".format(signed(comment)), "", shown(comment)]
         lines.append("")
@@ -501,13 +408,12 @@ def main(argv=None):
     status.add_argument("--since", help="ISO-8601 cut for new activity; defaults to the head commit time")
     status.set_defaults(run=command_status)
 
-    wait = scoped("wait", help="block until the verdict is no longer wait, then print the snapshot")
-    wait.add_argument("--max-minutes", type=float, default=9, help="return after this long even if still waiting")
+    wait = scoped("wait", help="wait for checks or mergeability to settle, then print the snapshot")
+    wait.add_argument("--max-minutes", type=float, default=0.5, help="return after this long even if still waiting")
     wait.add_argument("--interval", type=int, default=30, help="seconds between polls")
     wait.set_defaults(run=command_wait)
 
     for sub in (status, wait):
-        sub.add_argument("--review-cap", type=int, default=5, help="review-pr rounds allowed before the loop stops")
         sub.add_argument("--stuck-minutes", type=int, default=60, help="a check pending longer than this is stuck")
 
     history = scoped("history", help="print earlier review bodies and threads as Markdown")
