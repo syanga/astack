@@ -1,7 +1,6 @@
 ---
 name: ship-pr
-description: Landing a PR.
-disable-model-invocation: true
+description: Shipping a PR. Use when asked to ship or merge a PR or stack.
 ---
 
 # Ship PRs
