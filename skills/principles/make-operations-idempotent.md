@@ -1,4 +1,4 @@
-# Make Operations Idempotent
+# Make operations idempotent
 
 Apply when designing commands, lifecycle steps, or processing loops that run amid crashes, restarts, and retries.
 
@@ -7,9 +7,10 @@ Design operations so they converge to the correct state regardless of how many t
 **Why:** Commands, lifecycle operations, and processing loops run where crashes, restarts, and retries are normal. If partial state changes the next run's outcome, every restart becomes a debugging session.
 
 **The pattern:**
-- Convergent startup: scan for existing state and clean stale artifacts
+- Convergent startup: scan for existing state, clean stale artifacts, adopt live sessions
 - Content-based cleanup: compare by content equivalence, not creation order
 - Self-healing locks: use PID-based stale lock detection
+- Idempotent scheduling: failed work respawns cleanly, fresh input regenerated after each cycle
 
 **The test:**
 1. What happens if this runs twice in a row?

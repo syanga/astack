@@ -1,4 +1,4 @@
-# Model the Domain
+# Model the domain
 
 Apply when writing stateful logic, or when code branches a lot or repeats a shape assumption across files.
 

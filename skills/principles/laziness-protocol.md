@@ -1,4 +1,4 @@
-# Laziness Protocol
+# Laziness protocol
 
 Apply when refactoring, evaluating diff size, or tempted to add abstractions, layers, or signal threading.
 

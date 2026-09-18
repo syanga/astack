@@ -1,10 +1,8 @@
-# Type System Discipline
+# Type system discipline
 
 Apply when designing types, reviewing a function signature, or writing code in any statically-typed language.
 
 The type checker is a proof assistant. Use it to eliminate impossible states, mismatched primitives, and unhandled variants at compile time. A case the types let you ignore becomes a runtime failure the compiler could have stopped. Prefer defining errors and special cases out of existence over proliferating handlers. Unrepresentable states, total functions, and interface redesign (the patterns below) are the tools.
-
-Applies to any typed language.
 
 **The patterns:**
 

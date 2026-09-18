@@ -1,4 +1,4 @@
-# Encode Lessons in Structure
+# Encode lessons in structure
 
 Apply when you catch yourself writing the same instruction a second time, or notice a recurring correction.
 
@@ -14,7 +14,5 @@ When you catch yourself writing the same instruction a second time:
 
 **Feedback loop:**
 - **Capture every correction.** When the human intervenes or tests fail, decide if it is a one-off or a pattern.
-- **Route to the right layer.** One-off -> a note in the reply. Recurring fix -> skill or lint rule. Systemic issue -> principle.
+- **Route to the right layer.** Put recurring fixes in a skill or lint rule, and systemic lessons in a principle.
 - **Close the loop.** Apply now or create a concrete todo. "I'll keep that in mind" does not persist.
-
-**The test:** the diff contains the lint rule, check, or type change, and the instruction it replaced is gone.

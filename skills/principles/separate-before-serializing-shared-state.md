@@ -1,4 +1,4 @@
-# Separate Before Serializing Shared State
+# Separate before serializing shared state
 
 Apply when concurrent actors might write to the same file, branch, key, or state object.
 
