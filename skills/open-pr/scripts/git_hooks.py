@@ -107,7 +107,10 @@ def verify_install(hooks):
     payload = hooks / PAYLOAD
     if payload.is_symlink():
         raise ValueError("Managed hook directory was replaced by a symlink.")
-    state = json.loads((payload / "state.json").read_text())
+    state_path = payload / "state.json"
+    if state_path.is_symlink():
+        raise ValueError("Managed hook state was replaced by a symlink.")
+    state = json.loads(state_path.read_text())
     if state.get("version") != 1:
         raise ValueError("Unsupported hook state version.")
     if record(hooks / "pre-push") != {"sha256": digest(WRAPPER), "mode": 0o755}:

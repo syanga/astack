@@ -174,6 +174,39 @@ class HookTests(HookFixture):
         self.assertEqual(self.payload_snapshot(), before)
         self.assertEqual(self.invoke().returncode, 0)
 
+    def test_refresh_refuses_symlinked_state(self):
+        self.install_stale()
+        state = self.hooks / git_hooks.PAYLOAD / "state.json"
+        outside = self.root / "state.json"
+        state.rename(outside)
+        state.symlink_to(outside)
+        before = outside.read_bytes()
+        self.manage(ok=False)
+        self.assertTrue(state.is_symlink())
+        self.assertEqual(outside.read_bytes(), before)
+        self.assertEqual(self.invoke().returncode, 0)
+
+    def test_refresh_refuses_changes_during_preparation(self):
+        self.install_stale()
+        payload = self.hooks / git_hooks.PAYLOAD
+        runner = (payload / "runner.py").read_bytes()
+        state = git_hooks.verify_install(self.hooks)
+        state["chain"] = "pre-push.local"
+        copy = shutil.copy2
+
+        def edit_after_copy(source, destination):
+            result = copy(source, destination)
+            if Path(source).name == "state.json":
+                (payload / "state.json").write_text(json.dumps(state))
+            return result
+
+        with patch.object(git_hooks.shutil, "copy2", side_effect=edit_after_copy):
+            with self.assertRaisesRegex(ValueError, "changed during preparation"):
+                git_hooks.install(self.hooks)
+        self.assertEqual((payload / "runner.py").read_bytes(), runner)
+        self.assertEqual(git_hooks.verify_install(self.hooks), state)
+        self.assertEqual(list(self.hooks.glob(".astack-*")), [])
+
     def test_refresh_failures_restore_a_working_retryable_installation(self):
         self.install_stale()
         self.commit("file.txt", "changed\n")
