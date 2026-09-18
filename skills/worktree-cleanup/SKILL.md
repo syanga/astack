@@ -13,13 +13,13 @@ Inventory worktrees and associated resources, including leftovers outside delete
 
 Stop disposable resources before removing their worktrees:
 
-- Processes: match PID, start time, and command; account for supervisors and children.
-- Previews: use the [cleanup record](../t3-preview/cleanup.md) or original launch evidence. HTML-only previews have no processes. Stop preview quick tunnels before their servers; preserve T3's access tunnel and retained deliverables.
-- Docker: verify the daemon and container ownership. Compose names can span worktrees; inspect volume consumers, including stopped containers. Avoid global pruning.
-- Test databases: derive the exact target from test setup. Stop clients before scoped teardown; preserve shared servers and data.
+- Processes: match PID, start time, and command. Account for supervisors and children.
+- Previews: use the [cleanup record](../t3-preview/cleanup.md) or original launch evidence. HTML-only previews have no processes. Stop preview quick tunnels before their servers. Preserve T3's access tunnel and retained deliverables.
+- Docker: verify the daemon and container ownership. Compose names can span worktrees. Inspect volume consumers, including stopped containers. Avoid global pruning.
+- Test databases: derive the exact target from test setup. Stop clients before scoped teardown. Preserve shared servers and data.
 
-Remove only merged or explicitly abandoned worktrees. Check ignored/untracked files and post-squash commits; retain detached commits through a branch. Keep main, current, locked, active, and open-PR worktrees. Preserve branch refs unless deletion was requested.
+Remove only merged or explicitly abandoned worktrees. Check ignored and untracked files and post-squash commits. Retain detached commits through a branch. Keep main, current, locked, active, and open-PR worktrees. Preserve branch refs unless deletion was requested.
 
-Recheck before `git worktree remove`. Force removal requires explicit disposal authorization for the affected files. Verify teardown before deleting recovery records; report removals, retired links, holds, and failures.
+Recheck before `git worktree remove`. Force removal requires explicit disposal authorization for the affected files. Verify teardown before deleting recovery records. Report removals, retired links, holds, and failures.
 
 Expand to simulators or caches only when requested. Editor backups may contain otherwise unrecorded work.

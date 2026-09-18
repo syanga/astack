@@ -30,4 +30,4 @@ When hardening was requested, confirm its assessment covers the final head, refr
 
 Before an authorized merge, take a fresh snapshot, confirm that findings and user decisions are addressed and required checks and approvals pass on the intended head, and use `gh pr merge <n> --squash --match-head-commit <sha>`. Respect the user's merge disposition. If it is absent, report readiness and ask. For stacked PRs, retarget children to the parent's base before deleting the parent branch.
 
-For merge-when-ready, wait and merge the verified head explicitly. Use auto-merge only when requested and repository controls prevent unverified head changes while pending; matching the head at scheduling time alone is insufficient. Confirm the merged state before reporting the PR as landed.
+For merge-when-ready, wait and merge the verified head explicitly. Use auto-merge only when requested and repository controls prevent unverified head changes while pending. Matching the head at scheduling time alone is insufficient. Confirm the merged state before reporting the PR as landed.
