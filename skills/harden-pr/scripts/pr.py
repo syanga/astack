@@ -5,6 +5,10 @@ Bodies come from files and reach gh as JSON on stdin. Reviews are attributed
 and posted against the commit actually reviewed. GitHub can reject inline
 locations; review then folds findings into the body and reports that fallback.
 
+Every posted body starts with:
+
+    [<model id>] on behalf of <first name from git config user.name>
+
 Status reports observations, including review coverage and stalled checks.
 Wait polls pending checks and mergeability for a bounded interval. It returns
 on changed state that needs attention; callers assess the resulting snapshot.
@@ -19,8 +23,11 @@ import subprocess
 import sys
 import time
 
-HEADER_MARK = "RESPONDING ON BEHALF OF "
-ATTRIBUTION_HEADER = re.compile(r"\[[^\]\r\n]+\] " + HEADER_MARK + r"\S[^\r\n]*")
+HEADER_MARK = "on behalf of "
+LEGACY_HEADER_MARK = "RESPONDING ON BEHALF OF "
+ATTRIBUTION_HEADER = re.compile(
+    r"\[[^\]\r\n]+\] (?:" + HEADER_MARK + r"\S+|" + LEGACY_HEADER_MARK + r"\S[^\r\n]*)"
+)
 FOLD_MARK = "Findings on lines outside the diff:"
 CHECK_GRACE_MINUTES = 10
 PUSH_LISTING_TRIES = 3
@@ -241,7 +248,8 @@ def git_user_name():
 
 
 def format_body(model, body, name):
-    return "[{}] {}{}\n======\n\n{}".format(model, HEADER_MARK, name, body.rstrip("\n") + "\n")
+    first_name = name.split(maxsplit=1)[0]
+    return "[{}] {}{}\n\n{}".format(model, HEADER_MARK, first_name, body.rstrip("\n") + "\n")
 
 
 def build_review(model, review, commit, name):
