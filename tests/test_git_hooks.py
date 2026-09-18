@@ -72,12 +72,12 @@ sys.exit(code)
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
         return result
 
-    def invoke(self, head=None, base=None, data=None, cwd=None):
+    def invoke(self, head=None, base=None, data=None, cwd=None, destination="unused"):
         if data is None:
             head = head or self.git("rev-parse", "HEAD").stdout.strip()
             base = base or self.base
             data = "refs/heads/main {} refs/heads/main {}\n".format(head, base)
-        return subprocess.run([str(self.hooks / "pre-push"), "origin", "unused"],
+        return subprocess.run([str(self.hooks / "pre-push"), "origin", str(destination)],
                               input=data, text=True, cwd=cwd or self.repo,
                               env=self.env, capture_output=True)
 
@@ -205,16 +205,59 @@ class HookTests(HookFixture):
 
     def test_new_branch_uses_its_history_without_unrelated_remote_exclusions(self):
         self.commit("file.txt", "changed\n")
+        remote = self.root / "empty.git"
+        self.git("init", "--bare", str(remote))
         self.manage()
         log = self.root / "args.json"
         self.env["FAKE_LOG"] = str(log)
-        result = self.invoke(base="0" * 40)
+        result = self.invoke(base="0" * 40, destination=remote)
         self.assertEqual(result.returncode, 0, result.stderr)
         args = json.loads(log.read_text())
         opts = args[args.index("--log-opts") + 1]
         self.assertNotIn("--remotes", opts)
         self.assertNotIn("^", opts)
         self.assertIn("--diff-merges=separate", opts)
+
+    def test_new_branch_excludes_only_known_advertised_destination_heads(self):
+        remote = self.root / "destination.git"
+        self.git("clone", "--bare", str(self.repo), str(remote))
+        head = self.commit("file.txt", "unpublished\n")
+        self.git("update-ref", "refs/remotes/origin/stale", head)
+        self.git("update-ref", "refs/remotes/private/main", head)
+        self.manage()
+        log = self.root / "args.json"
+        self.env["FAKE_LOG"] = str(log)
+        result = self.invoke(base="0" * 40, destination=remote)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = json.loads(log.read_text())
+        opts = args[args.index("--log-opts") + 1].split()
+        self.assertIn("^" + self.base, opts)
+        self.assertNotIn("^" + head, opts)
+        self.assertIn(head, opts)
+
+    def test_new_branch_destination_failure_blocks_without_scanning(self):
+        self.commit("file.txt", "unpublished\n")
+        self.manage()
+        log = self.root / "args.json"
+        self.env["FAKE_LOG"] = str(log)
+        result = self.invoke(base="0" * 40, destination=self.root / "missing.git")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(log.exists())
+
+    def test_new_branch_unknown_destination_tip_does_not_exclude_history(self):
+        other = self.root / "other"
+        self.git("init", "-b", "main", str(other))
+        (other / "other.txt").write_text("unrelated\n")
+        self.git("add", "other.txt", repo=other)
+        self.git("commit", "-m", "unrelated", repo=other)
+        self.commit("file.txt", "unpublished\n")
+        self.manage()
+        log = self.root / "args.json"
+        self.env["FAKE_LOG"] = str(log)
+        result = self.invoke(base="0" * 40, destination=other)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = json.loads(log.read_text())
+        self.assertNotIn("^", args[args.index("--log-opts") + 1])
 
     def test_wrong_version_preserves_original(self):
         old = self.hooks / "pre-push"
@@ -387,6 +430,28 @@ class RealScannerTests(HookFixture):
         result = self.git("push", "origin", "feature", ok=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("secret detected", result.stderr)
+
+    def test_real_new_branch_does_not_rescan_published_history(self):
+        self.manage("uninstall")
+        self.commit("historical.txt", self.secret() + "\n")
+        self.git("push", "origin", "main")
+        self.manage()
+        self.git("checkout", "-b", "feature")
+        self.commit("file.txt", "new clean change\n")
+        self.git("push", "origin", "feature")
+
+    def test_real_new_branch_deleted_secret_blocks_despite_stale_destination_tracking_ref(self):
+        self.git("checkout", "-b", "feature")
+        self.commit("credential.txt", self.secret() + "\n")
+        self.git("rm", "credential.txt")
+        self.git("commit", "-m", "remove fixture")
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("update-ref", "refs/remotes/origin/feature", head)
+        result = self.git("push", "origin", "feature", ok=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("secret detected", result.stderr)
+        self.assertNotIn(self.secret(), result.stderr)
+        self.assertEqual(self.git("ls-remote", "origin", "refs/heads/feature").stdout, "")
 
     def test_real_force_push_and_merge_resolution_are_scanned(self):
         self.commit("file.txt", "published\n")

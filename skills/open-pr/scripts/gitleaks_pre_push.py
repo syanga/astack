@@ -15,18 +15,36 @@ PAYLOAD = "astack-gitleaks"
 MARKER = "# astack gitleaks pre-push v1"
 
 
-def git(*args):
+def git(*args, input=None):
     # Push transfers original objects, even when local replace refs hide them.
-    result = subprocess.run(["git", "--no-replace-objects", *args], capture_output=True, text=True)
+    result = subprocess.run(["git", "--no-replace-objects", *args], input=input,
+                            capture_output=True, text=True, timeout=30)
     if result.returncode:
         # Git errors can contain remote URLs or file content. Don't echo them.
         raise ValueError("Git could not determine the outgoing history; fetch the remote and retry.")
     return result.stdout.strip()
 
 
-def revisions(data):
+def destination_heads(destination):
+    advertised = git("ls-remote", "--heads", "--", destination)
+    heads = set()
+    for line in advertised.splitlines():
+        fields = line.split()
+        if (len(fields) != 2 or not re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", fields[0])
+                or not fields[1].startswith("refs/heads/")):
+            raise ValueError("Invalid destination ref advertisement; push blocked.")
+        heads.add(fields[0])
+    if not heads:
+        return []
+    objects = git("cat-file", "--batch-check=%(objectname) %(objecttype)",
+                  input="\n".join(sorted(heads)) + "\n")
+    return [line.split()[0] for line in objects.splitlines() if line.endswith(" commit")]
+
+
+def revisions(data, destination):
     """Use Git's authoritative old tip, never another remote's tracking refs."""
     ranges = []
+    exclusions = None
     for line in data.decode("utf-8").splitlines():
         fields = line.split()
         if len(fields) != 4 or any(not re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", x)
@@ -42,6 +60,10 @@ def revisions(data):
         args = [head]
         if set(remote) != {"0"}:
             args.append("^" + git("rev-parse", "--verify", remote + "^{commit}"))
+        else:
+            if exclusions is None:
+                exclusions = destination_heads(destination)
+            args.extend("^" + commit for commit in exclusions)
         if git("rev-list", "--count", *args) != "0":
             ranges.append(args)
     return ranges
@@ -80,7 +102,7 @@ def run(hooks, argv, data):
     payload = hooks / PAYLOAD
     state = json.loads((payload / "state.json").read_text())
     # Validate all ref lines before invoking either scanner or the chained hook.
-    ranges = revisions(data)
+    ranges = revisions(data, argv[1])
     if state["chain"]:
         previous = hooks / state["chain"]
         if previous.exists() and os.access(previous, os.X_OK):
