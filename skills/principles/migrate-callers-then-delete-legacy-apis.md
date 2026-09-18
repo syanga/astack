@@ -1,4 +1,4 @@
-# Migrate Callers Then Delete Legacy APIs
+# Migrate callers then delete legacy APIs
 
 Apply when introducing a new internal API while old callers still exist.
 
@@ -15,5 +15,3 @@ When we decide a new API is the right design, migrate callers and remove the old
 - Update tests to assert the new contract, and delete tests that only protect pre-refactor implementation details
 
 Keeping both old and new APIs leaves two paths to maintain, test, and read.
-
-**The test:** a search for the old symbol returns only its deletion in the diff.

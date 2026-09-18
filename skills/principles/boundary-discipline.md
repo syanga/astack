@@ -1,4 +1,4 @@
-# Boundary Discipline
+# Boundary discipline
 
 Apply when wiring validation, error handling, or framework adapters.
 
@@ -22,7 +22,9 @@ Validation and error handling:
 Code organization:
 - Business logic in pure functions with no framework dependencies
 - Parse functions: pure transforms from raw bytes to typed state
+- Prompt construction: structured state in, string out
+- Scoring and assessment: pure transforms from state to results
 
 **The tests:**
-- "Is this data crossing a system boundary right now?" If not, validation is redundant.
+- "Does this check repeat a guarantee already established by the boundary or the types?" If yes, it is redundant.
 - "Can this be a pure function that the shell just calls?" If yes, extract it.

@@ -1,4 +1,4 @@
-# Test Behavior, Not Implementation
+# Test behavior, not implementation
 
 Apply when you write, change, or keep a test.
 
@@ -8,7 +8,7 @@ The check: before you keep a test, ask whether it would still pass if every func
 
 **Why:** A test that cannot fail for a defect costs CI time and review attention and catches nothing. A constant pin also fails when someone edits the constant or the prompt it restates, so it prevents that edit.
 
-**Five shapes that still pass when every imported function returns `undefined`:**
+**Five patterns to inspect for weak or missing behavioral checks:**
 
 - **Weak or no assertion.** No `expect`, or only `toBeDefined`, `toBeTruthy`, `not.toThrow`, `toBeInstanceOf`, `toBeGreaterThan(0)`.
 - **Mock or absence only.** Only `toHaveBeenCalled`, `not.toHaveBeenCalled`, `toBeUndefined`, `toEqual([])`, `toHaveLength(0)`, `not.toBe(wrongValue)`.

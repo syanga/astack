@@ -1,4 +1,4 @@
-# Prove It Works
+# Prove it works
 
 Apply after completing a task, before declaring done.
 
@@ -21,8 +21,6 @@ Code and features:
 
 Delegation: trust artifacts, not self-reports.
 When verifying delegated work, inspect the actual output artifact (git diff, file contents, runtime behavior), not the delegate's summary.
-
-**The test:** you can name the command you ran and quote the output you observed. If you cannot, the work is unverified.
 
 ## Script the check when you can
 
