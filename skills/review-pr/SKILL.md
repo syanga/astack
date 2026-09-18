@@ -1,93 +1,92 @@
 ---
 name: review-pr
-description: Adversarial review of a diff or pull request. Findings posted to the PR, no fixes.
+description: Review changes against repository standards and the originating issue or spec.
 disable-model-invocation: true
 ---
 
-# Review a PR
+Two-axis review of the requested changes against a fixed point:
 
-The deliverable is a verdict the author can act on, posted to the PR as review comments when there is a PR. The review changes no code. Fixing is a separate request. The first round on a PR reviews the whole change. A later round reviews only the commits since the last reviewed one, and reads what the earlier rounds decided. When the user asks for a full review, run a full round whatever the PR's history.
+- **Standards**: does the code conform to this repo's documented coding standards?
+- **Spec**: does the code faithfully implement the originating issue / spec?
 
-## 1. Set the scope
+Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
 
-Take one of three routes.
+## Process
 
-- For a PR number or URL, run `gh pr view <n> --json title,body,baseRefName,headRefName,commits,closingIssuesReferences`. Run `git fetch origin <base>`, then `git fetch origin pull/<n>/head`, and record `git rev-parse FETCH_HEAD` as the reviewed SHA. Run `python3 <this skill's directory>/../babysit-pr/scripts/pr.py status --pr <n>` and read `our_reviews`.
-  - When `last_sha_in_pr` is false, or the user asked for a full review, this is a full round. The diff is `gh pr diff <n>` and the commit list is `git log --reverse --oneline origin/<base>..<sha>`.
-  - Otherwise this is a later round. The diff is `git diff "$(git merge-tree --write-tree <last_sha> $(git merge-base origin/<base> <sha>) | head -1)" <sha>`, which leaves out what a merge of the base brought in. When that diff shows conflict markers, use `git diff <last_sha>..<sha>` and tell the reviewers the base merge is included. The commit list is `git log --reverse --oneline --first-parent <last_sha>..<sha>`. When the diff command exits 0 and prints nothing, and the commit list is not empty, this is an empty later round: the new commits change nothing that the earlier rounds did not read, as when they only merge the base. Skip the rest of this step and steps 2 to 4, and go to step 5.
-  - When `total` is above zero, on either kind of round, the earlier rounds are the output of `pr.py history --pr <n>`.
+### 1. Pin the fixed point
 
-  Then run `tree="$(mktemp -d)/review-<n>" && git worktree add --detach "$tree" <sha> && echo "$tree"` and record the path.
-- For the current branch, run `git fetch origin <base>` and `git diff $(git merge-base origin/<base> HEAD)`. The tree is the repository root and the commit list is `git log --reverse --oneline origin/<base>..HEAD`.
-- For files or a pasted diff the user names, use those. There is no tree, and the commit list is the one line "none".
+Whatever the user said is the fixed point (a commit SHA, branch name, tag, `main`, `HEAD~5`, etc.). If they didn't specify one, use the PR's target branch when available; otherwise ask for it.
 
-Write the diff and the commit list each to a file in the system's temporary directory, and the earlier rounds too when there are any. Done when this is an empty later round, or the diff file is non-empty, the commit list file exists, and, on the PR route, `git -C <tree> rev-parse HEAD` prints the reviewed SHA. Otherwise say so and stop.
+For a PR, work from its head commit and record the SHA before dispatch.
 
-## 2. State the intent
+Review the requested changes against the fixed point. Give both reviewers the same diff and relevant commit history.
 
-Write one paragraph on what the change sets out to do, and save it to a file. Collect its sources in this order, and save them to a second file.
+Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, not inside two parallel sub-agents.
 
-1. The linked issue, from `gh issue view <n>`.
-2. A spec file under `docs/` or `specs/`, or a path the user gave.
-3. The PR body.
-4. The commit messages.
-5. The user's message.
-6. The code itself, when nothing else exists.
+### 2. Identify the spec source
 
-On a later round, the Intent section of the first review `pr.py history` marks as ours is the first source. A request that only says to babysit or review carries no intent. If the intent is still unclear, ask the user now. That question is the only one the review asks. Done when the paragraph accounts for every source that exists and names which ones you found.
+Look for the originating spec, in this order:
 
-## 3. Spawn the reviewers
+1. A path the user passed as an argument, or the user's current requirements.
+2. Issue references in the commit messages (`#123`, `Closes #45`, GitLab `!67`, etc.), fetched through the issue tracker.
+3. A spec file under `docs/`, `specs/`, or `.scratch/` matching the branch name or feature.
+4. If nothing is found, ask the user where the spec is. If they say there isn't one, the **Spec** sub-agent will skip and report "no spec available".
 
-Build each prompt as a file with this skill's `scripts/build_prompt.py`.
+### 3. Identify the standards sources
 
-```bash
-python3 <this skill's directory>/scripts/build_prompt.py code --intent <file> --diff <file> --commits <file> --tree <tree> --out <code prompt>
-python3 <this skill's directory>/scripts/build_prompt.py spec --intent <file> --diff <file> --commits <file> --sources <file> --out <spec prompt>
-```
+Anything in the repo that documents how code should be written, such as `CODING_STANDARDS.md` or `CONTRIBUTING.md`.
 
-Add `--prior <file>` whenever earlier rounds exist, and `--since <last_sha>` on a later round. Add `--lenses` to keep only the lenses of [`rubric.md`](rubric.md) the change can touch, named by the start of their headings. A change to prose alone keeps `correctness,verification,complexity`. Omit `--lenses` when the change touches code, and omit `--tree` on the route that has none. Then spawn the reviewers in parallel, each told only to read its prompt file in full and follow it.
+On top of whatever the repo documents, the Standards axis always carries the **smell baseline** below: a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing. Two rules bind it:
 
-- On a full round, `git apply --numstat <diff file> | awk '{n += $1 + $2} END {print n + 0}'` prints the number of changed lines. A count of 0 means the command could not read the diff. At 200 or more, or at 0, send the code prompt to three reviewers, spread over as many models as the harness offers. Send it to two when the harness offers one model.
-- On a full round under 200 changed lines, and on every later round, send the code prompt to one reviewer, on a model other than yours when the harness offers one.
-- Send the spec prompt to one reviewer when step 2 found a linked issue, a spec file, or a user's message that carries intent. Those are the sources the author of the change did not write, so a spec reviewer can check the change against them. On a later round, send it only when the new commits also add, remove, or change a behaviour the sources name. A commit that fixes a review finding does not.
+- **The repo overrides.** A documented repo standard always wins; where it endorses something the baseline would flag, suppress the smell.
+- **Always a judgement call.** Each smell is a labelled heuristic ("possible Feature Envy"), never a hard violation. Like any standard here, skip anything tooling already enforces.
 
-Name them code reviewer 1, 2, 3 and spec reviewer. Without a subagent tool, follow each prompt file yourself, one after the other.
+Each smell reads *what it is* → *how to fix*; match it against the diff:
 
-Done when every reviewer this round calls for has reported.
+- **Mysterious Name**: a function, variable, or type whose name doesn't reveal what it does or holds. → rename it; if no honest name comes, the design's murky.
+- **Duplicated Code**: the same logic shape appears in more than one hunk or file in the change. → extract the shared shape, call it from both.
+- **Feature Envy**: a method that reaches into another object's data more than its own. → move the method onto the data it envies.
+- **Data Clumps**: the same few fields or params keep travelling together (a type wanting to be born). → bundle them into one type, pass that.
+- **Primitive Obsession**: a primitive or string standing in for a domain concept that deserves its own type. → give the concept its own small type.
+- **Repeated Switches**: the same `switch`/`if`-cascade on the same type recurs across the change. → replace with polymorphism, or one map both sites share.
+- **Shotgun Surgery**: one logical change forces scattered edits across many files in the diff. → gather what changes together into one module.
+- **Divergent Change**: one file or module is edited for several unrelated reasons. → split so each module changes for one reason.
+- **Speculative Generality**: abstraction, parameters, or hooks added for needs the spec doesn't have. → delete it; inline back until a real need shows.
+- **Message Chains**: long `a.b().c().d()` navigation the caller shouldn't depend on. → hide the walk behind one method on the first object.
+- **Middle Man**: a class or function that mostly just delegates onward. → cut it, call the real target direct.
+- **Refused Bequest**: a subclass or implementer that ignores or overrides most of what it inherits. → drop the inheritance, use composition.
 
-## 4. Judge
+### 4. Spawn both sub-agents in parallel
 
-Apply [`judgment.md`](judgment.md) to every finding, code and spec alike. On the PR route, run `git worktree remove --force <tree>` now, before anything touches the network. Done when every finding has a bucket and a one-line rationale, every missing or wrong spec finding quotes its source line, and, on the PR route, the worktree is gone.
+Both reviewers report findings without changing code.
 
-## The verdict
+**Standards sub-agent prompt** should include:
 
-The verdict has these parts, whichever route delivers it.
+- The shared diff and relevant commit history.
+- The list of standards-source files you found in step 3, **plus the smell baseline from step 3** pasted in full (the sub-agent has no other access to it).
+- The brief: "Report, per file/hunk where relevant, (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls: documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Under 400 words."
 
-- **Intent.** The paragraph, the sources found, and whether this was a full or a later round.
-- **Reviewers.** One line each: name, model, number of findings.
-- **Act on**, **Consider**, **Noted**, **Dismissed**, as judgment.md defines them. Each finding carries its location with the quoted line, what is wrong, the evidence with its rung, and who raised it.
-- **Agreement.** Where reviewers agreed, where one contradicted another, and which findings came from one reviewer alone. Include it when more than one reviewer ran, the spec reviewer counted.
-- **Summary.** One line naming the worst finding, or saying there is nothing to act on.
+**Spec sub-agent prompt** should include:
 
-## 5. Deliver
+- The shared diff and relevant commit history.
+- The path or fetched contents of the spec.
+- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. Quote the spec line for each finding. Under 400 words."
 
-On the PR route, write a findings file in the system's temporary directory, in the shape the module docstring of `pr.py` documents. Its `comments` hold one entry per act-on and consider finding, and each `body` opens with the bucket and severity. The `line` must be inside a diff hunk of the PR, because GitHub rejects the whole review otherwise. Anchor a finding about an unchanged line on the changed line that leads to it, and name the real `file:line` in the comment, so every act-on and consider finding opens a thread the babysit verdict can see. Its `body` holds the intent, the reviewers, the noted and dismissed findings, the agreement, and the summary. An act-on or consider finding about the PR's title or body has no line of its own. Anchor it on any line inside a diff hunk, and say in the comment that it is about the title or the body. For an empty later round, the file has no `comments`, and its `body` is the one sentence that the commits since `<last_sha>` change nothing the earlier rounds did not read. From the repository root, post it:
+If the spec is missing, skip the Spec sub-agent and note this in the final report.
 
-```bash
-python3 <this skill's directory>/../babysit-pr/scripts/pr.py review --pr <n> --commit <reviewed sha> --review-file <file> --model <your model id>
-```
+### 5. Aggregate
 
-It prints `url`, `inline`, and `folded`. `folded` true means every finding went into the review body and no thread was opened. Exit code 2 with a message about the review file means the file is malformed: fix it and post again. Exit code 2 with a message that the commit is not in the PR means the head moved: start again at step 1. Any other exit code 2 means the post failed: retry once, then say the review could not be posted and put the whole verdict in the reply.
+Present the two reports under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings, because the two axes are deliberately separate (see _Why two axes_).
 
-Reply on the PR route in this shape, with one title line per act-on finding and the last line only when the review was folded:
+End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent.
 
-```
-<review URL>
-Act on <n> · Consider <n> · Noted <n> · Dismissed <n>
-Act on: <title>
-Folded: no thread was opened.
-```
+## Why two axes
 
-For an empty later round, reply with the review URL and the sentence in its body. On the other two routes, reply with the whole verdict.
+A change can pass one axis and fail the other:
 
-Done, on the PR route, when the posted review body carries every other part of the verdict, or the one sentence of an empty later round, and the script printed an `inline` count equal to the number of act-on and consider findings, or you reported the fold or the failed post in the reply. Done, on the other routes, when the reply carries every part of the verdict.
+- Code that follows every standard but implements the wrong thing → **Standards pass, Spec fail.**
+- Code that does exactly what the issue asked but breaks the project's conventions → **Spec pass, Standards fail.**
+
+Reporting them separately stops one axis from masking the other.
+
+When asked to post the review on a PR, use [posting.md](posting.md).

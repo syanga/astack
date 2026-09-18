@@ -10,7 +10,7 @@ Report the breakage a symbol search cannot find, before the change ships. Prove 
 
 ## Steps
 
-For a wide change, hand steps 2 to 4 to parallel reviewers on different models and merge their answers, the way [`../review-pr/SKILL.md`](../review-pr/SKILL.md) does.
+For a wide change, hand steps 2 to 4 to parallel reviewers on different models and merge their answers.
 
 1. **Read the change.** Take the diff, the symbols it adds, changes, and deletes, and what the code now does differently, including what the diff does not spell out. For a PR, run `gh pr view <n> --json title,body,commits,comments,reviews` and `gh pr diff <n>`. For history, run `git log --follow -p` on the files and `git blame -L <start>,<end> <file>` on the changed lines. Done when you have written one paragraph stating what changed.
 2. **Find the safety fact.** Most risky-looking changes are safe because of one fact, such as "this call only drops cache entries that are already dead". Name it. If it holds, most of the risky cases clear at once. Spend the time here. Done when the safety fact is one sentence that names the `file:line` making it true.

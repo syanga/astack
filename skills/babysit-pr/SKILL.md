@@ -49,7 +49,7 @@ Work `next.blockers` in this order: the draft state, the conflict, the threads, 
 
 **Conflict.** Rebase onto the base branch and resolve it following [`conflicts.md`](conflicts.md). If a hunk needs a product decision, stop and report the branch and the hunk. After the rebase, search the base for callers of every symbol the PR moves or deletes. The rebase restarts every check and outdates threads, so include it in the conflict-and-thread push.
 
-**Threads.** Work every unresolved thread whose `awaiting_user` is false, following [`triage.md`](triage.md). Reply with `python3 <this skill's directory>/scripts/pr.py reply --thread <id> --body-file <file> --model <your model id>`. Resolve a fixed, dismissed, or deferred thread with `pr.py resolve --thread <id>`, which exits 2 when the thread did not resolve. Push before replying, so the reply cites a commit that exists. A noted finding, a bucket [`../review-pr/judgment.md`](../review-pr/judgment.md) defines, sits in the latest review body in `new_reviews` and opens no thread. Fix it in the same push when you are already changing that file and `our_reviews.last_round` is false. Otherwise list it in the report. Fix a finding about the PR's title or body with `gh pr edit`.
+**Threads.** Work every unresolved thread whose `awaiting_user` is false, following [`triage.md`](triage.md). Reply with `python3 <this skill's directory>/scripts/pr.py reply --thread <id> --body-file <file> --model <your model id>`. Resolve a fixed, dismissed, or deferred thread with `pr.py resolve --thread <id>`, which exits 2 when the thread did not resolve. Push before replying, so the reply cites a commit that exists. A noted finding is valid but not actionable now. It sits in the latest review body in `new_reviews` and opens no thread. Fix it in the same push when you are already changing that file and `our_reviews.last_round` is false. Otherwise list it in the report. Fix a finding about the PR's title or body with `gh pr edit`.
 
 **A folded review.** When `our_reviews.folded_act_on` is above zero, the head's act-on findings sit in a review body in `new_reviews` and opened no threads. Fix them. The push moves the head and clears the fold. A folded act-on finding that does not hold cannot be cleared from the PR: report it to the user with your evidence and stop.
 
@@ -63,7 +63,7 @@ Run `python3 <this skill's directory>/scripts/pr.py wait`, with the same `--pr` 
 
 ## 5. Review the head
 
-Run [`../review-pr/SKILL.md`](../review-pr/SKILL.md) on the PR. If review-pr reports that it could not post the review, report that and stop, since an unposted review is not counted and would be run again. Otherwise return to step 2. Done when `our_reviews.on_head` is at least 1, or the failed post is reported.
+Run [`../review-pr/SKILL.md`](../review-pr/SKILL.md) on the PR and post its findings. If review-pr reports that it could not post the review, report that and stop, since an unposted review is not counted and would be run again. Otherwise return to step 2. Done when `our_reviews.on_head` is at least 1, or the failed post is reported.
 
 ## 6. Merge or hand off
 

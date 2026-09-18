@@ -13,7 +13,7 @@ reach gh as JSON on stdin, so no comment text passes through a shell.
 
 Every body this script posts opens with the on-behalf-of header:
 
-    [<model id>] RESPONDING ON BEHALF OF ALAN
+    [<model id>] RESPONDING ON BEHALF OF <git config user.name>
     ======
 
 `status` ends with a `next` verdict computed from the PR alone (fix, wait,
@@ -57,8 +57,8 @@ import subprocess
 import sys
 import time
 
-ON_BEHALF_OF = "ALAN"
-HEADER_MARK = "RESPONDING ON BEHALF OF " + ON_BEHALF_OF
+HEADER_MARK = "RESPONDING ON BEHALF OF "
+ATTRIBUTION_HEADER = re.compile(r"\[[^\]\r\n]+\] " + HEADER_MARK + r"\S[^\r\n]*")
 FOLD_MARK = "Findings on lines outside the diff:"
 BOT_PASS_CAP = 6
 CHECK_GRACE_MINUTES = 10
@@ -189,7 +189,7 @@ def is_bot(node):
 
 def is_ours(node):
     first = (node.get("body") or "").split("\n", 1)[0].strip()
-    return bool(node.get("viewerDidAuthor")) and first.startswith("[") and first.endswith("] " + HEADER_MARK)
+    return bool(node.get("viewerDidAuthor")) and ATTRIBUTION_HEADER.fullmatch(first) is not None
 
 
 def minutes_between(start, now):
@@ -330,14 +330,22 @@ def assess(snapshot):
     return {"action": action, "blockers": blockers, "handoff": handoff, "stop": stop}
 
 
-def format_body(model, body):
-    return "[{}] {}\n======\n\n{}".format(model, HEADER_MARK, body.rstrip("\n") + "\n")
+def git_user_name():
+    result = subprocess.run(["git", "config", "--get", "user.name"], capture_output=True, text=True)
+    name = result.stdout.strip()
+    if result.returncode or not name or len(name.splitlines()) != 1:
+        fail("Set git config user.name to a nonempty, single-line name before posting a review or reply.")
+    return name
 
 
-def build_review(model, review, commit):
+def format_body(model, body, name):
+    return "[{}] {}{}\n======\n\n{}".format(model, HEADER_MARK, name, body.rstrip("\n") + "\n")
+
+
+def build_review(model, review, commit, name):
     return {
-        "event": "COMMENT", "commit_id": commit, "body": format_body(model, review["body"]),
-        "comments": [{"path": c["path"], "line": c["line"], "side": "RIGHT", "body": format_body(model, c["body"])}
+        "event": "COMMENT", "commit_id": commit, "body": format_body(model, review["body"], name),
+        "comments": [{"path": c["path"], "line": c["line"], "side": "RIGHT", "body": format_body(model, c["body"], name)}
                      for c in review.get("comments", [])],
     }
 
@@ -436,13 +444,15 @@ def command_history(args):
 
 
 def command_reply(args):
+    identity = git_user_name()
     with open(args.body_file, encoding="utf-8") as handle:
-        body = format_body(args.model, handle.read())
+        body = format_body(args.model, handle.read(), identity)
     result = graphql(REPLY_MUTATION, thread=args.thread, body=body)
     print(result["addPullRequestReviewThreadReply"]["comment"]["url"])
 
 
 def command_review(args):
+    identity = git_user_name()
     pr = fetch_pr(args)
     owner, name = pr["url"].split("/")[3:5]
     with open(args.review_file, encoding="utf-8") as handle:
@@ -453,7 +463,7 @@ def command_review(args):
     if args.commit not in {commit.get("oid") for commit in pr["commits"]}:
         fail("commit {} is not in the PR; review the current commits again".format(args.commit))
     for attempt in (review, fold_comments(review)):
-        payload = build_review(args.model, attempt, args.commit)
+        payload = build_review(args.model, attempt, args.commit, identity)
         result = subprocess.run(["gh", "api", "--method", "POST", endpoint, "--input", "-"],
                                 input=json.dumps(payload), capture_output=True, text=True)
         line_outside_diff = "422" in result.stderr or "Unprocessable" in result.stderr
