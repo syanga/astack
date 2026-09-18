@@ -107,24 +107,59 @@ def verify_install(hooks):
     payload = hooks / PAYLOAD
     if payload.is_symlink():
         raise ValueError("Managed hook directory was replaced by a symlink.")
-    state = json.loads((payload / "state.json").read_text())
+    state_path = payload / "state.json"
+    if state_path.is_symlink():
+        raise ValueError("Managed hook state was replaced by a symlink.")
+    state = json.loads(state_path.read_text())
     if state.get("version") != 1:
         raise ValueError("Unsupported hook state version.")
     if record(hooks / "pre-push") != {"sha256": digest(WRAPPER), "mode": 0o755}:
-        raise ValueError("Pre-push hook was modified; reconcile it before uninstalling.")
+        raise ValueError("Pre-push hook was modified; reconcile it before continuing.")
     for name, expected in state["files"].items():
         if Path(name).name != name or record(payload / name) != expected:
             raise ValueError("Managed hook file was modified: {}".format(name))
     if state["original"] is not None and record(hooks / ORIGINAL) != state["original"]:
-        raise ValueError("Saved original hook was modified; reconcile it before uninstalling.")
+        raise ValueError("Saved original hook was modified; reconcile it before continuing.")
+    if {p.name for p in payload.iterdir()} != set(state["files"]) | {"state.json"}:
+        raise ValueError("Unmanaged files in the hook directory; preserve them elsewhere before continuing.")
     return state
+
+
+def refresh(hooks, dry_run=False):
+    state = verify_install(hooks)
+    if state["gitleaks_version"] != VERSION:
+        raise ValueError("Uninstall before changing the pinned Gitleaks version.")
+    contents = (HERE / "gitleaks_pre_push.py").read_bytes()
+    if state["files"]["runner.py"]["sha256"] == digest(contents):
+        print("Gitleaks hook already installed. Uninstall before changing its version or options.")
+        return
+    print("Refresh Gitleaks hook runner in {}. Uninstall before changing its version or options."
+          .format(hooks))
+    if dry_run:
+        return
+    payload = hooks / PAYLOAD
+    with tempfile.TemporaryDirectory(prefix=".astack-stage-", dir=hooks) as tmp:
+        stage = Path(tmp)
+        for name in ("runner.py", "state.json"):
+            shutil.copy2(payload / name, stage / name)
+        updated = json.loads((stage / "state.json").read_text())
+        updated["files"]["runner.py"]["sha256"] = digest(contents)
+        if verify_install(hooks) != state:
+            raise ValueError("Managed hook changed during preparation; retry.")
+        try:
+            atomic_write(payload / "runner.py", contents, state["files"]["runner.py"]["mode"])
+            atomic_write(payload / "state.json", (json.dumps(updated, indent=2) + "\n").encode(),
+                         stat.S_IMODE((stage / "state.json").stat().st_mode))
+        except BaseException:
+            for name in ("runner.py", "state.json"):
+                os.replace(stage / name, payload / name)
+            raise
 
 
 def install(hooks, binary=None, replace_gstack=False, dry_run=False):
     hook, payload = hooks / "pre-push", hooks / PAYLOAD
     if payload.exists() or payload.is_symlink():
-        verify_install(hooks)
-        print("Gitleaks hook already installed. Uninstall before changing its version or options.")
+        refresh(hooks, dry_run)
         return
     if (hooks / ORIGINAL).exists() or (hooks / ORIGINAL).is_symlink():
         raise ValueError("A saved hook already exists; reconcile it before installing.")
@@ -214,8 +249,6 @@ def uninstall(hooks, dry_run=False):
         return
     state = verify_install(hooks)
     expected = set(state["files"]) | {"state.json"}
-    if {p.name for p in payload.iterdir()} != expected:
-        raise ValueError("Unmanaged files in the hook directory; preserve them elsewhere before uninstalling.")
     print("Remove astack Gitleaks hook from {} and restore its predecessor.".format(hooks))
     if dry_run:
         return

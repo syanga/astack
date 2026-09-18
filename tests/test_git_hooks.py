@@ -83,6 +83,163 @@ sys.exit(code)
 
 
 class HookTests(HookFixture):
+    def install_stale(self, *extra):
+        shipped = self.root / "stale-scripts"
+        shutil.copytree(SCRIPTS, shipped)
+        runner = shipped / "gitleaks_pre_push.py"
+        runner.write_text(runner.read_text().replace('"--text", ', ''))
+        self.manage("install", *extra, scripts=shipped)
+
+    def payload_snapshot(self):
+        return {p.name: (p.read_bytes(), git_hooks.record(p))
+                for p in (self.hooks / git_hooks.PAYLOAD).iterdir()}
+
+    def test_refresh_preserves_scanner_and_chain_through_dry_run_and_worktree(self):
+        hook = self.hooks / "pre-push"
+        hook.write_text('#!/bin/sh\ncat > "$(dirname "$0")/seen"\n')
+        hook.chmod(0o751)
+        original = (hook.read_bytes(), git_hooks.record(hook))
+        self.install_stale()
+        before = self.payload_snapshot()
+        wrapper = git_hooks.record(hook)
+        linked = self.root / "linked tree"
+        self.git("worktree", "add", "-b", "linked", str(linked))
+        self.binary.unlink()
+        lock = self.repo / ".git/astack-hooks.lock"
+        lock.mkdir()
+        self.manage(repo=linked, ok=False)
+        lock.rmdir()
+        self.manage("install", "--dry-run", repo=linked)
+        self.assertEqual(self.payload_snapshot(), before)
+        self.manage(repo=linked)
+        after = self.payload_snapshot()
+        self.assertEqual(after["runner.py"][0], (SCRIPTS / "gitleaks_pre_push.py").read_bytes())
+        self.assertNotEqual(after["runner.py"], before["runner.py"])
+        for name in before.keys() - {"runner.py", "state.json"}:
+            self.assertEqual(after[name], before[name])
+        old_state = json.loads(before["state.json"][0])
+        new_state = git_hooks.verify_install(self.hooks)
+        old_state["files"]["runner.py"] = new_state["files"]["runner.py"]
+        self.assertEqual(new_state, old_state)
+        self.assertEqual(git_hooks.record(hook), wrapper)
+        self.manage(repo=linked)
+        self.assertEqual(self.payload_snapshot(), after)
+        self.commit("file.txt", "changed\n")
+        self.env["FAKE_LOG"] = str(self.root / "args.json")
+        data = "refs/heads/main {} refs/heads/main {}\n".format(
+            self.git("rev-parse", "HEAD").stdout.strip(), self.base)
+        result = self.invoke(data=data)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.hooks / "seen").read_text(), data)
+        args = json.loads(Path(self.env["FAKE_LOG"]).read_text())
+        self.assertIn("--text", args[args.index("--log-opts") + 1].split())
+        self.manage("uninstall", repo=linked)
+        self.assertEqual((hook.read_bytes(), git_hooks.record(hook)), original)
+
+    def test_refresh_refuses_modified_installations(self):
+        hook = self.hooks / "pre-push"
+        hook.write_text("#!/bin/sh\nexit 0\n")
+        hook.chmod(0o755)
+        self.install_stale()
+        payload = self.hooks / git_hooks.PAYLOAD
+        for path in [hook, self.hooks / git_hooks.ORIGINAL,
+                     *(payload / name for name in git_hooks.verify_install(self.hooks)["files"])]:
+            with self.subTest(path=path.name):
+                before = path.read_bytes()
+                path.write_bytes(before + b"local change\n")
+                modified = self.payload_snapshot()
+                self.manage(ok=False)
+                self.assertEqual(self.payload_snapshot(), modified)
+                self.assertEqual(path.read_bytes(), before + b"local change\n")
+                path.write_bytes(before)
+        runner = payload / "runner.py"
+        mode = git_hooks.record(runner)["mode"]
+        runner.chmod(0o755)
+        self.manage(ok=False)
+        runner.chmod(mode)
+        note = payload / "notes.txt"
+        note.write_text("mine")
+        self.manage(ok=False)
+        self.assertEqual(note.read_text(), "mine")
+        note.unlink()
+        self.manage()
+        self.manage("uninstall")
+
+    def test_refresh_refuses_a_different_scanner_pin(self):
+        self.install_stale()
+        before = self.payload_snapshot()
+        with patch.object(git_hooks, "VERSION", "0.0.0"):
+            with self.assertRaisesRegex(ValueError, "pinned Gitleaks version"):
+                git_hooks.install(self.hooks)
+        self.assertEqual(self.payload_snapshot(), before)
+        self.assertEqual(self.invoke().returncode, 0)
+
+    def test_refresh_refuses_symlinked_state(self):
+        self.install_stale()
+        state = self.hooks / git_hooks.PAYLOAD / "state.json"
+        outside = self.root / "state.json"
+        state.rename(outside)
+        state.symlink_to(outside)
+        before = outside.read_bytes()
+        self.manage(ok=False)
+        self.assertTrue(state.is_symlink())
+        self.assertEqual(outside.read_bytes(), before)
+        self.assertEqual(self.invoke().returncode, 0)
+
+    def test_refresh_refuses_changes_during_preparation(self):
+        self.install_stale()
+        payload = self.hooks / git_hooks.PAYLOAD
+        runner = (payload / "runner.py").read_bytes()
+        state = git_hooks.verify_install(self.hooks)
+        state["chain"] = "pre-push.local"
+        copy = shutil.copy2
+
+        def edit_after_copy(source, destination):
+            result = copy(source, destination)
+            if Path(source).name == "state.json":
+                (payload / "state.json").write_text(json.dumps(state))
+            return result
+
+        with patch.object(git_hooks.shutil, "copy2", side_effect=edit_after_copy):
+            with self.assertRaisesRegex(ValueError, "changed during preparation"):
+                git_hooks.install(self.hooks)
+        self.assertEqual((payload / "runner.py").read_bytes(), runner)
+        self.assertEqual(git_hooks.verify_install(self.hooks), state)
+        self.assertEqual(list(self.hooks.glob(".astack-*")), [])
+
+    def test_refresh_failures_restore_a_working_retryable_installation(self):
+        self.install_stale()
+        self.commit("file.txt", "changed\n")
+        before = self.payload_snapshot()
+        atomic_write = git_hooks.atomic_write
+        for name in ("runner.py", "state.json"):
+            for after_write in (False, True):
+                with self.subTest(file=name, after_write=after_write):
+                    def fail_write(path, data, mode):
+                        if after_write or path.name != name:
+                            atomic_write(path, data, mode)
+                        if path.name == name:
+                            if after_write:
+                                raise KeyboardInterrupt()
+                            raise OSError("disk full")
+
+                    with patch.object(git_hooks, "atomic_write", side_effect=fail_write):
+                        with self.assertRaises(KeyboardInterrupt if after_write else OSError):
+                            git_hooks.install(self.hooks)
+                    self.assertEqual(self.payload_snapshot(), before)
+                    git_hooks.verify_install(self.hooks)
+                    result = self.invoke()
+                    self.assertEqual(result.returncode, 0, result.stderr)
+        with patch.object(git_hooks.shutil, "copy2", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                git_hooks.install(self.hooks)
+        self.assertEqual(self.payload_snapshot(), before)
+        self.assertEqual(list(self.hooks.glob(".astack-*")), [])
+        self.manage()
+        git_hooks.verify_install(self.hooks)
+        self.assertEqual(self.invoke().returncode, 0)
+        self.manage("uninstall")
+
     def test_install_idempotent_dry_run_uninstall_and_shared_worktree(self):
         self.manage("install", "--dry-run")
         self.assertFalse((self.hooks / "pre-push").exists())
@@ -146,7 +303,10 @@ class HookTests(HookFixture):
         local.chmod(0o755)
         self.manage(ok=False)
         self.assertEqual(old.read_bytes(), before)
-        self.manage("install", "--replace-gstack")
+        self.install_stale("--replace-gstack")
+        before_local = git_hooks.record(local)
+        self.manage()
+        self.assertEqual(git_hooks.record(local), before_local)
         self.assertEqual(self.invoke().returncode, 0)
         self.assertTrue((self.hooks / "local-seen").exists())
         self.manage("uninstall")
