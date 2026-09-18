@@ -89,4 +89,4 @@ A change can pass one axis and fail the other:
 
 Reporting them separately stops one axis from masking the other.
 
-When asked to post the review on a PR, use [posting.md](posting.md).
+When asked to post the review on a PR, use [posting.md](../harden-pr/posting.md).

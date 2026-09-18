@@ -37,5 +37,5 @@ I wanted to share some of my preferences here so we can be more aligned as we wo
 * Open a real PR, not a draft. Drafts do not get review-bot coverage.
 * Rebase onto latest main before opening. Stale branches conflict and waste a review round.
 * Every repository you push from carries the Gitleaks pre-push hook. The open-pr skill installs it when it is missing.
-* Babysit only when asked, with the babysit-pr skill, and stay quiet while waiting.
+* Use review-pr for general review and harden-pr when asked to harden a change or follow a PR through fixes and CI. Stay quiet while waiting.
 * Merge only per the disposition given in the request (merge when green, or stop and report). If none was given, report and ask.
