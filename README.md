@@ -108,9 +108,10 @@ Without `ASTACK_TEST_GITLEAKS`, the suite uses a fake scanner and skips the
 real pushes. Set the variable to run the real-scanner tests locally.
 
 An installed guard keeps its own copy of the scanner. Running `install` again
-refreshes an outdated Python runner while preserving the pinned scanner and
-chained hooks. Locally modified installations are refused. To change the
-Gitleaks version or hook options, run `uninstall`, then `install`.
+updates the Python runner to match the invoked bundle while preserving the
+pinned scanner and chained hooks. Changes that fail the installation's integrity
+checks are refused. To change the Gitleaks version or hook options, run
+`uninstall`, then `install`.
 
 ## What to edit
 
@@ -325,8 +326,8 @@ overrides. Tests use temporary homes and exercise install, repeat install,
 updates, and uninstall for all four harnesses. They check local edits, unrelated
 files, backup restoration, custom environment paths, moved checkouts, executable
 helpers, binary assets, Unicode paths, symlinks, blocked state directories, and
-retry after an injected file-write failure. GitHub Actions is disabled for this
-repository. Run the suite locally.
+retry after an injected file-write failure. This repository has no GitHub Actions
+workflow. Run the suite locally.
 
 Settings tests temporarily configure both Claude and Codex, reinstall updates,
 then uninstall and check exact restoration. They also cover unrelated edits,
