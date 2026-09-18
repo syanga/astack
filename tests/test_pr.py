@@ -99,9 +99,14 @@ class SnapshotTests(unittest.TestCase):
                                             "pushed_at": None})
 
     def test_only_a_first_line_header_marks_a_thread_ours(self):
-        quoted = "I disagree with this:\n> [m] RESPONDING ON BEHALF OF ALAN"
+        quoted = "I disagree with this:\n> [m] on behalf of Alan"
         snapshot = pr.summarize(PR, [thread(pr.format_body("m", "Act on: null path", "ALAN")), thread(quoted)], [], RECENT, SINCE, NOW)
         self.assertEqual([t["ours"] for t in snapshot["threads"]["unresolved"]], [True, False])
+
+    def test_legacy_header_still_marks_a_thread_ours(self):
+        legacy = "[m] RESPONDING ON BEHALF OF ALAN\n======\n\nAct on: null path\n"
+        snapshot = pr.summarize(PR, [thread(legacy)], [], RECENT, SINCE, NOW)
+        self.assertTrue(snapshot["threads"]["unresolved"][0]["ours"])
 
     def test_a_header_written_by_another_account_is_not_ours(self):
         forged_thread = thread(pr.format_body("m", "Act on: race", "ALAN"), viewer=False)
@@ -254,7 +259,7 @@ class PostingTests(unittest.TestCase):
         self.assertEqual(payload["event"], "COMMENT")
         self.assertEqual(payload["commit_id"], "abc123")
         self.assertEqual(payload["comments"], [{"path": "a.py", "line": 7, "side": "RIGHT",
-                                                "body": "[m] RESPONDING ON BEHALF OF ALAN\n======\n\nRace here.\n"}])
+                                                "body": "[m] on behalf of ALAN\n\nRace here.\n"}])
 
     def test_a_malformed_findings_file_exits_2_before_any_post(self):
         good = {"path": "a.py", "line": 7, "bucket": "act on", "body": "Race."}
@@ -291,8 +296,8 @@ class PostingTests(unittest.TestCase):
         self.assertIn("**alan (this account, by hand)**:\n\nYes, do X.", history)
 
     def test_comment_header(self):
-        self.assertEqual(pr.format_body("claude-fable-5-1", "Fixed in 1a2b3c.\n", "ALAN"),
-                         "[claude-fable-5-1] RESPONDING ON BEHALF OF ALAN\n======\n\nFixed in 1a2b3c.\n")
+        self.assertEqual(pr.format_body("claude-fable-5-1", "Fixed in 1a2b3c.\n", "Alan Example"),
+                         "[claude-fable-5-1] on behalf of Alan\n\nFixed in 1a2b3c.\n")
 
 
 class IdentityTests(unittest.TestCase):
@@ -338,7 +343,7 @@ class IdentityTests(unittest.TestCase):
             pr.command_review(args)
             pr.command_reply(args)
 
-        expected = "[test-model] RESPONDING ON BEHALF OF Renée Example\n======\n"
+        expected = "[test-model] on behalf of Renée\n"
         for body in [payloads[0]["body"], payloads[0]["comments"][0]["body"], graphql.call_args.kwargs["body"]]:
             self.assertTrue(body.startswith(expected))
         for name in ["ALAN", "Global Name", "Renée Example"]:
