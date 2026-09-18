@@ -28,13 +28,13 @@ Give this pass the current source snapshot, captured diff, requirements, and sha
 
 Dispatch an independent subagent and wait for its result. It runs in the same harness; record its model identity only when reported by the runtime.
 
-Present findings under an `ADVERSARIAL REVIEW (native subagent):` header. FIXABLE findings flow into the same Fix-First pipeline as the structured review. INVESTIGATE findings retain their uncertainty and are assessed by their potential consequence; needing investigation does not make an issue low severity.
+Present findings under an `ADVERSARIAL REVIEW (native subagent):` header. Handle FIXABLE findings through [SKILL.md's fix process](../SKILL.md#step-5-fix-findings). INVESTIGATE findings retain their uncertainty and are assessed by their potential consequence; needing investigation does not make an issue low severity.
 
 ### Outside adversarial challenge (when a provider is available)
 
 Supply the shared brief and the complete plan, requirements, diff, and source context. Save the prompt in a private file and invoke the provider using [outside-review.md](../outside-review.md).
 
-Show the full response in a `tool-output` fence and assess completion using the rules below. Route findings with supported fixes through Fix-First. Report findings that need investigation and any unavailable coverage.
+Show the full response in a `tool-output` fence and assess completion using the rules below. Handle findings with supported fixes through SKILL.md's fix process. Report findings that need investigation and any unavailable coverage.
 
 ---
 
@@ -57,7 +57,7 @@ With another outside provider, supply the structured prompt, the complete checkl
 Present the full output under `OUTSIDE STRUCTURED REVIEW:` inside a `tool-output` fence.
 Assess completion and the gate using the rules below.
 
-Investigate failed-gate findings through Fix-First. Re-run the same structured invocation and diff scope after fixes. A product or scope decision follows the ASK flow.
+Investigate failed-gate findings through SKILL.md's fix process. Re-run the same structured invocation and diff scope after fixes. A product or scope decision follows the ASK flow.
 
 If `DIFF_TOTAL < 200` and this pass was not requested, skip this section. The native and outside adversarial passes still run.
 

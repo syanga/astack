@@ -98,7 +98,7 @@ Save the review with its source snapshot, findings, dispositions, per-specialist
 
 If the review exits early before a real review completes, report why.
 
-For an existing PR, post the final assessment and remaining actionable findings using [posting.md](posting.md). Include verification results and coverage limits, and identify the reviewed commit. Report local changes in the conversation.
+For an existing PR, post an assessment of its reviewed commit using [posting.md](posting.md). Include verification results and coverage limits, and identify the reviewed commit. Report local changes in the conversation.
 
 For requested PR follow-through, continue with [pr-work.md](pr-work.md).
 

@@ -65,10 +65,10 @@
       "https://github.com/garrytan/gstack.git"
     ],
     "path": [
-      "review/",
       "pstack/skills/poteto-mode/playbooks/babysit.md",
       "pstack/skills/poteto-mode/references/bugbot-triage.md",
-      "skills/engineering/resolving-merge-conflicts"
+      "skills/engineering/resolving-merge-conflicts",
+      "review/"
     ],
     "commit": [
       "c1c0a32802223f4be824112dd83d33ad29a8b26c",
