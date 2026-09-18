@@ -153,9 +153,10 @@ class HookTests(HookFixture):
                 self.assertEqual(path.read_bytes(), before + b"local change\n")
                 path.write_bytes(before)
         runner = payload / "runner.py"
+        mode = git_hooks.record(runner)["mode"]
         runner.chmod(0o755)
         self.manage(ok=False)
-        runner.chmod(0o644)
+        runner.chmod(mode)
         note = payload / "notes.txt"
         note.write_text("mine")
         self.manage(ok=False)

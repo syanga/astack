@@ -128,9 +128,10 @@ def refresh(hooks, dry_run=False):
         raise ValueError("Uninstall before changing the pinned Gitleaks version.")
     contents = (HERE / "gitleaks_pre_push.py").read_bytes()
     if state["files"]["runner.py"]["sha256"] == digest(contents):
-        print("Gitleaks hook already installed.")
+        print("Gitleaks hook already installed. Uninstall before changing its version or options.")
         return
-    print("Refresh Gitleaks hook runner in {}".format(hooks))
+    print("Refresh Gitleaks hook runner in {}. Uninstall before changing its version or options."
+          .format(hooks))
     if dry_run:
         return
     payload = hooks / PAYLOAD
