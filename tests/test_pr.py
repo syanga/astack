@@ -155,6 +155,19 @@ class StateTests(unittest.TestCase):
         self.assertFalse(old["checks"]["unregistered"])
         self.assertTrue(old["mergeable_overdue"])
 
+    def test_a_pending_status_without_a_start_time_is_dated_from_the_head(self):
+        legacy = green_pr(statusCheckRollup=[{"__typename": "StatusContext", "context": "deploy", "state": "PENDING"}])
+        fresh = pr.summarize(legacy, [], [], [], SINCE, NOW, stuck_minutes=5,
+                             pushed_at="2026-09-15T10:25:00Z")
+        old = pr.summarize(legacy, [], [], [], SINCE, NOW, stuck_minutes=5)
+        self.assertEqual(fresh["checks"]["stuck"], [])
+        self.assertEqual([check["name"] for check in old["checks"]["stuck"]], ["deploy"])
+
+    def test_a_repo_without_earlier_checks_does_not_wait_for_registration(self):
+        bare = green_pr(statusCheckRollup=[])
+        snapshot = pr.summarize(bare, [], [], [], SINCE, "2026-09-15T10:05:00Z")
+        self.assertFalse(snapshot["checks"]["unregistered"])
+
     def test_folded_findings_are_reported_on_the_reviewed_head(self):
         folded = pr.fold_comments({"body": "Verdict.", "comments": [
             {"path": "a.py", "line": 7, "bucket": "act on", "body": "Race."},

@@ -56,7 +56,7 @@ The core review checks, specialist criteria, test proposals, independent adversa
 - Keep current user requirements above older plans. Verify cross-repository deliverable contents, audit all plan items, and avoid guessing that unfinished work was forgotten or caused by context exhaustion.
 - Retain concrete checklist checks while correcting unsupported indexing assumptions, blanket string coercion for hashes, executable JSON-parsing claims, general ALTER TABLE CONCURRENTLY advice, destructive release retry advice, and the unsafe email-validator simplification example. Omit gstack-specific effort estimates and its ETHOS rule.
 
-Targeted mutation and fault-injection guidance remains an astack addition in verification.md, reached when those experiments are useful. PR follow-through retains the earlier pstack/Matt-derived material and licenses.
+Targeted mutation and fault-injection guidance remains an astack addition in verification.md, reached when those experiments are useful. The PR helper and short follow-through guidance retain material from the earlier pstack/Matt adaptations and their licenses.
 
 ## Writing and verification
 

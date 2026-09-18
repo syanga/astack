@@ -42,7 +42,7 @@ Show the full response in a `tool-output` fence and assess completion using the 
 
 If an outside provider is available and either `DIFF_TOTAL >= 200` or the user requested this pass:
 
-Prepare a structured review prompt requesting severity-tagged findings ([P1], [P2], [P3]) or an explicit NO_FINDINGS conclusion. Use the same captured diff and source.
+Prepare a structured review prompt requesting severity-tagged findings ([P0], [P1], [P2], [P3]) or an explicit NO_FINDINGS conclusion. Use the same captured diff and source.
 
 With Codex, use its built-in structured review when its base comparison covers the requested changes:
 
@@ -52,7 +52,7 @@ codex review --base '<fixed-point>' -c 'sandbox_mode="read-only"'
 
 The Codex backend uses `codex review --base` without a positional prompt: those arguments are mutually exclusive. Never drop --base to resolve an argv error; prompt-only review changes the diff scope. If the built-in comparison does not cover the requested changes, supply the captured diff and structured prompt through [outside-review.md](../outside-review.md).
 
-With another outside provider, supply the structured prompt, the complete checklist, and the same captured source using [outside-review.md](../outside-review.md). Request severity-tagged findings, including native P1:/P2: labels, or an explicit no-findings conclusion.
+With another outside provider, supply the structured prompt, the complete checklist, and the same captured source using [outside-review.md](../outside-review.md). Request severity-tagged findings, including native P0:/P1:/P2: labels, or an explicit no-findings conclusion.
 
 Present the full output under `OUTSIDE STRUCTURED REVIEW:` inside a `tool-output` fence.
 Assess completion and the gate using the rules below.
@@ -75,7 +75,7 @@ Record why the pass ran or was skipped, its findings, and any failure or missing
 
 - Native adversarial and gap-focused red-team passes complete when they return usable reviews. Failure, timeout, refusal, empty or malformed output is missing coverage.
 - Outside adversarial coverage requires successful execution and a completed review with an explicit recommendation. The recommendation need not use the exact `Recommendation:` prefix. Refusal, empty or malformed output, an incomplete review, a missing recommendation, timeout, or CLI failure means `outside_status: unavailable`.
-- Outside structured review requires severity-tagged findings or an explicit no-findings conclusion. P1 findings with `[P1]` or native `P1:` labels mean GATE: FAIL. Completed without P1 means GATE: PASS. Refusal, failure, or missing markers mean GATE: MISSING COVERAGE.
+- Outside structured review requires severity-tagged findings or an explicit no-findings conclusion. P0 or P1 findings, with bracketed or native colon labels, mean GATE: FAIL. Completed without P0 or P1 means GATE: PASS. Refusal, failure, or missing markers mean GATE: MISSING COVERAGE.
 
 A native fallback does not count as outside completion. Preserve each pass's missing coverage separately from a completed review with no findings.
 
