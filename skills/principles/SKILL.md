@@ -24,6 +24,7 @@ Before applying a principle, read its file in full. In the reply, name the decis
 
 ## Designing structure
 
+- [`deep-modules.md`](deep-modules.md). Designing module interfaces, choosing seams, or evaluating abstraction depth.
 - [`model-the-domain.md`](model-the-domain.md). Stateful logic, or code that branches a lot or repeats a shape assumption across files.
 - [`boundary-discipline.md`](boundary-discipline.md). Validation, error handling, framework adapters.
 - [`type-system-discipline.md`](type-system-discipline.md). Designing a type or a signature in a typed language.

@@ -370,3 +370,14 @@ Skills adapted from other repositories record their source repository, path, and
 commit in `upstream/manifest.json` and keep the upstream LICENSE in the skill
 directory. To see what changed upstream since, clone the source and diff from
 the pinned commit to its head.
+
+For imports with a `files` mapping, its keys are paths relative to the upstream
+`path`; values are current astack paths relative to this repository. A `null`
+value records an intentional omission, explained in the entry's `note`. Entries
+follow the source skill even when its files move into multiple astack directories.
+
+Compare upstream changes from the pinned commit separately from our adaptations:
+use `git diff <pinned-commit>..<upstream-head> -- <upstream-path>` in the source
+clone, then compare the pinned source files with their mapped astack files.
+Check the whole upstream directory for new files as well as the mapped files.
+Advance the pin only after reviewing and reconciling the upstream changes.
