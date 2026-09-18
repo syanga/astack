@@ -68,8 +68,11 @@ Each push scans the commit patches it sends:
 
 - For an existing branch, the guard scans every commit the remote branch lacks.
   A secret that a later commit deletes still blocks the push.
-- For a new branch or tag, the guard scans all history reachable from the pushed
-  commit. That scan can report a finding that another branch already published.
+- For a new branch or tag, the guard reads the destination's current branch tips
+  and scans commits those branches lack. It never trusts local remote-tracking
+  refs. Unknown destination tips are not excluded, so the scan may include
+  already-published history until you fetch. If the destination cannot be read,
+  the push blocks.
 - A shallow clone blocks the push until you run `git fetch --unshallow`.
 - A missing remote tip blocks the push with a message that says to fetch the
   remote. The block clears once a fetch brings in that tip, which a
