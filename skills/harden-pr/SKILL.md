@@ -70,6 +70,8 @@ Output a summary header: `Pre-Landing Review: N issues (X critical, Y informatio
 
 Use AUTO-FIX for a supported fix within the user's authorized intent. Use ASK when the fix needs a product decision, an expansion of scope, or missing authorization. Severity, a proposed test, or fix length alone does not require approval. Follow the user's design-selection workflow for UI changes.
 
+Before adding, changing, or retaining a test for a fix, read and apply [test-behavior-not-implementation.md](../principles/test-behavior-not-implementation.md).
+
 When a finding includes a `test_stub`, verify the proposed test, then add it with the fix when useful. Use the repository's test conventions and demonstrate that the test fails before the fix and passes afterward. For targeted mutations or fault injection, read [verification.md](verification.md).
 
 ### Automatic fixes

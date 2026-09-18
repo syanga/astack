@@ -1,5 +1,7 @@
 # Testing Specialist Review Checklist
 
+Read and apply [test-behavior-not-implementation.md](../../principles/test-behavior-not-implementation.md) when evaluating existing or proposed tests relevant to the change.
+
 ## Categories
 
 ### Missing Negative-Path Tests
