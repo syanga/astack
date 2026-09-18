@@ -19,6 +19,8 @@ Honor explicit specialist requests, including `--all-specialists`. Report which 
 
 Run selected specialists as independent subagents in parallel. Give each the full text of its checklist, the shared diff and source snapshot, relevant commit history and prior decisions, and the repository's language and test conventions. Include the response format below and the evidence and severity requirements from [SKILL.md](../SKILL.md#verify-findings).
 
+Include the full text of the principle linked from the testing checklist in the testing reviewer's prompt.
+
 Ask each reviewer to apply its checklist, verify findings against the source, and leave the source unchanged. When a focused test would demonstrate a finding, request a proposed test using the repository's conventions.
 
 ## Response format
