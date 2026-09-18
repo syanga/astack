@@ -39,4 +39,4 @@ Keep logs, SHAs, exhaustive file inventories, and bulky evidence in linked artif
 
 Create or update the PR using a file for the body. Confirm that it targets the intended base and is open for review, not a draft. In T3 Code, link it with `link_pull_request` when available. Return the URL, a brief verification summary, and any unresolved findings or limitations.
 
-Finish the requested phase or stack, then review with [review-pr](../review-pr/SKILL.md). Use [harden-pr](../harden-pr/SKILL.md) instead only when the user explicitly asks for it.
+Finish the requested phase or stack first. If the user requested a review, use [review-pr](../review-pr/SKILL.md). Use [harden-pr](../harden-pr/SKILL.md) only when the user explicitly requests hardening.
