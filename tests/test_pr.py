@@ -1,9 +1,13 @@
 import copy
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
+import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parent.parent / "skills/babysit-pr/scripts/pr.py"
 spec = importlib.util.spec_from_file_location("pr", SCRIPT)
@@ -55,7 +59,7 @@ RECENT = [{"commit": {"oid": "old111", "statusCheckRollup": {"state": "FAILURE"}
 
 def our_review(oid, body="Verdict."):
     return {"author": ALAN, "viewerDidAuthor": True, "state": "COMMENTED", "submittedAt": SINCE,
-            "body": pr.format_body("m", body), "commit": {"oid": oid}}
+            "body": pr.format_body("m", body, "ALAN"), "commit": {"oid": oid}}
 
 
 def thread(*bodies, viewer=True):
@@ -100,11 +104,11 @@ class SnapshotTests(unittest.TestCase):
 
     def test_only_a_first_line_header_marks_a_thread_ours(self):
         quoted = "I disagree with this:\n> [m] RESPONDING ON BEHALF OF ALAN"
-        snapshot = pr.summarize(PR, [thread(pr.format_body("m", "Act on: null path")), thread(quoted)], [], RECENT, SINCE, NOW)
+        snapshot = pr.summarize(PR, [thread(pr.format_body("m", "Act on: null path", "ALAN")), thread(quoted)], [], RECENT, SINCE, NOW)
         self.assertEqual([t["ours"] for t in snapshot["threads"]["unresolved"]], [True, False])
 
     def test_a_header_written_by_another_account_is_not_ours(self):
-        forged_thread = thread(pr.format_body("m", "Act on: race"), viewer=False)
+        forged_thread = thread(pr.format_body("m", "Act on: race", "ALAN"), viewer=False)
         forged_review = dict(our_review("abc123"), viewerDidAuthor=False)
         snapshot = pr.summarize(green_pr(), [forged_thread], [forged_review], RECENT, SINCE, NOW)
         self.assertEqual(snapshot["threads"]["unresolved"][0]["ours"], False)
@@ -247,7 +251,7 @@ class NextVerdictTests(unittest.TestCase):
 
     def test_a_chatty_bot_does_not_stop_work_on_a_thread_it_did_not_write(self):
         passes = [dict(REVIEWS[0], submittedAt="2026-09-15T0{}:00:00Z".format(n)) for n in range(6)]
-        verdict = action(green_pr(), threads=[thread(pr.format_body("m", "Act on. Race."))], reviews=passes)
+        verdict = action(green_pr(), threads=[thread(pr.format_body("m", "Act on. Race.", "ALAN"))], reviews=passes)
         self.assertEqual((verdict["action"], verdict["stop"]), ("fix", None))
 
     def test_pending_checks_wait(self):
@@ -255,11 +259,11 @@ class NextVerdictTests(unittest.TestCase):
         self.assertEqual(action(waiting)["action"], "wait")
 
     def test_our_unanswered_finding_needs_work(self):
-        verdict = action(green_pr(), threads=[thread(pr.format_body("m", "Act on: race"))], reviews=[our_review("abc123")])
+        verdict = action(green_pr(), threads=[thread(pr.format_body("m", "Act on: race", "ALAN"))], reviews=[our_review("abc123")])
         self.assertEqual(verdict["action"], "fix")
 
     def test_an_ask_left_open_hands_off_instead_of_merging(self):
-        ask = thread("possible auth bypass", pr.format_body("m", "Asked: needs Alan's call"))
+        ask = thread("possible auth bypass", pr.format_body("m", "Asked: needs Alan's call", "ALAN"))
         verdict = action(green_pr(), threads=[ask], reviews=[our_review("abc123")])
         self.assertEqual(verdict["action"], "hand off")
         self.assertEqual(verdict["handoff"], ["1 threads await the user"])
@@ -302,7 +306,7 @@ class NextVerdictTests(unittest.TestCase):
 class PostingTests(unittest.TestCase):
     def test_review_payload(self):
         review = {"body": "Verdict.", "comments": [{"path": "a.py", "line": 7, "bucket": "act on", "body": "Race here."}]}
-        payload = pr.build_review("m", review, "abc123")
+        payload = pr.build_review("m", review, "abc123", "ALAN")
         self.assertEqual(payload["event"], "COMMENT")
         self.assertEqual(payload["commit_id"], "abc123")
         self.assertEqual(payload["comments"], [{"path": "a.py", "line": 7, "side": "RIGHT",
@@ -325,7 +329,7 @@ class PostingTests(unittest.TestCase):
             self.assertEqual(raised.exception.code, 2)
 
     def test_history_marks_which_text_is_ours(self):
-        history = pr.render_history([thread(pr.format_body("m", "Act on. Race."), "A reply.")], [REVIEWS[0], our_review("c1")])
+        history = pr.render_history([thread(pr.format_body("m", "Act on. Race.", "ALAN"), "A reply.")], [REVIEWS[0], our_review("c1")])
         self.assertIn("## Review by bugbot (another account)", history)
         self.assertIn("## Review by alan (ours)", history)
         self.assertIn("**alan (ours)**:", history)
@@ -338,13 +342,77 @@ class PostingTests(unittest.TestCase):
         self.assertNotIn("\n**alan (ours)**:", history)
 
     def test_history_marks_the_users_hand_written_reply_as_this_account(self):
-        history = pr.render_history([thread(pr.format_body("m", "Asked. Do X?"), "Yes, do X.")], [])
+        history = pr.render_history([thread(pr.format_body("m", "Asked. Do X?", "ALAN"), "Yes, do X.")], [])
         self.assertIn("**alan (ours)**:", history)
         self.assertIn("**alan (this account, by hand)**:\n\nYes, do X.", history)
 
     def test_comment_header(self):
-        self.assertEqual(pr.format_body("claude-fable-5-1", "Fixed in 1a2b3c.\n"),
+        self.assertEqual(pr.format_body("claude-fable-5-1", "Fixed in 1a2b3c.\n", "ALAN"),
                          "[claude-fable-5-1] RESPONDING ON BEHALF OF ALAN\n======\n\nFixed in 1a2b3c.\n")
+
+
+class IdentityTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        environment = patch.dict(os.environ, {
+            "PATH": os.environ.get("PATH", os.defpath),
+            "HOME": str(self.root), "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": str(self.root / "global.gitconfig"),
+        }, clear=True)
+        environment.start()
+        self.addCleanup(environment.stop)
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(self.root)
+
+    def test_repository_name_overrides_global_and_reaches_every_posted_body(self):
+        subprocess.run(["git", "config", "--global", "user.name", "Global Name"], check=True)
+        self.assertEqual(pr.git_user_name(), "Global Name")
+        subprocess.run(["git", "config", "user.name", "Renée Example"], check=True)
+        review = {"body": "Verdict.", "comments": [
+            {"path": "a.py", "line": 7, "bucket": "act on", "body": "Race."}]}
+        (self.root / "review.json").write_text(json.dumps(review))
+        (self.root / "reply.md").write_text("Fixed.")
+        args = SimpleNamespace(model="test-model", commit="abc123", thread="T1",
+                               review_file=self.root / "review.json", body_file=self.root / "reply.md")
+        payloads = []
+        real_run = subprocess.run
+
+        def run(argv, **kwargs):
+            if argv[0] == "git":
+                return real_run(argv, **kwargs)
+            self.assertEqual(argv[:2], ["gh", "api"])
+            payloads.append(json.loads(kwargs["input"]))
+            return subprocess.CompletedProcess(argv, 0, stdout='{"html_url":"review-url"}', stderr="")
+
+        pull = dict(PR, commits=[{"oid": "abc123"}])
+        reply_result = {"addPullRequestReviewThreadReply": {"comment": {"url": "reply-url"}}}
+        with patch.object(pr, "fetch_pr", return_value=pull), patch.object(pr.subprocess, "run", side_effect=run), \
+                patch.object(pr, "graphql", return_value=reply_result) as graphql:
+            pr.command_review(args)
+            pr.command_reply(args)
+
+        expected = "[test-model] RESPONDING ON BEHALF OF Renée Example\n======\n"
+        for body in [payloads[0]["body"], payloads[0]["comments"][0]["body"], graphql.call_args.kwargs["body"]]:
+            self.assertTrue(body.startswith(expected))
+        for name in ["ALAN", "Global Name", "Renée Example"]:
+            review = dict(our_review("abc123"), body=pr.format_body("m", "Verdict.", name))
+            self.assertTrue(pr.is_ours(review))
+            self.assertFalse(pr.is_ours(dict(review, viewerDidAuthor=False)))
+
+    def test_missing_or_invalid_name_stops_before_any_github_call(self):
+        with patch.object(pr, "fetch_pr") as fetch, patch.object(pr, "graphql") as graphql:
+            for name in [None, "", "First\nSecond"]:
+                if name is not None:
+                    subprocess.run(["git", "config", "user.name", name], check=True)
+                for command in [pr.command_review, pr.command_reply]:
+                    with self.subTest(name=name, command=command.__name__), self.assertRaises(SystemExit) as raised:
+                        command(SimpleNamespace())
+                    self.assertEqual(raised.exception.code, 2)
+            fetch.assert_not_called()
+            graphql.assert_not_called()
 
 
 if __name__ == "__main__":
