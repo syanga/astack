@@ -260,14 +260,14 @@ class SettingsTests(InstallerFixture):
         original = '{"autoMemoryEnabled":true,"keep":1}'
         path = self.config("claude", original)
         module = self.manager()
-        real_write = module.atomic_write
+        real_write = module.files.atomic_write
 
         def fail_settings_state(target, data, mode=0o644):
             if target.name == "manifest.json" and '"settings":' in data.decode():
                 raise OSError("Injected settings ownership write failure")
             return real_write(target, data, mode)
 
-        with patch.object(module, "atomic_write", side_effect=fail_settings_state):
+        with patch.object(module.files, "atomic_write", side_effect=fail_settings_state):
             with self.assertRaises(OSError):
                 self.run_with_config(module, {}, "install", "--target", "claude")
         self.assertEqual(path.read_text(), original)
@@ -279,15 +279,62 @@ class SettingsTests(InstallerFixture):
     def test_setting_modified_after_preview_is_not_overwritten(self):
         path = self.config("claude", '{"autoMemoryEnabled":true}')
         module = self.manager()
-        real_write = module.atomic_write
+        real_write = module.files.atomic_write
 
         def edit_during_payload(target, data, mode=0o644):
             if target.name == "CLAUDE.md":
                 path.write_text('{"autoMemoryEnabled":true,"concurrent":true}')
             return real_write(target, data, mode)
 
-        with patch.object(module, "atomic_write", side_effect=edit_during_payload):
+        with patch.object(module.files, "atomic_write", side_effect=edit_during_payload):
             with self.assertRaisesRegex(ValueError, "Settings changed"):
                 self.run_with_config(module, {}, "install", "--target", "claude")
         self.assertTrue(json.loads(path.read_text())["concurrent"])
         self.assertNotIn("settings", self.manifest())
+
+    def test_later_settings_failure_preserves_completed_installation(self):
+        self.source("codex", {"model_reasoning_effort": "high"})
+        module = self.manager()
+        real_write = module.files.atomic_write
+
+        def fail_codex_state(target, data, mode=0o644):
+            if target.name == "manifest.json" and "codex" in json.loads(data).get("settings", {}):
+                raise OSError("Injected settings ownership write failure")
+            return real_write(target, data, mode)
+
+        with patch.object(module.files, "atomic_write", side_effect=fail_codex_state):
+            with self.assertRaises(OSError):
+                self.run_with_config(module, {}, "install")
+        self.assertFalse((self.home / ".codex/config.toml").exists())
+        claude = self.home / ".claude/settings.json"
+        self.assertFalse(json.loads(claude.read_text())["autoMemoryEnabled"])
+        state = self.manifest()
+        self.assertEqual(set(state["settings"]), {"claude"})
+        self.assertEqual(set(state["targets"]), {"claude", "codex"})
+        self.assertTrue(all(Path(path).exists() for records in state["targets"].values() for path in records))
+        self.run_installer()
+        self.run_installer(command="uninstall")
+        self.assertFalse(claude.exists())
+        self.assertFalse((self.home / ".codex/config.toml").exists())
+
+    def test_uninstall_state_failure_restores_removed_settings(self):
+        self.run_installer("--target", "claude")
+        path = self.home / ".claude/settings.json"
+        original = path.read_bytes()
+        ownership = self.manifest()["settings"]
+        module = self.manager()
+        real_write = module.files.atomic_write
+
+        def fail_settings_removal(target, data, mode=0o644):
+            if target.name == "manifest.json" and json.loads(data).get("settings") == {}:
+                raise OSError("Injected settings ownership write failure")
+            return real_write(target, data, mode)
+
+        with patch.object(module.files, "atomic_write", side_effect=fail_settings_removal):
+            with self.assertRaises(OSError):
+                self.run_with_config(module, {}, "uninstall", "--target", "claude")
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(self.manifest()["settings"], ownership)
+        self.assertEqual(self.manifest()["targets"], {})
+        self.run_installer("--target", "claude", command="uninstall")
+        self.assertFalse(path.exists())
