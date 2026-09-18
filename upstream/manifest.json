@@ -119,5 +119,19 @@
       "agents/openai.yaml": null
     },
     "note": "The shared reference is now the Deep Modules principle; its workflows live under improve-codebase-architecture. Removes skill frontmatter and the separate Codex display metadata, adds an applicability trigger, and uses sentence-case headings. Consolidates Relationships into the glossary and repeated seam definitions into the principle. Removes the blanket restriction on boundary terminology. Pure-function and assertion guidance point to Boundary Discipline and Test Behavior, Not Implementation. Interface exploration reads Exhaust the Design Space and passes applicable caller principles to designers. Old tests are removed only after their behavior is covered at the new interface. Designer briefs include project domain vocabulary when available. Replaces the claim that fewer methods require fewer tests with guidance on simplifying test setup."
+  },
+  "worktree-cleanup": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/poteto-mode/playbooks/worktree-cleanup.md",
+    "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
+    "license": "MIT, kept in skills/worktree-cleanup/LICENSE",
+    "note": "Adapted for model invocation on cleanup, resource audits, and lane closeout. Checks unfinished work first and reports blockers before cleanup or handoff writes. Uses Git inventory, T3 thread ownership, and task resource evidence instead of Cursor-specific auditing. Covers processes, Docker storage, disposable test databases, and t3-preview HTML and quick tunnels. Preserves shared resources and the daily-driver T3 connection. Adds preview ownership records; simulator and cache cleanup remains optional. Prose trimmed to task-specific rules and teardown hazards."
+  },
+  "ship-pr": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/poteto-mode/playbooks/shipping.md",
+    "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
+    "license": "MIT, kept in skills/ship-pr/LICENSE",
+    "note": "Adapted as ship-pr, a user-invoked entry point for landing an existing PR or stack. Reuses the shared PR follow-through procedure and existing review evidence. Removes the mandatory independent verification pass and separate verdict protocol; refreshes verification when evidence is missing or changes invalidate it. Retains safeguards against merging unverified head changes."
   }
 }
