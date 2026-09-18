@@ -1,6 +1,8 @@
 # Follow the PR
 
-Use `python3 "<harden-pr directory>/scripts/pr.py" status --pr <n>` for a GitHub snapshot and `history --pr <n>` for earlier reviews and thread replies. Add `--repo owner/name` when needed. A status-only request ends with a report. Read the current head, checks, unresolved threads, and review bodies before changing anything. The helper reports state, not a verdict about correctness or merge readiness.
+Use `python3 "<harden-pr directory>/scripts/pr.py" status --pr <n>` for a GitHub snapshot and `history --pr <n>` for earlier reviews and thread replies. Add `--repo owner/name` when needed. A status-only request ends with a report. Read the current head, checks, approvals, unresolved threads, and review evidence before changing anything. The helper reports state, not a verdict about correctness or merge readiness.
+
+Reuse applicable reviews and verification. Use targeted checks or review for missing evidence or changes that invalidate earlier results. Run the full [review-pr](../review-pr/SKILL.md) or [harden-pr](SKILL.md) workflow only when requested.
 
 ## Address findings and CI
 
@@ -14,7 +16,7 @@ Correct a title or description finding with `gh pr edit`.
 
 Read failing job logs before choosing a fix, rebase, or retry. A failure outside the diff can be an interaction, an existing base failure, or infrastructure trouble. Determine which. Retry a suspected transient failure when the evidence supports it; repeated failure calls for investigation. Report unavailable checks and external blockers accurately.
 
-For conflicts, read the intent on both sides and preserve it through the resolution. Ask only when the intents require a product decision. After a rebase, examine changed callers and rerun the affected checks.
+For conflicts, read the intent on both sides and preserve it through the resolution. Ask only when the intents require a product decision. After a push, rebase, or retarget, compare the patch and integration assumptions with the reviewed version and refresh affected verification. After squash-merging a parent, replay only the child's commits from the previous parent tip onto the new base.
 
 ## Push and wait
 
@@ -24,6 +26,8 @@ Take a fresh snapshot after each push. Use `pr.py wait --pr <n> --max-minutes 0.
 
 ## Finish or merge
 
-For requested hardening, assess the final head with the review and verification described in [SKILL.md](SKILL.md). For a narrower follow-through request, finish when its findings and checks are addressed. Report what changed, remaining findings, CI, required approvals, and unavailable coverage. A bot that reviewed an earlier commit may not have reviewed the final head.
+When hardening was requested, confirm its assessment covers the final head, refreshing affected coverage through [harden-pr](SKILL.md) as needed. For a narrower follow-through request, finish when its findings and checks are addressed. Report what changed, remaining findings, CI, required approvals, and unavailable coverage. A bot that reviewed an earlier commit may not have reviewed the final head.
 
 Before an authorized merge, take a fresh snapshot, confirm that findings and user decisions are addressed and required checks and approvals pass on the intended head, and use `gh pr merge <n> --squash --match-head-commit <sha>`. Respect the user's merge disposition. If it is absent, report readiness and ask. For stacked PRs, retarget children to the parent's base before deleting the parent branch.
+
+For merge-when-ready, wait and merge the verified head explicitly. Use auto-merge only when requested and repository controls prevent unverified head changes while pending; matching the head at scheduling time alone is insufficient. Confirm the merged state before reporting the PR as landed.

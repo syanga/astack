@@ -4,7 +4,7 @@ description: Review consequential changes with specialist and adversarial review
 disable-model-invocation: true
 ---
 
-For a request limited to PR status, comments, or CI, use [pr-work.md](pr-work.md). Otherwise run the review below.
+For a request limited to PR status, comments, or CI, follow [ship-pr](../ship-pr/SKILL.md). Otherwise run the review below.
 
 ## Step 1: Pin the fixed point
 
@@ -102,6 +102,6 @@ If the review exits early before a real review completes, report why.
 
 For an existing PR, post an assessment of its reviewed commit using [posting.md](posting.md). Include verification results and coverage limits, and identify the reviewed commit. Report local changes in the conversation.
 
-For requested PR follow-through, continue with [pr-work.md](pr-work.md).
+For requested PR follow-through, continue with [ship-pr](../ship-pr/SKILL.md).
 
 Keep the assessment concise. Explain each remaining problem and its proposed fix.

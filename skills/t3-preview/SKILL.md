@@ -7,6 +7,8 @@ description: Previewing HTML in T3 Code. Use when delivering a page or mock for 
 
 Pick the delivery route before building anything. The content itself follows the user's existing design and implementation workflow. A request to explain preview options needs only an answer.
 
+For either delivery route, keep the [preview cleanup record](cleanup.md) with the task's output and link it in the handoff. It identifies files and processes for later worktree cleanup.
+
 ## Where the browser runs
 
 The user usually works in T3 Code through a Cloudflare tunnel. T3's preview browser runs on the **viewing device**, which can be a different machine from the one the agent runs on. In that browser, `localhost` is the viewing device, so a server on the agent's machine is unreachable at a localhost address. The only public route from the agent's machine is a Cloudflare quick tunnel.
