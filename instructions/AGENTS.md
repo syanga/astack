@@ -1,41 +1,31 @@
 # Personal coding instructions
 
-<!-- Shared by all supported harnesses. Fill in your preferences below. -->
+I'm Alan. I did my PhD in electrical engineering at Stanford with Stephen Boyd, focusing on convex optimization, control, and machine learning. I value simple designs and a deep understanding of how systems work.
 
-I'm Alan. You're my agent. We will be working together a lot, so I thought it would be worth introducing myself.
+## Coding preferences
 
-I did my PhD in electrical engineering at Stanford University, working with Stephen Boyd. My academic background is mainly in convex optimization, control, machine learning.
-
-I love to build and deeply understand how systems work. I focus on building complex things as simple as possible. I love to find ways to reduce complexity when solving problems, and to explain and build things in simple yet elegant ways, as a mathematician might.
-
-I wanted to share some of my preferences here so we can be more aligned as we work together.
-
-## Coding preferences - general
-* Keep things simple. Channel "yagni" energy unless told otherwise.
-* Typesafety is useful, take advantage of it.
-* Don't be scared to propose bold ideas if they can meaningfully benefit our work.
+* Build only what the task needs.
+* Use types to express constraints.
+* Propose larger changes when they meaningfully simplify the solution.
 * Be careful with destructive actions that are not explicitly requested by the user.
-* Tests are good! Endless smoke tests, "regression tests" for feature deletions, etc, much less good. Tests should be focused, not slop.
-* Names, types, and structure carry meaning. Comments do not. Keep a comment only for a legal or license header, behaviour forced by an external dependency, platform, vendor, or protocol we cannot change, a doc comment that defines a public API contract, an issue or RFC link that explains a constraint the code cannot express, or a lint or type suppression whose rule is faulty, pedantic, or style-only. When unsure, delete the comment. The no-comments skill's keep list is the authority.
+* Add tests when they verify a meaningful behavior change or failure case. When writing or reviewing tests, read and apply `principles/test-behavior-not-implementation.md` from the installed skills.
+* When adding or changing code comments, read and follow the no-comments skill's keep list.
 
 ## Questions are read-only
-* A question is a request for an answer, not for changes. If the message opens with "how hard would it be", "what are your thoughts", "why does", "should we", "is it possible", "can X do Y", or otherwise asks rather than instructs: answer it, and do not edit files.
-* If the answer is obvious and the change is trivial, still answer first and offer the change. Ask before making it.
+
+Answer questions without editing files, even when the implied change is trivial. Offer the change and wait for an instruction to implement it.
+
+## Writing
+
+* When writing documentation, read and apply the technical-writing skill, which includes unslop.
+* When writing other prose, read and apply the unslop skill.
 
 ## Visual and design work
+
 * Do not edit real components first. For any non-trivial UI, layout, or copy change, build several distinct static mocks, publish them with the t3-preview skill, report the link, and stop. Wait for a pick before implementing.
 * Standing constraints: dark mode, true black (#000) background, white primary text. Information-dense, no decorative card/pill chrome, no light-gray subtitle lines above sections. Minimal copy. No em dashes.
 * Avoid continuously repainting CSS animations (pulse, shimmer, blur, spinners); they peg the GPU on high-refresh displays.
 
 ## Live systems
-* Never touch production, live databases, or daily-driver build/preview channels unless explicitly told to. When a task is adjacent to any of them, name what you are about to touch before touching it.
 
-## Pull Requests
-* Open PRs with the open-pr skill. Prefer several narrow PRs to one large one.
-* Titles follow the repo's convention. Conventional Commits in projects that use them, i.e. "fix(web): new threads no longer spike CPU"
-* The body is a briefing a reviewer reads in under a minute: why the change exists, then how it was verified. End with a blurb naming the model and harness that made the changes.
-* Open a real PR, not a draft. Drafts do not get review-bot coverage.
-* Rebase onto latest main before opening. Stale branches conflict and waste a review round.
-* Every repository you push from carries the Gitleaks pre-push hook. The open-pr skill installs it when it is missing.
-* Use review-pr for general review and harden-pr when asked to harden a change or follow a PR through fixes and CI. Stay quiet while waiting.
-* Merge only per the disposition given in the request (merge when green, or stop and report). If none was given, report and ask.
+* Never touch production, live databases, or daily-driver build/preview channels unless explicitly told to. When a task is adjacent to any of them, name what you are about to touch before touching it.
