@@ -18,7 +18,7 @@
     "path": "pstack/skills/principle-*",
     "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
     "license": "MIT, kept in skills/principles/LICENSE",
-    "note": "All 23 principle skills as plain files under one user-invoked index. Frontmatter removed, applicability retained in the bodies, links adapted to local files, and unavailable skill references removed. Headings use sentence case and duplicate applicability statements are removed. Adaptations put migration preconditions before the rule, bound root-cause fixes to the task's scope, preserve external-constraint explanations, clarify boundary guarantees, and consolidate the mechanism hierarchy. Autonomy follows the user's authorization and approval preferences; context guidance follows writing-for-agents. Other edits correct the assertion-pattern heading, group failing-test and fix commits into one verified unit, allow reuse of a concrete tool, and narrow attack-the-premise to actor imbalances without treating an even census as proof. Earlier astack-added completion tests and one-off reply notes are removed. Upstream examples for pure functions, idempotency, and the reader-load/context-window cross-reference are retained."
+    "note": "All 23 principle skills as plain files under one user-invoked index. Frontmatter removed, applicability retained in the bodies, links adapted to local files, and unavailable skill references removed. Headings use sentence case and duplicate applicability statements are removed. Adaptations put migration preconditions before the rule, bound root-cause fixes to the task's scope, preserve external-constraint explanations, clarify boundary guarantees, and consolidate the mechanism hierarchy. Autonomy follows the user's authorization and approval preferences; context guidance follows writing-for-agents. Other edits correct the assertion-pattern heading, group failing-test and fix commits into one verified unit, allow reuse of a concrete tool, and narrow attack-the-premise to actor imbalances without treating an even census as proof. Earlier astack-added completion tests and one-off reply notes are removed. Upstream examples for pure functions, idempotency, and the reader-load/context-window cross-reference are retained. Minimize Reader Load links to Deep Modules, whose Matt Pocock provenance is recorded under codebase-design."
   },
   "open-pr": {
     "repository": "https://github.com/cursor/plugins.git",
@@ -70,5 +70,54 @@
     ],
     "license": "MIT, kept in skills/harden-pr/LICENSE-pstack, LICENSE-mattpocock, and LICENSE-gstack",
     "note": "Adapted from the pinned gstack review directory. Retains core checks, specialist criteria, independent adversarial review, and outside structured review. Consolidates scope and dispatch, removes numerical scoring and aesthetic rules, and replaces gstack runtime dependencies. Adds astack PR posting, requested follow-through, and targeted mutation guidance. See upstream/review-adaptations.md."
+  },
+  "grilling": {
+    "repository": "https://github.com/mattpocock/skills.git",
+    "path": "skills/productivity/grilling",
+    "commit": "74ca5fe077456a0b3b2f5310cf9430999fd0b5fd",
+    "license": "MIT, kept in skills/grilling/LICENSE-mattpocock",
+    "note": "Preserves the design-tree interview, frontier rounds, recommendations, and shared-understanding checkpoint. Removes decorative emoji from the question template. Makes invocation explicit with matching Codex policy and a human-facing description. Allows direct factual lookups and delegates independent exploration that can run alongside the interview.",
+    "files": {
+      "SKILL.md": "skills/grilling/SKILL.md",
+      "agents/openai.yaml": "skills/grilling/agents/openai.yaml"
+    }
+  },
+  "improve-codebase-architecture": {
+    "repository": "https://github.com/mattpocock/skills.git",
+    "path": "skills/engineering/improve-codebase-architecture",
+    "commit": "74ca5fe077456a0b3b2f5310cf9430999fd0b5fd",
+    "license": "MIT, kept in skills/improve-codebase-architecture/LICENSE-mattpocock",
+    "note": "Preserves exploration, visual candidate reports, user selection, grilling, domain-model updates, and optional interface alternatives. Uses local skill links, tolerates absent project documentation, and adds targeted astack principle references. Reports use t3-preview, inline assets, dark styling, and plain candidate sections. Reads the Deep Modules principle and permits boundary terminology. DEEPENING.md and DESIGN-IT-TWICE.md are tracked under codebase-design, their upstream source. Consolidates report instructions in HTML-REPORT.md and glossary/ADR actions in domain-modeling. Reads principles at the relevant decisions and applies the deletion test from Deep Modules instead of restating it. Passes identified glossary and ADR locations to domain-modeling. The report links to DEEPENING.md for dependency classification.",
+    "files": {
+      "HTML-REPORT.md": "skills/improve-codebase-architecture/HTML-REPORT.md",
+      "SKILL.md": "skills/improve-codebase-architecture/SKILL.md",
+      "agents/openai.yaml": "skills/improve-codebase-architecture/agents/openai.yaml"
+    }
+  },
+  "domain-modeling": {
+    "repository": "https://github.com/mattpocock/skills.git",
+    "path": "skills/engineering/domain-modeling",
+    "commit": "74ca5fe077456a0b3b2f5310cf9430999fd0b5fd",
+    "license": "MIT, kept in skills/domain-modeling/LICENSE-mattpocock",
+    "note": "Preserves glossary updates, multiple contexts, and selective ADR creation with both format references. Uses sentence-case headings and reference-style links in the sample context map so example repository paths are not treated as installed skill dependencies. Consolidates glossary locations and format in CONTEXT-FORMAT.md and ADR locations, numbering, and examples in ADR-FORMAT.md. Keeps ADR eligibility and lazy document creation in SKILL.md; removes repeated criteria and directory trees. Makes invocation explicit with matching Codex policy and a human-facing description. Uses glossary and ADR locations identified by the caller or project instructions, retaining upstream defaults otherwise.",
+    "files": {
+      "ADR-FORMAT.md": "skills/domain-modeling/ADR-FORMAT.md",
+      "CONTEXT-FORMAT.md": "skills/domain-modeling/CONTEXT-FORMAT.md",
+      "SKILL.md": "skills/domain-modeling/SKILL.md",
+      "agents/openai.yaml": "skills/domain-modeling/agents/openai.yaml"
+    }
+  },
+  "codebase-design": {
+    "repository": "https://github.com/mattpocock/skills.git",
+    "path": "skills/engineering/codebase-design",
+    "commit": "74ca5fe077456a0b3b2f5310cf9430999fd0b5fd",
+    "license": "MIT, copied from repository-root LICENSE to skills/principles/LICENSE-mattpocock and skills/improve-codebase-architecture/LICENSE-mattpocock",
+    "files": {
+      "SKILL.md": "skills/principles/deep-modules.md",
+      "DEEPENING.md": "skills/improve-codebase-architecture/DEEPENING.md",
+      "DESIGN-IT-TWICE.md": "skills/improve-codebase-architecture/DESIGN-IT-TWICE.md",
+      "agents/openai.yaml": null
+    },
+    "note": "The shared reference is now the Deep Modules principle; its workflows live under improve-codebase-architecture. Removes skill frontmatter and the separate Codex display metadata, adds an applicability trigger, and uses sentence-case headings. Consolidates Relationships into the glossary and repeated seam definitions into the principle. Removes the blanket restriction on boundary terminology. Pure-function and assertion guidance point to Boundary Discipline and Test Behavior, Not Implementation. Interface exploration reads Exhaust the Design Space and passes applicable caller principles to designers. Old tests are removed only after their behavior is covered at the new interface. Designer briefs include project domain vocabulary when available. Replaces the claim that fewer methods require fewer tests with guidance on simplifying test setup."
   }
 }
