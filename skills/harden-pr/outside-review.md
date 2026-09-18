@@ -17,7 +17,7 @@ codex exec --sandbox read-only --ephemeral --json \
 For Claude:
 
 ```bash
-claude --print --safe-mode --permission-mode plan \
+claude --print --safe-mode \
   --tools 'Read,Glob,Grep' --strict-mcp-config \
   --no-session-persistence --output-format json \
   < '<prompt-file>' > '<response-file>' 2> '<stderr-file>'

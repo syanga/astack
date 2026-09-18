@@ -94,7 +94,7 @@ Read and follow [adversarial.md](sections/adversarial.md) for the native and out
 
 ## Step 7: Record the review result
 
-Save the review with its source snapshot, findings, dispositions, per-specialist coverage, outside-provider outcomes, and verification evidence in the temporary review directory. Record completion separately from convergence and unresolved findings. Link the records from the final assessment.
+Save the review with its source snapshot, findings, dispositions, per-specialist coverage, outside-provider outcomes, and verification evidence in the temporary review directory. Record completion separately from convergence and unresolved findings. Link the local records in the conversation.
 
 If the review exits early before a real review completes, report why.
 
