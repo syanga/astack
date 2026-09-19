@@ -13,9 +13,15 @@ Start upstream imports from the original. Preserve clear wording, structure,
 and examples. Make targeted changes for compatibility or a specific demonstrated
 problem, and compare each change against the original for clarity and meaning.
 
-When adapting an upstream skill, record its repository, path, and commit in
-`upstream/manifest.json`. Keep its license in the skill directory.
+When adapting an upstream skill, record its repository, path, commit, and any
+source-to-destination mappings in `upstream/manifest.json`. Keep its license in
+the skill directory. Limit manifest notes to rationale the diff cannot explain.
 To review upstream changes, clone the source and diff from the pinned commit.
+
+Put reusable lessons in the applicable skill or principle, and change history in
+the PR. Keep adaptation records in the manifest and PR instead of separate
+adaptation reports. Discover skills through `astack-help` and installed metadata;
+do not maintain skill inventories in the README or other overview documents.
 
 ## Verification
 
