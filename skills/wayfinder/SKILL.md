@@ -135,3 +135,5 @@ User invokes with a map (URL, number, or local path). A ticket is **optional**: 
 5. Add newly-surfaced tickets (create-then-wire); graduate any fog the answer has made specifiable, clearing each graduated patch from **Not yet specified** so it lives only as its new ticket. If the answer reveals that a ticket (this one or another) sits beyond the destination, **rule it out of scope** rather than resolving it on the route. If the decision invalidates other parts of the map, update them or close them as superseded, retaining their history and links. A canceled blocker does not count as a resolved prerequisite; update its dependents before admitting them to the frontier.
 
 The user may run unblocked tickets in parallel, so expect other sessions to be editing the tracker concurrently. Re-read current state before updating the shared map; preserve other sessions' decisions and use the tracker's concurrency controls.
+
+When passing unfinished work to another session, read [handoff](../handoff/SKILL.md). Keep decision findings in the map and ticket records, and follow the chosen tracker's claim-release procedure when the owning session stops.

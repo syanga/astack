@@ -193,7 +193,7 @@
       "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
     ],
     "license": "MIT, kept in skills/implement/LICENSE-pstack and skills/implement/LICENSE-mattpocock",
-    "note": "Uses the pstack Feature playbook as the base, retaining design ownership, the four-part throughput checkpoint, implementation delegation, diff review, and verified units. Incorporates Matt implement guidance for TDD, regular typechecking and focused tests, final review, and commits. Adapts provider-specific dispatch, local skill references, and task-scoped delivery. Retains Matt Codex metadata. See upstream/implementation-adaptations.md. Multi-phase execution follows the shared orchestrate/STATE.md convention; delegated workers return receipts to the sole state writer."
+    "note": "Uses the pstack Feature playbook as the base, retaining design ownership, the four-part throughput checkpoint, implementation delegation, diff review, and verified units. Incorporates Matt implement guidance for TDD, regular typechecking and focused tests, final review, and commits. Adapts provider-specific dispatch, local skill references, and task-scoped delivery. Retains Matt Codex metadata. See upstream/implementation-adaptations.md. Multi-phase execution follows the shared orchestrate/STATE.md convention; delegated workers return receipts to the sole state writer. References handoff for session transfers while preserving the existing task record."
   },
   "tdd": {
     "repository": [
@@ -232,7 +232,7 @@
       "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
     ],
     "license": "MIT, kept in skills/prototype/LICENSE-pstack and skills/prototype/LICENSE-mattpocock",
-    "note": "Starts from Matt prototype directory and retains logic scenarios, state display, UI alternative criteria, and switcher behavior. Uses pstack scratch isolation and matching-surface verification. Adapts real-route edits to static HTML mocks, local visual constraints and t3-preview, with selection before real components and scoped production handoff. Retains Codex metadata. See upstream/implementation-adaptations.md."
+    "note": "Starts from Matt prototype directory and retains logic scenarios, state display, UI alternative criteria, and switcher behavior. Uses pstack scratch isolation and matching-surface verification. Adapts real-route edits to static HTML mocks, local visual constraints and t3-preview, with selection before real components and scoped production handoff. Retains Codex metadata. See upstream/implementation-adaptations.md. References handoff for session transfers while preserving the existing task record."
   },
   "diagnosing-bugs": {
     "repository": "https://github.com/mattpocock/skills.git",
@@ -272,7 +272,7 @@
     ],
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/orchestrate/LICENSE-pstack",
-    "note": "Preserves coordinator roles, briefs, pilot and rolling execution, completion queues, stack ownership, SHA-keyed verification, failure handling, and escalation. Directly imports the original Bun/TypeScript CLI, store, bootstrap, tests, package manifest, and lockfile. Retains Graphite and adds a GitHub frontier adapter. Targeted changes add unit ownership, legacy table reads, retained verdict and drain history, verifier precedence, handoff status, and offline test setup. Adapts Cursor dispatch to available tools. Shares STATE.md and CLI.md with multi-phase-plan and sequential implement; honors execution and merge authorization and routes merges through ship-pr. See upstream/planning-adaptations.md. Delegates decision trails and their audit to the imported show-me-your-work skill. Centralizes verification rules in STATE.md, aligns frontier and standing-order instructions with the runtime, and removes repeated or figurative prose.",
+    "note": "Preserves coordinator roles, briefs, pilot and rolling execution, completion queues, stack ownership, SHA-keyed verification, failure handling, and escalation. Directly imports the original Bun/TypeScript CLI, store, bootstrap, tests, package manifest, and lockfile. Retains Graphite and adds a GitHub frontier adapter. Targeted changes add unit ownership, legacy table reads, retained verdict and drain history, verifier precedence, handoff status, and offline test setup. Adapts Cursor dispatch to available tools. Shares STATE.md and CLI.md with multi-phase-plan and sequential implement; honors execution and merge authorization and routes merges through ship-pr. See upstream/planning-adaptations.md. Delegates decision trails and their audit to the imported show-me-your-work skill. Centralizes verification rules in STATE.md, aligns frontier and standing-order instructions with the runtime, and removes repeated or figurative prose. References handoff for session transfers while preserving the existing task record.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/orchestrate.md": "skills/orchestrate/SKILL.md",
       "pstack/skills/poteto-mode/scripts/orch/orch.ts": "skills/orchestrate/scripts/orch/orch.ts",
@@ -291,7 +291,7 @@
     ],
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/multi-phase-plan/LICENSE-pstack",
-    "note": "Preserves the ordered plan skeleton and per-PR evidence workflow. Replaces provider-specific execution, scheduling, control, and model dependencies with astack skills and available tools. Scales live scenarios to risk, allows reasoned performance exemptions, and follows existing human gates. Ports the checker to Python standard library. See upstream/planning-adaptations.md. Records one execution store reused by implement and orchestrate, including durable handoffs and resume reconciliation. References show-me-your-work for the decision trail and completion audit.",
+    "note": "Preserves the ordered plan skeleton and per-PR evidence workflow. Replaces provider-specific execution, scheduling, control, and model dependencies with astack skills and available tools. Scales live scenarios to risk, allows reasoned performance exemptions, and follows existing human gates. Ports the checker to Python standard library. See upstream/planning-adaptations.md. Records one execution store reused by implement and orchestrate, including durable handoffs and resume reconciliation. References show-me-your-work for the decision trail and completion audit. References handoff for session transfers while preserving the existing task record.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/multi-phase-plan.md": "skills/multi-phase-plan/SKILL.md",
       "pstack/skills/poteto-mode/scripts/check-plan.mjs": "skills/multi-phase-plan/scripts/check_plan.py"
@@ -305,7 +305,7 @@
     ],
     "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
     "license": "MIT, kept in skills/wayfinder/LICENSE-mattpocock",
-    "note": "Preserves the map, decision tickets, ticket types, fog of war, and chart/work modes. Adapts tool invocation and skill links, local tracker fallback, concurrent session claims, cancellation and supersession, user-authorized execution, and explicit continuation. Retains Codex metadata. The local tracker reference retains only wayfinding operations and relevant shared conventions. See upstream/planning-adaptations.md.",
+    "note": "Preserves the map, decision tickets, ticket types, fog of war, and chart/work modes. Adapts tool invocation and skill links, local tracker fallback, concurrent session claims, cancellation and supersession, user-authorized execution, and explicit continuation. Retains Codex metadata. The local tracker reference retains only wayfinding operations and relevant shared conventions. See upstream/planning-adaptations.md. References handoff for session transfers while preserving the existing task record.",
     "files": {
       "skills/engineering/wayfinder/SKILL.md": "skills/wayfinder/SKILL.md",
       "skills/engineering/wayfinder/agents/openai.yaml": "skills/wayfinder/agents/openai.yaml",
@@ -326,6 +326,29 @@
       "pstack/skills/show-me-your-work/SKILL.md": "skills/show-me-your-work/SKILL.md",
       "pstack/skills/show-me-your-work/references/decision-log-template.tsv": "skills/show-me-your-work/references/decision-log-template.tsv",
       "pstack/skills/show-me-your-work/scripts/log.sh": "skills/show-me-your-work/scripts/log.sh"
+    }
+  },
+  "handoff": {
+    "repository": [
+      "https://github.com/mattpocock/skills.git",
+      "https://github.com/cursor/plugins.git"
+    ],
+    "path": [
+      "skills/productivity/handoff",
+      "pstack/skills/poteto-mode/playbooks/pause-safely.md",
+      "pstack/skills/poteto-mode/playbooks/session-pickup.md"
+    ],
+    "commit": [
+      "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+      "032be146865d973682535de75f2287da438550bf"
+    ],
+    "license": "MIT, kept in skills/handoff/LICENSE-mattpocock and skills/handoff/LICENSE-pstack",
+    "note": "Starts from Matt handoff and retains artifact pointers, suggested skills, redaction, focus arguments, and explicit-only Codex metadata. Imports pstack pause-safely and session-pickup as PAUSE.md and RESUME.md. Reuses execution stores and decision maps, keeps temporary notes for standalone tasks, and preserves coordinator ownership. Adapts transcript access, delivery authorization, partial-work preservation, and evidence reuse. See upstream/planning-adaptations.md.",
+    "files": {
+      "skills/productivity/handoff/SKILL.md": "skills/handoff/SKILL.md",
+      "skills/productivity/handoff/agents/openai.yaml": "skills/handoff/agents/openai.yaml",
+      "pstack/skills/poteto-mode/playbooks/pause-safely.md": "skills/handoff/PAUSE.md",
+      "pstack/skills/poteto-mode/playbooks/session-pickup.md": "skills/handoff/RESUME.md"
     }
   }
 }

@@ -1,0 +1,11 @@
+# Session pickup
+
+**You own the resume point. Read the prior trail and reuse completed work.**
+
+1. Locate the prior trail from the supplied handoff, plan, map, branch, or task-scoped conversation link. Read its overview and latest handoff first, then follow decision pointers as needed. Use the active environment's transcript tools or documented paths only for this task. For a long transcript, follow [guard the context window](../principles/guard-the-context-window.md), using a focused reader subagent when available and permitted. If the trail is unavailable, reconstruct what you can from the named artifacts and state what context is missing.
+2. Reconstruct operational state. Check the branch and worktree, what already landed (`git log`, `git diff` against the base), pending work, and recorded decisions. For an execution store, follow [its resume procedure](../orchestrate/STATE.md#resume). For Wayfinder, read the map and current claims through its chosen tracker. Confirm the prior owner has stopped or explicitly transferred the scope before taking over writes. A handoff file alone does not establish that.
+3. Compare done and pending work against the original goal. Name the resume point. Reuse evidence that still applies to the current artifact. Recheck claims when the head, environment, or acceptance criteria have changed, or the supporting evidence is missing; explain why a repeated check is needed.
+4. Read the suggested skills and route the remaining work to the matching astack skill. Decide whether to continue execution, deliver completed findings, revisit a prior conclusion, or investigate a failed run. Continue within recorded authorization, including any approvals still needed. The receiving skill owns execution and task-specific acceptance.
+5. Verify inherited claims against the original goal on the real artifact through [prove it works](../principles/prove-it-works.md). A passing prior self-report is not the proof. Existing receipts can supply that proof when they identify the current artifact and meet the receiving skill's acceptance rules.
+
+**Reply:** where the prior agent stopped, what you inherited vs redid (ideally nothing redone), the resume point, and the outcome.

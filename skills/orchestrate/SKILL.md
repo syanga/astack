@@ -28,6 +28,8 @@ Keep at most three levels: coordinator, track coordinator, and worker. Choose tr
 
 Reuse the plan's execution store, `.scratch/<program>/` by default, including any progress from sequential implement sessions. The execution owner maintains the store through the CLI and the decision-log helper. Owners publish facts, readers aggregate at read time. [STATE.md](STATE.md) defines the shared files, checkpoint and resume procedure, and additional coordination files. Record the absolute path in the plan and handoffs. Keep the store outside disposable worker workspaces.
 
+For a requested pause or transfer to another session, read [handoff](../handoff/SKILL.md). Keep the handoff in this store and reconcile active owners before transferring their work.
+
 - `preferences.md` holds numbered standing orders for model policy, stack ownership, verification, scope, and escalation. Carry them into spawns and resumes as specified under The brief. When you catch yourself restating an instruction, append the line before you act ([Encode Lessons in Structure](../principles/encode-lessons-in-structure.md)).
 - `overview.md` records the program and session handoffs. Append. Never rewrite wholesale per event.
 - `units.tsv` tracks each unit. Update it through the CLI.

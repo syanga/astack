@@ -131,3 +131,32 @@ Corrections now append evidence and identify the original row.
 The prose pass preserves the imported workflows, examples, and useful terms such
 as brief, frontier, and fog of war. It removes figurative phrasing, splits dense
 instructions, and replaces repeated state rules with references.
+
+## Handoff
+
+Matt's handoff supplies the short entry point, suggested-skills section, artifact
+pointers, redaction rule, and focus on the receiving session. Its explicit-only
+invocation policy and Codex metadata remain. Pstack's pause-safely and
+session-pickup playbooks supply separate procedures for stopping and resuming.
+Both source licenses are retained.
+
+The original temporary-file destination remains for standalone tasks. Planned
+execution instead appends to the existing store's overview and regenerates its
+status; Wayfinder retains handoffs in its map and ticket records. Workers return
+handoffs to the coordinator rather than writing shared state. A planning-only
+handoff does not initialize an execution store. Cross-machine transfer is
+explicit, and preparing a note alone does not stop workers or transfer ownership.
+
+The pause procedure preserves partial edits and honors existing delivery scope
+instead of requiring a WIP commit. It distinguishes immediate stop-writes orders
+from a pause at a safe boundary, checks worker status, and retains unconfirmed
+ownership. Pickup uses task-scoped artifacts and transcript access instead of
+Cursor paths. It reconciles current Git and tracker state, reuses applicable
+evidence, and repeats checks when their inputs changed or evidence is missing.
+This resolves the source's tension between never repeating verification and
+proving inherited claims.
+
+Implement, prototype, multi-phase-plan, orchestrate, and Wayfinder point to handoff
+at session-transfer boundaries. Routine checkpoints still follow STATE.md, and
+ordinary same-session skill transitions need no extra document. Handoff adds no
+scheduler, active-plan discovery, or automatic ownership transfer.
