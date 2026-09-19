@@ -4,7 +4,7 @@
     "path": "skills/productivity/writing-for-agents",
     "commit": "959a8e9f1edc3adbe2f7e3054bb6fbefa6696260",
     "license": "MIT, kept in skills/writing-for-agents/LICENSE",
-    "note": "Adapted: unslop pass over the prose, sharpened rule that a description is a trigger not a summary, SKILL-MECHANICS rewritten for astack's harnesses and sibling-path reach, unslop pointer and encode-lessons pruning rule added."
+    "note": "Adapted: unslop pass over the prose, sharpened rule that a description is a trigger not a summary, SKILL-MECHANICS rewritten for astack's harnesses and sibling-path reach, unslop pointer and encode-lessons pruning rule added. Adds an astack-authored SOURCE-EDITS.md guide for locating installed skills' owning repositories and submitting approved source improvements through open-pr."
   },
   "unslop": {
     "repository": "https://github.com/cursor/plugins.git",
@@ -133,5 +133,43 @@
     "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
     "license": "MIT, kept in skills/ship-pr/LICENSE",
     "note": "Adapted as ship-pr, a model-invoked entry point for landing an existing PR or stack. Reuses the shared PR follow-through procedure and existing review evidence. Removes the mandatory independent verification pass and separate verdict protocol; refreshes verification when evidence is missing or changes invalidate it. Retains safeguards against merging unverified head changes."
+  },
+  "how": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/how",
+    "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
+    "license": "MIT, copied from pstack/LICENSE to skills/how/LICENSE",
+    "note": "Preserves the upstream opening directive, simple and complex delegation paths, separate explorer and explainer prompts, and explanation structure. Shortens the description to the 200-character cap. Replaces Cursor Task parameters and fixed models with available subagent tools and a read-only direct fallback. Uses portable file-search instructions, validated reference links, and sentence-case headings. Makes explorer findings conditional in the explainer prompt so the direct-explain path works."
+  },
+  "why": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/why",
+    "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
+    "license": "MIT, copied from pstack/LICENSE to skills/why/LICENSE",
+    "note": "Preserves the upstream investigation workflow, default parallel source sweep, confidence framework, separate investigator and synthesizer prompts, and all source playbooks. Shortens the description, adapts tool discovery and delegation to the active harness, permits explicitly scoped investigations, and reports unavailable sources as gaps. Treats provider tools and warehouse schemas as examples to verify. Uses validated links and sentence-case headings."
+  },
+  "teach": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/teach",
+    "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
+    "license": "MIT, copied from pstack/LICENSE to skills/teach/LICENSE",
+    "note": "Preserves the upstream teaching directive, five-step conversational workflow, progressive diagrams, and concrete examples. Shortens the description, reads how and why by sibling paths, scopes investigation before dispatch, and returns findings for a single teaching explanation. Adapts image generation to available tools and the user's requested colors. Links the existing unslop skill."
+  },
+  "reflect": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/reflect",
+    "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
+    "license": "MIT, copied from pstack/LICENSE to skills/reflect/LICENSE",
+    "note": "Preserves the upstream three review lenses, separate reviewer and synthesizer prompts, durable-learning criteria, and selected-edit workflow. Adapts transcript discovery and delegation to the active harness with direct fallbacks. Removes the finding quota, limits missed-trigger tuning to model-invoked skills, and files backlog issues only when requested. Routes authoring through writing-for-agents, shared lessons to principles, and approved astack improvements through the source-editing PR workflow. Honors prior edit authorization. Updates the synthesizer's trigger examples for astack metadata."
+  },
+  "create-verification-skill": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": [
+      "pstack/skills/create-verification-skill",
+      "pstack/skills/maintain-verification-skill"
+    ],
+    "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
+    "license": "MIT, copied from pstack/LICENSE to skills/create-verification-skill/LICENSE",
+    "note": "Preserves the upstream creation workflow, complete feature-map examples, and maintenance procedure under one entry point. Shortens the description and replaces Cursor-only paths with project skill conventions. Adds shared authoring guidance and conditional verification, automation, idempotency, and testing principle links. Adapts delegation with a direct fallback, respects startup scope and isolation, reports unreachable features as unverified, and opens maintenance PRs when requested. Splits the maintenance live-pass paragraph so its health, evidence, and cleanup requirements are readable."
   }
 }
