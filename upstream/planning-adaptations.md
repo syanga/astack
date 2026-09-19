@@ -22,19 +22,34 @@ The pstack playbook supplies the coordinator role, brief template, seven-step
 workflow, completion queue, stack ownership, SHA-keyed verification ledger,
 failure handling, and escalation rules. Those remain the core of the skill.
 
-Cursor's Task schema, cloud-only placement, model names, Graphite authority,
-Bun orchestration CLI, and session-store paths are environment dependencies.
-The adaptation uses available agent tools, isolated workspaces, Git and forge
-state, and a durable task-local store. STATE.md defines the coordinator's single
-writer procedure, table fields, event replay, frontier reconstruction, and resume
-steps. Pstack's TypeScript runtime and its tests are not imported. This is a
-documented procedure, not a replacement orchestration service or background daemon.
+Cursor's Task schema, cloud-only placement, model names, and session-store paths
+are adapted to available agent tools, isolated workspaces, and a plan-local store.
+The original Bun/TypeScript CLI, store implementation, tests, bootstrap, package
+manifest, and lockfile are imported directly. Graphite frontier support remains;
+GitHub support adds an explicit PR order and checks remote heads against local
+branches. This runtime is the documented exception to astack's Python script
+convention. The upstream lockfile and dependency versions are retained.
+
+Targeted runtime changes preserve the shared-state contract: optional unit agent
+ownership, reads of the previously documented table formats, append-only verdict
+history with verifier precedence, retained inbox drain batches, and a status
+section for current unit verification and the latest handoff. One original test
+now names the second independent verifier, matching the intentional precedence
+change. Additional tests cover those changes, lock contention and stale locks,
+interrupted drains, and the GitHub adapter. Offline mode refuses dependency
+installation during tests. The installer excludes local dependency caches.
+
+STATE.md defines checkpoint and resume ownership; CLI.md supplies setup, command
+usage, recovery, and runtime limits. The CLI serializes individual writes. It
+does not claim tasks, dispatch agents, discover active plans, validate evidence,
+schedule work, or authorize merges. Drained events remain available for recovery,
+but the coordinator still reconciles replay against current Git and PR state.
 
 Sequential implement sessions and orchestrate use the same STATE.md convention
 and the same plan-local store. The core records are the plan, overview, unit
 table, verification ledger, and derived status. Handoffs record partial work,
-blockers, ownership, and the exact next action. Worker queues and merge-frontier
-files are added when needed. Resume reconciles saved state with Git and PRs
+blockers, ownership, and the exact next action. The CLI initializes worker queues and a merge-frontier file; populate them when
+coordination requires them. Resume reconciles saved state with Git and PRs
 before assigning more work. Switching execution skills requires no state migration.
 
 Planning authorization, execution authorization, and merge authorization remain

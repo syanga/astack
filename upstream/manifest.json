@@ -261,10 +261,27 @@
   },
   "orchestrate": {
     "repository": "https://github.com/cursor/plugins.git",
-    "path": "pstack/skills/poteto-mode/playbooks/orchestrate.md",
+    "path": [
+      "pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "pstack/skills/poteto-mode/scripts/orch/orch.ts",
+      "pstack/skills/poteto-mode/scripts/orch/store.ts",
+      "pstack/skills/poteto-mode/scripts/orch/orch.test.ts",
+      "pstack/skills/poteto-mode/scripts/bootstrap.ts",
+      "pstack/skills/poteto-mode/scripts/package.json",
+      "pstack/skills/poteto-mode/scripts/bun.lock"
+    ],
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/orchestrate/LICENSE-pstack",
-    "note": "Preserves coordinator roles, brief, pilot and rolling execution, completion queue, stack ownership, SHA-keyed verification, failure handling, and escalation. Replaces Cursor, cloud, Graphite, and Bun runtime dependencies with available tools and an astack-authored STATE.md procedure. Honors execution and merge authorization separately and routes merges through ship-pr. See upstream/planning-adaptations.md. Shares its core state, checkpoint, and resume convention with multi-phase-plan and sequential implement sessions."
+    "note": "Preserves coordinator roles, briefs, pilot and rolling execution, completion queues, stack ownership, SHA-keyed verification, failure handling, and escalation. Directly imports the original Bun/TypeScript CLI, store, bootstrap, tests, package manifest, and lockfile. Retains Graphite and adds a GitHub frontier adapter. Targeted changes add unit ownership, legacy table reads, retained verdict and drain history, verifier precedence, handoff status, and offline test setup. Adapts Cursor dispatch to available tools. Shares STATE.md and CLI.md with multi-phase-plan and sequential implement; honors execution and merge authorization and routes merges through ship-pr. See upstream/planning-adaptations.md.",
+    "files": {
+      "pstack/skills/poteto-mode/playbooks/orchestrate.md": "skills/orchestrate/SKILL.md",
+      "pstack/skills/poteto-mode/scripts/orch/orch.ts": "skills/orchestrate/scripts/orch/orch.ts",
+      "pstack/skills/poteto-mode/scripts/orch/store.ts": "skills/orchestrate/scripts/orch/store.ts",
+      "pstack/skills/poteto-mode/scripts/orch/orch.test.ts": "skills/orchestrate/scripts/orch/orch.test.ts",
+      "pstack/skills/poteto-mode/scripts/bootstrap.ts": "skills/orchestrate/scripts/bootstrap.ts",
+      "pstack/skills/poteto-mode/scripts/package.json": "skills/orchestrate/scripts/package.json",
+      "pstack/skills/poteto-mode/scripts/bun.lock": "skills/orchestrate/scripts/bun.lock"
+    }
   },
   "multi-phase-plan": {
     "repository": "https://github.com/cursor/plugins.git",

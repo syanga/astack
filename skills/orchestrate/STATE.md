@@ -19,12 +19,14 @@ authorized shared location. Local files alone do not synchronize across machines
 
 ## Initialize
 
-When execution starts, create any missing `overview.md`, `units.tsv`, `ledger.tsv`,
-and `status.md` files alongside the plan. Preserve existing rows and history.
-Record the owner's session identity, repository,
-plan path, execution authorization, merge authorization, and done predicate in
-`overview.md`. Seed one unit row per planned PR, using the plan's stable IDs.
-Keep dependencies and acceptance criteria in the plan; link them from state.
+When execution starts, read [CLI.md](CLI.md) and run `orch init` against this
+store. Here `orch` means `bun "$ORCH_CLI"` with `ORCH_STORE` set as documented
+there. Init creates missing unit, ledger, inbox, gate, standing-order, and
+frontier files while preserving existing data. Create `overview.md` and record
+the owner's session identity, repository, plan path, execution authorization,
+merge authorization, and done predicate. Seed one unit per planned PR with
+`orch unit add`, using the plan's stable IDs. Keep dependencies and acceptance
+criteria in the plan; link them from state.
 
 A sequential run uses track `main`, the current session as `agent`, and an empty
 `brief` field unless a separate brief is needed. Leave unknown branch, PR, and
@@ -32,34 +34,33 @@ SHA fields empty until assigned. Create `reports/` for verification receipts.
 Before a PR exists, keep receipts keyed by unit and head SHA there. Once the PR
 exists, append a ledger row only if its current head matches the receipt.
 
-Add `preferences.md` for standing orders, `decisions.tsv` for new decisions,
-and `gates.md` when a human decision blocks an action. With delegated workers,
-also create `briefs/`, `inbox/`, and `processed/`. With coordinated merges or
-stack mutations, maintain `frontier.json`. Adding these files changes no core
-schema or unit IDs.
+Use `orch standing add` for standing orders and `orch gate park` for human
+decisions that block an action. Keep new decisions in `decisions.tsv` with
+`question`, `evidence`, `decision`, and `units` columns. Create `briefs/` when
+workers need separate briefs. The CLI maintains the completion queue, archived
+drain batches, and merge frontier; use its commands instead of rewriting tables.
 
-Use these header rows when creating UTF-8 TSV files. Fields contain no literal tabs
-or newlines. Use report paths for multiline evidence.
+The CLI writes these UTF-8 TSV headers. Fields contain no literal tabs or
+newlines; use report paths for multiline evidence. It also reads the original
+upstream headers and astack's earlier documented headers, converting on write.
 
 ```text
 units.tsv
-id	track	state	agent	branch	pr	head_sha	brief
+id	track	state	branch	pr	sha	brief	agent
 
 ledger.tsv
-pr	head_sha	role	verdict	evidence
-
-decisions.tsv
-question	evidence	decision	units
+pr	sha	verdict	evidence	verifier	ts
 ```
 
-Unit states are `planned`, `running`, `blocked`, `needs-verify`, `merge-ready`, `done`,
+New units start `pending` (`planned` in older manual stores). Execution states
+are `running`, `blocked`, `needs-verify`, `merge-ready`, `done`,
 `failed`, `abandoned`, and `zombie-reconciled`. Use `done` only when the unit's
 acceptance criteria and authorized delivery step are complete. A PR awaiting
 merge remains `merge-ready`. Abandonment records its reason and the replacement
 or remaining gap in `overview.md`; it does not satisfy the original predicate.
 
-Ledger roles are `worker` and `verifier`. Verdicts are `live-ui-verified`,
-`unit-test-verified`, `type-check-only`, `verifier-blocked`, and `verifier-failed`.
+Omit `--verifier` for worker claims; name the verifier for independent receipts.
+Verdicts are `live-ui-verified`, `unit-test-verified`, `type-check-only`, `verifier-blocked`, and `verifier-failed`.
 Blocked and failed verdicts never satisfy acceptance. Behavioral work requires
 more than `type-check-only`. Append verdicts in receipt order.
 For a PR and head SHA, use the latest verifier row when one exists, otherwise
@@ -69,8 +70,8 @@ receipts when a later verdict supersedes them.
 
 ## Checkpoint progress
 
-Update state after a unit changes state, verification completes, a PR head or
-base changes, or a blocking decision arrives. Save partial progress before
+Use the CLI to update state after a unit changes state, verification completes,
+a PR head or base changes, or a blocking decision arrives. Save partial progress before
 ending a session. Sequential owners record their own results directly;
 coordinators drain worker completions first using the procedure below.
 
@@ -82,10 +83,11 @@ coordinators drain worker completions first using the procedure below.
 3. Append a dated handoff to `overview.md` with each active unit, its worktree,
    branch and PR, head SHA, any uncommitted work, blockers, and the exact next
    action or command. Include remaining approvals and active worker identities.
-   Use explicit `none` entries when these do not apply. The latest handoff is the
-   resume entry point; earlier entries retain the history.
-4. Generate `status.md` from the current tables and latest handoff. Include counts
-   by state, current heads and effective verdicts, blockers, and the next action.
+   Use `## Handoff <date/time>` headings and explicit `none` entries when these
+   do not apply. The latest handoff is the resume entry point; earlier entries retain the history.
+4. Run `orch status` to generate `status.md` from the saved tables and latest
+   handoff. It includes state counts, recorded heads, effective verdicts, and gates;
+   the handoff supplies blockers and the next action.
    Keep `status.md` derived; do not maintain a separate `progress.md` or chat-only
    task list as another source of truth.
 
@@ -95,38 +97,40 @@ partial result. Session termination alone never marks work done.
 
 ## Drain completions
 
-1. Save each completion to a uniquely named file in `inbox/`, with agent, unit,
-   reported status, and a durable report path. Reports include the head SHA,
-   commands, results, and artifacts. Retain the source event id when available.
-2. Snapshot the pending filenames. Reconcile those events against current PRs,
-   heads, and existing rows before accepting their claims. Replayed events must
-   not create duplicate units or replace newer evidence.
-3. Update the unit rows, append verdicts and decisions, and recompute the frontier
-   after a merge or stack mutation. Write replacement tables to temporary files
-   in the store, then rename them into place. After interruption, reconcile
-   pending events against the tables before dispatching more work.
-4. Generate `status.md` by reading the saved tables with a TSV reader, counting
-   units by state and track, and joining each PR's current SHA to its effective
-   ledger verdict. Include unmatched heads as unverified. Report changes since
-   the previous drain and unresolved entries in `gates.md`.
-5. Move reconciled pointers to `processed/`. Leave arrivals outside the snapshot
-   for the next drain. Recompute ready work from dependencies and current state.
+1. Save each completion with `orch inbox push`, including agent, unit, reported
+   status, and a durable report path. Reports include the head SHA, commands,
+   results, and artifacts. Retain the source event ID in the report when available.
+2. Read `orch --json inbox drain`. It rotates the pending queue and retains the
+   drained batch under `processed/` before returning its pointers. Reconcile those
+   reports against current PRs, heads, and existing rows before accepting claims.
+   Replayed events must not create duplicate units or replace newer evidence.
+3. Update units with `orch unit set`, append verdicts with `orch ledger record`,
+   and record decisions. Recompute the frontier after a merge or stack mutation.
+   Each CLI mutation holds the store lock and atomically replaces its file; a
+   checkpoint spanning commands still needs recovery after interruption.
+4. Run `orch status`, then recompute ready work from dependencies and current state.
+   Record acceptance and the next action in the overview handoff.
+
+After interruption, run `orch init`, inspect `orch --json inbox history`, and
+reconcile any unrecorded receipts before dispatching more work. History includes
+interrupted and archived batches. A drained pointer is not proof of acceptance.
+Arrivals after queue rotation remain in `inbox/` for the next drain.
 
 ## Recompute the merge frontier
 
-Fetch current Git refs and query the forge for each tracked PR's state, base,
-head branch, and head SHA. Compare these with the plan's dependencies and the
-stack owner's confirmed branch order. For GitHub, use `gh pr view <number>
---json number,state,baseRefName,headRefName,headRefOid,url` for current PR data.
+Fetch current Git refs and reconcile them with the forge and the stack owner's
+confirmed order. Use `orch frontier set --repo <repo>` for Graphite, or
+`orch frontier set --source github --repo <repo> --prs <ordered-pr-list>` for
+GitHub. [CLI.md](CLI.md) defines each adapter's checks and limits. The saved
+frontier contains a generation, ordered PRs with branches, SHAs, and states,
+and the lowest unmerged PR. Each store has one frontier; separate track stores
+send rollups to their parent coordinator.
 
-Write `frontier.json` with a monotonically increasing `generation`, the
-observation time, and one entry per stack. Each stack records its owner, its
-ordered PRs with branches and SHAs, and its lowest unmerged PR. Only admit a
-merge when all dependencies are satisfied, its current SHA has the required
-verdict, and its human gates and merge authorization are satisfied.
-
-If refs disagree during a restack, record the frontier as blocked until the
-stack owner confirms the complete graph. Re-read the candidate PR's head before
+Only admit a merge when all plan dependencies are satisfied, its current SHA has
+the required verdict, and its human gates and merge authorization are satisfied.
+A frontier refresh does not enforce these conditions. If refresh fails or refs
+disagree during a restack, treat the saved frontier as stale until the stack owner
+confirms the graph and refresh succeeds. Re-read the candidate PR's head before
 merging and use the exact-head protection required by ship-pr.
 
 ## Resume

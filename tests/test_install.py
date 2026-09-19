@@ -17,7 +17,7 @@ class InstallerFixture(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.repo = self.root / "checkout with spaces"
-        shutil.copytree(SOURCE, self.repo, ignore=shutil.ignore_patterns(".git", ".cache", "__pycache__"))
+        shutil.copytree(SOURCE, self.repo, ignore=shutil.ignore_patterns(".git", ".cache", "__pycache__", "node_modules"))
         self.home = self.root / "test home"
         # The user's growing skill collection is not part of this test fixture.
         shutil.rmtree(self.repo / "skills")
@@ -61,6 +61,18 @@ class InstallerTests(InstallerFixture):
             self.assertTrue(os.access(self.home / skills / "test-skill/scripts/helper.sh", os.X_OK))
         self.assertFalse(list(self.home.rglob("replace-with-skill-name")))
         self.assertEqual(len(self.manifest()["targets"]), 4)
+
+    def test_dependency_cache_is_not_installed_or_validated_as_skill_source(self):
+        cache = self.skill / "scripts/node_modules"
+        cache.mkdir()
+        (cache / "README.md").write_text("[dependency link](missing.md)\n")
+        (cache / "bin").symlink_to("missing-executable")
+        (self.skill / "scripts/package.json").write_text('{"private": true}\n')
+        self.run_installer()
+        installed = self.home / ".agents/skills/test-skill/scripts"
+        self.assertTrue((installed / "package.json").exists())
+        self.assertFalse((installed / "node_modules").exists())
+        self.assertFalse(any("node_modules" in path for path in self.manifest()["targets"]["codex"]))
 
     def test_dry_run_does_not_create_home(self):
         result = self.run_installer("--dry-run", "--target", "all")

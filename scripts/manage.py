@@ -79,6 +79,8 @@ def skill_files():
         elif user_invoked:
             result.append((policy.relative_to(REPO / "skills"), CODEX_POLICY.encode(), 0o644))
         for source in sorted(folder.rglob("*")):
+            if "node_modules" in source.relative_to(folder).parts:
+                continue
             if source.is_symlink():
                 raise ValueError("Skill source symlinks are unsupported: {}".format(source))
             if source.is_file():

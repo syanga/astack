@@ -83,7 +83,12 @@ multiple owners and durable coordination. Bounded tasks still start with
 
 Sequential and orchestrated execution use the same [durable state convention](skills/orchestrate/STATE.md).
 The store records unit states, verification evidence, and a session handoff with
-the exact next action. Switching execution skills keeps the same store.
+the exact next action. Switching execution skills keeps the same store. The
+[orchestration CLI](skills/orchestrate/CLI.md) maintains these files using pstack's
+imported Bun/TypeScript runtime, with retained Graphite support and an additional
+GitHub frontier adapter. Bun is required when executing multi-phase work; the
+first CLI call installs the locked dependencies. Agent dispatch stays with the
+active harness.
 
 The [planning adaptation notes](upstream/planning-adaptations.md) explain the
 upstream workflows and their integration with astack.
