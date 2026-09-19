@@ -30,6 +30,13 @@ writer procedure, table fields, event replay, frontier reconstruction, and resum
 steps. Pstack's TypeScript runtime and its tests are not imported. This is a
 documented procedure, not a replacement orchestration service or background daemon.
 
+Sequential implement sessions and orchestrate use the same STATE.md convention
+and the same plan-local store. The core records are the plan, overview, unit
+table, verification ledger, and derived status. Handoffs record partial work,
+blockers, ownership, and the exact next action. Worker queues and merge-frontier
+files are added when needed. Resume reconciles saved state with Git and PRs
+before assigning more work. Switching execution skills requires no state migration.
+
 Planning authorization, execution authorization, and merge authorization remain
 distinct. Existing authorization is honored. Without merge authorization,
 verified units stop at merge-ready. Integration that changes a head requires

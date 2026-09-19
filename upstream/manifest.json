@@ -193,7 +193,7 @@
       "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
     ],
     "license": "MIT, kept in skills/implement/LICENSE-pstack and skills/implement/LICENSE-mattpocock",
-    "note": "Uses the pstack Feature playbook as the base, retaining design ownership, the four-part throughput checkpoint, implementation delegation, diff review, and verified units. Incorporates Matt implement guidance for TDD, regular typechecking and focused tests, final review, and commits. Adapts provider-specific dispatch, local skill references, and task-scoped delivery. Retains Matt Codex metadata. See upstream/implementation-adaptations.md."
+    "note": "Uses the pstack Feature playbook as the base, retaining design ownership, the four-part throughput checkpoint, implementation delegation, diff review, and verified units. Incorporates Matt implement guidance for TDD, regular typechecking and focused tests, final review, and commits. Adapts provider-specific dispatch, local skill references, and task-scoped delivery. Retains Matt Codex metadata. See upstream/implementation-adaptations.md. Multi-phase execution follows the shared orchestrate/STATE.md convention; delegated workers return receipts to the sole state writer."
   },
   "tdd": {
     "repository": [
@@ -264,7 +264,7 @@
     "path": "pstack/skills/poteto-mode/playbooks/orchestrate.md",
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/orchestrate/LICENSE-pstack",
-    "note": "Preserves coordinator roles, brief, pilot and rolling execution, completion queue, stack ownership, SHA-keyed verification, failure handling, and escalation. Replaces Cursor, cloud, Graphite, and Bun runtime dependencies with available tools and an astack-authored STATE.md procedure. Honors execution and merge authorization separately and routes merges through ship-pr. See upstream/planning-adaptations.md."
+    "note": "Preserves coordinator roles, brief, pilot and rolling execution, completion queue, stack ownership, SHA-keyed verification, failure handling, and escalation. Replaces Cursor, cloud, Graphite, and Bun runtime dependencies with available tools and an astack-authored STATE.md procedure. Honors execution and merge authorization separately and routes merges through ship-pr. See upstream/planning-adaptations.md. Shares its core state, checkpoint, and resume convention with multi-phase-plan and sequential implement sessions."
   },
   "multi-phase-plan": {
     "repository": "https://github.com/cursor/plugins.git",
@@ -274,7 +274,7 @@
     ],
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/multi-phase-plan/LICENSE-pstack",
-    "note": "Preserves the ordered plan skeleton and per-PR evidence workflow. Replaces provider-specific execution, scheduling, control, and model dependencies with astack skills and available tools. Scales live scenarios to risk, allows reasoned performance exemptions, and follows existing human gates. Ports the checker to Python standard library. See upstream/planning-adaptations.md.",
+    "note": "Preserves the ordered plan skeleton and per-PR evidence workflow. Replaces provider-specific execution, scheduling, control, and model dependencies with astack skills and available tools. Scales live scenarios to risk, allows reasoned performance exemptions, and follows existing human gates. Ports the checker to Python standard library. See upstream/planning-adaptations.md. Records one execution store reused by implement and orchestrate, including durable handoffs and resume reconciliation.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/multi-phase-plan.md": "skills/multi-phase-plan/SKILL.md",
       "pstack/skills/poteto-mode/scripts/check-plan.mjs": "skills/multi-phase-plan/scripts/check_plan.py"

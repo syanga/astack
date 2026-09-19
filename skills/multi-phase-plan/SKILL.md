@@ -11,7 +11,7 @@ disable-model-invocation: true
 1. When the change is one or two files with an obvious approach, skip the plan. Say so and stop.
 2. Settle open questions before you write. Use [prototype](../prototype/SKILL.md) for questions an experiment can answer, [architect](../architect/SKILL.md) for code structure, and [wayfinder](../wayfinder/SKILL.md) when decisions span sessions. Reuse existing evidence. Keep the branch, the SHA, and the artifacts for Appendix A. Ask the operator only about a product or preference call that no run can settle.
 3. Explore independent areas in subagents when available and permitted, within the harness's capacity. Each returns file pointers, conventions, test commands, and entry points. No inlined dumps. Explore directly when delegation is unavailable or adds no value.
-4. Copy the skeleton below into the plan file and fill every placeholder. Unless the operator names a path, write `.scratch/<program>/plan.md`. Keep every heading and every sub-block in the order shown. One section per PR. One PR is one change with its own evidence, per [Sequence Verifiable Units](../principles/sequence-verifiable-units.md). Name [implement](../implement/SKILL.md) as the execution skill for bounded work or [orchestrate](../orchestrate/SKILL.md) for a standing program. Record execution and merge authorization separately.
+4. Copy the skeleton below into the plan file and fill every placeholder. Unless the operator names a path, write `.scratch/<program>/plan.md`. Keep every heading and every sub-block in the order shown. One section per PR. One PR is one change with its own evidence, per [Sequence Verifiable Units](../principles/sequence-verifiable-units.md). Name [implement](../implement/SKILL.md) as the execution skill for bounded work or [orchestrate](../orchestrate/SKILL.md) for a standing program. Both use the [shared execution-state convention](../orchestrate/STATE.md). Read it and record the absolute store path in the plan. Record execution and merge authorization separately.
 5. Write under [technical-writing](../technical-writing/SKILL.md) in full, then [unslop](../unslop/SKILL.md). The body is one Diátaxis mode, how-to. Appendices hold explanation and reference. Each heading states the task or the finding. No long dashes. No mid-sentence colons.
 6. Run `python3 <this skill's directory>/scripts/check_plan.py <plan.md>` and fix every problem it prints. The checker validates structure and evidence fields. Review the dependencies and the adequacy of the verification yourself.
 7. Hand back. Post the plan path and the script's output, then stop. Execution starts under the named skill when the user authorizes it. Honor authorization already given for execution after planning.
@@ -31,6 +31,8 @@ One box is one unit of work. Every box names the evidence that checks it. A nest
 
 The program runs `<installed skills directory>/<implement or orchestrate>/SKILL.md`. <Who merges, and which PR ids are the operator's items that stop at merge-ready.>
 
+Shared execution state lives at `<absolute store path>`, using `<installed skills directory>/orchestrate/STATE.md`. Use that same store for sequential and delegated execution, and link it in every session handoff.
+
 Tests alone are not sufficient verification. A PR is verified only when its applicable unit, live, and perf boxes are checked with evidence.
 
 ## Program checklist
@@ -38,9 +40,9 @@ Tests alone are not sufficient verification. A PR is verified only when its appl
 ### Arm the program
 
 - [ ] Record the protocol, this plan, execution authorization, and merge authorization. Start when execution is authorized. A request to plan alone ends with this document.
-- [ ] Record the plan path, the PR ids in order, the verification rule, who merges, and the done condition in durable state. Create a harness goal only if the user explicitly requests one.
+- [ ] Initialize or resume the shared execution store under its STATE.md procedure. Record the plan path, stable PR unit IDs, the verification rule, who merges, and the done condition. Create a harness goal only if the user explicitly requests one.
 - [ ] Read the installed execution, verification, open-pr, and ship-pr skills used by this program. Record their paths and re-read them on resume or when they change.
-- [ ] Record a supported audit cadence. If background scheduling is unavailable, audit at each completion drain and before each human report. Leave a durable handoff when the session ends.
+- [ ] Record a supported audit cadence. If background scheduling is unavailable, audit at each completion drain and before each human report. Checkpoint unit states and receipts as work progresses. Before ending the session, append the current worktree, partial work, blockers, and exact next action to the store's overview and regenerate its status summary.
 - [ ] At each audit, probe active owners using read-only status and their artifacts. Reconcile stalled work before replacing its owner. Post a status message with the PR, owner, state, head SHA, verdicts, merges, open gates, and blockers.
 - [ ] On the operator's hold or stand-down, send every owner a zero-writes order at once.
 

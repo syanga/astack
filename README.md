@@ -81,6 +81,10 @@ Use [orchestrate](skills/orchestrate/SKILL.md) to execute a program that needs
 multiple owners and durable coordination. Bounded tasks still start with
 `implement`; these planning skills are optional entry points, not a required chain.
 
+Sequential and orchestrated execution use the same [durable state convention](skills/orchestrate/STATE.md).
+The store records unit states, verification evidence, and a session handoff with
+the exact next action. Switching execution skills keeps the same store.
+
 The [planning adaptation notes](upstream/planning-adaptations.md) explain the
 upstream workflows and their integration with astack.
 
