@@ -69,6 +69,21 @@ These entry points compose with the existing principles, review, and delivery
 skills. The [adaptation notes](upstream/implementation-adaptations.md) explain
 the upstream sources, overlaps, and workflow choices.
 
+## Multi-phase work
+
+Use [wayfinder](skills/wayfinder/SKILL.md) when a large effort still has decisions
+to resolve across sessions. It keeps a shared map of questions, answers, and
+unknowns. Its decision tickets do not replace an implementation plan.
+
+Once the route is clear, [multi-phase-plan](skills/multi-phase-plan/SKILL.md)
+writes the PR sequence, dependencies, verification steps, and delivery gates.
+Use [orchestrate](skills/orchestrate/SKILL.md) to execute a program that needs
+multiple owners and durable coordination. Bounded tasks still start with
+`implement`; these planning skills are optional entry points, not a required chain.
+
+The [planning adaptation notes](upstream/planning-adaptations.md) explain the
+upstream workflows and their integration with astack.
+
 ## Update or remove
 
 After pulling source changes, rerun the installer with the same targets.
