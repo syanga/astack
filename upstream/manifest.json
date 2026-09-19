@@ -4,7 +4,7 @@
     "path": "skills/productivity/writing-for-agents",
     "commit": "959a8e9f1edc3adbe2f7e3054bb6fbefa6696260",
     "license": "MIT, kept in skills/writing-for-agents/LICENSE",
-    "note": "Adapted: unslop pass over the prose, sharpened rule that a description is a trigger not a summary, SKILL-MECHANICS rewritten for astack's harnesses and sibling-path reach, unslop pointer and encode-lessons pruning rule added. Adds an astack-authored SOURCE-EDITS.md guide for locating installed skills' owning repositories and submitting approved source improvements through open-pr."
+    "note": "Adapted: unslop pass over the prose, sharpened rule that a description is a trigger not a summary, SKILL-MECHANICS rewritten for astack's harnesses and sibling-path reach, including when the installer generates or validates Codex policy, unslop pointer and encode-lessons pruning rule added. Adds an astack-authored SOURCE-EDITS.md guide for locating installed skills' owning repositories and submitting approved source improvements through open-pr."
   },
   "unslop": {
     "repository": "https://github.com/cursor/plugins.git",
