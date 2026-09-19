@@ -9,7 +9,7 @@ Two-axis review of the requested changes against a fixed point:
 - **Standards**: does the code conform to this repo's documented coding standards?
 - **Spec**: does the code faithfully implement the originating issue / spec?
 
-Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
+Both axes run as **separate sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
 
 ## Process
 
@@ -23,7 +23,7 @@ Follow [test results](../open-pr/test-results.md) to reuse existing verification
 
 Review the requested changes against the fixed point. Give both reviewers the same diff and relevant commit history.
 
-Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, not inside two parallel sub-agents.
+Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, before dispatching reviewers.
 
 ### 2. Identify the spec source
 
@@ -58,7 +58,9 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 - **Middle Man**: a class or function that mostly just delegates onward. → cut it, call the real target direct.
 - **Refused Bequest**: a subclass or implementer that ignores or overrides most of what it inherits. → drop the inheritance, use composition.
 
-### 4. Spawn both sub-agents in parallel
+### 4. Spawn both sub-agents
+
+Run both reviewers in parallel when capacity permits. When capacity prevents concurrent dispatch, run them sequentially in separate contexts against the same pinned diff.
 
 Both reviewers report findings without changing code.
 
