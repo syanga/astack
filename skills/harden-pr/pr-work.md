@@ -2,7 +2,7 @@
 
 Use `python3 "<harden-pr directory>/scripts/pr.py" status --pr <n>` for a GitHub snapshot and `history --pr <n>` for earlier reviews and thread replies. Add `--repo owner/name` when needed. A status-only request ends with a report. Read the current head, checks, approvals, unresolved threads, and review evidence before changing anything. The helper reports state, not a verdict about correctness or merge readiness.
 
-Reuse applicable reviews and verification. Use targeted checks or review for missing evidence or changes that invalidate earlier results. Run the full [review-pr](../review-pr/SKILL.md) or [harden-pr](SKILL.md) workflow only when requested.
+Reuse applicable reviews. Follow [test results](../open-pr/test-results.md) to reuse verification and publish any new test results on the PR. Use targeted review for missing evidence or changes that invalidate earlier reviews. Run the full [review-pr](../review-pr/SKILL.md) or [harden-pr](SKILL.md) workflow only when requested.
 
 ## Address findings and CI
 

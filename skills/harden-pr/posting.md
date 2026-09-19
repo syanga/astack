@@ -1,5 +1,7 @@
 # Post the review
 
+Post only findings that require a concrete change to the reviewed commit. Keep each comment to the problem, supporting evidence, and requested change. If there are no actionable findings, post nothing. Report summaries, clean results, and review coverage in the conversation. Publish [test results](../open-pr/test-results.md) in the PR description.
+
 Use harden-pr's `scripts/pr.py review` to post against the commit actually reviewed. The helper signs the review and exposes actionable findings to harden-pr.
 
 The helper prefixes reviews, inline comments, and thread replies with `[<model slug>] on behalf of <first name from git config user.name>`. Run it from the reviewed repository so repository-specific Git identity applies. An unset or invalid name stops posting; earlier signed reviews remain recognizable after a name change.
@@ -8,25 +10,25 @@ Write a JSON file with this shape:
 
 ```json
 {
-  "body": "Assessment, verification results, coverage limits, and remaining findings.",
+  "body": "",
   "comments": [
     {
       "path": "src/example.py",
       "line": 42,
       "bucket": "act on",
-      "body": "Act on: title. Explain the impact and evidence."
+      "body": "Act on: title. Explain the problem, evidence, and requested change."
     }
   ]
 }
 ```
 
-Post the assessment and actionable findings for the commit reviewed. Keep findings open on the PR until their fixes are pushed. Include source citations, reviewer models, verification results, and per-pass coverage limits. Put each remaining blocking finding in `comments` with bucket `act on`; use `consider` for suggestions. A review with no remaining findings has no inline comments.
+Leave `body` empty and put each actionable finding in `comments` with bucket `act on`. Keep findings open on the PR until their fixes are pushed.
 
 When screenshots or recordings demonstrate a finding, follow [open-pr's attachment guidance](../open-pr/SKILL.md).
 
-If fixes remain local, report them in the conversation. Post an assessment of those fixes after they have been pushed and reviewed, when pushing is authorized.
+If fixes remain local, report them in the conversation. After an authorized push, review the fixes and post any remaining actionable findings.
 
-For a two-axis review, preserve the Standards and Spec reports as separate sections and label inline findings with their axis.
+For a two-axis review, label each finding with its axis.
 
 GitHub inline comments need a line in the PR diff. For a finding in unchanged code, anchor it on the changed line that causes the problem and name the actual location in the comment. For a finding about the title or description, use a diff line and explicitly label it as a metadata finding. These findings still need entries so the helper can preserve them if inline posting fails.
 

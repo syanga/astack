@@ -1,6 +1,6 @@
 ---
 name: harden-pr
-description: Review consequential changes with specialist and adversarial reviewers, fix findings, and post the assessment on an existing PR.
+description: Review consequential changes with specialist and adversarial reviewers, fix findings, and post actionable findings on an existing PR.
 disable-model-invocation: true
 ---
 
@@ -11,6 +11,8 @@ For a request limited to PR status, comments, or CI, follow [ship-pr](../ship-pr
 Whatever the user said is the fixed point (a commit SHA, branch name, tag, `main`, `HEAD~5`, etc.). If they didn't specify one, use the PR's target branch when available; otherwise ask for it.
 
 For a PR, work from its head commit and record the SHA before dispatch.
+
+Follow [test results](../open-pr/test-results.md) to reuse existing verification, pass it to reviewers, and publish any new test results on the PR.
 
 Review the requested changes against the fixed point. Give reviewers the same diff and relevant commit history.
 
@@ -100,7 +102,7 @@ Save the review with its source snapshot, findings, dispositions, per-specialist
 
 If the review exits early before a real review completes, report why.
 
-For an existing PR, post an assessment of its reviewed commit using [posting.md](posting.md). Include verification results and coverage limits, and identify the reviewed commit. Report local changes in the conversation.
+For an existing PR, post actionable findings using [posting.md](posting.md). Report the assessment, coverage limits, and local changes in the conversation.
 
 For requested PR follow-through, continue with [ship-pr](../ship-pr/SKILL.md).
 

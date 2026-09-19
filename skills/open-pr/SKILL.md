@@ -9,7 +9,7 @@ Check whether the branch already has an open PR and update it when it does. Revi
 
 Before opening a new PR, rebase onto the latest default branch, or its parent's current tip for a stack child. Independent work and stack roots target the default branch. Each child targets its parent branch. Start substantial work on a new stack from the latest default branch.
 
-Apply [no-comments](../no-comments/SKILL.md) to the code diff before review. Run the repository's required checks and verify the changed behavior. Use results from this session when they still cover the final diff. Report anything you could not verify.
+Apply [no-comments](../no-comments/SKILL.md) to the code diff before review. Follow [test results](test-results.md) to reuse verification, run the required checks, and publish the results on the PR.
 
 Before pushing, install the Gitleaks hook from the repository root:
 
@@ -35,7 +35,7 @@ Use these sections in this order by default. Omit sections that have nothing use
 
 When screenshots or recordings demonstrate the change, upload them as GitHub attachments using `gh pr edit --attach` or GitHub's editor.
 
-Keep logs, SHAs, exhaustive file inventories, and bulky evidence in linked artifacts. End with the model and harness attribution. Use commit bodies to explain what the subject leaves unsaid.
+Keep logs, SHA lists, exhaustive file inventories, and bulky evidence in linked artifacts. End with the model and harness attribution. Use commit bodies to explain what the subject leaves unsaid.
 
 Create or update the PR using a file for the body. Confirm that it targets the intended base and is open for review, not a draft. In T3 Code, link it with `link_pull_request` when available. Return the URL, a brief verification summary, and any unresolved findings or limitations.
 

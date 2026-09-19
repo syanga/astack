@@ -33,6 +33,7 @@ CHECK_GRACE_MINUTES = 10
 PUSH_LISTING_TRIES = 3
 PUSH_LISTING_RETRY_SECONDS = 2
 FOLDED_ACT_ON = re.compile(r"^Folded act-on findings: (\d+)\r?$", re.M)
+FOLDED_FINDING = re.compile(r"^.+:\d+ \((act on|consider)\)\r?$", re.M)
 
 PR_FIELDS = ("number,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
              "headRefOid,headRefName,headRepository,baseRefName,commits,statusCheckRollup,comments")
@@ -49,7 +50,10 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
           comments(first: 50) { nodes { author { login __typename } viewerDidAuthor body createdAt url } }
         }
       }
-      reviews(last: 100) { nodes { author { login __typename } viewerDidAuthor state submittedAt body commit { oid } } }
+      reviews(last: 100) { nodes {
+        author { login __typename } viewerDidAuthor state submittedAt body commit { oid }
+        comments(first: 1) { nodes { viewerDidAuthor body replyTo { id } } }
+      } }
       commits(last: 20) { nodes { commit { oid statusCheckRollup { state } } } }
     }
   }
@@ -157,7 +161,9 @@ def is_bot(node):
 
 def is_ours(node):
     first = (node.get("body") or "").split("\n", 1)[0].strip()
-    return bool(node.get("viewerDidAuthor")) and ATTRIBUTION_HEADER.fullmatch(first) is not None
+    return bool(node.get("viewerDidAuthor")) and (
+        ATTRIBUTION_HEADER.fullmatch(first) is not None
+        or any(not comment.get("replyTo") and is_ours(comment) for comment in (node.get("comments") or {}).get("nodes", [])))
 
 
 def minutes_between(start, now):
@@ -192,6 +198,8 @@ def summarize(pr, threads, reviews, recent, since, now, stuck_minutes=60, pushed
     latest = max(ours, key=lambda review: review.get("submittedAt") or "", default=None)
     last_sha = (latest.get("commit") or {}).get("oid") if latest else None
     folded_act_on = sum(int(found) for review in on_head for found in FOLDED_ACT_ON.findall(review.get("body", "")))
+    folded_act_on += sum(FOLDED_FINDING.findall(review.get("body", "")).count("act on")
+                         for review in on_head if FOLD_MARK not in review.get("body", ""))
     committed_at = max(commit["committedDate"] for commit in pr["commits"])
     head_time = pushed_at or committed_at
     pending = [check for check in checks if check["kind"] == "pending"]
@@ -221,7 +229,8 @@ def summarize(pr, threads, reviews, recent, since, now, stuck_minutes=60, pushed
         "our_reviews": {"total": len(ours), "on_head": len(on_head),
                         "last_sha": last_sha,
                         "last_sha_in_pr": last_sha is not None and last_sha in {commit.get("oid") for commit in pr["commits"]},
-                        "folded_on_head": any(FOLD_MARK in review.get("body", "") for review in on_head),
+                        "folded_on_head": any(FOLD_MARK in review.get("body", "") or FOLDED_FINDING.search(review.get("body", ""))
+                                              for review in on_head),
                         "folded_act_on": folded_act_on},
         "bots": bots,
         "new_comments": [
@@ -232,7 +241,7 @@ def summarize(pr, threads, reviews, recent, since, now, stuck_minutes=60, pushed
             {"author": login(review), "bot": is_bot(review), "ours": is_ours(review),
              "at": review["submittedAt"], "state": review["state"], "body": review.get("body", "")}
             for review in reviews if review.get("submittedAt") and review["submittedAt"] > since
-            and (review.get("body") or not review.get("viewerDidAuthor"))
+            and (review.get("body") or is_ours(review) or not review.get("viewerDidAuthor"))
         ],
     }
     return snapshot
@@ -253,21 +262,26 @@ def format_body(model, body, name):
 
 
 def build_review(model, review, commit, name):
-    return {
-        "event": "COMMENT", "commit_id": commit, "body": format_body(model, review["body"], name),
+    payload = {
+        "event": "COMMENT", "commit_id": commit,
         "comments": [{"path": c["path"], "line": c["line"], "side": "RIGHT", "body": format_body(model, c["body"], name)}
                      for c in review.get("comments", [])],
     }
+    if review["body"].strip():
+        payload["body"] = format_body(model, review["body"], name)
+    return payload
 
 
 def check_review(review):
     if not isinstance(review, dict) or not isinstance(review.get("body"), str):
         fail("review file: it must be an object whose body is a string")
+    if review["body"].strip():
+        fail("review file: leave body empty and put actionable findings in comments")
     if not isinstance(review.get("comments", []), list):
         fail("review file: comments must be a list")
     for index, c in enumerate(review.get("comments", [])):
         well_formed = (isinstance(c, dict) and isinstance(c.get("path"), str) and type(c.get("line")) is int
-                       and isinstance(c.get("body"), str) and c.get("bucket") in ("act on", "consider"))
+                       and isinstance(c.get("body"), str) and c["body"].strip() and c.get("bucket") in ("act on", "consider"))
         if not well_formed:
             fail("review file: comment {} needs a path, an integer line, a body, and a bucket of "
                  "'act on' or 'consider': {}".format(index, json.dumps(c)))
@@ -275,10 +289,8 @@ def check_review(review):
 
 def fold_comments(review):
     comments = review.get("comments", [])
-    act_on = sum(1 for c in comments if c["bucket"] == "act on")
     moved = "\n\n".join("{}:{} ({})\n{}".format(c["path"], c["line"], c["bucket"], c["body"]) for c in comments)
-    return {"body": "{}\n\n{}\nFolded act-on findings: {}\n\n{}".format(review["body"], FOLD_MARK, act_on, moved),
-            "comments": []}
+    return {"body": moved, "comments": []}
 
 
 def take_snapshot(args):
@@ -373,6 +385,10 @@ def command_review(args):
     with open(args.review_file, encoding="utf-8") as handle:
         review = json.load(handle)
     check_review(review)
+    if not review.get("comments"):
+        json.dump({"url": None, "inline": 0, "folded": False}, sys.stdout)
+        print()
+        return
     endpoint = "repos/{}/{}/pulls/{}/reviews".format(owner, name, pr["number"])
     wanted = len(review.get("comments", []))
     if args.commit not in {commit.get("oid") for commit in pr["commits"]}:

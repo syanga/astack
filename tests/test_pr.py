@@ -1,4 +1,5 @@
 import copy
+import io
 import importlib.util
 import json
 import os
@@ -115,6 +116,16 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["threads"]["unresolved"][0]["ours"], False)
         self.assertEqual(snapshot["our_reviews"]["on_head"], 0)
 
+    def test_inline_findings_identify_a_review_without_a_summary(self):
+        review = dict(our_review("abc123"), body="", submittedAt="2026-09-15T10:10:00Z", comments={"nodes": [
+            {"viewerDidAuthor": True, "body": "[m] on behalf of Alan\n\nAct on: fix the race."}]})
+        snapshot = pr.summarize(green_pr(), [], [review], RECENT, SINCE, NOW)
+        self.assertEqual(snapshot["our_reviews"]["on_head"], 1)
+        self.assertEqual(snapshot["new_reviews"], [{"author": "alan", "bot": False, "ours": True,
+                                                  "at": "2026-09-15T10:10:00Z", "state": "COMMENTED", "body": ""}])
+        forged = pr.summarize(green_pr(), [], [dict(review, viewerDidAuthor=False)], RECENT, SINCE, NOW)
+        self.assertEqual(forged["our_reviews"]["on_head"], 0)
+
     def test_a_bot_pass_counts_for_the_head_only_when_it_reviewed_the_head_commit(self):
         late_review_of_old_commit = dict(REVIEWS[1], commit={"oid": "old111"})
         snapshot = pr.summarize(PR, [], [late_review_of_old_commit], RECENT, SINCE, NOW)
@@ -143,7 +154,9 @@ class StateTests(unittest.TestCase):
 
     def test_our_own_thread_replies_do_not_show_up_as_new_reviews(self):
         reply_shell = {"author": ALAN, "viewerDidAuthor": True, "state": "COMMENTED",
-                       "submittedAt": "2026-09-15T12:00:00Z", "body": "", "commit": {"oid": "abc123"}}
+                       "submittedAt": "2026-09-15T12:00:00Z", "body": "", "commit": {"oid": "abc123"},
+                       "comments": {"nodes": [{"viewerDidAuthor": True, "replyTo": {"id": "C1"},
+                                               "body": "[m] on behalf of Alan\n\nFixed."}]}}
         human = dict(reply_shell, viewerDidAuthor=False, author={"login": "pat", "__typename": "User"})
         snapshot = pr.summarize(green_pr(), [], [reply_shell, human], [], SINCE, NOW)
         self.assertEqual([review["author"] for review in snapshot["new_reviews"]], ["pat"])
@@ -177,11 +190,18 @@ class StateTests(unittest.TestCase):
         folded = pr.fold_comments({"body": "Verdict.", "comments": [
             {"path": "a.py", "line": 7, "bucket": "act on", "body": "Race."},
             {"path": "a.py", "line": 9, "bucket": "consider", "body": "Name."}]})
+        self.assertEqual(folded, {"body": "a.py:7 (act on)\nRace.\n\na.py:9 (consider)\nName.", "comments": []})
         reviews = [our_review("abc123", folded["body"])]
         current = pr.summarize(green_pr(), [], reviews, [], SINCE, NOW)["our_reviews"]
         advanced = pr.summarize(green_pr(headRefOid="new"), [], reviews, [], SINCE, NOW)["our_reviews"]
         self.assertEqual((current["on_head"], current["folded_act_on"]), (1, 1))
         self.assertEqual((advanced["on_head"], advanced["folded_act_on"]), (0, 0))
+
+    def test_legacy_folded_findings_still_count_once(self):
+        review = our_review("abc123", "Verdict.\n\nFindings on lines outside the diff:\nFolded act-on findings: 1\n\na.py:7 (act on)\nRace.")
+        snapshot = pr.summarize(green_pr(), [], [review], [], SINCE, NOW)
+        self.assertEqual(snapshot["our_reviews"]["folded_act_on"], 1)
+        self.assertTrue(snapshot["our_reviews"]["folded_on_head"])
 
 
 class WaitTests(unittest.TestCase):
@@ -254,25 +274,55 @@ class WaitTests(unittest.TestCase):
 
 class PostingTests(unittest.TestCase):
     def test_review_payload(self):
-        review = {"body": "Verdict.", "comments": [{"path": "a.py", "line": 7, "bucket": "act on", "body": "Race here."}]}
+        review = {"body": "", "comments": [{"path": "a.py", "line": 7, "bucket": "act on", "body": "Race here."}]}
         payload = pr.build_review("m", review, "abc123", "ALAN")
         self.assertEqual(payload["event"], "COMMENT")
         self.assertEqual(payload["commit_id"], "abc123")
         self.assertEqual(payload["comments"], [{"path": "a.py", "line": 7, "side": "RIGHT",
                                                 "body": "[m] on behalf of ALAN\n\nRace here.\n"}])
+        self.assertNotIn("body", payload)
+
+    def test_review_posts_findings_but_skips_a_clean_result(self):
+        posts = []
+
+        def run(argv, **kwargs):
+            if argv[:2] == ["git", "config"]:
+                output = "Alan Example\n"
+            elif argv[:3] == ["gh", "pr", "view"]:
+                output = json.dumps(dict(PR, commits=[{"oid": "abc123"}]))
+            else:
+                self.assertEqual(argv[:4], ["gh", "api", "--method", "POST"])
+                posts.append(json.loads(kwargs["input"]))
+                output = '{"html_url":"review-url"}'
+            return subprocess.CompletedProcess(argv, 0, stdout=output, stderr="")
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "review.json"
+            for comments in ([], [{"path": "a.py", "line": 7, "bucket": "act on", "body": "Act on: fix the race."}]):
+                path.write_text(json.dumps({"body": "", "comments": comments}))
+                output = io.StringIO()
+                with patch.object(pr.subprocess, "run", side_effect=run), patch("sys.stdout", output):
+                    pr.main(["review", "--pr", "12", "--commit", "abc123", "--review-file", str(path), "--model", "m"])
+                if comments:
+                    self.assertEqual(json.loads(output.getvalue()), {"url": "review-url", "inline": 1, "folded": False})
+                    self.assertEqual(posts, [{"event": "COMMENT", "commit_id": "abc123", "comments": [
+                        {"path": "a.py", "line": 7, "side": "RIGHT", "body": "[m] on behalf of Alan\n\nAct on: fix the race.\n"}]}])
+                else:
+                    self.assertEqual(json.loads(output.getvalue()), {"url": None, "inline": 0, "folded": False})
+                    self.assertEqual(posts, [])
 
     def test_a_malformed_findings_file_exits_2_before_any_post(self):
         good = {"path": "a.py", "line": 7, "bucket": "act on", "body": "Race."}
-        pr.check_review({"body": "Verdict.", "comments": [good, dict(good, bucket="consider")]})
-        for bad in (dict(good, bucket="act-on"), dict(good, line="seven"), {k: v for k, v in good.items() if k != "path"}):
+        pr.check_review({"body": "", "comments": [good, dict(good, bucket="consider")]})
+        for bad in (dict(good, body=" "), dict(good, bucket="act-on"), dict(good, line="seven"), {k: v for k, v in good.items() if k != "path"}):
             with self.assertRaises(SystemExit) as raised:
-                pr.check_review({"body": "Verdict.", "comments": [bad]})
+                pr.check_review({"body": "", "comments": [bad]})
             self.assertEqual(raised.exception.code, 2)
 
     def test_a_findings_file_of_the_wrong_shape_exits_2(self):
         good = {"path": "a.py", "line": 7, "bucket": "act on", "body": "Race."}
-        for bad in ([], {"body": "Verdict.", "comments": None}, {"body": "Verdict.", "comments": ["a.py:7 race"]},
-                    {"body": "Verdict.", "comments": [dict(good, line=True)]}):
+        for bad in ([], {"body": "", "comments": None}, {"body": "", "comments": ["a.py:7 race"]},
+                    {"body": "", "comments": [dict(good, line=True)]}, {"body": "Verdict.", "comments": [good]}):
             with self.assertRaises(SystemExit) as raised:
                 pr.check_review(bad)
             self.assertEqual(raised.exception.code, 2)
@@ -320,7 +370,7 @@ class IdentityTests(unittest.TestCase):
         subprocess.run(["git", "config", "--global", "user.name", "Global Name"], check=True)
         self.assertEqual(pr.git_user_name(), "Global Name")
         subprocess.run(["git", "config", "user.name", "Renée Example"], check=True)
-        review = {"body": "Verdict.", "comments": [
+        review = {"body": "", "comments": [
             {"path": "a.py", "line": 7, "bucket": "act on", "body": "Race."}]}
         (self.root / "review.json").write_text(json.dumps(review))
         (self.root / "reply.md").write_text("Fixed.")
@@ -344,7 +394,7 @@ class IdentityTests(unittest.TestCase):
             pr.command_reply(args)
 
         expected = "[test-model] on behalf of Renée\n"
-        for body in [payloads[0]["body"], payloads[0]["comments"][0]["body"], graphql.call_args.kwargs["body"]]:
+        for body in [payloads[0]["comments"][0]["body"], graphql.call_args.kwargs["body"]]:
             self.assertTrue(body.startswith(expected))
         for name in ["ALAN", "Global Name", "Renée Example"]:
             review = dict(our_review("abc123"), body=pr.format_body("m", "Verdict.", name))
