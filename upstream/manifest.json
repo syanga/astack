@@ -251,5 +251,12 @@
       "SKILL.md": "skills/principles/sequence-verifiable-units.md",
       "agents/openai.yaml": null
     }
+  },
+  "wizard": {
+    "repository": "https://github.com/mattpocock/skills.git",
+    "path": "skills/engineering/wizard",
+    "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+    "license": "MIT, kept in skills/wizard/LICENSE-mattpocock",
+    "note": "Retains the upstream process, Bash template, example stage, and Codex metadata. Shortens the model-invoked description, reuses agreed scope instead of requiring repeated confirmation, and limits CI and local writes to their agreed destinations. Adds secret redaction guidance and documents the literal single-line dotenv subset. The template preserves input whitespace, stops on EOF, quotes supported dotenv values, decodes existing quotes without evaluation, and rejects unsupported syntax before writes. Removes narration and decorative comments while retaining public helper contracts and the stage marker. Offline tests cover reruns, captured secret payloads, EOF, unsupported values, and action-only stages."
   }
 }
