@@ -2,7 +2,7 @@
 
 **You own the diagnosis. Capture runtime evidence and test the mechanism.** The deliverable is a cited diagnosis.
 
-Use an authorized development or isolated test environment. A diagnosis-only request can permit temporary probes; a read-only request does not authorize instrumentation or code edits. Production and daily-driver processes require explicit authorization. If access or scope prevents a capture, report the gap and analyze existing evidence.
+Use an authorized development or isolated test environment. A diagnosis-only request can permit temporary probes. A read-only request does not authorize instrumentation or code edits. Production and daily-driver processes require explicit authorization. If access or scope prevents a capture, report the gap and analyze existing evidence.
 
 1. Capture the signal through the affected UI, CLI, or API with available tools: a CPU profile for a spinning process, a heap snapshot for a suspected leak, a browser trace for a visual glitch. Record the reproduction steps, workload, revision, configuration, and capture command. Redact secrets and personal data from shared output.
 2. Follow [trace forensics](TRACE-FORENSICS.md) to reduce the artifact to a finding: the function on the hot path, the retainer chain from an object to a GC root, or the loop firing without input. Keep reduced evidence and artifact pointers in the main thread.
