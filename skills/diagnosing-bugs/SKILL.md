@@ -1,13 +1,19 @@
 ---
 name: diagnosing-bugs
-description: Diagnosis loop for hard bugs and performance regressions. Use when the user says "diagnose"/"debug this", or reports something broken/throwing/failing/slow.
+description: Diagnose failures and performance regressions, or analyze captured profiles, traces, and heap snapshots.
 ---
 
-# Diagnosing Bugs
+# Diagnosing bugs
 
 A discipline for hard bugs. Skip phases only when explicitly justified. A diagnosis-only request ends with evidence and a proposed fix.
 
 Read [Fix Root Causes](../principles/fix-root-causes.md). For regression tests, follow [tdd](../tdd/SKILL.md) and [Test Behavior, Not Implementation](../principles/test-behavior-not-implementation.md).
+
+For an existing capture, follow [trace forensics](TRACE-FORENSICS.md) instead of requiring a new reproduction loop. For live profiling, follow [runtime forensics](RUNTIME-FORENSICS.md). Those paths may return a provisional diagnosis; they do not establish that a fix works.
+
+The phases below apply to a runnable failure. Reuse reproduction evidence already gathered by the caller. Honor its scope: a read-only inquiry permits existing checks and evidence analysis, not code edits or instrumentation. When a needed experiment exceeds that scope, return the gap and proposed experiment. For a requested fix, [bug-fix](../bug-fix/SKILL.md) owns delivery; for optimization, [perf-issue](../perf-issue/SKILL.md) owns the measurement comparison. Continue the current diagnosis without recursively restarting those workflows.
+
+For a session transfer, read [handoff](../handoff/SKILL.md). Include the reproduction command or capture, hypotheses tested, remaining probes, and cleanup state.
 
 When exploring the codebase, read `CONTEXT.md` (if it exists) to get a clear mental model of the relevant modules, and check ADRs in the area you're touching.
 
@@ -65,7 +71,7 @@ Phase 1 is done when the loop is **tight** and **red-capable**: you can name **o
 - [ ] **Fast**: seconds, not minutes.
 - [ ] **Agent-runnable**: you can run it unattended; a human in the loop only via `scripts/hitl-loop.template.sh`.
 
-If you catch yourself reading code to build a theory before this command exists, **stop: jumping straight to a hypothesis is the exact failure this skill prevents.** No red-capable command, no Phase 2.
+Read enough code to construct the loop. Treat early theories as provisional until runtime evidence supports them. Proceed to Phase 2 only with the red-capable command; otherwise use the missing-loop procedure above.
 
 ## Phase 2: Reproduce + minimise
 
@@ -115,7 +121,7 @@ Tool preference:
 
 ## Phase 5: Fix + regression test
 
-Continue into implementation only when it is authorized.
+Continue into implementation only when it is authorized. For diagnosis-only work, report the supported cause, evidence, unresolved hypotheses, and proposed fix or next experiment. Then perform the cleanup below that applies to your probes.
 
 Write the regression test **before the fix**, but only if there is a **correct seam** for it.
 
@@ -133,10 +139,13 @@ If a correct seam exists:
 
 ## Phase 6: Cleanup
 
-Required before declaring done:
+After a fix:
 
 - [ ] Original repro no longer reproduces (re-run the Phase 1 loop). For intermittent bugs, compare before/after failure rates and trial counts; zero observed failures alone does not prove impossibility.
 - [ ] Regression test passes (or absence of seam is documented)
-- [ ] All `[DEBUG-...]` instrumentation removed (`grep` the prefix)
-- [ ] Throwaway prototypes deleted (or moved to a clearly-marked debug location)
-- [ ] The hypothesis that turned out correct is stated in the commit / PR message, so the next debugger learns
+- [ ] The hypothesis that turned out correct is stated in the commit or PR message, so the next debugger learns
+
+For diagnosis and fixes alike:
+
+- [ ] Temporary instrumentation and runtime patches you introduced are removed, preserving unrelated work. Search for your `[DEBUG-...]` prefix.
+- [ ] Retain evidence needed to reproduce or explain the finding. Remove disposable experiments, and report retained artifact paths or any cleanup still pending.

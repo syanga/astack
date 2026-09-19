@@ -239,7 +239,7 @@
     "path": "skills/engineering/diagnosing-bugs",
     "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
     "license": "MIT, kept in skills/diagnosing-bugs/LICENSE-mattpocock",
-    "note": "Retains the upstream six phases, feedback-loop menu, minimization criteria, prediction format, checklists, human-loop script, and Codex metadata. Links shared testing and root-cause guidance, preserves diagnosis-only scope and provisional investigation without reproduction, qualifies flake-rate claims, and treats hypothesis count as guidance. Removes narration comments from the shell template under no-comments. See upstream/implementation-adaptations.md."
+    "note": "Retains the upstream six phases, feedback-loop menu, minimization criteria, prediction format, checklists, human-loop script, and Codex metadata. Links shared testing and root-cause guidance, preserves diagnosis-only scope and provisional investigation without reproduction, qualifies flake-rate claims, and treats hypothesis count as guidance. Removes narration comments from the shell template under no-comments. See upstream/implementation-adaptations.md. The debugging suite adds conditional pstack forensics references, scope-aware routing, reusable caller evidence, and handoff pointers. Distinguishes runnable-failure gates from captured-artifact analysis and diagnosis cleanup from fix verification. See upstream/debugging-adaptations.md; pstack provenance is recorded under debugging-forensics."
   },
   "implementation-slicing": {
     "repository": "https://github.com/mattpocock/skills.git",
@@ -349,6 +349,50 @@
       "skills/productivity/handoff/agents/openai.yaml": "skills/handoff/agents/openai.yaml",
       "pstack/skills/poteto-mode/playbooks/pause-safely.md": "skills/handoff/PAUSE.md",
       "pstack/skills/poteto-mode/playbooks/session-pickup.md": "skills/handoff/RESUME.md"
+    }
+  },
+  "investigation": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/poteto-mode/playbooks/investigation.md",
+    "commit": "032be146865d973682535de75f2287da438550bf",
+    "license": "MIT, kept in skills/investigation/LICENSE-pstack",
+    "note": "Preserves the read-only inquiry, how/why routing, explanation or recommendation, and unslop pass. Adds the agreed diagnosis and captured-artifact branches, explicit evidence limits, and a scoped handoff to existing implementation skills. Omits the Poteto Mode throughput marker. See upstream/debugging-adaptations.md.",
+    "files": {
+      "pstack/skills/poteto-mode/playbooks/investigation.md": "skills/investigation/SKILL.md"
+    }
+  },
+  "bug-fix": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/poteto-mode/playbooks/bug-fix.md",
+    "commit": "032be146865d973682535de75f2287da438550bf",
+    "license": "MIT, kept in skills/bug-fix/LICENSE-pstack",
+    "note": "Preserves task ownership, reproduction, hypothesis elimination, runtime confirmation, delegated implementation, same-interface verification, and PR delivery. Shares the existing diagnosing-bugs loop and tdd regression procedure. Replaces Cursor control and loop commands and fixed models with available tools. Preserves failing-before evidence without requiring a separate failing commit. Adds existing review, execution-state, and handoff conventions. See upstream/debugging-adaptations.md.",
+    "files": {
+      "pstack/skills/poteto-mode/playbooks/bug-fix.md": "skills/bug-fix/SKILL.md"
+    }
+  },
+  "perf-issue": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/poteto-mode/playbooks/perf-issue.md",
+    "commit": "032be146865d973682535de75f2287da438550bf",
+    "license": "MIT, kept in skills/perf-issue/LICENSE-pstack",
+    "note": "Preserves the six-step measurement workflow and all eight optimization strategy families. Adapts tools, delegation, review, and delivery to astack. Adds comparable workloads, revision and configuration records, repeated measurements and variation, correctness checks, cleanup, and shared state/handoff links. Omits the unimported Hillclimb dependency. See upstream/debugging-adaptations.md.",
+    "files": {
+      "pstack/skills/poteto-mode/playbooks/perf-issue.md": "skills/perf-issue/SKILL.md"
+    }
+  },
+  "debugging-forensics": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": [
+      "pstack/skills/poteto-mode/playbooks/trace-forensics.md",
+      "pstack/skills/poteto-mode/playbooks/runtime-forensics.md"
+    ],
+    "commit": "032be146865d973682535de75f2287da438550bf",
+    "license": "MIT, kept in skills/diagnosing-bugs/LICENSE-pstack",
+    "note": "Imports both playbooks as conditional references under diagnosing-bugs. Preserves format-specific analysis, queryable captures, call trees, retainers, source attribution, mechanism experiments, and diagnosis-only delivery. Uses available tools, permits native queries instead of mandatory SQLite conversion, preserves capture identity, and distinguishes paired-capture correlation from causal proof. Runtime probes require the appropriate environment and write scope and have explicit cleanup. See upstream/debugging-adaptations.md.",
+    "files": {
+      "pstack/skills/poteto-mode/playbooks/trace-forensics.md": "skills/diagnosing-bugs/TRACE-FORENSICS.md",
+      "pstack/skills/poteto-mode/playbooks/runtime-forensics.md": "skills/diagnosing-bugs/RUNTIME-FORENSICS.md"
     }
   }
 }

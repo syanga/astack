@@ -69,6 +69,24 @@ These entry points compose with the existing principles, review, and delivery
 skills. The [adaptation notes](upstream/implementation-adaptations.md) explain
 the upstream sources, overlaps, and workflow choices.
 
+## Debugging and investigation
+
+Use [investigation](skills/investigation/SKILL.md) for a technical question that
+needs a cited explanation or recommendation. It selects code, history, or
+diagnostic methods and keeps the inquiry read-only.
+
+Use [bug-fix](skills/bug-fix/SKILL.md) to carry a defect through reproduction,
+diagnosis, implementation, and verification. Use
+[perf-issue](skills/perf-issue/SKILL.md) to improve measured performance with
+comparable baseline and post-fix results.
+
+[diagnosing-bugs](skills/diagnosing-bugs/SKILL.md) provides the shared diagnosis
+loop. Its [trace](skills/diagnosing-bugs/TRACE-FORENSICS.md) and
+[runtime](skills/diagnosing-bugs/RUNTIME-FORENSICS.md) references cover existing
+captures and live instrumentation. A diagnosis request ends with findings;
+implementation follows the user's scope. See the
+[adaptation notes](upstream/debugging-adaptations.md) for source comparisons.
+
 ## Multi-phase work
 
 Use [wayfinder](skills/wayfinder/SKILL.md) when a large effort still has decisions
