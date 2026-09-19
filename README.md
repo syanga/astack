@@ -47,60 +47,10 @@ The repository defines what gets installed:
 
 For contribution rules, see [AGENTS.md](AGENTS.md).
 
-## Implementation skills
+## Find a skill
 
-Ask `astack-help` which skills fit your current task. It reads the installed
-astack skills and recommends what to use next.
-
-Start with [implement](skills/implement/SKILL.md) when the desired behavior is
-clear. Use [prototype](skills/prototype/SKILL.md) first to resolve UI or logic
-design questions, then implement the chosen direction.
-
-[architect](skills/architect/SKILL.md) explores the code's structure, and
-[to-spec](skills/to-spec/SKILL.md) captures decisions for a durable handoff.
-Implementation uses [tdd](skills/tdd/SKILL.md) for test-first changes and
-[diagnosing-bugs](skills/diagnosing-bugs/SKILL.md) for uncertain failures.
-
-Use [wizard](skills/wizard/SKILL.md) when setup or migrations need human steps.
-It generates an interactive Bash script that guides dashboard actions and
-captures configuration values for local development and CI.
-
-These entry points compose with the existing principles, review, and delivery
-skills. The [adaptation notes](upstream/implementation-adaptations.md) explain
-the upstream sources, overlaps, and workflow choices.
-
-## Multi-phase work
-
-Use [wayfinder](skills/wayfinder/SKILL.md) when a large effort still has decisions
-to resolve across sessions. It keeps a shared map of questions, answers, and
-unknowns. Its decision tickets do not replace an implementation plan.
-
-Once the route is clear, [multi-phase-plan](skills/multi-phase-plan/SKILL.md)
-writes the PR sequence, dependencies, verification steps, and delivery gates.
-Use [orchestrate](skills/orchestrate/SKILL.md) to execute a program that needs
-multiple owners and durable coordination. Bounded tasks still start with
-`implement`; these planning skills are optional entry points, not a required chain.
-
-Sequential and orchestrated execution use the same [durable state convention](skills/orchestrate/STATE.md).
-The store records unit states, verification evidence, and a session handoff with
-the exact next action. Switching execution skills keeps the same store. The
-[orchestration CLI](skills/orchestrate/CLI.md) maintains these files using pstack's
-imported Bun/TypeScript runtime, with retained Graphite support and an additional
-GitHub frontier adapter. Bun is required when executing multi-phase work; the
-first CLI call installs the locked dependencies. Agent dispatch stays with the
-active harness.
-
-[Handoff](skills/handoff/SKILL.md) prepares another session to continue the task.
-It reuses an execution store or decision map when present. Standalone tasks get
-a temporary handoff file. Its pause and pickup procedures preserve partial work
-and check ownership before another session takes over.
-
-[Show-me-your-work](skills/show-me-your-work/SKILL.md) owns the decision trail
-used by these execution workflows, including reasons, evidence, outcomes, and
-the final audit. Its original Bash helper and TSV template are included.
-
-The [planning adaptation notes](upstream/planning-adaptations.md) explain the
-upstream workflows and their integration with astack.
+Ask [astack-help](skills/astack-help/SKILL.md) which skills fit your current task.
+It reads the installed skills and recommends what to use next.
 
 ## Update or remove
 

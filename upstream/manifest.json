@@ -4,7 +4,7 @@
     "path": "skills/productivity/writing-for-agents",
     "commit": "959a8e9f1edc3adbe2f7e3054bb6fbefa6696260",
     "license": "MIT, kept in skills/writing-for-agents/LICENSE",
-    "note": "Adapted: unslop pass over the prose, sharpened rule that a description is a trigger not a summary, SKILL-MECHANICS rewritten for astack's harnesses and sibling-path reach, including when the installer generates or validates Codex policy, unslop pointer and encode-lessons pruning rule added. Adds an astack-authored SOURCE-EDITS.md guide for locating installed skills' owning repositories and submitting approved source improvements through open-pr."
+    "note": "SKILL-MECHANICS.md describes astack invocation metadata. SOURCE-EDITS.md is astack-authored. Completion includes representative checks of changed decisions."
   },
   "unslop": {
     "repository": "https://github.com/cursor/plugins.git",
@@ -69,7 +69,7 @@
       "a6b3a57512ca6d5c6aa5b68f74f736195021f96e"
     ],
     "license": "MIT, kept in skills/harden-pr/LICENSE-pstack, LICENSE-mattpocock, and LICENSE-gstack",
-    "note": "Adapted from the pinned gstack review directory. Retains core checks, specialist criteria, independent adversarial review, and outside structured review. Consolidates scope and dispatch, removes numerical scoring and aesthetic rules, and replaces gstack runtime dependencies. Adds astack PR posting, requested follow-through, and targeted mutation guidance. See upstream/review-adaptations.md. Links shared astack guidance for reusing and publishing PR test results, including delegated runs and the tested commit. Posts only actionable findings, keeps summaries in the conversation, and puts test results in the PR description."
+    "note": "Uses generated gstack review Markdown without its generator or global runtime. Scope follows current user requirements. Findings require evidence rather than numerical scores. Testing and maintainability always run because astack has no specialist hit-rate store. PR transport retains earlier pstack and Matt material."
   },
   "grilling": {
     "repository": "https://github.com/mattpocock/skills.git",
@@ -177,7 +177,7 @@
     "path": "pstack/skills/architect",
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/architect/LICENSE-pstack",
-    "note": "Starts from the pinned pstack directory, retaining the five phases, candidate brief, design red flags, and rationale template. Replaces arena and fixed models with available subagent tools, links local principles and exploration skills, preserves design-only scope, and requires the local UI selection workflow. Applies no-comments to sketch guidance. See upstream/implementation-adaptations.md."
+    "note": "Host subagents replace arena so design exploration works outside Cursor. UI exploration follows astack static-mock selection before real component edits."
   },
   "implement": {
     "repository": [
@@ -193,7 +193,7 @@
       "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
     ],
     "license": "MIT, kept in skills/implement/LICENSE-pstack and skills/implement/LICENSE-mattpocock",
-    "note": "Uses the pstack Feature playbook as the base, retaining design ownership, the four-part throughput checkpoint, implementation delegation, diff review, and verified units. Incorporates Matt implement guidance for TDD, regular typechecking and focused tests, final review, and commits. Adapts provider-specific dispatch, local skill references, and task-scoped delivery. Retains Matt Codex metadata. See upstream/implementation-adaptations.md. Multi-phase execution follows the shared orchestrate/STATE.md convention; delegated workers return receipts to the sole state writer. References handoff for session transfers while preserving the existing task record."
+    "note": "The pstack Feature playbook supplies task ownership and delegation. Matt supplies TDD and implementation checks. Multi-phase work reuses the existing execution store so switching owners or workflows does not create competing state."
   },
   "tdd": {
     "repository": [
@@ -209,14 +209,14 @@
       "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
     ],
     "license": "MIT, kept in skills/tdd/LICENSE-pstack and skills/tdd/LICENSE-mattpocock",
-    "note": "Keeps Matt SKILL.md, tests.md, mocking.md, and Codex metadata, plus pstack regression workflow as BUG-FIX.md without skill frontmatter. Reuses established testing boundaries, links the existing testing principle and Deep Modules, and explicitly permits concrete refactoring after green. Removes narration comments from code examples under no-comments. See upstream/implementation-adaptations.md."
+    "note": "Matt supplies the main skill and test-quality references. Pstack supplies BUG-FIX.md. Existing agreed test boundaries carry forward. Refactoring after green is allowed when it simplifies code without changing behavior."
   },
   "to-spec": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/engineering/to-spec",
     "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
     "license": "MIT, kept in skills/to-spec/LICENSE-mattpocock",
-    "note": "Retains the upstream process, inline spec template, decision lists, prototype exception, and Codex metadata. Replaces setup and fixed tracker labels with the agreed destination, reuses settled testing boundaries, scales user stories to the feature, and records blocking questions. See upstream/implementation-adaptations.md."
+    "note": "Uses the agreed destination instead of Matt-specific setup and tracker labels. Story coverage scales to the feature instead of a quota that could invent requirements."
   },
   "prototype": {
     "repository": [
@@ -232,14 +232,14 @@
       "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
     ],
     "license": "MIT, kept in skills/prototype/LICENSE-pstack and skills/prototype/LICENSE-mattpocock",
-    "note": "Starts from Matt prototype directory and retains logic scenarios, state display, UI alternative criteria, and switcher behavior. Uses pstack scratch isolation and matching-surface verification. Adapts real-route edits to static HTML mocks, local visual constraints and t3-preview, with selection before real components and scoped production handoff. Retains Codex metadata. See upstream/implementation-adaptations.md. References handoff for session transfers while preserving the existing task record."
+    "note": "Matt supplies logic and UI exploration. Pstack supplies scratch isolation. Static mocks precede real component edits to preserve the user's design-selection workflow."
   },
   "diagnosing-bugs": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/engineering/diagnosing-bugs",
     "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
     "license": "MIT, kept in skills/diagnosing-bugs/LICENSE-mattpocock",
-    "note": "Retains the upstream six phases, feedback-loop menu, minimization criteria, prediction format, checklists, human-loop script, and Codex metadata. Links shared testing and root-cause guidance, preserves diagnosis-only scope and provisional investigation without reproduction, qualifies flake-rate claims, and treats hypothesis count as guidance. Removes narration comments from the shell template under no-comments. See upstream/implementation-adaptations.md."
+    "note": "Captured-artifact analysis bypasses the runnable-reproduction gate, but does not verify a fix. Early code reading can help build a loop. Theories remain provisional. Diagnosis-only completion requires findings and probe cleanup, not a code fix. Pstack references are recorded under debugging-forensics."
   },
   "implementation-slicing": {
     "repository": "https://github.com/mattpocock/skills.git",
@@ -272,7 +272,7 @@
     ],
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/orchestrate/LICENSE-pstack",
-    "note": "Preserves coordinator roles, briefs, pilot and rolling execution, completion queues, stack ownership, SHA-keyed verification, failure handling, and escalation. Directly imports the original Bun/TypeScript CLI, store, bootstrap, tests, package manifest, and lockfile. Retains Graphite and adds a GitHub frontier adapter. Targeted changes add unit ownership, legacy table reads, retained verdict and drain history, verifier precedence, handoff status, and offline test setup. Adapts Cursor dispatch to available tools. Shares STATE.md and CLI.md with multi-phase-plan and sequential implement; honors execution and merge authorization and routes merges through ship-pr. See upstream/planning-adaptations.md. Delegates decision trails and their audit to the imported show-me-your-work skill. Centralizes verification rules in STATE.md, aligns frontier and standing-order instructions with the runtime, and removes repeated or figurative prose. References handoff for session transfers while preserving the existing task record.",
+    "note": "Retains the original Bun runtime and lockfile as an exception to astack's Python convention. Adds a GitHub adapter beside Graphite. Shared ownership, retained drain batches, and verifier precedence support recovery across sessions without losing evidence. The CLI records claims. The coordinator still judges them.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/orchestrate.md": "skills/orchestrate/SKILL.md",
       "pstack/skills/poteto-mode/scripts/orch/orch.ts": "skills/orchestrate/scripts/orch/orch.ts",
@@ -291,7 +291,7 @@
     ],
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/multi-phase-plan/LICENSE-pstack",
-    "note": "Preserves the ordered plan skeleton and per-PR evidence workflow. Replaces provider-specific execution, scheduling, control, and model dependencies with astack skills and available tools. Scales live scenarios to risk, allows reasoned performance exemptions, and follows existing human gates. Ports the checker to Python standard library. See upstream/planning-adaptations.md. Records one execution store reused by implement and orchestrate, including durable handoffs and resume reconciliation. References show-me-your-work for the decision trail and completion audit. References handoff for session transfers while preserving the existing task record. Named probes bind verification boxes to unit and lane IDs; the checker validates references and selects commands by ID.",
+    "note": "The checker uses the Python standard library for astack portability. Risk-sized scenarios replace fixed lane and model quotas. Performance exemptions need reasons. Stable probe IDs connect plan checks to executable commands without making the checker judge their adequacy.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/multi-phase-plan.md": "skills/multi-phase-plan/SKILL.md",
       "pstack/skills/poteto-mode/scripts/check-plan.mjs": "skills/multi-phase-plan/scripts/check_plan.py"
@@ -305,7 +305,7 @@
     ],
     "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
     "license": "MIT, kept in skills/wayfinder/LICENSE-mattpocock",
-    "note": "Preserves the map, decision tickets, ticket types, fog of war, and chart/work modes. Adapts tool invocation and skill links, local tracker fallback, concurrent session claims, cancellation and supersession, user-authorized execution, and explicit continuation. Retains Codex metadata. The local tracker reference retains only wayfinding operations and relevant shared conventions. See upstream/planning-adaptations.md. References handoff for session transfers while preserving the existing task record.",
+    "note": "TRACKER.md retains only wayfinding operations from Matt's local tracker. A coordinator serializes local claims because Markdown lacks atomic tracker operations. Cancellation does not satisfy dependents, and invalidated decisions retain their history.",
     "files": {
       "skills/engineering/wayfinder/SKILL.md": "skills/wayfinder/SKILL.md",
       "skills/engineering/wayfinder/agents/openai.yaml": "skills/wayfinder/agents/openai.yaml",
@@ -321,7 +321,7 @@
     ],
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/show-me-your-work/LICENSE-pstack",
-    "note": "Imports the original decision-trail skill, TSV template, Bash helper, examples, and audit checklist. Shortens the description for astack, uses task-scoped transcript tools or records, and makes unavailable independent review or model diversity explicit. Resolves the upstream conflict between append-only history and deleting audit errors through corrective rows. Shares the execution store, serializes writes through its owner, and preserves legacy logs before adopting the six-column format. The helper retains sanitization and adds incompatible-header refusal. See upstream/planning-adaptations.md.",
+    "note": "Corrective rows resolve the upstream conflict between append-only history and deleting errors. Incompatible headers are rejected to preserve older four-column logs. The execution owner serializes writes because the helper has no lock.",
     "files": {
       "pstack/skills/show-me-your-work/SKILL.md": "skills/show-me-your-work/SKILL.md",
       "pstack/skills/show-me-your-work/references/decision-log-template.tsv": "skills/show-me-your-work/references/decision-log-template.tsv",
@@ -343,12 +343,56 @@
       "032be146865d973682535de75f2287da438550bf"
     ],
     "license": "MIT, kept in skills/handoff/LICENSE-mattpocock and skills/handoff/LICENSE-pstack",
-    "note": "Starts from Matt handoff and retains artifact pointers, suggested skills, redaction, focus arguments, and explicit-only Codex metadata. Imports pstack pause-safely and session-pickup as PAUSE.md and RESUME.md. Reuses execution stores and decision maps, keeps temporary notes for standalone tasks, and preserves coordinator ownership. Adapts transcript access, delivery authorization, partial-work preservation, and evidence reuse. Uses the numbered pause/resume protocol, delegates store-backed pickup to STATE.md, verifies other work before continuing, and routes trail audits and Attention findings through show-me-your-work. See upstream/planning-adaptations.md.",
+    "note": "Standalone tasks retain Matt's temporary note. Planned execution and decision maps reuse their existing records to avoid competing state. Pickup reuses evidence only when it still applies, resolving upstream tension between avoiding repeated checks and proving inherited claims.",
     "files": {
       "skills/productivity/handoff/SKILL.md": "skills/handoff/SKILL.md",
       "skills/productivity/handoff/agents/openai.yaml": "skills/handoff/agents/openai.yaml",
       "pstack/skills/poteto-mode/playbooks/pause-safely.md": "skills/handoff/PAUSE.md",
       "pstack/skills/poteto-mode/playbooks/session-pickup.md": "skills/handoff/RESUME.md"
+    }
+  },
+  "investigation": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/poteto-mode/playbooks/investigation.md",
+    "commit": "032be146865d973682535de75f2287da438550bf",
+    "license": "MIT, kept in skills/investigation/LICENSE-pstack",
+    "note": "Extends the original how/why routing to diagnosis and captured artifacts because technical questions may arrive as failure reports or profiles. The inquiry remains read-only.",
+    "files": {
+      "pstack/skills/poteto-mode/playbooks/investigation.md": "skills/investigation/SKILL.md"
+    }
+  },
+  "bug-fix": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/poteto-mode/playbooks/bug-fix.md",
+    "commit": "032be146865d973682535de75f2287da438550bf",
+    "license": "MIT, kept in skills/bug-fix/LICENSE-pstack",
+    "note": "Reuses diagnosing-bugs and tdd rather than defining a second diagnosis loop. Failing-before evidence is required without mandating a separate failing commit. Delivery stays within the task authorization.",
+    "files": {
+      "pstack/skills/poteto-mode/playbooks/bug-fix.md": "skills/bug-fix/SKILL.md"
+    }
+  },
+  "perf-issue": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/poteto-mode/playbooks/perf-issue.md",
+    "commit": "032be146865d973682535de75f2287da438550bf",
+    "license": "MIT, kept in skills/perf-issue/LICENSE-pstack",
+    "note": "Repeated comparable measurements distinguish improvements from noise. Correctness checks accompany performance measurements. Sustained Hillclimb optimization is outside this import.",
+    "files": {
+      "pstack/skills/poteto-mode/playbooks/perf-issue.md": "skills/perf-issue/SKILL.md"
+    }
+  },
+  "debugging-forensics": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": [
+      "pstack/skills/poteto-mode/playbooks/trace-forensics.md",
+      "pstack/skills/poteto-mode/playbooks/runtime-forensics.md"
+    ],
+    "commit": "032be146865d973682535de75f2287da438550bf",
+    "license": "MIT, kept in skills/diagnosing-bugs/LICENSE-pstack",
+    "note": "Native queries can replace mandatory SQLite conversion. Retention alone does not establish a leak. Paired captures alone do not prove causality. Runtime instrumentation is a write and needs the corresponding scope, despite the upstream read-only label.",
+    "files": {
+      "pstack/skills/poteto-mode/playbooks/trace-forensics.md": "skills/diagnosing-bugs/TRACE-FORENSICS.md",
+      "pstack/skills/poteto-mode/playbooks/runtime-forensics.md": "skills/diagnosing-bugs/RUNTIME-FORENSICS.md"
     }
   }
 }
