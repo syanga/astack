@@ -25,14 +25,14 @@
     "path": "pstack/skills/poteto-mode/playbooks/opening-a-pr.md",
     "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
     "license": "MIT, kept in skills/open-pr/LICENSE",
-    "note": "Adapted under the global Pull Requests policy. Keeps narrow PRs, stack relationships, coherent commits, no-comments, technical-writing, unslop, title guidance, and default description sections. Cursor forge and deslop removed; Gitleaks hook install and T3 Code PR linking added."
+    "note": "Adapted under the global Pull Requests policy. Keeps narrow PRs, stack relationships, coherent commits, no-comments, technical-writing, unslop, title guidance, and default description sections. Cursor forge and deslop removed; Gitleaks hook install and T3 Code PR linking added. Links shared astack guidance for reusing and publishing PR test results, including delegated runs and the tested commit."
   },
   "review-pr": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/engineering/code-review",
     "commit": "74ca5fe077456a0b3b2f5310cf9430999fd0b5fd",
     "license": "MIT, kept in skills/review-pr/LICENSE-mattpocock",
-    "note": "Based on the pinned upstream directory, preserving the two axes, twelve Fowler smells, reviewer briefs, and separate reports. Adapts invocation metadata, removes Matt-specific setup, prioritizes user requirements, reviews the requested diff, records the PR head, and links optional attributed posting through harden-pr's shared PR helper. Removes the old rubric and prompt builder."
+    "note": "Based on the pinned upstream directory, preserving the two axes, twelve Fowler smells, reviewer briefs, and separate reports. Adapts invocation metadata, removes Matt-specific setup, prioritizes user requirements, reviews the requested diff, records the PR head, and links optional attributed posting through harden-pr's shared PR helper. Removes the old rubric and prompt builder. Links shared astack guidance for reusing and publishing PR test results, including delegated runs and the tested commit."
   },
   "technical-writing": {
     "repository": "https://github.com/cursor/plugins.git",
@@ -69,7 +69,7 @@
       "a6b3a57512ca6d5c6aa5b68f74f736195021f96e"
     ],
     "license": "MIT, kept in skills/harden-pr/LICENSE-pstack, LICENSE-mattpocock, and LICENSE-gstack",
-    "note": "Adapted from the pinned gstack review directory. Retains core checks, specialist criteria, independent adversarial review, and outside structured review. Consolidates scope and dispatch, removes numerical scoring and aesthetic rules, and replaces gstack runtime dependencies. Adds astack PR posting, requested follow-through, and targeted mutation guidance. See upstream/review-adaptations.md."
+    "note": "Adapted from the pinned gstack review directory. Retains core checks, specialist criteria, independent adversarial review, and outside structured review. Consolidates scope and dispatch, removes numerical scoring and aesthetic rules, and replaces gstack runtime dependencies. Adds astack PR posting, requested follow-through, and targeted mutation guidance. See upstream/review-adaptations.md. Links shared astack guidance for reusing and publishing PR test results, including delegated runs and the tested commit."
   },
   "grilling": {
     "repository": "https://github.com/mattpocock/skills.git",

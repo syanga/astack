@@ -19,6 +19,8 @@ Whatever the user said is the fixed point (a commit SHA, branch name, tag, `main
 
 For a PR, work from its head commit and record the SHA before dispatch.
 
+Follow [test results](../open-pr/test-results.md) to reuse existing verification, pass it to both reviewers, and publish any new test results on the PR.
+
 Review the requested changes against the fixed point. Give both reviewers the same diff and relevant commit history.
 
 Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, not inside two parallel sub-agents.
