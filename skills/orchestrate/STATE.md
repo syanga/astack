@@ -10,9 +10,9 @@ track store, but sends rollups instead of writing the parent's files.
 ## Locate the store
 
 Use the plan's directory, `<project repo>/.scratch/<program>/` by default. Resolve
-it from the project checkout hosting the plan, not from each worker's directory. If an existing effort
-already has a store elsewhere, reuse it. Record the absolute store and plan paths
-in the plan and every session handoff. Keep the store outside disposable worker
+it from the project checkout hosting the plan. Workers use that same path.
+If an existing effort already has a store elsewhere, reuse it. Record the absolute
+store and plan paths in the plan and every session handoff. Keep the store outside disposable worker
 worktrees and preserve it through worktree cleanup. For another machine or a
 remote session, explicitly transfer the current store or publish it to an
 authorized shared location. Local files alone do not synchronize across machines.
@@ -35,22 +35,15 @@ Before a PR exists, keep receipts keyed by unit and head SHA there. Once the PR
 exists, append a ledger row only if its current head matches the receipt.
 
 Use `orch standing add` for standing orders and `orch gate park` for human
-decisions that block an action. Keep new decisions in `decisions.tsv` with
-`question`, `evidence`, `decision`, and `units` columns. Create `briefs/` when
-workers need separate briefs. The CLI maintains the completion queue, archived
-drain batches, and merge frontier; use its commands instead of rewriting tables.
+decisions that block an action. Open the decision trail through
+[show-me-your-work](../show-me-your-work/SKILL.md), which owns its format, helper,
+history, and audit procedure. Use `<store>/decisions.tsv`; the execution owner
+writes it. Follow that skill's transition procedure for an older log. Create
+`briefs/` when workers need separate briefs. The CLI maintains the completion
+queue, archived drain batches, and merge frontier; use its commands instead of rewriting tables.
 
-The CLI writes these UTF-8 TSV headers. Fields contain no literal tabs or
-newlines; use report paths for multiline evidence. It also reads the original
-upstream headers and astack's earlier documented headers, converting on write.
-
-```text
-units.tsv
-id	track	state	branch	pr	sha	brief	agent
-
-ledger.tsv
-pr	sha	verdict	evidence	verifier	ts
-```
+The CLI owns the unit and ledger formats. Use `--json` for complete records.
+[CLI.md](CLI.md#compatibility-and-boundaries) describes older table compatibility.
 
 New units start `pending` (`planned` in older manual stores). Execution states
 are `running`, `blocked`, `needs-verify`, `merge-ready`, `done`,
@@ -59,24 +52,34 @@ acceptance criteria and authorized delivery step are complete. A PR awaiting
 merge remains `merge-ready`. Abandonment records its reason and the replacement
 or remaining gap in `overview.md`; it does not satisfy the original predicate.
 
-Omit `--verifier` for worker claims; name the verifier for independent receipts.
-Verdicts are `live-ui-verified`, `unit-test-verified`, `type-check-only`, `verifier-blocked`, and `verifier-failed`.
-Blocked and failed verdicts never satisfy acceptance. Behavioral work requires
-more than `type-check-only`. Append verdicts in receipt order.
-For a PR and head SHA, use the latest verifier row when one exists, otherwise
-the latest worker row. Check that its verdict meets the unit's recorded
-acceptance criteria. A new SHA needs a new row. Preserve failed and blocked
-receipts when a later verdict supersedes them.
+## Accept verification
+
+Record each receipt with `orch ledger record` in receipt order. Omit `--verifier`
+for worker claims; name the verifier for independent receipts. Use
+`orch --json ledger check <pr> <sha>` to read the effective verdict. The CLI
+retains every row and selects the latest verifier receipt for that PR and SHA,
+or the latest worker receipt when no verifier exists. A new SHA needs a new receipt.
+
+Verdicts are `live-ui-verified`, `unit-test-verified`, `type-check-only`,
+`verifier-blocked`, and `verifier-failed`. Inspect the evidence and compare its SHA
+with the current PR head before accepting the result. CI success contributes
+evidence but does not establish a verdict. Behavioral work needs more than
+`type-check-only`. A blocked check resumes when its environment is available;
+a failed check needs a fix before new verification. Neither satisfies acceptance.
+
+The CLI records claims. It does not run verification, validate evidence files,
+or enforce unit transitions. Check the recorded acceptance criteria yourself.
 
 ## Checkpoint progress
 
 Use the CLI to update state after a unit changes state, verification completes,
-a PR head or base changes, or a blocking decision arrives. Save partial progress before
-ending a session. Sequential owners record their own results directly;
+a PR head or base changes, or a blocking decision arrives. Save partial progress
+before ending a session. Sequential owners record their own results directly;
 coordinators drain worker completions first using the procedure below.
 
 1. Save the receipt under `reports/`, including the unit, head SHA, commands,
    results, and artifact paths. Update the unit row and append any ledger verdict.
+   Log decisions and checkpoints through show-me-your-work.
 2. Check plan boxes only when their evidence exists. Link that evidence from the
    box. The unit table owns execution state; a stale checkbox cannot override
    current Git state or a missing verdict at the current SHA.
@@ -84,7 +87,7 @@ coordinators drain worker completions first using the procedure below.
    branch and PR, head SHA, any uncommitted work, blockers, and the exact next
    action or command. Include remaining approvals and active worker identities.
    Use `## Handoff <date/time>` headings and explicit `none` entries when these
-   do not apply. The latest handoff is the resume entry point; earlier entries retain the history.
+   do not apply. The latest handoff is the resume entry point. Keep earlier entries.
 4. Run `orch status` to generate `status.md` from the saved tables and latest
    handoff. It includes state counts, recorded heads, effective verdicts, and gates;
    the handoff supplies blockers and the next action.
@@ -121,23 +124,23 @@ Arrivals after queue rotation remain in `inbox/` for the next drain.
 Fetch current Git refs and reconcile them with the forge and the stack owner's
 confirmed order. Use `orch frontier set --repo <repo>` for Graphite, or
 `orch frontier set --source github --repo <repo> --prs <ordered-pr-list>` for
-GitHub. [CLI.md](CLI.md) defines each adapter's checks and limits. The saved
-frontier contains a generation, ordered PRs with branches, SHAs, and states,
-and the lowest unmerged PR. Each store has one frontier; separate track stores
-send rollups to their parent coordinator.
+GitHub. [CLI.md](CLI.md) defines each adapter's checks and limits. Each store holds
+one ordered frontier with a generation, PRs, branches, SHAs, states, and the
+lowest unmerged PR. Separate track stores send rollups to their
+parent coordinator.
 
-Only admit a merge when all plan dependencies are satisfied, its current SHA has
-the required verdict, and its human gates and merge authorization are satisfied.
-A frontier refresh does not enforce these conditions. If refresh fails or refs
-disagree during a restack, treat the saved frontier as stale until the stack owner
+Only admit a merge when all plan dependencies are satisfied, the current SHA
+meets the verification criteria above, and its human gates and merge authorization
+are satisfied. A frontier refresh does not enforce these conditions. If refresh
+fails or refs disagree during a restack, treat the saved frontier as stale until the stack owner
 confirms the graph and refresh succeeds. Re-read the candidate PR's head before
 merging and use the exact-head protection required by ship-pr.
 
 ## Resume
 
 Read the plan, latest overview handoff, unit rows, ledger, and any standing
-orders or pending completions. Confirm the previous execution owner is inactive
-or has explicitly transferred ownership before writing shared state.
+orders, the decision trail, and pending completions. Confirm that the previous
+execution owner is inactive or has transferred ownership before writing shared state.
 
 Check the recorded worktrees, uncommitted changes, branch heads, PR states, and
 verification receipts. Preserve partial work. Probe surviving workers through
@@ -150,3 +153,10 @@ Regenerate the frontier when present and the status summary. Select the next
 unfinished unit whose dependencies and approvals are satisfied. Continue from
 its recorded next action, either directly with implement or through orchestrate's
 drain cycle. Reuse the same store when execution changes between these modes.
+
+## Close
+
+Audit the decision trail through show-me-your-work before handing back. Include
+its review findings with the plan and store links. Preserve the store and its
+receipts after completion. Follow [worktree-cleanup](../worktree-cleanup/SKILL.md)
+for workspace teardown when authorized.

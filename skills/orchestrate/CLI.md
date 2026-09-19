@@ -22,8 +22,8 @@ bun "$ORCH_CLI" init
 bun "$ORCH_CLI" --help
 ```
 
-`--store` overrides `ORCH_STORE`. Use `--json` when consuming output: the default
-compact display truncates some lists. Each command has `--help` for arguments.
+`--store` overrides `ORCH_STORE`. Use `--json` when consuming output because
+the default compact display truncates some lists. Each command has `--help` for arguments.
 Read-only commands leave the store untouched; `status` writes `status.md`.
 
 | Commands | Durable record |
@@ -49,18 +49,14 @@ bun "$ORCH_CLI" --json ledger check 42 "$verified_sha"
 bun "$ORCH_CLI" status
 ```
 
-Set `verified_sha` from the artifact actually tested. Inspect the receipt and
-compare it with the current PR head before accepting the result. The CLI stores
-the claim; it does not run verification or validate the evidence file. A ledger
-check exits 0 for an existing row, including a failed or blocked verdict. Inspect
-the returned verdict. Missing units or verdicts exit 2; usage, data, and lock
-errors exit 1. Unit states are nonempty labels, not an enforced state machine.
+Set `verified_sha` from the artifact actually tested. Follow
+[STATE.md's verification procedure](STATE.md#accept-verification) when recording
+or accepting a result. A ledger check exits 0 for an existing row, including a
+failed or blocked verdict. Inspect the returned verdict. Missing units or
+verdicts exit 2; usage, data, and lock errors exit 1.
 
-`--verifier` identifies an independent verifier; omit it for a worker claim.
-Records append to history. For the same PR and SHA, the latest verifier receipt
-controls; otherwise the latest worker receipt controls. A new SHA is unverified
-until recorded. Summary counts cover historical PR/SHA keys; the status page
-also joins each unit's recorded head to its effective verdict.
+Ledger summary counts cover historical PR/SHA keys. The status page also joins
+each unit's recorded head to its effective verdict.
 
 ## Completions and recovery
 
@@ -71,13 +67,10 @@ bun "$ORCH_CLI" --json inbox drain
 bun "$ORCH_CLI" --json inbox history
 ```
 
-The coordinator records completion events and reconciles each report before
-updating units or verdicts. Drain atomically rotates the queue and retains the
-batch under `processed/`. That name means drained, not accepted. History includes
-archived batches and batches left at the store root by an interrupted drain.
-After interruption, run `init` to recreate missing files, read history, and
-reconcile receipts against current state before replaying them. Replay is not
-automatically deduplicated. Malformed input remains available for repair.
+Follow [STATE.md's drain and recovery procedure](STATE.md#drain-completions).
+`inbox history` reads archived batches and batches left at the store root by an
+interrupted drain. The CLI does not deduplicate replayed events. Malformed input
+remains available for repair.
 
 Writes use the original PID lock and atomic file replacement. Another writer
 fails while the lock is held; a later command recovers a dead process's lock.
@@ -88,6 +81,12 @@ local store; copying its files between machines does not provide distributed loc
 
 `gate park --default` records a proposed answer. It neither approves the action
 nor schedules a timeout. Resolve the gate only when the required decision exists.
+
+Standing orders must remain consecutively numbered. To pause dispatch, append
+`Dispatch paused: <reason>` with `orch standing add`. After fixing the cause,
+append `Dispatch resumed: <evidence>`. The latest dispatch order controls new
+spawns; other standing constraints remain in force. This records the coordinator's
+instruction, not an automatic scheduler switch. Preserve both entries for review.
 
 ## Merge frontier
 
@@ -112,11 +111,9 @@ list. Fetch and reconcile local branches first, retaining branches for merged
 PRs still in the list. Failed refreshes preserve the previous frontier; treat it
 as stale until a refresh succeeds.
 
-Each store holds one ordered frontier. Track coordinators can maintain separate
-stores and send rollups. The GitHub list is explicit: the CLI does not discover
-missing dependencies outside it. The frontier is an observation, not a merge
-approval. Before merging, check plan dependencies, current head verification,
-human gates, and authorization, then follow [ship-pr](../ship-pr/SKILL.md).
+The GitHub list is explicit. The CLI does not discover dependencies outside it.
+[STATE.md](STATE.md#recompute-the-merge-frontier) defines frontier ownership and
+the checks required before a merge.
 
 ## Compatibility and boundaries
 
@@ -126,17 +123,17 @@ runtime format while retaining its records. Unit ownership adds an optional
 `agent` column to upstream's format. Legacy verifier rows receive the name
 `legacy-verifier`; their unavailable timestamps remain empty.
 
-`overview.md`, the plan, briefs, reports, and `decisions.tsv` remain authored by
-the execution owner. Append handoffs under `## Handoff <date/time>` headings;
-`status` includes the last such section. Its compact change summary compares
+The execution owner maintains the plan, briefs, reports, and overview under
+[STATE.md](STATE.md). [Show-me-your-work](../show-me-your-work/SKILL.md) owns the
+decision trail and its helper. `orch` does not write that log. `status` includes
+the last `## Handoff <date/time>` section from the overview. Its compact change summary compares
 aggregate counts, frontier, and gate IDs, so consult the full status for head or
 handoff changes that leave those aggregates unchanged.
 
 Agent dispatch, scheduling, ownership transfer, active-plan discovery, execution,
 and cleanup remain responsibilities of the skills and the active harness.
-The CLI runs when invoked; it does not resume work in the background. Preserve
-the store after completion. Workspace teardown follows
-[worktree-cleanup](../worktree-cleanup/SKILL.md) when authorized.
+The CLI runs when invoked and does not resume work in the background. Follow
+[STATE.md](STATE.md#close) for the completion handoff and teardown.
 
 ## Verify changes to the runtime
 

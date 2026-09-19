@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Implement the work described by the user in the spec or tickets. Carry forward designs and decisions already made. For non-trivial UI changes, follow [prototype](../prototype/SKILL.md) before editing real components.
 
-When executing a multi-phase plan, read [the shared execution-state convention](../orchestrate/STATE.md). A sequential execution owner initializes or resumes the plan's existing store, checkpoints progress, and leaves its next action there before ending a session. A delegated worker returns receipts to its coordinator, which owns the shared state updates.
+When executing a multi-phase plan, read [the shared execution-state convention](../orchestrate/STATE.md). A sequential execution owner initializes or resumes the plan's existing store, checkpoints progress, and leaves its next action there before ending a session. At completion, follow the store's close procedure, including the show-me-your-work audit. A delegated worker returns receipts to its coordinator, which owns the shared state updates and final audit.
 
 **You own the design. Plan, review, verify.** Delegate implementation. Stay in the lead.
 

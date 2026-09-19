@@ -39,8 +39,11 @@ change. Additional tests cover those changes, lock contention and stale locks,
 interrupted drains, and the GitHub adapter. Offline mode refuses dependency
 installation during tests. The installer excludes local dependency caches.
 
-STATE.md defines checkpoint and resume ownership; CLI.md supplies setup, command
-usage, recovery, and runtime limits. The CLI serializes individual writes. It
+STATE.md defines checkpoint and resume ownership and verification acceptance.
+CLI.md supplies setup, command usage, recovery, and runtime limits. Shared rules
+live in those references instead of being repeated in the playbook. Each store
+holds one ordered frontier. Pause and resume orders use the CLI's numbered
+standing-order format and retain both entries. The CLI serializes individual writes. It
 does not claim tasks, dispatch agents, discover active plans, validate evidence,
 schedule work, or authorize merges. Drained events remain available for recovery,
 but the coordinator still reconciles replay against current Git and PR state.
@@ -48,8 +51,8 @@ but the coordinator still reconciles replay against current Git and PR state.
 Sequential implement sessions and orchestrate use the same STATE.md convention
 and the same plan-local store. The core records are the plan, overview, unit
 table, verification ledger, and derived status. Handoffs record partial work,
-blockers, ownership, and the exact next action. The CLI initializes worker queues and a merge-frontier file; populate them when
-coordination requires them. Resume reconciles saved state with Git and PRs
+blockers, ownership, and the exact next action. The CLI initializes worker queues
+and a merge-frontier file; populate them when coordination requires them. Resume reconciles saved state with Git and PRs
 before assigning more work. Switching execution skills requires no state migration.
 
 Planning authorization, execution authorization, and merge authorization remain
@@ -102,3 +105,29 @@ The one-decision-per-session default remains, with an explicit user override.
 Invalidated tickets retain their history instead of being deleted. A route is
 clear only when its in-scope tickets and fog are resolved, not merely when the
 current frontier is empty. Matt's Codex display and invocation metadata is retained.
+
+## Show-me-your-work
+
+Pstack's decision-trail skill is imported as a separate skill, with its original
+TSV template, Bash helper, examples, and MIT license. Orchestrate references it
+when opening and auditing the trail, as upstream does. Multi-phase plans and
+sequential implement sessions use the same trail through their shared store.
+The decision-trail skill owns the schema, logging rules, and audit procedure.
+
+The Bash helper retains timestamping, parent-directory creation, single-line
+cells, and spreadsheet formula-prefix escaping. It adds a header check to avoid
+appending six-column rows to astack's earlier four-column logs. The transition
+procedure preserves the earlier file and logs its path without inventing missing
+facts. Writes remain serialized by the execution owner; the helper has no lock.
+
+Transcript access uses the active environment's task-scoped tools or documented
+paths. When transcripts are unavailable, the audit uses available command records
+and artifacts and reports that limit. Independent review remains required when
+delegation is available. A different model family is used when available and
+permitted; the final Attention findings identify coverage limits. The upstream
+instruction to delete incorrect entries conflicted with its append-only rule.
+Corrections now append evidence and identify the original row.
+
+The prose pass preserves the imported workflows, examples, and useful terms such
+as brief, frontier, and fog of war. It removes figurative phrasing, splits dense
+instructions, and replaces repeated state rules with references.

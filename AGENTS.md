@@ -23,7 +23,8 @@ Run `python3 -m unittest discover -s tests -v`. Keep tests offline and confined
 to temporary directories. Use Python 3.10+, the standard library, and Git for
 scripts, with support for macOS and Linux.
 
-The directly imported orchestration runtime under `skills/orchestrate/scripts/`
-retains upstream Bun/TypeScript to preserve its implementation and tests. This is
-the exception to the Python script convention. Follow the verification steps in
-[CLI.md](skills/orchestrate/CLI.md) to run its tests offline in a temporary copy.
+The directly imported orchestration runtime retains Bun/TypeScript, and
+`skills/show-me-your-work/scripts/log.sh` retains Bash. These upstream imports
+are exceptions to the Python script convention. Follow the verification steps in
+[CLI.md](skills/orchestrate/CLI.md) to run the orchestration tests offline in a
+temporary copy. The Python suite also tests the imported decision-log helper.

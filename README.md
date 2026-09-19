@@ -90,6 +90,10 @@ GitHub frontier adapter. Bun is required when executing multi-phase work; the
 first CLI call installs the locked dependencies. Agent dispatch stays with the
 active harness.
 
+[Show-me-your-work](skills/show-me-your-work/SKILL.md) owns the decision trail
+used by these execution workflows, including reasons, evidence, outcomes, and
+the final audit. Its original Bash helper and TSV template are included.
+
 The [planning adaptation notes](upstream/planning-adaptations.md) explain the
 upstream workflows and their integration with astack.
 

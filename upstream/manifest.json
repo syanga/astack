@@ -272,7 +272,7 @@
     ],
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/orchestrate/LICENSE-pstack",
-    "note": "Preserves coordinator roles, briefs, pilot and rolling execution, completion queues, stack ownership, SHA-keyed verification, failure handling, and escalation. Directly imports the original Bun/TypeScript CLI, store, bootstrap, tests, package manifest, and lockfile. Retains Graphite and adds a GitHub frontier adapter. Targeted changes add unit ownership, legacy table reads, retained verdict and drain history, verifier precedence, handoff status, and offline test setup. Adapts Cursor dispatch to available tools. Shares STATE.md and CLI.md with multi-phase-plan and sequential implement; honors execution and merge authorization and routes merges through ship-pr. See upstream/planning-adaptations.md.",
+    "note": "Preserves coordinator roles, briefs, pilot and rolling execution, completion queues, stack ownership, SHA-keyed verification, failure handling, and escalation. Directly imports the original Bun/TypeScript CLI, store, bootstrap, tests, package manifest, and lockfile. Retains Graphite and adds a GitHub frontier adapter. Targeted changes add unit ownership, legacy table reads, retained verdict and drain history, verifier precedence, handoff status, and offline test setup. Adapts Cursor dispatch to available tools. Shares STATE.md and CLI.md with multi-phase-plan and sequential implement; honors execution and merge authorization and routes merges through ship-pr. See upstream/planning-adaptations.md. Delegates decision trails and their audit to the imported show-me-your-work skill. Centralizes verification rules in STATE.md, aligns frontier and standing-order instructions with the runtime, and removes repeated or figurative prose.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/orchestrate.md": "skills/orchestrate/SKILL.md",
       "pstack/skills/poteto-mode/scripts/orch/orch.ts": "skills/orchestrate/scripts/orch/orch.ts",
@@ -291,7 +291,7 @@
     ],
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/multi-phase-plan/LICENSE-pstack",
-    "note": "Preserves the ordered plan skeleton and per-PR evidence workflow. Replaces provider-specific execution, scheduling, control, and model dependencies with astack skills and available tools. Scales live scenarios to risk, allows reasoned performance exemptions, and follows existing human gates. Ports the checker to Python standard library. See upstream/planning-adaptations.md. Records one execution store reused by implement and orchestrate, including durable handoffs and resume reconciliation.",
+    "note": "Preserves the ordered plan skeleton and per-PR evidence workflow. Replaces provider-specific execution, scheduling, control, and model dependencies with astack skills and available tools. Scales live scenarios to risk, allows reasoned performance exemptions, and follows existing human gates. Ports the checker to Python standard library. See upstream/planning-adaptations.md. Records one execution store reused by implement and orchestrate, including durable handoffs and resume reconciliation. References show-me-your-work for the decision trail and completion audit.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/multi-phase-plan.md": "skills/multi-phase-plan/SKILL.md",
       "pstack/skills/poteto-mode/scripts/check-plan.mjs": "skills/multi-phase-plan/scripts/check_plan.py"
@@ -310,6 +310,22 @@
       "skills/engineering/wayfinder/SKILL.md": "skills/wayfinder/SKILL.md",
       "skills/engineering/wayfinder/agents/openai.yaml": "skills/wayfinder/agents/openai.yaml",
       "skills/engineering/setup-matt-pocock-skills/issue-tracker-local.md": "skills/wayfinder/TRACKER.md"
+    }
+  },
+  "show-me-your-work": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": [
+      "pstack/skills/show-me-your-work/SKILL.md",
+      "pstack/skills/show-me-your-work/references/decision-log-template.tsv",
+      "pstack/skills/show-me-your-work/scripts/log.sh"
+    ],
+    "commit": "032be146865d973682535de75f2287da438550bf",
+    "license": "MIT, kept in skills/show-me-your-work/LICENSE-pstack",
+    "note": "Imports the original decision-trail skill, TSV template, Bash helper, examples, and audit checklist. Shortens the description for astack, uses task-scoped transcript tools or records, and makes unavailable independent review or model diversity explicit. Resolves the upstream conflict between append-only history and deleting audit errors through corrective rows. Shares the execution store, serializes writes through its owner, and preserves legacy logs before adopting the six-column format. The helper retains sanitization and adds incompatible-header refusal. See upstream/planning-adaptations.md.",
+    "files": {
+      "pstack/skills/show-me-your-work/SKILL.md": "skills/show-me-your-work/SKILL.md",
+      "pstack/skills/show-me-your-work/references/decision-log-template.tsv": "skills/show-me-your-work/references/decision-log-template.tsv",
+      "pstack/skills/show-me-your-work/scripts/log.sh": "skills/show-me-your-work/scripts/log.sh"
     }
   }
 }
