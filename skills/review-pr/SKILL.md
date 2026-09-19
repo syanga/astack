@@ -83,6 +83,8 @@ Present the two reports under `## Standards` and `## Spec` headings, verbatim or
 
 End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent.
 
+For an existing PR, post actionable findings using [posting.md](../harden-pr/posting.md).
+
 ## Why two axes
 
 A change can pass one axis and fail the other:
@@ -91,5 +93,3 @@ A change can pass one axis and fail the other:
 - Code that does exactly what the issue asked but breaks the project's conventions → **Spec pass, Standards fail.**
 
 Reporting them separately stops one axis from masking the other.
-
-When asked to post the review on a PR, use [posting.md](../harden-pr/posting.md).
