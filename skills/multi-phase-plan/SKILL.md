@@ -13,10 +13,12 @@ disable-model-invocation: true
 3. Explore independent areas in subagents when available and permitted, within the harness's capacity. Each returns file pointers, conventions, test commands, and entry points. No inlined dumps. Explore directly when delegation is unavailable or adds no value.
 4. Copy the skeleton below into the plan file and fill every placeholder. Unless the operator names a path, write `.scratch/<program>/plan.md`. Keep every heading and every sub-block in the order shown. One section per PR. One PR is one change with its own evidence, per [Sequence Verifiable Units](../principles/sequence-verifiable-units.md). Name [implement](../implement/SKILL.md) as the execution skill for bounded work or [orchestrate](../orchestrate/SKILL.md) for a standing program. Both use the [shared execution-state convention](../orchestrate/STATE.md) and its [show-me-your-work](../show-me-your-work/SKILL.md) decision trail. Read the state convention and record the absolute store path in the plan. Record execution and merge authorization separately.
 5. Write under [technical-writing](../technical-writing/SKILL.md) in full, then [unslop](../unslop/SKILL.md). The body is one Diátaxis mode, how-to. Appendices hold explanation and reference. Each heading states the task or the finding. No long dashes. No mid-sentence colons.
-6. Run `python3 <this skill's directory>/scripts/check_plan.py <plan.md>` and fix every problem it prints. The checker validates structure and evidence fields. Review the dependencies and the adequacy of the verification yourself.
+6. Run `python3 <this skill's directory>/scripts/check_plan.py <plan.md>` and fix every problem it prints. The checker validates structure, evidence fields, and probe references. Review the dependencies and the adequacy of the verification yourself.
 7. Hand back. Post the plan path and the script's output, then stop. Execution starts under the named skill when the user authorizes it. Honor authorization already given for execution after planning. For a requested transfer to another session, use [handoff](../handoff/SKILL.md) to link the plan and record remaining approvals. Planning alone does not initialize an execution store.
 
 **Verification.** Tests alone are not sufficient verification. A PR is verified only when its applicable unit, live, and perf boxes are checked with evidence. Every verification block opens with that rule.
+
+Give each verification command or tool procedure a named code fence, such as `sh probe=PR1.unit` or `text probe=PR1.live.1`. Use the PR section's ID, followed by `.unit`, `.live.<lane number>`, or `.perf`. For several unit probes, append a stable name, such as `.unit.errors`. Reference each fence from its verification box with ``Probe `PR1.unit` ``. Keep the commands beside their boxes or in an appendix. Plans without named probes retain their existing checks.
 
 The live block is mandatory and exercises the real changed behavior. Use as many independent scenarios as the risks require, with an artifact and a pass predicate for each. One is the **Regression lane against trunk.** It runs the same load-bearing scenario on trunk and head. If trunk does not have the feature, record that fact and gate the behavior the diff adds plus the end state the user waits for.
 
@@ -40,6 +42,8 @@ The program runs `<installed skills directory>/<implement or orchestrate>/SKILL.
 Shared execution state lives at `<absolute store path>`, using `<installed skills directory>/orchestrate/STATE.md`. Use that same store for sequential and delegated execution, and link it in every session handoff.
 
 Tests alone are not sufficient verification. A PR is verified only when its applicable unit, live, and perf boxes are checked with evidence.
+
+Select a probe with `python3 <installed skills directory>/multi-phase-plan/scripts/check_plan.py <absolute plan path> --probe <id>`. The command validates the plan and prints that probe without executing it.
 
 ## Program checklist
 
@@ -104,17 +108,21 @@ Each lane uses an isolated workspace at the PR head when it writes files or stat
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its applicable unit, live, and perf boxes are checked with evidence.
 
-- [ ] <Test file and the case it gains.> Run `<command>`.
+- [ ] <Test file and the case it gains.> Probe `<PR id>.unit`.
+
+```sh probe=<PR id>.unit
+<test command>
+```
 
 **Verify, live.** Tests alone are not sufficient verification. A PR is verified only when its applicable unit, live, and perf boxes are checked with evidence. Run at the PR head, per the boot recipe.
 
-- [ ] Lane 1. Regression lane against trunk. Run <the same load-bearing scenario> at trunk and head. If trunk lacks the feature, record that and gate <the behavior the diff adds plus the end state the user waits for>. Save `<artifact path>`. Pass when <predicate>.
-- [ ] Lane 2. <Scenario.> Save `<artifact path>`. Pass when <predicate>.
+- [ ] Lane 1. Regression lane against trunk. Probe `<PR id>.live.1`. Run <the same load-bearing scenario> at trunk and head. If trunk lacks the feature, record that and gate <the behavior the diff adds plus the end state the user waits for>. Save `<artifact path>`. Pass when <predicate>.
+- [ ] Lane 2. <Scenario.> Probe `<PR id>.live.2`. Save `<artifact path>`. Pass when <predicate>.
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its applicable unit, live, and perf boxes are checked with evidence.
 
 - [ ] Metric. <What is measured at both trunk and head. If trunk lacks the feature, also name the diff-added work and the end-to-end state the user waits for.>
-- [ ] Probe. <The command or procedure, run at trunk and at the head, interleaved. Both sides must produce the metric.>
+- [ ] Probe. `<PR id>.perf`. <Run at trunk and head, interleaved. Both sides must produce the metric.>
 - [ ] Baseline. Record the trunk <value> first.
 - [ ] Rule. <Head against trunk, with the number that fails. If the scenarios differ, add absolute budgets for the diff-added work and the user-visible end state instead of an invalid ratio.>
 

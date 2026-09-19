@@ -33,7 +33,8 @@ convention. The upstream lockfile and dependency versions are retained.
 Targeted runtime changes preserve the shared-state contract: optional unit agent
 ownership, reads of the previously documented table formats, append-only verdict
 history with verifier precedence, retained inbox drain batches, and a status
-section for current unit verification and the latest handoff. One original test
+section for current unit verification and the latest handoff. Generated status
+explains that missing PR-ledger evidence does not assess local receipts. One original test
 now names the second independent verifier, matching the intentional precedence
 change. Additional tests cover those changes, lock contention and stale locks,
 interrupted drains, and the GitHub adapter. Offline mode refuses dependency
@@ -78,7 +79,10 @@ including selection of UI mocks before real component edits.
 The Node check-plan script is ported to Python's standard library. It checks the
 plan structure and evidence fields, accepts reasoned performance exemptions,
 and rejects missing live receipts, predicates, or regression scenarios. It also
-checks code-fence boundaries and numeric performance thresholds. It cannot judge
+checks code-fence boundaries and numeric performance thresholds. Named probes
+bind commands to unit and lane IDs, and `--probe` selects a block after validation.
+Duplicate, missing, and mismatched references fail. Plans without probe IDs retain
+their existing checks. The checker cannot judge
 whether a scenario proves the intended behavior or whether the dependency graph
 is correct; the author still reviews those. Tests exercise the CLI using plans
 in temporary directories.

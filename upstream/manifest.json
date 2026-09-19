@@ -32,7 +32,7 @@
     "path": "skills/engineering/code-review",
     "commit": "74ca5fe077456a0b3b2f5310cf9430999fd0b5fd",
     "license": "MIT, kept in skills/review-pr/LICENSE-mattpocock",
-    "note": "Based on the pinned upstream directory, preserving the two axes, twelve Fowler smells, reviewer briefs, and separate reports. Adapts invocation metadata, removes Matt-specific setup, prioritizes user requirements, reviews the requested diff, records the PR head, and requires attributed posting of actionable findings through harden-pr's shared PR helper. Removes the old rubric and prompt builder. Links shared astack guidance for reusing and publishing PR test results, including delegated runs and the tested commit. Posts only actionable findings, keeps summaries in the conversation, and puts test results in the PR description."
+    "note": "Based on the pinned upstream directory, preserving the two axes, twelve Fowler smells, reviewer briefs, and separate reports. Adapts invocation metadata, removes Matt-specific setup, prioritizes user requirements, reviews the requested diff, records the PR head, and requires attributed posting of actionable findings through harden-pr's shared PR helper. Removes the old rubric and prompt builder. Links shared astack guidance for reusing and publishing PR test results, including delegated runs and the tested commit. Posts only actionable findings, keeps summaries in the conversation, and puts test results in the PR description. Reviewer contexts remain independent when limited agent capacity requires sequential execution."
   },
   "technical-writing": {
     "repository": "https://github.com/cursor/plugins.git",
@@ -291,7 +291,7 @@
     ],
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/multi-phase-plan/LICENSE-pstack",
-    "note": "Preserves the ordered plan skeleton and per-PR evidence workflow. Replaces provider-specific execution, scheduling, control, and model dependencies with astack skills and available tools. Scales live scenarios to risk, allows reasoned performance exemptions, and follows existing human gates. Ports the checker to Python standard library. See upstream/planning-adaptations.md. Records one execution store reused by implement and orchestrate, including durable handoffs and resume reconciliation. References show-me-your-work for the decision trail and completion audit. References handoff for session transfers while preserving the existing task record.",
+    "note": "Preserves the ordered plan skeleton and per-PR evidence workflow. Replaces provider-specific execution, scheduling, control, and model dependencies with astack skills and available tools. Scales live scenarios to risk, allows reasoned performance exemptions, and follows existing human gates. Ports the checker to Python standard library. See upstream/planning-adaptations.md. Records one execution store reused by implement and orchestrate, including durable handoffs and resume reconciliation. References show-me-your-work for the decision trail and completion audit. References handoff for session transfers while preserving the existing task record. Named probes bind verification boxes to unit and lane IDs; the checker validates references and selects commands by ID.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/multi-phase-plan.md": "skills/multi-phase-plan/SKILL.md",
       "pstack/skills/poteto-mode/scripts/check-plan.mjs": "skills/multi-phase-plan/scripts/check_plan.py"

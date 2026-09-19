@@ -959,6 +959,8 @@ ${table(
 
 ## Current unit verification
 
+NOT-VERIFIED means no ledger receipt matches the unit's PR and SHA. Local receipts under reports/ are not assessed here; inspect them before accepting work without a PR.
+
 ${table(["Unit", "PR", "SHA", "Verdict"], unitRows.map((unit) => [
   unit.id, unit.pr, unit.sha,
   ledgerRows.find((row) => row.pr === unit.pr && row.sha === unit.sha)?.verdict ?? "NOT-VERIFIED",

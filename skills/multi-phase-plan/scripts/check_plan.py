@@ -22,6 +22,8 @@ HOW_MARKERS = [
 ]
 PERF_ITEMS = ["Metric.", "Probe.", "Baseline.", "Rule."]
 BOX = re.compile(r"^\s*- \[[ x]\] (.*)$")
+PROBE_REF = re.compile(r"\bProbe\.? `([^`]+)`")
+PROBE_ID = r"[A-Za-z0-9_-]+\.(?:unit(?:\.[A-Za-z0-9_-]+)?|live\.[1-9][0-9]*|perf)"
 
 
 @dataclass
@@ -58,15 +60,35 @@ def check(text):
         except ValueError:
             fail(1, "unclosed frontmatter")
     lines = []
+    probes = {}
+    source_lines = text.splitlines(keepends=True)
     fence = None
+    probe_id = None
+    probe_body = []
     for number, value in enumerate(raw[start:], start + 1):
         marker = re.match(r"^\s{0,3}(`{3,}|~{3,})(.*)$", value)
         if fence:
             if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence) and not marker[2].strip():
+                if probe_id:
+                    body = "".join(probe_body)
+                    if probe_id in probes:
+                        fail(number, f"duplicate probe {probe_id}")
+                    elif not body.strip():
+                        fail(number, f"empty probe {probe_id}")
+                    else:
+                        probes[probe_id] = body
                 fence = None
+            elif probe_id:
+                probe_body.append(source_lines[number - 1])
             continue
         if marker:
             fence = marker[1]
+            info = marker[2].strip()
+            probe = re.fullmatch(rf"\w+ probe=({PROBE_ID})", info)
+            probe_id = probe[1] if probe else None
+            probe_body = []
+            if "probe=" in info and not probe:
+                fail(number, "probe fence needs a language and UNIT.unit, UNIT.live.N, or UNIT.perf ID")
             continue
         lines.append(Line(number, value))
         prose = re.sub(r"`[^`]*`|!?\[[^\]]*\]\([^)]*\)", "", value)
@@ -125,7 +147,17 @@ def check(text):
     if not prs:
         fail(1, "no PR sections between Program checklist and Close the program")
     report = []
+    named_probes = bool(probes) or any(PROBE_REF.search(line.text) for line in lines)
+    referenced = set()
+    units = set()
     for pr in prs:
+        unit = re.search(r"\(([A-Za-z0-9_-]+)\)$", pr.title)
+        if named_probes and not unit:
+            fail(pr.number, "a plan with named probes needs a unit ID in parentheses after each PR title")
+        if named_probes and unit:
+            if unit[1] in units:
+                fail(pr.number, f"duplicate unit ID {unit[1]}")
+            units.add(unit[1])
         blocks = []
         for line in pr.lines:
             match = re.match(r"^\*\*([^*]+)\*\*(.*)$", line.text)
@@ -147,6 +179,24 @@ def check(text):
                     fail(box.number, f"{prefix} has an empty box")
             if block.title.startswith("Verify,") and not block.rest.startswith(RULE):
                 fail(block.number, f"{prefix} does not open with the rule")
+            if named_probes and unit:
+                for box in boxes:
+                    lane = re.match(r"Lane (\d+)\.", box.text)
+                    if block.title == "Verify, unit.":
+                        expected = rf"{re.escape(unit[1])}\.unit(?:\.[A-Za-z0-9_-]+)?"
+                    elif block.title == "Verify, live." and lane:
+                        expected = re.escape(f"{unit[1]}.live.{lane[1]}")
+                    elif block.title == "Verify, perf." and box.text.startswith("Probe."):
+                        expected = re.escape(f"{unit[1]}.perf")
+                    else:
+                        continue
+                    refs = PROBE_REF.findall(box.text)
+                    if len(refs) != 1 or not re.fullmatch(expected, refs[0]):
+                        fail(box.number, f"{prefix} needs one Probe reference matching its unit and lane")
+                    for ref in refs:
+                        referenced.add(ref)
+                        if ref not in probes:
+                            fail(box.number, f"undefined probe {ref}")
             if block.title == "Verify, live.":
                 numbers = []
                 for box in boxes:
@@ -192,22 +242,30 @@ def check(text):
             fail(close.number, "no Prototype evidence appendix")
         if not close.boxes():
             fail(close.number, "Close the program has no boxes")
+    for probe_id in sorted(probes.keys() - referenced):
+        fail(1, f"probe {probe_id} has no verification box")
     report.append(f"{len(prs)} PR sections, {len(problems)} problems")
-    return report, problems
+    return report, problems, probes
 
 
 def main():
     parser = argparse.ArgumentParser(description="Check the structure and evidence fields of a multi-PR plan.")
     parser.add_argument("plan", type=Path)
+    parser.add_argument("--probe", metavar="ID", help="validate the plan and print the named probe without executing it")
     args = parser.parse_args()
     try:
         content = args.plan.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
         parser.exit(2, f"{args.plan}: {error}\n")
-    report, problems = check(content)
-    print("\n".join(report))
+    report, problems, probes = check(content)
+    if args.probe is not None and args.probe not in probes:
+        problems.append((1, f"unknown probe {args.probe}"))
+    if args.probe is None:
+        print("\n".join(report))
     for number, message in problems:
         print(f"{args.plan}:{number}: {message}", file=sys.stderr)
+    if args.probe is not None and not problems:
+        sys.stdout.write(probes[args.probe])
     return bool(problems)
 
 

@@ -57,18 +57,85 @@ Not applicable. This adds validation on the startup error path only.
 The reproduction script and output are attached to PR1.
 """
 
+NAMED_PLAN = (
+    PLAN.replace("Run `python3 -m unittest test_cli`.", "Probe `PR1.unit`.")
+    .replace("Lane 1. Regression", "Lane 1. Probe `PR1.live.1`. Regression")
+    + "\n## Appendix B. Probes\n"
+    + "```sh probe=PR1.unit\npython3 -m unittest test_cli\n```\n"
+    + "~~~sh probe=PR1.live.1\npython3 cli.py --config bad.json\n~~~\n"
+)
+
 
 class CheckPlanTests(unittest.TestCase):
-    def run_plan(self, content):
+    def run_plan(self, content, *args):
         with tempfile.TemporaryDirectory() as directory:
             plan = Path(directory) / "plan.md"
             plan.write_text(content, encoding="utf-8")
             result = subprocess.run(
-                [sys.executable, str(SCRIPT), str(plan)],
+                [sys.executable, str(SCRIPT), str(plan), *args],
                 capture_output=True, text=True, check=False,
             )
             self.assertEqual(plan.read_text(encoding="utf-8"), content)
             return result
+
+    def test_probe_selection_uses_identity_after_blocks_move(self):
+        plan = PLAN.replace("Run `python3 -m unittest test_cli`.", "Probe `PR1.unit`.")
+        plan = plan.replace("Lane 1. Regression", "Lane 1. Probe `PR1.live.1`. Regression")
+        unit = "```sh probe=PR1.unit\npython3 -m unittest test_cli\n```\n"
+        live = "~~~sh probe=PR1.live.1\npython3 cli.py --config bad.json\n~~~\n"
+        for blocks in (unit + live, live + unit):
+            with self.subTest(blocks=blocks):
+                result = self.run_plan(plan + "\n## Appendix B. Probes\n" + blocks, "--probe", "PR1.live.1")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "python3 cli.py --config bad.json\n")
+
+    def test_invalid_probe_bindings_emit_no_selected_command(self):
+        section = NAMED_PLAN[NAMED_PLAN.index("## Reject invalid"):NAMED_PLAN.index("## Close the program")]
+        for plan, diagnostic in [
+            (NAMED_PLAN.replace("probe=PR1.unit", "probe=PR2.unit"), "undefined probe PR1.unit"),
+            (NAMED_PLAN.replace("PR1.live.1", "PR2.live.1"), "matching its unit and lane"),
+            (NAMED_PLAN.replace("PR1.live.1", "PR1.live.2"), "matching its unit and lane"),
+            (NAMED_PLAN.replace("Probe `PR1.unit`.", "Run the tests."), "needs one Probe reference"),
+            (NAMED_PLAN + "```sh probe=PR1.unit\necho duplicate\n```\n", "duplicate probe PR1.unit"),
+            (NAMED_PLAN + "```sh probe=PR1.unit.extra\necho unused\n```\n", "has no verification box"),
+            (NAMED_PLAN.replace("python3 -m unittest test_cli\n", "\n"), "empty probe PR1.unit"),
+            (NAMED_PLAN.replace("probe=PR1.unit", "probe=PR1.unknown"), "probe fence needs"),
+            (NAMED_PLAN.replace("(PR1)", "without an ID"), "needs a unit ID"),
+            (NAMED_PLAN.replace("## Close the program", section + "## Close the program"), "duplicate unit ID PR1"),
+        ]:
+            with self.subTest(diagnostic=diagnostic):
+                result = self.run_plan(plan, "--probe", "PR1.live.1")
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+                self.assertIn(diagnostic, result.stderr)
+        for probe in ("PR9.live.1", ""):
+            result = self.run_plan(NAMED_PLAN, "--probe", probe)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, "")
+            self.assertIn(f"unknown probe {probe}", result.stderr)
+
+    def test_probe_selection_preserves_heredoc_without_executing_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "must-not-exist"
+            command = f"python3 - <<'PY'\nfrom pathlib import Path\nPath({str(marker)!r}).touch()\nPY\n"
+            plan = NAMED_PLAN.replace("python3 -m unittest test_cli\n", command)
+            result = self.run_plan(plan, "--probe", "PR1.unit")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, command)
+            self.assertFalse(marker.exists())
+
+    def test_performance_probe_reference_is_checked_and_selectable(self):
+        plan = NAMED_PLAN.replace(
+            "Not applicable. This adds validation on the startup error path only.",
+            "- [ ] Metric. Startup in ms.\n- [ ] Probe. `PR1.perf`.\n"
+            "- [ ] Baseline. Record trunk first.\n- [ ] Rule. Fail above 10 percent.",
+        ) + "```sh probe=PR1.perf\npython3 bench.py\n```\n"
+        result = self.run_plan(plan, "--probe", "PR1.perf")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "python3 bench.py\n")
+        result = self.run_plan(plan.replace("Probe. `PR1.perf`", "Probe. `PR1.unit`"))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("matching its unit and lane", result.stderr)
 
     def test_cli_accepts_plan_with_live_evidence_and_reasoned_perf_exemption(self):
         result = self.run_plan(PLAN)
