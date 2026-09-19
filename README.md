@@ -49,6 +49,9 @@ For contribution rules, see [AGENTS.md](AGENTS.md).
 
 ## Implementation skills
 
+Ask `astack-help` which skills fit your current task. It reads the installed
+astack skills and recommends what to use next.
+
 Start with [implement](skills/implement/SKILL.md) when the desired behavior is
 clear. Use [prototype](skills/prototype/SKILL.md) first to resolve UI or logic
 design questions, then implement the chosen direction.
