@@ -17,7 +17,6 @@ Sources and MIT licenses are recorded in [manifest.json](manifest.json).
 | [tdd](../skills/tdd/SKILL.md) | Matt's main skill, tests and mocking examples; pstack's regression workflow in BUG-FIX.md | Test Behavior, Not Implementation and Deep Modules |
 | [to-spec](../skills/to-spec/SKILL.md) | Matt's process and inline spec template | Established domain vocabulary and testing decisions |
 | [prototype](../skills/prototype/SKILL.md) | Matt's UI and logic branches; pstack's isolation and observation | Static mocks, t3-preview, and implementation handoff |
-| [to-tickets](../skills/to-tickets/SKILL.md) | Matt's vertical slices, dependencies, and ticket templates | Existing internal-API migration principle |
 | [diagnosing-bugs](../skills/diagnosing-bugs/SKILL.md) | Matt's six phases, feedback-loop menu, checklists, and human-loop script | Root-cause and behavioral-testing principles |
 
 Pstack's `feature` is a playbook inside `poteto-mode`, not a standalone skill.
@@ -29,8 +28,8 @@ handles a particular proposed change. Grilling and domain modeling retain their
 existing jobs. Review, hardening, PR delivery, and merging use the existing
 skills instead of new copies of their workflows.
 
-Matt's Codex display metadata is retained. Architect, implement, to-spec, and
-to-tickets require explicit invocation. TDD, prototype, and diagnosing-bugs
+Matt's Codex display metadata is retained. Architect, implement, and to-spec
+require explicit invocation. TDD, prototype, and diagnosing-bugs
 remain model-invoked. Descriptions are bounded by astack's catalog limit.
 
 ## Architecture and implementation
@@ -79,14 +78,15 @@ testing decision lists and prototype-fragment exception. Story coverage scales
 to the feature instead of following a length quota. Further Notes records
 assumptions and unresolved decisions; the handoff identifies blocking questions.
 
-To-tickets retains both local and tracker templates, dependency order, vertical
-slices, and the staged wide-refactor explanation. A pointer applies the existing
-internal-API migration policy before choosing expand-contract. Tickets include
-the verification that demonstrates the delivered behavior.
-
-Both skills use the agreed destination and actual project labels. Matt's setup
+To-spec uses the agreed destination and actual project labels. Matt's setup
 skill is not required. Prior agreement is reused, and external publication stays
-within the authorized scope. Local tickets remain usable without tracker access.
+within the authorized scope.
+
+The collection omits to-tickets. Implementation already handles decomposition
+within a task. Its useful vertical-slice and dependency guidance lives in
+[Sequence Verifiable Units](../skills/principles/sequence-verifiable-units.md).
+A separate ticket workflow would be useful if work regularly needs assignment
+across sessions or contributors.
 
 ## Prototypes
 

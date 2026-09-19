@@ -234,18 +234,22 @@
     "license": "MIT, kept in skills/prototype/LICENSE-pstack and skills/prototype/LICENSE-mattpocock",
     "note": "Starts from Matt prototype directory and retains logic scenarios, state display, UI alternative criteria, and switcher behavior. Uses pstack scratch isolation and matching-surface verification. Adapts real-route edits to static HTML mocks, local visual constraints and t3-preview, with selection before real components and scoped production handoff. Retains Codex metadata. See upstream/implementation-adaptations.md."
   },
-  "to-tickets": {
-    "repository": "https://github.com/mattpocock/skills.git",
-    "path": "skills/engineering/to-tickets",
-    "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
-    "license": "MIT, kept in skills/to-tickets/LICENSE-mattpocock",
-    "note": "Retains the upstream process, vertical slices, dependency edges, both ticket templates, and Codex metadata. Replaces setup dependencies and fixed labels, honors prior agreement, adds explicit verification, and reconciles staged migrations with the existing internal-API migration principle. See upstream/implementation-adaptations.md."
-  },
   "diagnosing-bugs": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/engineering/diagnosing-bugs",
     "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
     "license": "MIT, kept in skills/diagnosing-bugs/LICENSE-mattpocock",
     "note": "Retains the upstream six phases, feedback-loop menu, minimization criteria, prediction format, checklists, human-loop script, and Codex metadata. Links shared testing and root-cause guidance, preserves diagnosis-only scope and provisional investigation without reproduction, qualifies flake-rate claims, and treats hypothesis count as guidance. Removes narration comments from the shell template under no-comments. See upstream/implementation-adaptations.md."
+  },
+  "implementation-slicing": {
+    "repository": "https://github.com/mattpocock/skills.git",
+    "path": "skills/engineering/to-tickets",
+    "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+    "license": "MIT, retained in skills/principles/LICENSE-mattpocock",
+    "note": "Only vertical-slice and blocking-dependency guidance is retained in the existing Sequence Verifiable Units principle. No standalone to-tickets skill, tracker workflow, or ticket templates are installed. The rest of the principle retains its pstack provenance under principles.",
+    "files": {
+      "SKILL.md": "skills/principles/sequence-verifiable-units.md",
+      "agents/openai.yaml": null
+    }
   }
 }
