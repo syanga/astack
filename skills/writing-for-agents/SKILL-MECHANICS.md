@@ -28,9 +28,13 @@ When user-invoked skills multiply past what you can remember, a **router skill**
 | Harness | User-invoked mechanism | Catalog cost |
 | --- | --- | --- |
 | Claude Code | `disable-model-invocation: true` in frontmatter | description truncated at 1536 characters |
-| Codex | `policy.allow_implicit_invocation: false` in `agents/openai.yaml`; the astack installer writes it from the frontmatter flag | whole catalog capped at 8000 characters or 2% of context |
+| Codex | `policy.allow_implicit_invocation: false` in `agents/openai.yaml` | whole catalog capped at 8000 characters or 2% of context |
 | Gemini CLI | none, every enabled skill is listed | every description injected each session |
 | OpenCode | none, every skill is listed | every description in the skill tool |
+
+For a user-invoked skill, the astack installer generates Codex policy when
+`agents/openai.yaml` is absent. If the file exists, its policy must match the
+frontmatter. The installer validates it without modifying it.
 
 Two consequences. Write every description as if the model will read it, because on two harnesses it will. Keep the model-invoked set small, because forty skills at 200 characters fill Codex's cap.
 

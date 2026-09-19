@@ -61,6 +61,10 @@ design questions, then implement the chosen direction.
 Implementation uses [tdd](skills/tdd/SKILL.md) for test-first changes and
 [diagnosing-bugs](skills/diagnosing-bugs/SKILL.md) for uncertain failures.
 
+Use [wizard](skills/wizard/SKILL.md) when setup or migrations need human steps.
+It generates an interactive Bash script that guides dashboard actions and
+captures configuration values for local development and CI.
+
 These entry points compose with the existing principles, review, and delivery
 skills. The [adaptation notes](upstream/implementation-adaptations.md) explain
 the upstream sources, overlaps, and workflow choices.
