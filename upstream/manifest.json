@@ -171,5 +171,85 @@
     "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
     "license": "MIT, copied from pstack/LICENSE to skills/create-verification-skill/LICENSE",
     "note": "Preserves the upstream creation workflow, complete feature-map examples, and maintenance procedure under one entry point. Shortens the description and replaces Cursor-only paths with project skill conventions. Adds shared authoring guidance and conditional verification, automation, idempotency, and testing principle links. Adapts delegation with a direct fallback, respects startup scope and isolation, reports unreachable features as unverified, and opens maintenance PRs when requested. Splits the maintenance live-pass paragraph so its health, evidence, and cleanup requirements are readable."
+  },
+  "architect": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/architect",
+    "commit": "032be146865d973682535de75f2287da438550bf",
+    "license": "MIT, kept in skills/architect/LICENSE-pstack",
+    "note": "Starts from the pinned pstack directory, retaining the five phases, candidate brief, design red flags, and rationale template. Replaces arena and fixed models with available subagent tools, links local principles and exploration skills, preserves design-only scope, and requires the local UI selection workflow. Applies no-comments to sketch guidance. See upstream/implementation-adaptations.md."
+  },
+  "implement": {
+    "repository": [
+      "https://github.com/cursor/plugins.git",
+      "https://github.com/mattpocock/skills.git"
+    ],
+    "path": [
+      "pstack/skills/poteto-mode/playbooks/feature.md",
+      "skills/engineering/implement"
+    ],
+    "commit": [
+      "032be146865d973682535de75f2287da438550bf",
+      "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
+    ],
+    "license": "MIT, kept in skills/implement/LICENSE-pstack and skills/implement/LICENSE-mattpocock",
+    "note": "Uses the pstack Feature playbook as the base, retaining design ownership, the four-part throughput checkpoint, implementation delegation, diff review, and verified units. Incorporates Matt implement guidance for TDD, regular typechecking and focused tests, final review, and commits. Adapts provider-specific dispatch, local skill references, and task-scoped delivery. Retains Matt Codex metadata. See upstream/implementation-adaptations.md."
+  },
+  "tdd": {
+    "repository": [
+      "https://github.com/cursor/plugins.git",
+      "https://github.com/mattpocock/skills.git"
+    ],
+    "path": [
+      "pstack/skills/tdd",
+      "skills/engineering/tdd"
+    ],
+    "commit": [
+      "032be146865d973682535de75f2287da438550bf",
+      "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
+    ],
+    "license": "MIT, kept in skills/tdd/LICENSE-pstack and skills/tdd/LICENSE-mattpocock",
+    "note": "Keeps Matt SKILL.md, tests.md, mocking.md, and Codex metadata, plus pstack regression workflow as BUG-FIX.md without skill frontmatter. Reuses established testing boundaries, links the existing testing principle and Deep Modules, and explicitly permits concrete refactoring after green. Removes narration comments from code examples under no-comments. See upstream/implementation-adaptations.md."
+  },
+  "to-spec": {
+    "repository": "https://github.com/mattpocock/skills.git",
+    "path": "skills/engineering/to-spec",
+    "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+    "license": "MIT, kept in skills/to-spec/LICENSE-mattpocock",
+    "note": "Retains the upstream process, inline spec template, decision lists, prototype exception, and Codex metadata. Replaces setup and fixed tracker labels with the agreed destination, reuses settled testing boundaries, scales user stories to the feature, and records blocking questions. See upstream/implementation-adaptations.md."
+  },
+  "prototype": {
+    "repository": [
+      "https://github.com/cursor/plugins.git",
+      "https://github.com/mattpocock/skills.git"
+    ],
+    "path": [
+      "pstack/skills/poteto-mode/playbooks/prototype.md",
+      "skills/engineering/prototype"
+    ],
+    "commit": [
+      "032be146865d973682535de75f2287da438550bf",
+      "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
+    ],
+    "license": "MIT, kept in skills/prototype/LICENSE-pstack and skills/prototype/LICENSE-mattpocock",
+    "note": "Starts from Matt prototype directory and retains logic scenarios, state display, UI alternative criteria, and switcher behavior. Uses pstack scratch isolation and matching-surface verification. Adapts real-route edits to static HTML mocks, local visual constraints and t3-preview, with selection before real components and scoped production handoff. Retains Codex metadata. See upstream/implementation-adaptations.md."
+  },
+  "diagnosing-bugs": {
+    "repository": "https://github.com/mattpocock/skills.git",
+    "path": "skills/engineering/diagnosing-bugs",
+    "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+    "license": "MIT, kept in skills/diagnosing-bugs/LICENSE-mattpocock",
+    "note": "Retains the upstream six phases, feedback-loop menu, minimization criteria, prediction format, checklists, human-loop script, and Codex metadata. Links shared testing and root-cause guidance, preserves diagnosis-only scope and provisional investigation without reproduction, qualifies flake-rate claims, and treats hypothesis count as guidance. Removes narration comments from the shell template under no-comments. See upstream/implementation-adaptations.md."
+  },
+  "implementation-slicing": {
+    "repository": "https://github.com/mattpocock/skills.git",
+    "path": "skills/engineering/to-tickets",
+    "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+    "license": "MIT, retained in skills/principles/LICENSE-mattpocock",
+    "note": "Only vertical-slice and blocking-dependency guidance is retained in the existing Sequence Verifiable Units principle. No standalone to-tickets skill, tracker workflow, or ticket templates are installed. The rest of the principle retains its pstack provenance under principles.",
+    "files": {
+      "SKILL.md": "skills/principles/sequence-verifiable-units.md",
+      "agents/openai.yaml": null
+    }
   }
 }

@@ -47,6 +47,21 @@ The repository defines what gets installed:
 
 For contribution rules, see [AGENTS.md](AGENTS.md).
 
+## Implementation skills
+
+Start with [implement](skills/implement/SKILL.md) when the desired behavior is
+clear. Use [prototype](skills/prototype/SKILL.md) first to resolve UI or logic
+design questions, then implement the chosen direction.
+
+[architect](skills/architect/SKILL.md) explores the code's structure, and
+[to-spec](skills/to-spec/SKILL.md) captures decisions for a durable handoff.
+Implementation uses [tdd](skills/tdd/SKILL.md) for test-first changes and
+[diagnosing-bugs](skills/diagnosing-bugs/SKILL.md) for uncertain failures.
+
+These entry points compose with the existing principles, review, and delivery
+skills. The [adaptation notes](upstream/implementation-adaptations.md) explain
+the upstream sources, overlaps, and workflow choices.
+
 ## Update or remove
 
 After pulling source changes, rerun the installer with the same targets.
