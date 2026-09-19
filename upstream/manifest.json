@@ -149,20 +149,11 @@
     "note": "Preserves the upstream investigation workflow, default parallel source sweep, confidence framework, separate investigator and synthesizer prompts, and all source playbooks. Shortens the description, adapts tool discovery and delegation to the active harness, permits explicitly scoped investigations, and reports unavailable sources as gaps. Treats provider tools and warehouse schemas as examples to verify. Uses validated links and sentence-case headings."
   },
   "teach": {
-    "repository": [
-      "https://github.com/cursor/plugins.git",
-      "https://github.com/mattpocock/skills.git"
-    ],
-    "path": [
-      "pstack/skills/teach",
-      "skills/productivity/teach"
-    ],
-    "commit": [
-      "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
-      "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
-    ],
-    "license": "MIT, kept in skills/teach/LICENSE and skills/teach/LICENSE-mattpocock",
-    "note": "Preserves the upstream teaching directive, five-step conversational workflow, progressive diagrams, and concrete examples. Shortens the description, reads how and why by sibling paths, scopes investigation before dispatch, and returns findings for a single teaching explanation. Adapts image generation to available tools and the user's requested colors. Links the existing unslop skill. Borrows concrete learning outcomes, prerequisite pacing, evidence of understanding, and primary-source follow-up from Matt Pocock. Keeps conversational, read-only teaching without a persistent course workspace or quizzes."
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/teach",
+    "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
+    "license": "MIT, copied from pstack/LICENSE to skills/teach/LICENSE",
+    "note": "Preserves the upstream teaching directive, five-step conversational workflow, progressive diagrams, and concrete examples. Shortens the description, reads how and why by sibling paths, scopes investigation before dispatch, and returns findings for a single teaching explanation. Adapts image generation to available tools and the user's requested colors. Links the existing unslop skill."
   },
   "reflect": {
     "repository": "https://github.com/cursor/plugins.git",
