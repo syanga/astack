@@ -48,8 +48,11 @@ The CLI owns the unit and ledger formats. Use `--json` for complete records.
 New units start `pending` (`planned` in older manual stores). Execution states
 are `running`, `blocked`, `needs-verify`, `merge-ready`, `done`,
 `failed`, `abandoned`, and `zombie-reconciled`. Use `done` only when the unit's
-acceptance criteria and authorized delivery step are complete. A PR awaiting
-merge remains `merge-ready`. Abandonment records its reason and the replacement
+acceptance criteria and authorized delivery step are complete. Required reviews
+are part of acceptance. If a hold prevents a required review, keep the unit
+`needs-verify` and record the pending review. Delivery permission alone does not
+waive that review. A PR awaiting merge remains `merge-ready`.
+Abandonment records its reason and the replacement
 or remaining gap in `overview.md`; it does not satisfy the original predicate.
 
 ## Accept verification
@@ -111,8 +114,8 @@ partial result. Session termination alone never marks work done.
    and record decisions. Recompute the frontier after a merge or stack mutation.
    Each CLI mutation holds the store lock and atomically replaces its file; a
    checkpoint spanning commands still needs recovery after interruption.
-4. Run `orch status`, then recompute ready work from dependencies and current state.
-   Record acceptance and the next action in the overview handoff.
+4. Recompute ready work from dependencies and current state. Record acceptance
+   and the next action in the overview handoff, then run `orch status`.
 
 After interruption, run `orch init`, inspect `orch --json inbox history`, and
 reconcile any unrecorded receipts before dispatching more work. History includes
@@ -157,7 +160,8 @@ report them as pending. Reconcile these results before selecting work. An
 interrupted checkpoint is evidence to reconcile, not permission to repeat an
 already completed action.
 
-Regenerate the frontier when present and the status summary, within any
+Refresh the frontier only when the store tracks PRs. The empty frontier created
+by `orch init` needs no forge lookup. Regenerate the status summary within any
 restrictions on checkpoint writes. Select the next unfinished unit whose
 dependencies and approvals are satisfied and whose work the current hold permits.
 If the hold prevents all execution, report the saved

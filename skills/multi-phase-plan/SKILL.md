@@ -50,7 +50,7 @@ Tests alone are not sufficient verification. A PR is verified only when its appl
 - [ ] Read the installed execution, verification, open-pr, and ship-pr skills used by this program. Record their paths and re-read them on resume or when they change.
 - [ ] Record a supported audit cadence. If background scheduling is unavailable, audit at each completion drain and before each human report. Checkpoint unit states and receipts as work progresses. Before ending the session, append the current worktree, partial work, blockers, and exact next action to the store's overview and regenerate its status summary.
 - [ ] At each audit, probe active owners using read-only status and their artifacts. Reconcile stalled work before replacing its owner. Post a status message with the PR, owner, state, head SHA, verdicts, merges, open gates, and blockers.
-- [ ] On the operator's hold or stand-down, send every owner a zero-writes order at once.
+- [ ] On the operator's hold or stand-down, apply the requested scope through the installed handoff skill's PAUSE.md procedure. Record the hold and release condition when checkpoint writes are allowed.
 
 ### Spawn owners
 
