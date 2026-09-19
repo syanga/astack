@@ -156,6 +156,14 @@ evidence, and repeats checks when their inputs changed or evidence is missing.
 This resolves the source's tension between never repeating verification and
 proving inherited claims.
 
+Pauses with an execution store use the CLI's numbered pause and resume orders.
+The hold records whether in-flight work may continue and what permits resumption.
+An operator hold survives session changes until its release condition is met.
+Pickup with an execution store delegates to STATE.md. Other tasks reconcile
+ownership and evidence before continuing. Handoff routes decision-trail audits
+and Attention findings through show-me-your-work. A stop instruction that prevents
+review leaves that review explicitly pending.
+
 Implement, prototype, multi-phase-plan, orchestrate, and Wayfinder point to handoff
 at session-transfer boundaries. Routine checkpoints still follow STATE.md, and
 ordinary same-session skill transitions need no extra document. Handoff adds no

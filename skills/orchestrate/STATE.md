@@ -142,17 +142,28 @@ Read the plan, latest overview handoff, unit rows, ledger, and any standing
 orders, the decision trail, and pending completions. Confirm that the previous
 execution owner is inactive or has transferred ownership before writing shared state.
 
+Apply [the CLI's pause and resume orders](CLI.md#completions-and-recovery).
+Honor the hold's scope during verification, checkpoint writes, and execution.
+
 Check the recorded worktrees, uncommitted changes, branch heads, PR states, and
 verification receipts. Preserve partial work. Probe surviving workers through
 read-only harness status and durable artifacts before reassigning their scope.
 Reconcile stale rows and plan checkboxes with these facts; a changed SHA requires
-fresh verification. An interrupted checkpoint is evidence to reconcile, not
-permission to repeat an already completed action.
+fresh verification. Evaluate receipts under [Accept verification](#accept-verification).
+Reuse them only when they identify the current artifact and remain applicable to
+its environment and acceptance criteria. When those inputs changed or supporting
+evidence is missing, run the necessary checks if the hold permits them. Otherwise
+report them as pending. Reconcile these results before selecting work. An
+interrupted checkpoint is evidence to reconcile, not permission to repeat an
+already completed action.
 
-Regenerate the frontier when present and the status summary. Select the next
-unfinished unit whose dependencies and approvals are satisfied. Continue from
-its recorded next action, either directly with implement or through orchestrate's
-drain cycle. Reuse the same store when execution changes between these modes.
+Regenerate the frontier when present and the status summary, within any
+restrictions on checkpoint writes. Select the next unfinished unit whose
+dependencies and approvals are satisfied and whose work the current hold permits.
+If the hold prevents all execution, report the saved
+resume point and its release condition. Otherwise continue from the recorded next
+action, either directly with implement or through orchestrate's drain cycle.
+Reuse the same store when execution changes between these modes.
 
 ## Close
 

@@ -343,7 +343,7 @@
       "032be146865d973682535de75f2287da438550bf"
     ],
     "license": "MIT, kept in skills/handoff/LICENSE-mattpocock and skills/handoff/LICENSE-pstack",
-    "note": "Starts from Matt handoff and retains artifact pointers, suggested skills, redaction, focus arguments, and explicit-only Codex metadata. Imports pstack pause-safely and session-pickup as PAUSE.md and RESUME.md. Reuses execution stores and decision maps, keeps temporary notes for standalone tasks, and preserves coordinator ownership. Adapts transcript access, delivery authorization, partial-work preservation, and evidence reuse. See upstream/planning-adaptations.md.",
+    "note": "Starts from Matt handoff and retains artifact pointers, suggested skills, redaction, focus arguments, and explicit-only Codex metadata. Imports pstack pause-safely and session-pickup as PAUSE.md and RESUME.md. Reuses execution stores and decision maps, keeps temporary notes for standalone tasks, and preserves coordinator ownership. Adapts transcript access, delivery authorization, partial-work preservation, and evidence reuse. Uses the numbered pause/resume protocol, delegates store-backed pickup to STATE.md, verifies other work before continuing, and routes trail audits and Attention findings through show-me-your-work. See upstream/planning-adaptations.md.",
     "files": {
       "skills/productivity/handoff/SKILL.md": "skills/handoff/SKILL.md",
       "skills/productivity/handoff/agents/openai.yaml": "skills/handoff/agents/openai.yaml",

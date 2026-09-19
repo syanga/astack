@@ -29,4 +29,8 @@ Redact any sensitive information, such as API keys, passwords, or personally ide
 
 If the user passed arguments, treat them as a description of what the next session will focus on and tailor the doc accordingly.
 
+## Report
+
+When the task has a decision trail, follow [show-me-your-work](../show-me-your-work/SKILL.md) for its audit, review, and Attention findings. If the user's stop instruction prevents that review, report the review as pending in Attention and explain why.
+
 Return the handoff's absolute path or URL, the first action on resume, and any ownership or transfer still pending. The next session starts from that pointer; this skill does not automatically discover active work.

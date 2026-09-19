@@ -83,10 +83,14 @@ local store; copying its files between machines does not provide distributed loc
 nor schedules a timeout. Resolve the gate only when the required decision exists.
 
 Standing orders must remain consecutively numbered. To pause dispatch, append
-`Dispatch paused: <reason>` with `orch standing add`. After fixing the cause,
-append `Dispatch resumed: <evidence>`. The latest dispatch order controls new
-spawns; other standing constraints remain in force. This records the coordinator's
-instruction, not an automatic scheduler switch. Preserve both entries for review.
+`Dispatch paused: <reason>` with `orch standing add`. Include whether in-flight
+work may continue and what permits resumption. Append `Dispatch resumed: <evidence>`
+only when that release condition is met and resumption is authorized. An operator
+hold requires the operator's release unless the original order specifies another
+release condition. A session change alone does not release a hold.
+The latest dispatch order controls new spawns. Other standing constraints remain
+in force. This records the coordinator's instruction, not an automatic scheduler
+switch. Preserve both entries for review.
 
 ## Merge frontier
 
