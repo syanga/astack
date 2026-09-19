@@ -1,6 +1,7 @@
 ---
 name: wizard
-description: Generate a Bash wizard when setup, credentials, third-party dashboards, or migrations require human steps the agent cannot perform.
+description: Generate an interactive Bash wizard for a manual procedure.
+disable-model-invocation: true
 ---
 
 # Wizard
