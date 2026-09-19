@@ -1,36 +1,28 @@
 ---
 name: prototype
-description: Build a throwaway prototype to resolve a UI, state-model, or behavioral design question before implementation.
+description: Build a throwaway prototype to answer a design question. Use when the user wants to sanity-check whether a state model or logic feels right, or explore what a UI should look like.
 ---
 
 # Prototype
 
-Name the decision the prototype must resolve. Use the prompt and current
-discussion to choose its shape:
+A prototype is **throwaway code that answers a question**. The question decides the shape.
 
-- For layout, interaction, or copy choices, follow [UI.md](UI.md).
-- For state transitions, business rules, or data shape, follow [LOGIC.md](LOGIC.md).
-- For a behavioral or timing comparison, use the smallest isolated script that
-  measures the relevant output or timing under comparable inputs.
+## Pick a branch
 
-State an assumption if the question is ambiguous and a useful experiment can
-proceed. Ask when choosing the wrong branch would waste the work.
+Identify which question is being answered, using the user's prompt, the surrounding code, or by asking if the user is around:
 
-Build in a clearly named scratch directory, separate from production source.
-Use in-memory sample data by default. If persistence is the subject of the
-experiment, use an isolated scratch store within the user's authorized scope.
+- **"Does this logic / state model feel right?"** → [LOGIC.md](LOGIC.md). Build a single shareable HTML file (free-play buttons plus tabbed guided walkthroughs) that pushes the state machine through cases that are hard to reason about on paper, and that a non-developer can drive.
+- **"What should this look like?"** → [UI.md](UI.md). Generate several radically different static UI variations, switchable via a URL search param and a floating bottom bar.
+- **"Which behavior or timing works better?"** Build the smallest isolated script that exercises the question and records comparable outputs or timings.
 
-Keep the prototype cheap to discard. Add only what makes the decision
-observable. Verify it by running the scenario or inspecting the rendered
-variants, without building a production test suite around it.
+These branches produce very different artifacts, so getting this wrong wastes the whole prototype. If the question is genuinely ambiguous and the user isn't reachable, default to whichever branch better matches the surrounding code (a backend module → logic; a page or component → UI) and state the assumption at the top of the prototype.
 
-Deliver HTML through [t3-preview](../t3-preview/SKILL.md). Report the decision,
-alternatives, observed evidence, recommendation, and artifact link. Distinguish
-checks you ran from those left for the user. State that the artifact is throwaway.
+## Rules that apply to every branch
 
-For a visual choice, stop for the user's selection before editing real
-components. Once a decision is made, capture its rationale and artifact pointer
-in the spec or task record. Use [implement](../implement/SKILL.md) for authorized
-production work. Carry forward validated behavior with normal verification.
-Archive prototype branches or update external issues only when that delivery is
-part of the task.
+1. **Throwaway from day one, and clearly marked as such.** Build throwaway in an isolated scratch dir, separate from production source. Name the artifact and identify the module or page it explores so the context is clear.
+2. **Trivial to run.** A UI or logic demo is a self-contained HTML file. Deliver it through [t3-preview](../t3-preview/SKILL.md), including its cleanup record. A behavioral experiment runs with one command.
+3. **No persistence by default.** State lives in memory. Persistence is the thing the prototype is _checking_, not something it should depend on. If the question explicitly involves a database, hit a scratch DB or a local file with a clear "PROTOTYPE, wipe me" name.
+4. **Skip the polish.** No tests, no error handling beyond what makes the prototype _runnable_, no abstractions. The point is to learn something fast.
+5. **Surface the state.** After every action (logic) or on every variant switch (UI), print or render the full relevant state so the user can see what changed.
+6. **Verify on the matching surface.** For a visual decision, inspect each variant and drive the interaction using t3-preview's browser route when available. For a behavioral or timing decision, observe the thing you are deciding by logging the timing, printing the output, or watching the render. Report checks that remain unverified.
+7. **Capture it when done.** Record the verdict, the question it settled, and a pointer to the prototype in the task record or spec. For a visual decision, stop for the user's selection before editing real components. Hand the chosen direction to [implement](../implement/SKILL.md) for authorized production work and normal verification. Archive branches and external issue updates follow the task's delivery scope.

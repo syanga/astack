@@ -1,64 +1,109 @@
 ---
 name: to-tickets
-description: Break a spec, plan, or conversation into verifiable implementation tickets with explicit dependencies.
+description: Break a plan, spec, or conversation into verifiable tickets with explicit blocking dependencies.
 disable-model-invocation: true
 ---
 
-# To tickets
+# To Tickets
 
-Read the source spec or conversation and any referenced issue discussion.
-Inspect unfamiliar code and use the project's domain vocabulary and ADRs.
-Separate unresolved design decisions from implementation work. A ticket blocked
-on a decision remains blocked even when it has no code dependency.
+Break a plan, spec, or conversation into a set of **tickets**: tracer-bullet vertical slices, each declaring the tickets that **block** it.
 
-## Draft the slices
+Use the user's requested tracker or the project's established destination and labels. Otherwise use local Markdown files. External publication follows the task's authorization.
 
-Read [Sequence Verifiable Units](../principles/sequence-verifiable-units.md).
-Each ticket delivers a narrow but complete behavior through the necessary
-layers and includes its verification. Size it for one focused agent session.
-State only dependencies that genuinely prevent the ticket from starting.
+## Process
 
-Put necessary preparatory refactoring first, with its own passing checks.
-Avoid splitting a feature into separate schema, backend, frontend, and test
-tickets when none delivers verifiable behavior alone.
+### 1. Gather context
 
-For a wide mechanical refactor, read
-[Migrate Callers Then Delete Legacy APIs](../principles/migrate-callers-then-delete-legacy-apis.md).
-Use a coordinated migration when all callers can change together. If external
-compatibility or independent delivery requires expand-contract, plan the new
-form, migration batches, and removal as explicit dependent tickets. Keep the
-temporary compatibility path bounded by the removal ticket. If no batch can
-pass independently, keep the coupled work in one integration unit and identify
-its final verification requirement.
+Work from whatever is already in the conversation context. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments.
 
-## Check the breakdown
+### 2. Explore the codebase (optional)
 
-Present titles, delivered behavior, and blockers in dependency order. Check that
-every acceptance criterion has an owner, every blocker resolves to a ticket or
-named external decision, and the dependency graph has no cycles.
+If you have not already explored the codebase, do so to understand the current state of the code. Ticket titles and descriptions should use the project's domain glossary vocabulary, and respect ADRs in the area you're touching.
 
-Use prior agreement on scope and granularity. Ask about unresolved product or
-sequencing choices when they affect the breakdown. Complete the drafts before
-seeking any required publication approval.
+Look for opportunities to prefactor the code to make the implementation easier. "Make the change easy, then make the easy change."
 
-## Deliver
+### 3. Draft vertical slices
 
-Use the destination requested by the user or established by the project.
-For local tickets, write one Markdown file per ticket in the chosen task
-directory, numbered in dependency order. When no destination is established,
-return the draft breakdown in the conversation.
+Break the work into **tracer bullet** tickets.
 
-Each ticket contains:
+<vertical-slice-rules>
 
-- A parent spec reference, if one exists.
-- The behavior to build and its acceptance criteria.
-- Verification that establishes those criteria.
-- The tickets or decisions blocking it, or an explicit statement that none do.
+- Each slice cuts a narrow but COMPLETE path through every layer (schema, API, UI, tests): vertical, NOT a horizontal slice of one layer
+- A completed slice is demoable or verifiable on its own
+- Each slice is sized to fit in a single fresh context window
+- Any prefactoring should be done first
 
-Publish externally only when authorized. Create blockers first so later tickets
-can reference real identifiers. Use native dependency links when available,
-otherwise record blockers in the body. Use the project's actual labels and
-leave the parent issue's state unchanged unless updating it was requested.
+</vertical-slice-rules>
 
-Return the ticket links and identify which tickets can start. The deliverable
-is the breakdown; begin implementation only when it is also requested.
+Give each ticket its **blocking edges**: the other tickets that must complete before it can start. A ticket with no blockers can start immediately.
+
+Read [Migrate Callers Then Delete Legacy APIs](../principles/migrate-callers-then-delete-legacy-apis.md) before planning an internal API migration. When its conditions apply, migrate callers and remove the old API in the same refactor wave. Use the staged approach below when compatibility or delivery constraints require it.
+
+**Wide refactors are the exception to vertical slicing.** A **wide refactor** is one mechanical change (rename a column, retype a shared symbol) whose **blast radius** fans across the whole codebase, so a single edit breaks thousands of call sites at once and no vertical slice can land green. Don't force it into a tracer bullet; sequence it as **expand–contract**. First expand: add the new form beside the old so nothing breaks. Then migrate the call sites over in batches sized by blast radius (per package, per directory), each batch its own ticket blocked by the expand, keeping CI green batch to batch because the old form still exists. Finally contract: delete the old form once no caller remains, in a ticket blocked by every migrate batch. When even the batches can't stay green alone, keep the sequence but let them share an integration branch that all block a final integrate-and-verify ticket; green is promised only there.
+
+### 4. Quiz the user
+
+Present the proposed breakdown as a numbered list. For each ticket, show:
+
+- **Title**: short descriptive name
+- **Blocked by**: which other tickets (if any) must complete first
+- **What it delivers**: the end-to-end behaviour this ticket makes work
+
+Ask the user:
+
+- Does the granularity feel right? (too coarse / too fine)
+- Are the blocking edges correct: does each ticket only depend on tickets that genuinely gate it?
+- Should any tickets be merged or split further?
+
+Use prior agreement on scope and granularity. Resolve open choices with the user when they affect the breakdown; an already authorized breakdown does not need another approval. Check that every acceptance criterion has an owner and the dependency graph has no cycles.
+
+### 5. Publish the tickets to the configured tracker
+
+Publish the authorized tickets. **How** depends on the agreed destination; the tickets are the same either way, only the shape of the blocking edges changes:
+
+- **Local files** → write one file per ticket under `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` in dependency order (blockers first). Each file's "Blocked by" lists the numbers/titles it depends on. Use the per-ticket file template below: one ticket per file, never a single combined file.
+- **A real issue tracker (GitHub, Linear, …)** → publish one issue per ticket in dependency order (blockers first) so each ticket's blocking edges can reference real identifiers. Use the platform's native blocking / sub-issue relationship where it has one; otherwise set each ticket's "Blocked by" to the blocking issues. Apply the project's actual readiness labels, distinguishing tickets blocked on unresolved decisions.
+
+Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
+
+Do NOT close or modify any parent issue.
+
+<local-ticket-template>
+
+# <NN>: <Ticket title>
+
+**What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective, not a layer-by-layer implementation list.
+
+**Blocked by:** the numbers/titles of the tickets that gate this one, or "None (can start immediately)".
+
+**Status:** ready or blocked, based on the declared dependencies
+
+- [ ] Acceptance criterion 1
+- [ ] Acceptance criterion 2
+
+**Verification:** the check that demonstrates the delivered behavior.
+
+</local-ticket-template>
+
+<issue-template>
+
+## Parent
+
+A reference to the parent issue on the tracker (if the source was an existing issue, otherwise omit this section).
+
+## What to build
+
+The end-to-end behaviour this ticket makes work, from the user's perspective, not layer-by-layer implementation.
+
+## Acceptance criteria
+
+- [ ] Criterion 1
+- [ ] Criterion 2
+
+## Blocked by
+
+- A reference to each blocking ticket, or "None (can start immediately)".
+
+</issue-template>
+
+In either form, avoid specific file paths or code snippets: they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts, not a working demo, just the important bits.

@@ -177,7 +177,7 @@
     "path": "pstack/skills/architect",
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/architect/LICENSE-pstack",
-    "note": "Retains grounding, caller-first sketches, structurally distinct alternatives, rationale, and redesign on repeated implementation friction. Uses existing how, why, Deep Modules, and Design It Twice references instead of arena and fixed model lists. Keeps sketches separate from production code until implementation. Design-only requests stop at the recommendation. See upstream/implementation-adaptations.md."
+    "note": "Starts from the pinned pstack directory, retaining the five phases, candidate brief, design red flags, and rationale template. Replaces arena and fixed models with available subagent tools, links local principles and exploration skills, preserves design-only scope, and requires the local UI selection workflow. Applies no-comments to sketch guidance. See upstream/implementation-adaptations.md."
   },
   "implement": {
     "repository": [
@@ -193,7 +193,7 @@
       "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
     ],
     "license": "MIT, kept in skills/implement/LICENSE-pstack and skills/implement/LICENSE-mattpocock",
-    "note": "Combines the pstack Feature playbook with Matt Pocock implement. Retains design ownership, work decomposition, artifact review, incremental checks, and verification on the matching surface. Uses conditional delegation, shared astack skills, and task-scoped delivery instead of mandatory arena, review, commits, and publication. See upstream/implementation-adaptations.md."
+    "note": "Uses the pstack Feature playbook as the base, retaining design ownership, the four-part throughput checkpoint, implementation delegation, diff review, and verified units. Incorporates Matt implement guidance for TDD, regular typechecking and focused tests, final review, and commits. Adapts provider-specific dispatch, local skill references, and task-scoped delivery. Retains Matt Codex metadata. See upstream/implementation-adaptations.md."
   },
   "tdd": {
     "repository": [
@@ -209,14 +209,14 @@
       "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
     ],
     "license": "MIT, kept in skills/tdd/LICENSE-pstack and skills/tdd/LICENSE-mattpocock",
-    "note": "Combines incremental feature TDD with practical bug regression testing. Reuses the existing testing principle instead of duplicating tests.md. Adapts mocking guidance, removes mandatory seam approval, permits focused refactoring while green, and reports limits when failing-before evidence is unavailable. See upstream/implementation-adaptations.md."
+    "note": "Keeps Matt SKILL.md, tests.md, mocking.md, and Codex metadata, plus pstack regression workflow as BUG-FIX.md without skill frontmatter. Reuses established testing boundaries, links the existing testing principle and Deep Modules, and explicitly permits concrete refactoring after green. Removes narration comments from code examples under no-comments. See upstream/implementation-adaptations.md."
   },
   "to-spec": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/engineering/to-spec",
     "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
     "license": "MIT, kept in skills/to-spec/LICENSE-mattpocock",
-    "note": "Retains conversation synthesis, testing decisions, prototype decision fragments, and explicit scope. Uses a separate concise format, records unresolved decisions, removes mandatory interviews, long story quotas, setup dependencies, and automatic tracker publication. See upstream/implementation-adaptations.md."
+    "note": "Retains the upstream process, inline spec template, decision lists, prototype exception, and Codex metadata. Replaces setup and fixed tracker labels with the agreed destination, reuses settled testing boundaries, scales user stories to the feature, and records blocking questions. See upstream/implementation-adaptations.md."
   },
   "prototype": {
     "repository": [
@@ -232,20 +232,20 @@
       "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
     ],
     "license": "MIT, kept in skills/prototype/LICENSE-pstack and skills/prototype/LICENSE-mattpocock",
-    "note": "Combines pstack isolated experiments and evidence with Matt Pocock UI alternatives and interactive logic scenarios. Adapts UI work to static scratch mocks and t3-preview, preserves selection before real edits, and removes automatic promotion and branch or issue writes. See upstream/implementation-adaptations.md."
+    "note": "Starts from Matt prototype directory and retains logic scenarios, state display, UI alternative criteria, and switcher behavior. Uses pstack scratch isolation and matching-surface verification. Adapts real-route edits to static HTML mocks, local visual constraints and t3-preview, with selection before real components and scoped production handoff. Retains Codex metadata. See upstream/implementation-adaptations.md."
   },
   "to-tickets": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/engineering/to-tickets",
     "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
     "license": "MIT, kept in skills/to-tickets/LICENSE-mattpocock",
-    "note": "Retains complete vertical slices, explicit blocking dependencies, local per-ticket files, and native tracker links when authorized. Reconciles wide migrations with the existing internal-API migration principle and avoids mandatory setup, labels, and repeated approval. See upstream/implementation-adaptations.md."
+    "note": "Retains the upstream process, vertical slices, dependency edges, both ticket templates, and Codex metadata. Replaces setup dependencies and fixed labels, honors prior agreement, adds explicit verification, and reconciles staged migrations with the existing internal-API migration principle. See upstream/implementation-adaptations.md."
   },
   "diagnosing-bugs": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/engineering/diagnosing-bugs",
     "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
     "license": "MIT, kept in skills/diagnosing-bugs/LICENSE-mattpocock",
-    "note": "Retains reproduction, minimization, falsifiable hypotheses, targeted instrumentation, performance measurements, regression checks, and cleanup. Extracts feedback-loop choices, removes hard numerical quotas and the HITL shell template, and permits provisional read-only investigation when reproduction is blocked. See upstream/implementation-adaptations.md."
+    "note": "Retains the upstream six phases, feedback-loop menu, minimization criteria, prediction format, checklists, human-loop script, and Codex metadata. Links shared testing and root-cause guidance, preserves diagnosis-only scope and provisional investigation without reproduction, qualifies flake-rate claims, and treats hypothesis count as guidance. Removes narration comments from the shell template under no-comments. See upstream/implementation-adaptations.md."
   }
 }

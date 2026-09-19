@@ -3,60 +3,36 @@ name: tdd
 description: Test-driven development. Use for test-first features, red-green-refactor, regression tests, or bug fixes with a practical local test path.
 ---
 
-# Test-driven development
+# Test-Driven Development
 
-Make the intended behavior executable before changing its implementation.
-Work in vertical slices, one failing test and its implementation at a time.
+TDD is the red → green loop. This skill is the reference that makes that loop produce tests worth keeping: what a good test is, where tests go, the anti-patterns, and the rules of the loop. Every section applies on every cycle: consult them before and during the loop, not after.
 
-## Choose the boundary and behavior
+When exploring the codebase, read `CONTEXT.md` (if it exists) so test names and interface vocabulary match the project's domain language, and respect ADRs in the area you're touching.
 
-Read [Test Behavior, Not Implementation](../principles/test-behavior-not-implementation.md)
-before writing or changing tests. Use the project's domain vocabulary and
-existing test conventions.
+For bug fixes, follow [BUG-FIX.md](BUG-FIX.md) for the focused regression workflow and its practical fallback. The test-quality references below apply to both features and fixes.
 
-Name the behavior and the public interface where a caller can observe it.
-Reuse testing boundaries already chosen in the spec or conversation. Otherwise
-choose an existing boundary that reaches the behavior and state the choice.
-Ask only when the choice depends on unresolved requirements or would change
-the design. For interface design, read [Deep Modules](../principles/deep-modules.md).
+## What a good test is
 
-Prefer the highest practical boundary that exercises the real behavior with a
-fast, reliable signal. A cheap unit test is insufficient when the defect
-requires several callers or an integration path. Read [mocking.md](mocking.md)
-when external dependencies need control.
+Tests verify behavior through public interfaces, not implementation details. Code can change entirely; tests shouldn't. A good test reads like a specification: "user can checkout with valid cart" tells you exactly what capability exists, and it survives refactors because it doesn't care about internal structure.
 
-## Run the loop
+Read [Test Behavior, Not Implementation](../principles/test-behavior-not-implementation.md) before writing or changing tests. See [tests.md](tests.md) for examples and [mocking.md](mocking.md) for mocking guidelines.
 
-1. Write one focused test for the next behavior. Derive its expected result
-   independently from the requirement or a worked example.
-2. Run it before changing the implementation. Confirm that it fails for the
-   intended behavior, rather than a syntax, fixture, or environment error.
-3. Make the smallest implementation change that satisfies the behavior and
-   preserves nearby contracts.
-4. Run the test again and confirm it passes. Run affected adjacent tests and
-   type checks when the change reaches beyond this test.
-5. Refactor when the passing code reveals a concrete simplification. Keep
-   behavior fixed and rerun the affected checks.
-6. Choose the next behavior based on what this cycle revealed.
+## Seams: where tests go
 
-Keep each completed slice green. Avoid writing the full test suite up front
-against an imagined implementation. Preserve existing assertions unless the
-behavioral contract has changed, and state that change.
+A **seam** is the public boundary you test at: the interface where you observe behavior without reaching inside. Tests live at seams, never against internals.
 
-## When a regression test is impractical
+**Reuse agreed seams.** Use the testing boundaries already established in the spec or conversation. Otherwise name the existing public interface that reaches the behavior and state your choice. Confirm with the user only when unresolved requirements or a new boundary would change the design. Testing effort belongs on the critical paths and complex logic.
 
-If the test would mostly exercise mocks, require unrelated fixture work, or
-depend on unavailable infrastructure, explain the limitation before fixing.
-Choose the closest useful check, such as a reproduction command, targeted
-script, browser interaction, or replayed input. Capture failing-before and
-passing-after evidence when possible.
+When the shape of that interface is itself in question (how deep the module is, where the seam belongs, what the interface should expose), read [Deep Modules](../principles/deep-modules.md) for the vocabulary. It is the shared source of the module, interface, depth, seam, adapter, leverage and locality terms, and it is a reference to consult, not a session to run.
 
-For a hard-to-reproduce bug, follow [diagnosing-bugs](../diagnosing-bugs/SKILL.md)
-to establish a useful signal. A manual check is evidence with a narrower
-guarantee than a retained regression test. State that limit.
+## Anti-patterns
 
-## Finish
+- **Implementation-coupled**: mocks internal collaborators, tests private methods, or verifies through a side channel (querying the database instead of using the interface). The tell: the test breaks when you refactor but behavior hasn't changed.
+- **Tautological**: the assertion recomputes the expected value the way the code does (`expect(add(a, b)).toBe(a + b)`, a snapshot derived by hand the same way, a constant asserted equal to itself), so it passes by construction and can never disagree with the code. Expected values must come from an independent source of truth: a known-good literal, a worked example, the spec.
+- **Horizontal slicing**: writing all tests first, then all implementation. Bulk tests verify _imagined_ behavior: you test the _shape_ of things rather than user-facing behavior, the tests go insensitive to real changes, and you commit to test structure before understanding the implementation. Work in **vertical slices** instead: one test → one implementation → repeat, each test a **tracer bullet** that responds to what the last cycle taught you.
 
-Run the final checks appropriate to the change. Report the failure observed
-before the fix, the passing check afterward, and any missing regression
-coverage. If no failing-before check ran, say so.
+## Rules of the loop
+
+- **Red before green.** Write the failing test first, then only enough code to pass it. Don't anticipate future tests or add speculative features.
+- **One slice at a time.** One seam, one test, one minimal implementation per cycle.
+- **Refactor after green.** When the passing code reveals a concrete simplification, keep behavior fixed and rerun the affected checks. Broader review belongs to [review-pr](../review-pr/SKILL.md).

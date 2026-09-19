@@ -1,66 +1,30 @@
 ---
 name: implement
-description: Implement a feature, spec, or set of tickets in verifiable slices.
+description: Implement a feature, spec, or set of tickets with design ownership, independent review, and verified slices.
 disable-model-invocation: true
 ---
 
 # Implement
 
-Build the work described by the user, spec, or tickets. Resolve conflicts in
-favor of the user's current requirements. Carry forward designs and decisions
-already made instead of reopening them by default.
+Implement the work described by the user in the spec or tickets. Carry forward designs and decisions already made. For non-trivial UI changes, follow [prototype](../prototype/SKILL.md) before editing real components.
 
-## Establish the contract
+**You own the design. Plan, review, verify.** Delegate implementation. Stay in the lead.
 
-Read the source request and relevant project instructions, domain glossary, and
-ADRs. Identify the observable acceptance criteria, scope, dependencies, and
-verification commands. Trace unfamiliar affected behavior with
-[how](../how/SKILL.md).
+1. [how](../how/SKILL.md) over the affected subsystem.
+2. [architect](../architect/SKILL.md) for parallel design exploration. Skipping stays as `architect skipped: <reason>`. Do not fold the design decision silently into implementation.
+3. Write the throughput checkpoint as four todo items. A dimension that genuinely does not apply (single file, no fan-out) keeps its item with `n/a: <reason>` rather than being dropped:
+   - **Blocking first steps.** Gates run before fan-out.
+   - **Independent workstreams.** Disjoint files, services, or layers parallelize. Shared writes serialize.
+   - **Shared mutable state.** Default to splitting the target (the [separate-before-serializing-shared-state](../principles/separate-before-serializing-shared-state.md) principle skill). Serialize only for real invariants.
+   - **Smallest safe decomposition.** If one worker is best, name why.
+4. Delegate code-writing to a subagent using the active environment's available tools and model configuration, with a specific scope (file paths, named data shape and its organizing structure per [model-the-domain](../principles/model-the-domain.md), a state machine over scattered booleans, a table/registry over branching, a typed model over repeated shape assumptions, chosen before the delegate writes logic, and success criteria). Review its diff yourself. When the implementation admits multiple valid shapes, use architect's candidate exploration before assigning the implementation. The purpose of delegation is review separation. If delegation is unavailable, own the diff directly and make the separate review pass explicit. Comments follow [no-comments](../no-comments/SKILL.md). Make surgical edits and re-ground against the source for upstream-derived files. Port shared-primitive improvements to all in-scope consumers and verify each.
+   Use [tdd](../tdd/SKILL.md) where possible, at the testing boundaries established for the task. Run typechecking regularly, single test files regularly, and the full test suite once at the end.
+5. Verify on the matching surface. "Inconclusive" or wrong-surface is not a pass. Flag it.
+6. Rebase into small, ordered commits. Stack follow-ups.
+   Use the [sequence-verifiable-units](../principles/sequence-verifiable-units.md) principle skill, building, verifying, and committing each small unit before the next.
+7. Once done, use [review-pr](../review-pr/SKILL.md) to review the work. For explicitly requested adversarial hardening, use [harden-pr](../harden-pr/SKILL.md).
+8. Commit the work and use [open-pr](../open-pr/SKILL.md) for PR delivery within the task's authorized scope. Honor a request to stop at local edits. Merging and deployment are separate actions.
 
-If the module shape remains uncertain, use [architect](../architect/SKILL.md).
-Return here with the chosen design. For non-trivial UI, layout, or copy changes,
-follow [prototype](../prototype/SKILL.md) before editing real components. Honor
-an existing selection.
+Code-coupled work (one feature, one migration) goes to a single owner with the checkpoint inline. That owner fans out internally after the blocking phase. Parent-level fan-out is for slices that produce independent artifacts (audits, cross-subsystem investigations, competing experiments). Rewrite the checkpoint at phase boundaries. Spawn a fresh owner rather than chaining interrupts.
 
-## Sequence the work
-
-Read [Sequence Verifiable Units](../principles/sequence-verifiable-units.md).
-Choose the smallest slice that demonstrates useful behavior through the
-affected layers. Put prerequisite decisions and setup before dependent work.
-For work spanning several tickets, use the dependencies already recorded or
-read [to-tickets](../to-tickets/SKILL.md) to draft a breakdown.
-
-For substantial work, identify independent workstreams and shared writes.
-When delegation is useful and available, give each worker a disjoint scope,
-the chosen data model, and acceptance criteria. Keep coupled changes under one
-owner. Inspect delegated diffs and verify their artifacts yourself. Work
-directly when dividing the task would add coordination without useful separation.
-
-## Build one slice
-
-Use [tdd](../tdd/SKILL.md) for requested test-first work and behavior changes with
-a practical test path. It owns test selection and the failing-before evidence.
-Use the closest useful executable check when a new test would provide weak
-signal or require disproportionate setup.
-
-Run focused tests and relevant type checks as each slice changes. Finish the
-current slice with its checks passing before building on it. Follow
-[no-comments](../no-comments/SKILL.md) when adding or changing code comments.
-If implementation repeatedly contradicts the sketch, return to architect's
-revision step with the evidence.
-
-## Verify and deliver
-
-Read [Prove It Works](../principles/prove-it-works.md). Exercise the changed
-behavior on the matching surface, including the complete communication path
-for integrations. Run the repository's required final checks and inspect the
-diff against the acceptance criteria. Distinguish blocked or inconclusive
-verification from a pass.
-
-Use [review-pr](../review-pr/SKILL.md) when the user requests review or the
-change warrants an independent review. Use [open-pr](../open-pr/SKILL.md) for
-authorized PR delivery. Preserve a request to stop at local changes.
-
-Report the behavior delivered, material design choices, verification evidence,
-and unresolved acceptance criteria. Commit and publish according to the task's
-delivery scope. Merging and deployment require their own authorization.
+**Reply:** what you built, what you chose and why, the throughput checkpoint, open decisions. Tables for design alternatives.

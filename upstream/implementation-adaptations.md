@@ -1,138 +1,141 @@
 # Implementation skill adaptations
 
-This collection combines pstack's design and feature workflows with Matt
-Pocock's implementation skills. Source revisions and retained MIT licenses are
-recorded in [manifest.json](manifest.json).
-
-The source checkouts used for this comparison are:
+This collection starts from pinned pstack and Matt Pocock originals. Clear
+upstream wording, structure, and examples are retained. The changes below
+address astack integration, user preferences, or specific correctness issues.
+Sources and MIT licenses are recorded in [manifest.json](manifest.json).
 
 - [pstack at 032be146](https://github.com/cursor/plugins/tree/032be146865d973682535de75f2287da438550bf/pstack).
 - [Matt Pocock at c55ee460](https://github.com/mattpocock/skills/tree/c55ee46073ed923f86ce59a5eb3b6d895095d1b7).
 
-## Collection
+## Collection and existing responsibilities
 
-| Skill | Sources | Responsibility |
+| Skill | Base and retained material | Integration with astack |
 | --- | --- | --- |
-| [architect](../skills/architect/SKILL.md) | pstack architect | Ground the problem, compare caller-first shapes, and choose a design |
-| [implement](../skills/implement/SKILL.md) | pstack Feature playbook and Matt implement | Carry a feature, spec, or tickets through verified slices |
-| [tdd](../skills/tdd/SKILL.md) | Both TDD skills | Establish failing-before evidence and implement one behavior at a time |
-| [to-spec](../skills/to-spec/SKILL.md) | Matt to-spec | Synthesize agreed behavior, decisions, and open questions |
-| [prototype](../skills/prototype/SKILL.md) | Both prototype workflows | Resolve design questions through disposable experiments |
-| [to-tickets](../skills/to-tickets/SKILL.md) | Matt to-tickets | Divide work into verifiable slices with explicit dependencies |
-| [diagnosing-bugs](../skills/diagnosing-bugs/SKILL.md) | Matt diagnosing-bugs | Establish a failure signal and test competing causes |
+| [architect](../skills/architect/SKILL.md) | pstack's five phases, runner brief, red flags, and rationale template | how, why, Deep Modules, and local principles |
+| [implement](../skills/implement/SKILL.md) | pstack Feature plus Matt's implementation checks and review | TDD, prototype, review-pr, and open-pr |
+| [tdd](../skills/tdd/SKILL.md) | Matt's main skill, tests and mocking examples; pstack's regression workflow in BUG-FIX.md | Test Behavior, Not Implementation and Deep Modules |
+| [to-spec](../skills/to-spec/SKILL.md) | Matt's process and inline spec template | Established domain vocabulary and testing decisions |
+| [prototype](../skills/prototype/SKILL.md) | Matt's UI and logic branches; pstack's isolation and observation | Static mocks, t3-preview, and implementation handoff |
+| [to-tickets](../skills/to-tickets/SKILL.md) | Matt's vertical slices, dependencies, and ticket templates | Existing internal-API migration principle |
+| [diagnosing-bugs](../skills/diagnosing-bugs/SKILL.md) | Matt's six phases, feedback-loop menu, checklists, and human-loop script | Root-cause and behavioral-testing principles |
 
-`feature` is a playbook inside pstack's `poteto-mode`, rather than a standalone
-skill. Its implementation responsibilities belong in `implement` here. Keeping
-both names would create two entry points with the same job.
+Pstack's `feature` is a playbook inside `poteto-mode`, not a standalone skill.
+Its responsibilities live under `implement` here. Both TDD workflows share one
+entry point, with pstack's focused bug-fix procedure reached through a reference.
 
-`architect`, `implement`, `to-spec`, and `to-tickets` are explicit entry points.
-`tdd`, `prototype`, and `diagnosing-bugs` remain model-invoked with bounded
-triggers. Callers can read any of them through sibling paths. The installer
-generates the corresponding Codex invocation policy.
+Architecture discovery remains in `improve-codebase-architecture`; `architect`
+handles a particular proposed change. Grilling and domain modeling retain their
+existing jobs. Review, hardening, PR delivery, and merging use the existing
+skills instead of new copies of their workflows.
 
-## Shared responsibilities already in astack
+Matt's Codex display metadata is retained. Architect, implement, to-spec, and
+to-tickets require explicit invocation. TDD, prototype, and diagnosing-bugs
+remain model-invoked. Descriptions are bounded by astack's catalog limit.
 
-| Existing skill or reference | Integration |
-| --- | --- |
-| how and why | Ground the affected system and recover design constraints |
-| grilling and domain-modeling | Resolve requirements and maintain domain vocabulary when that work is requested |
-| Deep Modules and Design It Twice | Supply shared interface vocabulary and independent design exploration |
-| improve-codebase-architecture | Find refactoring candidates across an existing codebase; architect handles a particular proposed change |
-| Test Behavior, Not Implementation | Own test-quality rules for both implementation and diagnosis |
-| review-pr and harden-pr | Keep review and requested hardening in their existing workflows |
-| open-pr and ship-pr | Keep PR preparation and merging separate from implementation mechanics |
-| create-verification-skill | Maintain project-specific verification knowledge when a reusable verification skill is needed |
-| t3-preview | Deliver prototypes and record ownership for cleanup |
+## Architecture and implementation
 
-## Reconciliation choices
+Architect retains the upstream phases, two distinct candidate requirement,
+caller-first design, screening criteria, synthesis rationale, and redesign
+signals. Arena and fixed provider models become portable subagent dispatch,
+with a stated direct fallback when delegation is unavailable. Runner guidance
+links to local principles and no-comments. The lead owns synthesis and
+implementation, so candidate agents do not recursively run the full workflow.
 
-### Architecture and implementation
+Design-only requests stop at the recommendation. Implementation uses scratch
+sketches until work begins and honors the static-mock selection requirement.
+Requested adversarial review routes to harden-pr.
 
-Architect retains pstack's grounding, caller usage before types, distinct
-alternatives, comparison by interface depth, and redesign when implementation
-repeatedly contradicts the sketch. Its rationale format is shorter and the
-shared design vocabulary stays in Deep Modules. Arena, Cursor model lists, and
-duplicated principle bodies are replaced by local references and available
-delegation. Scratch sketches avoid leaving unfinished bodies in production code.
+Implement retains pstack's design ownership, four-part throughput checkpoint,
+delegation, diff inspection, and verifiable units. Matt supplies the focused
+checks, TDD, final review, and commit guidance. Tool dispatch and skill links are
+adapted to astack. Prior decisions carry forward, and publication follows the
+task's delivery scope. A direct fallback records missing review separation when
+subagents are unavailable.
 
-Implement combines pstack's design ownership, decomposition, and artifact
-verification with Matt's incremental implementation and regular focused checks.
-Delegation depends on useful independent work, and delivery follows the user's
-scope. A small local edit does not require arena, a full review workflow, or a
-published PR. Design-only requests remain read-only with respect to product code.
+## TDD
 
-### Testing and diagnosis
+Matt's main structure and concrete test and mocking examples remain. Pstack's
+bug-fix workflow retains its practical fallback and before/after evidence
+requirements in BUG-FIX.md, with only skill frontmatter removed. Narration
+comments are removed from code examples under no-comments; the examples remain.
 
-Matt's feature TDD and pstack's focused bug regression workflow share one loop.
-The local testing principle owns assertion quality. The mocking reference adds
-external dependency control and the limits of fake integrations.
+Two behavior changes are deliberate:
 
-Testing boundaries already established in the spec are reused. Choosing an
-ordinary existing boundary does not require another approval. A new boundary
-that changes the design remains a decision to resolve.
+- Existing testing decisions are reused. Ordinary use of an established public
+  interface does not require another approval. A new boundary that changes the
+  design remains a decision to resolve.
+- Refactoring is allowed after green when it provides a concrete simplification,
+  with affected checks rerun. Matt's pinned main body reserves refactoring for
+  review even though its display metadata says red-green-refactor.
 
-Matt's current TDD body excludes refactoring from the implementation loop even
-though its description mentions red-green-refactor. The combined skill permits
-concrete simplification after green, with affected checks rerun. Pstack's
-practical fallback remains: a weak or disproportionate test gives way to an
-explicit executable check and a reported coverage limit.
+The existing testing principle remains authoritative for assertion quality.
+The examples supplement it instead of replacing it.
 
-Diagnosing-bugs keeps reproduction, minimization, predictions, targeted probes,
-and rerunning the original scenario after the fix. Read-only investigation can
-continue without a reproduction, but its conclusions remain provisional. Fixed
-hypothesis counts, fixed flake-rate thresholds, and a mandatory human-loop shell
-template are omitted. Performance and intermittent failures require measured
-comparisons rather than a claim that one passing run proves the fix.
+## Specs and tickets
 
-### Specs and tickets
+To-spec keeps the upstream template inline, including the implementation and
+testing decision lists and prototype-fragment exception. Story coverage scales
+to the feature instead of following a length quota. Further Notes records
+assumptions and unresolved decisions; the handoff identifies blocking questions.
 
-To-spec synthesizes the conversation without starting another interview. Its
-format distinguishes acceptance criteria, decisions, scope, and open questions.
-Prototype fragments remain useful when they express a decision more precisely
-than prose. Story quotas and a blanket ban on concrete paths are removed.
+To-tickets retains both local and tracker templates, dependency order, vertical
+slices, and the staged wide-refactor explanation. A pointer applies the existing
+internal-API migration policy before choosing expand-contract. Tickets include
+the verification that demonstrates the delivered behavior.
 
-To-tickets retains vertical slices and dependency edges. Wide refactors follow
-the existing migration principle when callers can change together. Expand-contract
-is reserved for compatibility or delivery constraints, with removal explicitly
-planned. Coupled batches are not presented as independently verified tickets.
+Both skills use the agreed destination and actual project labels. Matt's setup
+skill is not required. Prior agreement is reused, and external publication stays
+within the authorized scope. Local tickets remain usable without tracker access.
 
-Both workflows work without Matt's setup skill, fixed labels, or external
-tracker access. They honor existing authorization and publish only within the
-task's delivery scope.
+## Prototypes
 
-### Prototypes
+Matt's logic scenarios, portable model, visible state, free play, guided
+walkthroughs, and UI switcher behavior remain. Pstack supplies scratch isolation
+and observation on the relevant surface, including timing experiments.
 
-Pstack contributes isolation and measurement on the relevant surface. Matt
-contributes structurally different UI alternatives and logic demos with visible
-state, free play, reset, and guided scenarios.
+Real-route edits conflict with the user's static-mocks-first workflow. UI
+variants therefore use isolated, self-contained HTML and representative data.
+The rendering example uses browser APIs instead of framework components.
+Visual defaults follow the user's black background, white text, density, and
+animation constraints. HTML delivery and browser inspection use t3-preview.
 
-Matt's real-route edits conflict with the local static-mocks-first workflow.
-UI prototypes therefore live in scratch HTML, use the user's design constraints,
-and stop for a selection before production edits. Automatic code promotion,
-archive branches, and issue updates are replaced by scoped handoffs. The logic
-model stays separate from the page, but incorporation into production still
-requires normal verification.
+A visual decision stops for selection before real component edits. The handoff
+records the decision and prototype pointer; production work receives normal
+verification. Branch archives and issue updates follow the task's delivery scope.
+
+## Diagnosis
+
+The six phases, feedback-loop examples, minimization gate, prediction format,
+targeted probes, and cleanup checks remain. The optional human-loop script keeps
+its behavior with narration comments removed under no-comments.
+
+Diagnosis-only requests stop before implementation. When reproduction is
+unavailable, read-only investigation may continue with unverified hypotheses;
+the reproduction gate remains unmet. Production instrumentation requires
+explicit authorization. Unsupported percentage claims are replaced with measured
+reproduction rates and trial counts. The hypothesis count is guidance, not a
+quota. Intermittent fixes require evidence beyond one passing run.
 
 ## Other upstream candidates
 
-The inventory also surfaced these adjacent workflows. They remain candidates
-for later work rather than additional entry points in this import.
+These remain separate scope decisions:
 
-| Candidate | Current disposition |
+| Candidate | Existing coverage or distinct purpose |
 | --- | --- |
-| Matt wayfinder | Planning across sessions through a tracker-backed graph of decisions; broader than implementation slicing |
-| Matt research | Primary-source investigation and captured findings; a separate research workflow |
-| Matt grill-with-docs | Mostly composition of grilling and domain-modeling already present |
-| Matt triage and wizard | Issue lifecycle and human-only setup, outside this implementation collection |
-| pstack blast-radius | Cross-boundary impact investigation; compare with existing review and hardening coverage before importing |
+| Matt wayfinder | Planning across sessions through a graph of decisions |
+| Matt research | Primary-source investigation and captured findings |
+| Matt grill-with-docs | Composition of grilling and domain-modeling |
+| Matt triage and wizard | Issue lifecycle and human-only setup |
+| pstack blast-radius | Cross-boundary impact investigation; compare with review and hardening |
 | pstack interrogate | Independent adversarial review already covered by harden-pr |
-| pstack arena and swarm | Multi-agent orchestration with host-specific configuration; useful ideas do not require importing the runtime |
-| pstack figure-it-out and show-me-your-work | Large unattended workflows and durable decision trails; broader than the initial collection |
+| pstack arena and swarm | Provider-specific multi-agent orchestration |
+| pstack figure-it-out and show-me-your-work | Large unattended workflows and durable decision trails |
 
 ## Verification
 
-Installer validation checks skill names, description limits, references, and
-invocation metadata. The repository test suite checks installation behavior.
-These checks establish packaging correctness, not the effectiveness of every
-workflow in a live coding session. Behavioral changes should follow observed
-use rather than tests that pin prompt wording.
+Installer checks validate names, descriptions, local references, and invocation
+metadata. The repository test suite validates installation behavior. The restored
+human-loop script receives syntax and fixture-input checks. These checks do not
+establish effectiveness across live implementation tasks. Compare future changes
+against the pinned originals and evaluate behavioral changes through actual use.
