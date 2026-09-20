@@ -4,8 +4,6 @@ Examples for [TypeScript best practices](../SKILL.md). Shared rules live in [typ
 
 ## Branded types
 
-Brand primitives where mixing their meanings would be a defect. Validate once at the boundary. Downstream code trusts the type.
-
 ```ts
 type AgentId = string & { readonly __brand: "AgentId" };
 
@@ -20,8 +18,6 @@ declare function focusAgent(id: AgentId): void;
 This example uses a string brand. Reuse an existing brand convention when the repository has one.
 
 ## Discriminated unions
-
-Model variants with a literal discriminant. Every variant shares the field name and each variant's value is unique, so impossible combos can't be represented.
 
 ```ts
 type DiffState = { loading: boolean; diff?: GitDiff; error?: string };
@@ -39,8 +35,6 @@ type DiffState =
 Pick one discriminant name (`kind`, `type`, `tag`) and stick to it.
 
 ## Constructive modeling
-
-Build the type from parts that are all legal instead of restricting a loose type with runtime checks.
 
 Non-empty, via a variadic tuple. The required first element remains accessible under `noUncheckedIndexedAccess`:
 
@@ -111,8 +105,6 @@ Weakening the result to `Session | undefined` is the other total signature.
 
 ## `unknown` over `any`
 
-External data is always `unknown`. Narrow before use.
-
 ```ts
 function handle(input: any) {
   return input.foo.bar;
@@ -130,11 +122,9 @@ function handle(input: unknown) {
 }
 ```
 
-External sources include RPC payloads, `JSON.parse`, `postMessage`, IPC, file contents, environment variables, database results.
-
 ## Schemas before hand-rolled guards
 
-Before writing a property-by-property type guard for external data, look for the repository's runtime schema library and existing schemas. Let one schema own validation and derive the TypeScript type from it. Do not maintain a schema, a duplicate interface, and a guard that can drift apart.
+With Zod, derive the type from the schema that validates the input:
 
 ```ts
 import { z } from "zod";
@@ -151,11 +141,9 @@ function parseUser(input: unknown): User {
 }
 ```
 
-Use `safeParse` when failure is an expected branch. Use the equivalent inference helper when the repository uses another schema library. Do not add a new schema dependency for one guard. This rule prefers the schema system the codebase already trusts.
+Use `safeParse` when failure is an expected branch. Use the equivalent inference helper when the repository uses another schema library. Do not add a new schema dependency for one guard.
 
 ## Type assertions
-
-Assertions do not validate data. Prefer narrowing or a runtime schema. Use an assertion only when validation or a demonstrated invariant supports it, as in the branded constructors above.
 
 When removing an assertion, identify why TypeScript cannot infer the type:
 
@@ -185,15 +173,11 @@ function area(s: Shape): number {
 
 ## Type guards
 
-A guard must actually verify the claim. A lying guard is worse than `as`.
-
 ```ts
 function isCircle(s: Shape): s is Shape & { kind: "circle" } {
   return s.kind === "circle";
 }
 ```
-
-Prefer discriminant narrowing when possible.
 
 ## Exhaustiveness
 
@@ -245,11 +229,10 @@ const checked = { theme: "dark", cols: 3 } satisfies Config;
 
 ## Boundary validation
 
-Validate once where data crosses in. Trust established types inside. See [boundary discipline](../../principles/boundary-discipline.md).
+Keep intentionally open metadata as `Record<string, unknown>`.
 
 - **Wire formats:** follow the protocol's unknown-field policy. Ignore additional fields only where the contract permits them.
 - **Persisted JSON:** versioned blob with a try/catch around the parse.
-- **Don't re-validate** deep in call chains.
 
 ## Schema-derived types
 
@@ -272,8 +255,6 @@ declare function renderChecks(
 ): void;
 ```
 
-Reach for `Pick`, `Omit`, `Parameters`, `ReturnType`, `Awaited`, `typeof` before writing a new interface.
-
 ## Object args
 
 ```ts
@@ -293,5 +274,3 @@ openFile({
   },
 });
 ```
-
-Named options help when positional arguments have the same type and different meanings. Keep clear simple APIs and repository conventions. Measure allocation costs before changing a hot path.
