@@ -18,17 +18,5 @@ Read that repository's instructions. Compare the installed copy with its source
 before drafting changes. Account for local edits and changes already made upstream.
 Prepare the diff against source files. Installed copies are deployment outputs.
 
-## Validate and submit astack improvements
-
-For approved astack changes, run the checks required by the repository and follow
-[open-pr](../open-pr/SKILL.md) to submit a PR. If the user requested a proposal or
-local edits only, stop at that stage. The caller owns any selection of proposed
-changes before application.
-
-Explain the failure the change addresses and how the result was verified.
-Include only the session evidence needed to justify the change, with private
-transcript details removed from the public PR. If repository access or publishing
-is unavailable, retain the local diff and report the blocker.
-
-Return the PR link and verification result. Merging and reinstalling are separate
-actions governed by the user's request.
+Follow the owning repository's authoring, verification, and delivery instructions.
+In astack, the repository's `AGENTS.md` points to its local `author-skill` workflow.

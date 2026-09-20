@@ -8,7 +8,7 @@ Reference for writing any document an agent consumes: a skill, an `AGENTS.md` / 
 When the document you're writing is a skill, read [`SKILL-MECHANICS.md`](SKILL-MECHANICS.md) for frontmatter, invocation choice, and router skills. When a draft is done, run its prose through the sibling `unslop` skill at `../unslop/SKILL.md`.
 
 When improving an installed skill, follow [source edits](SOURCE-EDITS.md) to
-locate its owning repository, edit the source, and submit approved astack changes.
+locate its owning repository and follow that repository's authoring workflow.
 
 ## Context pointers
 

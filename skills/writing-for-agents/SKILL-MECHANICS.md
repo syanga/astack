@@ -32,14 +32,10 @@ When user-invoked skills multiply past what you can remember, a **router skill**
 | Gemini CLI | none, every enabled skill is listed | every description injected each session |
 | OpenCode | none, every skill is listed | every description in the skill tool |
 
-For a user-invoked skill, the astack installer generates Codex policy when
-`agents/openai.yaml` is absent. If the file exists, its policy must match the
-frontmatter. The installer validates it without modifying it.
-
 Two consequences. Write every description as if the model will read it, because on two harnesses it will. Keep the model-invoked set small, because forty skills at 200 characters fill Codex's cap.
 
 ## Done when
 
-Before finishing, check that the frontmatter `name` matches its directory, the description fits the 200-character cap and reads as a trigger when the skill is model-invoked or as a one-line summary when it is user-invoked, every file it links to exists, and the prose has been through the unslop checklist. If the skill ships its own `agents/openai.yaml`, that file sets `allow_implicit_invocation: false` when the skill is user-invoked, and only then. The astack installer checks the name, the cap, the links, and that setting, so a dry run is the quickest test.
+Before finishing, check that the frontmatter `name` matches its directory, the description reads as a trigger when the skill is model-invoked or as a one-line summary when it is user-invoked, every file it links to exists, and the prose has been through the unslop checklist. If the skill ships its own `agents/openai.yaml`, that file sets `allow_implicit_invocation: false` when the skill is user-invoked, and only then.
 
 When an edit changes decisions or stopping conditions, exercise representative cases for those branches. For new callers or supported uses, trace a representative case through existing eligibility filters and completion instructions. Check behavior as well as packaging, and report any branches that remain untested.

@@ -4,7 +4,7 @@
     "path": "skills/productivity/writing-for-agents",
     "commit": "959a8e9f1edc3adbe2f7e3054bb6fbefa6696260",
     "license": "MIT, kept in skills/writing-for-agents/LICENSE",
-    "note": "SKILL-MECHANICS.md describes astack invocation metadata. SOURCE-EDITS.md is astack-authored. Completion includes representative checks of changed decisions."
+    "note": "SOURCE-EDITS.md is astack-authored and locates the owning repository before handing off to its local workflow. Astack authoring and delivery are repository-local so installed writing guidance remains usable in other repositories."
   },
   "unslop": {
     "repository": "https://github.com/cursor/plugins.git",
