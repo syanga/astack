@@ -1,7 +1,6 @@
 ---
 name: review-pr
-description: Review changes against repository standards and the originating issue or spec.
-disable-model-invocation: true
+description: Review a PR, branch, or working changes against standards and requirements. Use for review requests and implementation handoffs, with a fix-and-review loop when repairs are authorized.
 ---
 
 Two-axis review of the requested changes against a fixed point:
@@ -13,15 +12,21 @@ Both axes run as **separate sub-agents** so they don't pollute each other's cont
 
 ## Process
 
+### Choose the mode
+
+Use **report-only** for a standalone review request. Use **fix-and-review** when the user requests repairs or an implementation workflow hands off its authorized work. An explicit read-only request takes precedence. State the selected mode and carry forward the task's scope and requirements.
+
+Both modes use the independent reviewers below. In fix-and-review mode, the parent owns repairs and follows [the repair loop](fix-and-review.md) after collecting both reports. Use [harden-pr](../harden-pr/SKILL.md) only for explicitly requested adversarial hardening.
+
 ### 1. Pin the fixed point
 
 Whatever the user said is the fixed point (a commit SHA, branch name, tag, `main`, `HEAD~5`, etc.). If they didn't specify one, use the PR's target branch when available; otherwise ask for it.
 
-For a PR, work from its head commit and record the SHA before dispatch.
+Resolve the fixed point to a commit SHA once and retain the same comparison base throughout the review. For a PR, start from its head commit and record the SHA before dispatch.
+
+Capture the requested diff and source in a temporary review directory. Include in-scope staged, unstaged, and untracked source when reviewing working changes or local repairs. Keep unrelated working changes outside the review and edits. Give both reviewers the same snapshot, relevant unchanged source, and commit history. Record which changes are uncommitted so local results are not attributed to the PR head.
 
 Follow [test results](../open-pr/test-results.md) to reuse existing verification, pass it to both reviewers, and publish any new test results on the PR.
-
-Review the requested changes against the fixed point. Give both reviewers the same diff and relevant commit history.
 
 Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, before dispatching reviewers.
 
@@ -64,7 +69,7 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 
 Run both reviewers in parallel when capacity permits. When capacity prevents concurrent dispatch, run them sequentially in separate contexts against the same pinned diff.
 
-Both reviewers report findings without changing code.
+Both reviewers report findings without changing code. Record failed or unavailable reviews as incomplete coverage.
 
 **Standards sub-agent prompt** should include:
 
@@ -83,9 +88,13 @@ If the spec is missing, skip the Spec sub-agent and note this in the final repor
 
 ### 5. Aggregate
 
+In fix-and-review mode, follow [the repair loop](fix-and-review.md) before producing the final report.
+
 Present the two reports under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings, because the two axes are deliberately separate (see _Why two axes_).
 
-End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent.
+Report the reviewed snapshot, verification results, and missing coverage. In fix-and-review mode, include fixes, finding dispositions, and whether the loop converged or stopped with blockers. Keep unresolved defects separate from deferred advice.
+
+End with a one-line summary: remaining findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent.
 
 For an existing PR, post actionable findings using [posting.md](../harden-pr/posting.md).
 

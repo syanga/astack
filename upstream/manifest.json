@@ -32,7 +32,10 @@
     "path": "skills/engineering/code-review",
     "commit": "74ca5fe077456a0b3b2f5310cf9430999fd0b5fd",
     "license": "MIT, kept in skills/review-pr/LICENSE-mattpocock",
-    "note": "Based on the pinned upstream directory, preserving the two axes, twelve Fowler smells, reviewer briefs, and separate reports. Adapts invocation metadata, removes Matt-specific setup, prioritizes user requirements, reviews the requested diff, records the PR head, and requires attributed posting of actionable findings through harden-pr's shared PR helper. Removes the old rubric and prompt builder. Links shared astack guidance for reusing and publishing PR test results, including delegated runs and the tested commit. Posts only actionable findings, keeps summaries in the conversation, and puts test results in the PR description. Reviewer contexts remain independent when limited agent capacity requires sequential execution."
+    "note": "Preserves the independent Standards and Spec axes and Fowler smell baseline. fix-and-review.md is astack-authored. Repair mode addresses implementation handoffs that previously stopped after reporting findings.",
+    "files": {
+      "SKILL.md": "skills/review-pr/SKILL.md"
+    }
   },
   "technical-writing": {
     "repository": "https://github.com/cursor/plugins.git",
