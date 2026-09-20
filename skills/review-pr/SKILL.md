@@ -20,7 +20,7 @@ Whatever the user said is the fixed point (a commit SHA, branch name, tag, `main
 
 Resolve the comparison base to a commit SHA once. For a PR, work from its head commit and record the SHA before dispatch.
 
-Follow [test results](../open-pr/test-results.md) to reuse existing verification, pass it to both reviewers, and publish any new test results on the PR.
+Reuse existing verification and pass it to the applicable reviewers.
 
 Review the requested changes against the fixed point. Give both reviewers the same diff and relevant commit history.
 
@@ -84,13 +84,13 @@ If the spec is missing, skip the Spec sub-agent and note this in the final repor
 
 ### 5. Aggregate
 
-In fix-and-review mode, collect both reports, then have the parent fix verified in-scope problems and run the affected checks. Refresh the diff against the same base, including uncommitted repairs, and repeat both applicable reviews. Finish when the final changes have no unresolved verified problems, required checks pass, and applicable reviews are complete. Optional suggestions do not block completion. If progress stalls or a decision is needed, report the remaining blockers.
+In fix-and-review mode, collect the applicable reports. Have the parent fix verified in-scope problems and rerun the caller's affected acceptance checks. Refresh the diff against the same base, including uncommitted repairs, and repeat both applicable reviews. Finish when the final changes have no unresolved verified problems, required checks pass, and applicable reviews are complete. Optional suggestions do not block completion. If progress stalls or a decision is needed, report the remaining blockers.
 
 Present the two reports under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings, because the two axes are deliberately separate (see _Why two axes_).
 
 End with a one-line summary: remaining findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent.
 
-For an existing PR, post actionable findings using [posting.md](../harden-pr/posting.md).
+When a PR exists and publication is within the task's authorized delivery scope, follow [posting.md](../harden-pr/posting.md) for findings and [test results](../open-pr/test-results.md) for verification. Otherwise report both in the conversation.
 
 ## Why two axes
 
