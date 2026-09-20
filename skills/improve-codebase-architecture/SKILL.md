@@ -53,3 +53,5 @@ Read [Model the Domain](../principles/model-the-domain.md) and [Foundational Thi
 Follow [domain-modeling](../domain-modeling/SKILL.md) as terms and decisions resolve, passing along any identified glossary and ADR locations. Apply its ADR criteria to rejected candidates as well.
 
 If the user wants to explore alternative interfaces for the deepened module, follow [Design It Twice](DESIGN-IT-TWICE.md).
+
+When the user authorizes implementation of a behavior-preserving change, hand the chosen design to [refactoring](../refactoring/SKILL.md). A change to observable behavior belongs in [implement](../implement/SKILL.md). Reuse the decisions and evidence from this exploration.

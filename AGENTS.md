@@ -12,6 +12,8 @@ Validate skill changes with `./install.sh --dry-run`.
 Start upstream imports from the original. Preserve clear wording, structure,
 and examples. Make targeted changes for compatibility or a specific demonstrated
 problem, and compare each change against the original for clarity and meaning.
+For imported examples that claim to exclude invalid states, check a counterexample
+under the stated compiler or runtime assumptions.
 
 When adapting an upstream skill, record its repository, path, commit, and any
 source-to-destination mappings in `upstream/manifest.json`. Keep its license in
