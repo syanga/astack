@@ -1,6 +1,6 @@
 # Post the review
 
-Post only findings that require a concrete change to the reviewed commit. Keep each comment to the problem, supporting evidence, and requested change. If there are no actionable findings, post nothing. Report summaries, clean results, and review coverage in the conversation. Publish [test results](../open-pr/test-results.md) in the PR description.
+Post review comments only for findings that require a concrete change to the reviewed commit. Keep each comment to the problem, supporting evidence, and requested change. If there are no actionable findings, post no review. Report summaries, clean results, and review coverage in the conversation. Publish [test results](../open-pr/test-results.md) in the PR description.
 
 Use harden-pr's `scripts/pr.py review` to post against the commit actually reviewed. The helper signs the review and exposes actionable findings to harden-pr.
 

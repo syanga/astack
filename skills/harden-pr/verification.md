@@ -6,7 +6,7 @@ Choose experiments around the change's important invariants and suspected failur
 
 For a reported defect, reproduce the trigger when feasible and retain a focused test that fails before the fix and passes afterward. When execution is impractical, trace the relevant code and constraints and state the unverified part. Separate an environment or setup failure from a demonstrated product failure.
 
-Use fault injection for partial writes, dependency errors, delayed responses, cancellation, and restart. For concurrency, control the interleaving with barriers or deterministic scheduling where possible. Use properties or model-based tests for invariants across sequences of operations. Compare against a trusted implementation when an independent oracle is available. Choose the technique that answers the question; every change need not use every technique.
+Use fault injection for partial writes, dependency errors, delayed responses, cancellation, and restart. Prefer a module-local binding, adapter, or proxy and restore it afterward. Patching an attribute of an imported shared module can still change process-global behavior. Check cleanup after partial startup. For concurrency, control the interleaving with barriers or deterministic scheduling where possible. Use properties or model-based tests for invariants across sequences of operations. Compare against a trusted implementation when an independent oracle is available. Choose the technique that answers the question; every change need not use every technique.
 
 ## Targeted mutations
 
@@ -18,6 +18,6 @@ Record the important mutation and detecting test, or explain why it survived. Pr
 
 ## Reassess after fixes
 
-Run the checks affected by the fix, then the repository's required checks. Ask an independent reviewer to examine changes to important invariants. Broaden verification when failures or changed contracts reveal wider consequences; stop repeating checks once they pass and no new concern justifies another run.
+During repair, run checks affected by each fix batch. Run the repository's required checks when semantic changes settle, reusing applicable results under [test results](../open-pr/test-results.md). An earlier broad run is appropriate when it establishes a needed baseline or investigates a cross-cutting failure. Ask an independent reviewer to examine changes to important invariants. Broaden verification when failures or changed contracts reveal wider consequences; stop repeating checks once they pass and no new concern justifies another run.
 
 Keep evidence associated with the commit or local diff it tested. Report what ran, its outcome, and limits that affect confidence. For performance claims, use a comparable workload and report the primary before-and-after result with its unit.

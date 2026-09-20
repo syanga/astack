@@ -7,8 +7,8 @@ Inspect the changed files and their callers, repository conventions, and test fr
 | When | Checklist |
 |---|---|
 | Every hardening review | [Testing](../specialists/testing.md) and [maintainability](../specialists/maintainability.md) |
-| Authentication, authorization, or backend changes | [Security](../specialists/security.md) |
-| Backend or frontend changes | [Performance](../specialists/performance.md) |
+| Changes affecting authorization, security controls, untrusted input, secrets, privileges, or sensitive data, including callers and ordering | [Security](../specialists/security.md) |
+| Changes affecting I/O, resource bounds, complexity, hot paths, caching, payload size, rendering cost, or explicit performance claims | [Performance](../specialists/performance.md) |
 | Schema changes or data migrations | [Data migration](../specialists/data-migration.md) |
 | API contract changes | [API contract](../specialists/api-contract.md) |
 | More than 100 added and removed lines, or requested simplification | [Simplification](../specialists/simplification.md) |
@@ -17,7 +17,7 @@ Honor explicit specialist requests, including `--all-specialists`. Report which 
 
 ## Dispatch
 
-Run selected specialists as independent subagents in parallel. Give each the full text of its checklist, the shared diff and source snapshot, relevant commit history and prior decisions, and the repository's language and test conventions. Include the response format below and the evidence and severity requirements from [SKILL.md](../SKILL.md#verify-findings).
+Run selected specialists as fresh independent subagents in parallel with the native adversarial pass. Start without inherited conversation when supported and supply the required context explicitly. Follow-up clarification or focused fix verification may reuse a reviewer, but does not count as another fresh independent pass. Give each the full text of its checklist, the shared diff and source snapshot, relevant commit history and prior decisions, and the repository's language and test conventions. Include the response format below and the evidence and severity requirements from [SKILL.md](../SKILL.md#verify-findings).
 
 Include the full text of the principle linked from the testing checklist in the testing reviewer's prompt.
 
@@ -31,7 +31,7 @@ Each reviewer returns one JSON object per finding:
 {"severity":"CRITICAL|INFORMATIONAL","path":"file","line":42,"category":"category","summary":"Problem and failure conditions","evidence":"Supporting code or reproduction","fix":"Recommended fix","specialist":"name"}
 ```
 
-Required fields are severity, path, category, summary, evidence, and specialist. Line, fix, fingerprint, and test_stub are optional. Use `advisory: true` for simplification suggestions; `lines_removable` may record the estimated reduction. Return `NO FINDINGS` when no supported findings remain.
+Required fields are severity, path, category, summary, evidence, and specialist. Line, fix, fingerprint, and test_stub are optional. Use `advisory: true` for optional suggestions, including simplification and optimization; `lines_removable` may record the estimated reduction. Return `NO FINDINGS` when no supported findings remain.
 
 ## Collect and assess
 
