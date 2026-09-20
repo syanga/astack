@@ -19,7 +19,7 @@ This is the invocation cut of splitting. The sequence cut lives in `SKILL.md`. S
 
 ## Router skills
 
-When user-invoked skills multiply past what you can remember, a **router skill** cures that piled-up cognitive load. It is one user-invoked skill that names the others and when to reach for each, so the human has one skill to remember instead of many. It can only hint, never fire them through the skill tool, because user-invoked skills have no description in the catalog.
+When user-invoked skills multiply past what you can remember, a **router skill** cures that piled-up cognitive load. It is one skill that names the others and when to reach for each, so the human has one skill to remember instead of many. Keep it user-invoked unless the agent must also know the suite exists. Then make it model-invoked, and its description becomes the suite's one always-loaded mention. It can only hint, never fire them through the skill tool, because user-invoked skills have no description in the catalog.
 
 ## Harnesses
 
