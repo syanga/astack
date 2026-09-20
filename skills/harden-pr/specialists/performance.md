@@ -1,5 +1,7 @@
 # Performance Specialist Review Checklist
 
+Report a performance defect only with supported trigger conditions and a practical consequence. Source evidence can establish unbounded resource use or blocking behavior without a benchmark. For measured improvements, provide a representative workload, comparable baseline, result, and unit. Patterns without demonstrated impact are advice, not required optimizations.
+
 ## Categories
 
 ### N+1 Queries

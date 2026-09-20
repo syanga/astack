@@ -6,7 +6,7 @@ Count the added and removed lines in the captured diff as `DIFF_TOTAL`.
 
 **Check outside-provider availability:** Read [outside-review.md](../outside-review.md). Use a provider different from the current host, and honor any provider the user disabled. Record unavailable coverage separately from a completed review with no findings. The native adversarial subagent still runs.
 
-**User override:** If the user explicitly requested "full review", "structured review", or "P1 gate", also run the outside structured review regardless of diff size (still requires an available provider).
+**User override:** If the user explicitly requested "full review", "structured review", or "P1 gate", include the structured review contract regardless of diff size (still requires an available provider). Honor explicit requests for separate independent passes.
 
 ---
 
@@ -24,34 +24,25 @@ Include this brief in both the native and outside adversarial prompts:
 
 ### Native adversarial subagent (always runs)
 
-Give this pass the current source snapshot, captured diff, requirements, and shared brief. Keep earlier reviewer findings and specialist checklists out of its prompt so this pass remains independent. Also ask it to classify findings as FIXABLE when it knows how to fix them, or INVESTIGATE when human judgment is needed.
+Give this pass the current source snapshot, captured diff, requirements, and shared brief in a fresh context without inherited conversation when supported. Keep earlier reviewer findings and specialist checklists out of its prompt so this pass remains independent. Also ask it to classify findings as FIXABLE when it knows how to fix them, or INVESTIGATE when human judgment is needed.
 
-Dispatch an independent subagent and wait for its result. It runs in the same harness; record its model identity only when reported by the runtime.
+Dispatch this reviewer with the local specialist wave in Step 4 and collect its result before fixing that snapshot. It runs in the same harness; record its model identity only when reported by the runtime.
 
 Present findings under an `ADVERSARIAL REVIEW (native subagent):` header. Handle FIXABLE findings through [SKILL.md's fix process](../SKILL.md#step-5-fix-findings). INVESTIGATE findings retain their uncertainty and are assessed by their potential consequence; needing investigation does not make an issue low severity.
 
-### Outside adversarial challenge (when a provider is available)
+### Outside review (when a provider is available)
 
-Supply the shared brief and the complete plan, requirements, diff, and source context. Save the prompt in a private file and invoke the provider using [outside-review.md](../outside-review.md).
+Resolve supported local defects and complete affected local re-review before invoking an outside provider. Availability checks may run earlier. Report unresolved local blockers before spending an outside pass on a candidate awaiting a known fix.
 
-Show the full response in a `tool-output` fence and assess completion using the rules below. Handle findings with supported fixes through SKILL.md's fix process. Report findings that need investigation and any unavailable coverage.
+Supply the shared adversarial brief and complete requirements, captured diff, and relevant source context. If `DIFF_TOTAL >= 200` or the user requested structured review, also supply the complete checklist and request severity-tagged findings ([P0], [P1], [P2], [P3]) or an explicit NO_FINDINGS conclusion.
 
----
+Use one prompted invocation, combining both contracts when structured review is required. Require a coverage statement, findings or an explicit no-findings conclusion, and a recommendation. Assess each contract separately. Record a combined invocation as one independent review covering two obligations. Use separate invocations when explicitly requested or when they answer materially different unresolved questions.
 
-### Outside structured review (large diffs only, 200+ lines)
+When separate independent passes are required, a completed combined review may fill one role. Run the other in a fresh context without the first report, unless the user specified a different procedure.
 
-If an outside provider is available and either `DIFF_TOTAL >= 200` or the user requested this pass:
+Follow [outside-review.md](../outside-review.md). Codex's built-in base review does not accept the combined prompt. Save the full response with the review records and present its findings, recommendation, and coverage limits.
 
-Prepare a structured review prompt requesting severity-tagged findings ([P0], [P1], [P2], [P3]) or an explicit NO_FINDINGS conclusion. Use the same captured diff and source.
-
-Follow [outside-review.md](../outside-review.md) to invoke the provider. For a prompted review, supply the structured prompt, the complete checklist, and the same captured source.
-
-Present the full output under `OUTSIDE STRUCTURED REVIEW:` inside a `tool-output` fence.
-Assess completion and the gate using the rules below.
-
-Investigate failed-gate findings through SKILL.md's fix process. Re-run the same structured invocation and diff scope after fixes. A product or scope decision follows the ASK flow.
-
-If `DIFF_TOTAL < 200` and this pass was not requested, skip this section. The native and outside adversarial passes still run.
+Handle findings through SKILL.md's fix process and refresh affected coverage under Re-review after fixes below.
 
 ---
 
@@ -66,8 +57,10 @@ Record why the pass ran or was skipped, its findings, and any failure or missing
 ### Completion criteria
 
 - Native adversarial and gap-focused red-team passes complete when they return usable reviews. Failure, timeout, refusal, empty or malformed output is missing coverage.
-- Outside adversarial coverage requires successful execution and a completed review with an explicit recommendation. The recommendation need not use the exact `Recommendation:` prefix. Refusal, empty or malformed output, an incomplete review, a missing recommendation, timeout, or CLI failure means `outside_status: unavailable`.
-- Outside structured review requires severity-tagged findings or an explicit no-findings conclusion. P0 or P1 findings, with bracketed or native colon labels, mean GATE: FAIL. Completed without P0 or P1 means GATE: PASS. Refusal, failure, or missing markers mean GATE: MISSING COVERAGE.
+- Outside adversarial coverage requires successful execution, a completed review, a coverage statement, and an explicit recommendation. The recommendation need not use the exact `Recommendation:` prefix. Refusal, empty or malformed output, an incomplete review, a missing coverage statement or recommendation, timeout, or CLI failure means `outside_status: unavailable`.
+- Outside structured review requires completed coverage, a coverage statement, and severity-tagged findings or an explicit no-findings conclusion. P0 or P1 findings, with bracketed or native colon labels, mean GATE: FAIL. Completed without P0 or P1 means GATE: PASS. Refusal, failure, incomplete coverage, or missing required output means GATE: MISSING COVERAGE.
+
+A reviewer that leaves required scope uninspected provides incomplete coverage even if it reports no findings. Sampling test inputs does not by itself mean code-review scope was omitted.
 
 A native fallback does not count as outside completion. Preserve each pass's missing coverage separately from a completed review with no findings.
 
@@ -79,8 +72,12 @@ Record each attempted pass: native adversarial, outside adversarial, outside str
 
 ### Re-review after fixes
 
-If any fixes were applied during the review, capture the updated source and repeat steps 2 through 6 in SKILL.md. A fixing pass cannot certify the fixed source without a fresh review. Continue while another pass can resolve material findings. If repeated attempts make no progress, report the remaining findings and what would unblock them.
+After a fix, capture the updated source and identify which behavior, invariants, and review conclusions the edit can affect. Include callers, shared contracts, configuration, dependencies, and test evidence. Rerun affected reviewers and checks; retain other evidence only with a reason it still applies. A changed commit alone does not invalidate every review. If the effects are uncertain or the design changed substantially, review the full scope.
 
-Record completion and convergence separately in step 7. Apply the completion criteria above. The review converges only when the required passes complete against the current snapshot without further edits. Report findings that remain even when no edits were made.
+The author of a fix cannot provide its only review. Use another reviewer for affected behavior. A focused follow-up is repair verification, not a new independent discovery pass.
+
+Before finishing, reconcile every required review and check against the exact candidate. Record each result's original snapshot and why it applies now. Complete missing or invalidated coverage without automatically repeating the entire matrix. Preserve unavailable coverage as unavailable.
+
+Record completion and convergence separately in Step 7. Convergence requires applicable completed coverage, passing required checks, and no unresolved in-scope defects or investigations that could prevent required behavior. Follow the checkpoint procedure in Step 5 during repairs. Deferred advice does not reopen convergence.
 
 Keep each specialist and provider's coverage visible. A clean result from one reviewer does not hide missing coverage from another.

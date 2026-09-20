@@ -18,4 +18,8 @@ codex review --base '<fixed-point>' -c 'sandbox_mode="read-only"'
 
 Successful process exit alone does not establish a completed review. Validate the response as described in [adversarial.md](sections/adversarial.md).
 
-If the reviewed source changes while a pass runs, repeat it against the updated source before claiming convergence.
+If a returned review omits required output fields, request one targeted clarification. Keep coverage incomplete until the response meets the completion criteria.
+
+After timeout or failure, record unavailable coverage and preserve partial output as incomplete evidence. Retry only when an identified scope or failure condition changes, or the user requests another attempt. When partitioning a large review, retain the original coverage obligation across the parts.
+
+If the reviewed source changes, follow [affected re-review](sections/adversarial.md#re-review-after-fixes) before applying the result to the new candidate.
