@@ -15,9 +15,10 @@ class CaptureSink(io.StringIO):
         self.close_count = 0
 
     def close(self):
-        self.saved = self.getvalue()
         self.close_count += 1
-        super().close()
+        if self.close_count == 1:
+            self.saved = self.getvalue()
+            super().close()
 
 
 class FailingSink(CaptureSink):
@@ -93,11 +94,23 @@ class ExportTests(unittest.TestCase):
 
     def test_catalog_inputs_unchanged(self):
         sink = CaptureSink()
-        items = [Item("a", "Apple", 3)]
-        requested = ["a"]
+        first = Item("b", "Banana", 2)
+        second = Item("a", "Apple", 3)
+        duplicate = Item("a", "Apricot", 5)
+        items = [first, second, duplicate]
+        original_ids = [id(item) for item in items]
+        requested = ["a", "b", "a"]
         export_catalog(items, requested, lambda: sink)
-        self.assertEqual(items, [Item("a", "Apple", 3)])
-        self.assertEqual(requested, ["a"])
+        self.assertEqual(
+            items,
+            [
+                Item("b", "Banana", 2),
+                Item("a", "Apple", 3),
+                Item("a", "Apricot", 5),
+            ],
+        )
+        self.assertEqual([id(item) for item in items], original_ids)
+        self.assertEqual(requested, ["a", "b", "a"])
 
     def test_sink_creation_error_propagates(self):
         def unavailable():
