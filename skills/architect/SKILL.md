@@ -28,9 +28,9 @@ Skip Phase A only when the work is genuinely greenfield with no surrounding syst
 
 ## Phase B: Sketch
 
-Spawn independent design subagents with the design-sketch task and the Phase A grounding artifacts. Pass [runner-prompt.md](references/runner-prompt.md) as each runner's prompt. Each candidate produces a design package shaped per [rationale-template.md](references/rationale-template.md).
+Run [arena](../arena/SKILL.md) with the design-sketch task and the Phase A grounding artifacts. Pass [runner-prompt.md](references/runner-prompt.md) as each runner's prompt. Each candidate produces a design package shaped per [rationale-template.md](references/rationale-template.md).
 
-Use the active environment's available subagent tools and model configuration. If delegation is unavailable, develop the distinct candidates directly and state that they were not independently produced. Read [Deep Modules](../principles/deep-modules.md) for the shared interface vocabulary.
+Arena owns runner selection, independent judging, synthesis, and coverage limits. Read [Deep Modules](../principles/deep-modules.md) for the shared interface vocabulary.
 
 Design it twice. Require at least two structurally distinct candidates before synthesis, even when the first looks sufficient. This is the [exhaust-the-design-space](../principles/exhaust-the-design-space.md) principle skill made concrete. Whole-shape alternatives, not point fixes inside one shape.
 
@@ -38,11 +38,11 @@ Screen every candidate against [`references/design-red-flags.md`](references/des
 
 Compare viable candidates on interface depth. Prefer the design that hides more complexity behind a smaller, simpler public surface. A rich interface can keep call chains short by concentrating capability instead of scattering it across layers.
 
-Inspect the candidates and produce one synthesized design package. The synthesis decision populates the rationale's "Synthesis decision" section.
+Pass these architectural criteria to arena's rubric. Arena returns one synthesized design package. Its synthesis note populates the rationale's "Synthesis decision" section.
 
 ## Phase C: Agree (opt-in)
 
-When implementation is authorized, proceed directly with the synthesized design. A design-only request ends with the sketch and recommendation. If called from [implement](../implement/SKILL.md), return the chosen design to that workflow.
+When implementation is authorized, proceed directly with the synthesized design. A design-only request ends with the sketch and recommendation. If called for a design step by another workflow, return the chosen design before implementation. The caller owns its testing and delivery gates.
 
 Opt in to a checkpoint when the invoker explicitly asks: "/architect with checkpoint," "stop and show me before implementing," or similar. Then surface the synthesized design and pause for sign-off.
 

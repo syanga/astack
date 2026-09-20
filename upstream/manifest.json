@@ -177,7 +177,7 @@
     "path": "pstack/skills/architect",
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/architect/LICENSE-pstack",
-    "note": "Host subagents replace arena so design exploration works outside Cursor. UI exploration follows astack static-mock selection before real component edits."
+    "note": "Arena owns candidate comparison. Architect retains design criteria and returns to the caller before implementation. UI exploration follows astack static-mock selection."
   },
   "implement": {
     "repository": [
@@ -376,7 +376,7 @@
     "path": "pstack/skills/poteto-mode/playbooks/perf-issue.md",
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/perf-issue/LICENSE-pstack",
-    "note": "Repeated comparable measurements distinguish improvements from noise. Correctness checks accompany performance measurements. Sustained Hillclimb optimization is outside this import.",
+    "note": "Repeated comparable measurements distinguish improvements from noise. Correctness checks accompany performance measurements.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/perf-issue.md": "skills/perf-issue/SKILL.md"
     }
@@ -394,5 +394,25 @@
       "pstack/skills/poteto-mode/playbooks/trace-forensics.md": "skills/diagnosing-bugs/TRACE-FORENSICS.md",
       "pstack/skills/poteto-mode/playbooks/runtime-forensics.md": "skills/diagnosing-bugs/RUNTIME-FORENSICS.md"
     }
+  },
+  "arena": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/arena/SKILL.md",
+    "commit": "032be146865d973682535de75f2287da438550bf",
+    "license": "MIT, kept in skills/arena/LICENSE-pstack",
+    "files": {
+      "pstack/skills/arena/SKILL.md": "skills/arena/SKILL.md"
+    },
+    "note": "Provider CLI tasks return read-only proposals that the parent materializes in isolated worktrees. Same-provider and direct fallbacks disclose missing diversity or independence."
+  },
+  "hillclimb": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/poteto-mode/playbooks/hillclimb.md",
+    "commit": "032be146865d973682535de75f2287da438550bf",
+    "license": "MIT, kept in skills/hillclimb/LICENSE-pstack",
+    "files": {
+      "pstack/skills/poteto-mode/playbooks/hillclimb.md": "skills/hillclimb/SKILL.md"
+    },
+    "note": "Minimum attempts apply when requested. Repeated confirmation guards early wins otherwise. Existing logs and handoffs preserve progress without promising automatic wake."
   }
 }
