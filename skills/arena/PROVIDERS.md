@@ -7,8 +7,10 @@ Leave unknown model identities unknown.
 
 For outside coverage, choose Claude when hosted in Codex and Codex when hosted
 in Claude. In another host, choose an available provider. If host identity is
-unclear or inherited host markers conflict, report that limitation. A native
-agent is an independent context, not an outside provider.
+unclear or inherited host markers conflict, report outside coverage as unavailable
+until the host is resolved. A completed result can still inform the work, but
+does not satisfy an outside-provider gate. A native agent is an independent
+context, not an outside provider.
 
 Check the installed CLI's help before invocation. A missing CLI, failed
 authentication, or unsupported option means unavailable coverage. Report it
