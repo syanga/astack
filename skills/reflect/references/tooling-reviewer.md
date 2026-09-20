@@ -28,25 +28,14 @@ Scan for:
 - Debugging entry points: how to capture a trace, where logs land, which RPC to hit
 - Build / package-manager / sandbox surprises that cost minutes the first time
 
-## Scope to skills and tools the session actually used
+## Evidence and routing
 
-Findings must point to skills, tools, or MCPs invoked in this transcript. Speculative routings to skills the parent never opened do not count. To check whether a skill was used, scan the transcript for:
-
-- File reads of skill or principle instructions followed by use of their workflow
-- Subagent prompts that name a skill path
-- Tool calls that match a skill's documented commands
-
-Two valid finding shapes:
-
-- The parent invoked the skill and you found a real gap in its body. Route to the skill's relevant section.
-- The model-invoked skill was visible in the catalog but did not trigger when it would have helped. Tune the skill's description so future agents pick it up. Route as `tune description: <skill path>`.
-
-If a skill was neither invoked nor a missed-trigger candidate, drop it.
+Read [Route learnings](../SKILL.md#route-learnings), resolving the path relative to this template. Apply it to each finding, including workflow capture without a prior skill invocation and standing preferences. Search existing guidance only to establish a concrete routing for transcript evidence.
 
 Return durable learnings that meet these criteria, without a quota. For each:
 - Principle: one sentence naming the convention or technical fact. Concrete enough that a future agent recognizes when it applies.
 - Evidence: the exact moment in the transcript (turn number or short quote, including the command or flag).
-- Routing: most relevant existing skill (give the `SKILL.md` path as it appears in the transcript), OR `tune description: <skill path>` when the skill should have triggered but didn't, OR "new skill: <kebab-name>".
+- Routing: the owning repository and source path, using the Route learnings rules. State whether this edits existing guidance, tunes a description, creates a skill, or updates instructions.
 
 Skip trivial things (typos, retries). Skip anything already obvious from the existing skill the parent followed. Skip implementation details that drift: specific SHAs, current file paths, version numbers, exact byte counts. Convention generalizes. Pinned details don't.
 

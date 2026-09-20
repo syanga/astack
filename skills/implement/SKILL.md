@@ -8,6 +8,8 @@ disable-model-invocation: true
 
 Implement the work described by the user in the spec or tickets. Carry forward designs and decisions already made. For non-trivial UI changes, follow [prototype](../prototype/SKILL.md) before editing real components.
 
+For a substantial behavior-preserving phase, follow [refactoring](../refactoring/SKILL.md), reusing the design and evidence already established. Keep incidental cleanup within this workflow. Apply [TypeScript guidance](../typescript-best-practices/SKILL.md) when writing or reviewing TypeScript.
+
 When executing a multi-phase plan, read [the shared execution-state convention](../orchestrate/STATE.md). A sequential execution owner initializes or resumes the plan's existing store, checkpoints progress, and leaves its next action there before ending a session. At completion, follow the store's close procedure, including the show-me-your-work audit. A delegated worker returns receipts to its coordinator, which owns the shared state updates and final audit.
 
 For a requested pause or transfer to another session, read [handoff](../handoff/SKILL.md). Reuse the execution store when present; standalone implementation needs only a handoff note.

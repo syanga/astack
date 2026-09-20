@@ -414,5 +414,20 @@
       "pstack/skills/poteto-mode/playbooks/hillclimb.md": "skills/hillclimb/SKILL.md"
     },
     "note": "Minimum attempts apply when requested. Repeated confirmation guards early wins otherwise. Existing logs and handoffs preserve progress without promising automatic wake."
+  },
+  "refactoring": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/poteto-mode/playbooks/refactoring.md",
+    "commit": "032be146865d973682535de75f2287da438550bf",
+    "license": "MIT, kept in skills/refactoring/LICENSE-pstack",
+    "mapping": {
+      "pstack/skills/poteto-mode/playbooks/refactoring.md": "skills/refactoring/SKILL.md"
+    }
+  },
+  "typescript-best-practices": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/typescript-best-practices",
+    "commit": "032be146865d973682535de75f2287da438550bf",
+    "license": "MIT, kept in skills/typescript-best-practices/LICENSE-pstack"
   }
 }

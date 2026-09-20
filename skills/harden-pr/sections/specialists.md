@@ -21,6 +21,8 @@ Run selected specialists as fresh independent subagents in parallel with the nat
 
 Include the full text of the principle linked from the testing checklist in the testing reviewer's prompt.
 
+For TypeScript changes, include [TypeScript guidance](../../typescript-best-practices/SKILL.md) in the maintainability review. Apply the existing defect and advisory criteria; style advice does not expand the hardening scope.
+
 Ask each reviewer to apply its checklist, verify findings against the source, and leave the source unchanged. When a focused test would demonstrate a finding, request a proposed test using the repository's conventions.
 
 ## Response format
