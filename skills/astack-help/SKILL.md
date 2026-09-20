@@ -1,7 +1,6 @@
 ---
 name: astack-help
-description: Recommend astack skills for your current task.
-disable-model-invocation: true
+description: Recommend astack skills for a task. Use when the user asks which astack skills exist or fit. Most astack skills are user-invoked and absent from this catalog.
 ---
 
 # Find the right astack skills
