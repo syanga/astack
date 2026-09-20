@@ -10,27 +10,32 @@ description: Create, import, or modify skills in the astack repository. Use for 
    Put shared skills in `skills/` and repository-local skills in `.agents/skills/`.
    For upstream material, follow [upstream imports](#upstream-imports).
 2. Read [writing-for-agents](../../../skills/writing-for-agents/SKILL.md) and its
-   skill-mechanics guidance. Trace changed invocation or actions through the
-   caller and linked workflows. Check which prior acceptance results edits can
-   invalidate and which external writes become reachable under the caller's scope.
+   skill-mechanics guidance.
 3. Edit the source, reusing existing guidance through pointers. When moving
    guidance, update its callers and preserve the decisions it controls.
    Apply [technical-writing](../../../skills/technical-writing/SKILL.md) and
    [unslop](../../../skills/unslop/SKILL.md) to the diff.
-4. For changed decisions, have an independent reviewer exercise a representative
-   task and a case where the new behavior must not run. Give the reviewer the
-   request, skill, and raw artifacts without suggested conclusions. If delegation
-   is unavailable, exercise the cases yourself and report that limitation.
-   Fix demonstrated gaps and repeat the affected cases.
-5. Run `./install.sh --dry-run` and the repository's
-   [verification checks](../../../AGENTS.md#verification). Run an available skill
-   validator on touched skills. Check relative links in repository-local skills
-   separately, since the installer validates only distributed skills.
-6. For approved changes, follow [open-pr](../../../skills/open-pr/SKILL.md) to
+4. After writing or modifying the skill, run two independent subagent reviews:
+
+   - Writing: apply the linked writing guidance. Check for redundancy across
+     skills, unnecessary rules, excessive prose, and misplaced guidance.
+   - Behavior: check the request against the skill and its callers. Trace changed
+     invocation, stopping conditions, invalidated acceptance results, and external
+     writes through linked workflows. For changed behavior, exercise a
+     representative task and a case where the new behavior must not run.
+
+   Give both reviewers the request, diff, repository rules, and referenced files
+   without suggested conclusions. Reviewers report concrete findings without
+   editing or delegating. Assess the findings, fix demonstrated problems, and
+   repeat affected reviews until clean or blocked. Report unresolved blockers.
+   If subagents are unavailable, perform both reviews yourself and report that
+   they were not independent.
+5. For approved changes, follow [open-pr](../../../skills/open-pr/SKILL.md) to
    submit a PR unless the request is limited to a proposal or local edits.
    Explain the behavior change, verification, and untested branches. Keep private
    transcript details out of the PR. Report publication blockers with the local
-   diff. Merging and reinstalling remain separate actions.
+   diff. Merge only when authorized. If the PR merges, ask whether to reinstall
+   unless the user already authorized it.
 
 ## Upstream imports
 
