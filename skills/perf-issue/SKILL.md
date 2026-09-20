@@ -8,6 +8,8 @@ disable-model-invocation: true
 
 **You own the measurements. Plan, review, verify the numbers.** Tie every fix to a measurement.
 
+For sustained improvement against a metric, use [hillclimb](../hillclimb/SKILL.md). Pass the workload, baseline evidence, measurement command, correctness checks, and existing authorization. Hillclimb owns the repeated experiments and stopping criteria.
+
 For a diagnosis-only request, stop before implementation with the measurements, supported cause, and proposed next experiment. A read-only request also excludes instrumentation and code edits.
 
 1. Reproduce the reported slowness in an authorized environment and capture a baseline through the affected UI, CLI, or API. Name the metric, unit, workload, revision, configuration, and repeatable command. Record warmup, trial count, and variation so later comparisons can distinguish a change from noise. For live capture and mechanism checks, follow [runtime forensics](../diagnosing-bugs/RUNTIME-FORENSICS.md). For an existing capture, follow [trace forensics](../diagnosing-bugs/TRACE-FORENSICS.md). If the baseline does not reproduce the complaint, report the gap before optimizing.
