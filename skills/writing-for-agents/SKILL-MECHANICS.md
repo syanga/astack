@@ -42,4 +42,4 @@ Two consequences. Write every description as if the model will read it, because 
 
 Before finishing, check that the frontmatter `name` matches its directory, the description fits the 200-character cap and reads as a trigger when the skill is model-invoked or as a one-line summary when it is user-invoked, every file it links to exists, and the prose has been through the unslop checklist. If the skill ships its own `agents/openai.yaml`, that file sets `allow_implicit_invocation: false` when the skill is user-invoked, and only then. The astack installer checks the name, the cap, the links, and that setting, so a dry run is the quickest test.
 
-When an edit changes decisions or stopping conditions, exercise representative cases for those branches. Check behavior as well as packaging, and report any branches that remain untested.
+When an edit changes decisions or stopping conditions, exercise representative cases for those branches. For new callers or supported uses, trace a representative case through existing eligibility filters and completion instructions. Check behavior as well as packaging, and report any branches that remain untested.
