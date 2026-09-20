@@ -2,7 +2,7 @@
 
 Follow [provider execution](../arena/PROVIDERS.md) for provider selection, CLI invocation, timeouts, captured output, and unavailable coverage. Run from the reviewed repository. Supply each assignment's complete prompt, diff, and relevant source context from the fixed review snapshot.
 
-Use its read-only invocations for prompted reviews. Review-specific completion criteria remain in [adversarial.md](sections/adversarial.md).
+Use its read-only prompted invocations for every assignment, including structured reviews. Review-specific completion criteria remain in [adversarial.md](sections/adversarial.md).
 
 ## Size assignments before dispatch
 
@@ -10,17 +10,7 @@ Before launch, assess the diff and supporting source against the execution budge
 
 Give each reviewer a bounded scope and readable references into the fixed snapshot. Include the assigned diff explicitly and use source references for supporting context instead of pasting the whole source tree. Keep relevant shared requirements and supporting source accessible to every part.
 
-State a working budget shorter than the provider's hard timeout. Ask the reviewer to finish with findings, inspected scope, unfinished scope, and a recommendation within that budget. Unfinished scope remains missing coverage.
-
-## Codex built-in structured review
-
-For a structured review with Codex, use its built-in review when its base comparison covers the requested changes:
-
-```bash
-codex review --base '<fixed-point>' -c 'sandbox_mode="read-only"'
-```
-
-`--base` and a positional prompt are mutually exclusive. Keep `--base` when resolving an argument error; dropping it changes the diff scope. If the built-in comparison does not cover the requested changes, use the prompted review above with the captured diff and structured prompt.
+State a working budget shorter than the provider's hard timeout. Ask the reviewer to return the [required review output](sections/adversarial.md#completion-criteria) within that budget.
 
 ## Results and limits
 
