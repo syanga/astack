@@ -5,20 +5,8 @@ apply only to this repository.
 
 ## Skills
 
-Before adding or editing a skill, read
-[writing-for-agents](skills/writing-for-agents/SKILL.md) and follow its pointers.
-Validate skill changes with `./install.sh --dry-run`.
-
-Start upstream imports from the original. Preserve clear wording, structure,
-and examples. Make targeted changes for compatibility or a specific demonstrated
-problem, and compare each change against the original for clarity and meaning.
-For imported examples that claim to exclude invalid states, check a counterexample
-under the stated compiler or runtime assumptions.
-
-When adapting an upstream skill, record its repository, path, commit, and any
-source-to-destination mappings in `upstream/manifest.json`. Keep its license in
-the skill directory. Limit manifest notes to rationale the diff cannot explain.
-To review upstream changes, clone the source and diff from the pinned commit.
+Before creating, importing, or modifying a skill, follow the repository-local
+[author-skill workflow](.agents/skills/author-skill/SKILL.md).
 
 Put reusable lessons in the applicable skill or principle, and change history in
 the PR. Keep adaptation records in the manifest and PR instead of separate
