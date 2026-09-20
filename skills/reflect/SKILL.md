@@ -65,6 +65,8 @@ Reviewers and the synthesizer apply these rules to the active transcript only.
 - **Standing preferences.** An explicit durable preference or consistent repeated correction belongs in instructions when it applies across tasks. Keep task-specific requests within their original scope.
 - **Destination.** Put cross-project workflows in astack's `skills/` and project-specific workflows in the owning repository's skill source directory. Put standing preferences in astack's `instructions/` or the project's instruction source, according to scope. Name the repository and source path in every proposed routing. Edit source files rather than installed or generated copies. Keep private transcript details out of committed guidance and public PRs.
 
+For workflow capture, retain repository-specific details only when they express a demonstrated requirement. Check them against current source. Reference existing scripts or configuration where they already define the procedure, and omit incidental run data.
+
 New skills need a recognizable trigger and reusable decisions that existing guidance does not cover. Prefer a demonstrated command or helper when prose would only repeat a mechanical procedure.
 
 ## Summarize for the user

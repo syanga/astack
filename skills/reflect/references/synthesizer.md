@@ -12,14 +12,14 @@ Reviewer outputs:
 
 Read [Route learnings](../SKILL.md#route-learnings), resolving the path relative to this template. Apply it and each criterion below to every finding:
 
-- Durability: still true in 6 months once paths, SHAs, tool versions, and code shapes have changed.
+- Durability: general lessons remain useful when paths, SHAs, tool versions, and code shapes change. For workflow capture, apply Route learnings' retention criteria.
 - Specificity: broad enough to apply across tasks, precise enough that a future agent recognizes when to use it. Reject vague platitudes ("write good code") and hyper-specific facts ("`<specific-skill-name>` has 175 tokens at limit 80").
 - Convergence: findings echoed by 2+ reviewers carry higher confidence. Singletons must clear a higher bar on the other criteria.
 - Decision-changing: a future agent does something different because of the edit, not just reads more text.
 - Structural-mechanism check: route to Backlog when a lint rule, script, metadata flag, or runtime check already enforces the rule or could enforce it cheaply. Skill prose is for things mechanisms cannot enforce.
 - Already-covered: read the target skill before accepting any body-edit row. If the proposal duplicates clear, well-placed existing guidance, reject as `already-covered`. The issue is execution, not the skill. If the existing guidance is buried, weak, or easy to skip past, accept the row but reframe the proposal as a wording / placement improvement to make it fire (not a duplicate addition).
 
-Drop (implementation details that drift):
+Drop from general lessons:
 - "linter at SHA `bd91aa7` uses chars/4 heuristic"
 - "`<specific-skill-name>` has 175 tokens at limit 80"
 - "Bugbot flagged regex backtracking on May 2"

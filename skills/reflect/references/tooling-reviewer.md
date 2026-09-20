@@ -37,7 +37,7 @@ Return durable learnings that meet these criteria, without a quota. For each:
 - Evidence: the exact moment in the transcript (turn number or short quote, including the command or flag).
 - Routing: the owning repository and source path, using the Route learnings rules. State whether this edits existing guidance, tunes a description, creates a skill, or updates instructions.
 
-Skip trivial things (typos, retries). Skip anything already obvious from the existing skill the parent followed. Skip implementation details that drift: specific SHAs, current file paths, version numbers, exact byte counts. Convention generalizes. Pinned details don't.
+Skip trivial things (typos, retries). Skip anything already obvious from the existing skill the parent followed. For general lessons, skip implementation details that drift: specific SHAs, current file paths, version numbers, exact byte counts. For workflow capture, apply Route learnings' retention criteria.
 
 Return as a numbered list. No exposition.
 
