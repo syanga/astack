@@ -53,7 +53,7 @@ Draft each variant. Hold each one to:
 
 Variants must be **structurally different**: different layout, different information hierarchy, different primary affordance, not just different colours. Three slightly-tweaked card grids isn't a UI prototype, it's wallpaper. If two drafts come out too similar, redo one with explicit "do not use a card grid" guidance.
 
-Use the user's visual constraints: true black background, white primary text, dense layout, minimal copy, no decorative card or pill chrome, and no light-gray subtitle lines above sections. Avoid continuously repainting animations.
+Match the project's colors, typography, spacing, and component conventions unless the user requests a redesign. New pages within an existing product follow the same conventions. For standalone work, follow the user's visual preferences. Avoid continuously repainting animations.
 
 ### 3. Wire them together
 
