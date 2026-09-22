@@ -28,7 +28,7 @@ For a requested pause or transfer to another session, read [handoff](../handoff/
 5. Verify on the matching surface. "Inconclusive" or wrong-surface is not a pass. Flag it.
 6. Rebase into small, ordered commits. Stack follow-ups.
    Use the [sequence-verifiable-units](../principles/sequence-verifiable-units.md) principle skill, building, verifying, and committing each small unit before the next.
-7. Once done, use [review-pr](../review-pr/SKILL.md) to review the work. For explicitly requested adversarial hardening, use [harden-pr](../harden-pr/SKILL.md).
+7. Once done, use [review-pr](../review-pr/SKILL.md) in fix-and-review mode. For explicitly requested adversarial hardening, use [harden-pr](../harden-pr/SKILL.md).
 8. Commit the work and use [open-pr](../open-pr/SKILL.md) for PR delivery within the task's authorized scope. Honor a request to stop at local edits. Merging and deployment are separate actions.
 
 Code-coupled work (one feature, one migration) goes to a single owner with the checkpoint inline. That owner fans out internally after the blocking phase. Parent-level fan-out is for slices that produce independent artifacts (audits, cross-subsystem investigations, competing experiments). Rewrite the checkpoint at phase boundaries. Spawn a fresh owner rather than chaining interrupts.
