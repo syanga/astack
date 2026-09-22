@@ -9,16 +9,14 @@ Pick the delivery route before building anything. The content itself follows the
 
 For either delivery route, keep the [preview cleanup record](cleanup.md) with the task's output and link it in the handoff. It identifies files and processes for later worktree cleanup.
 
-## Where the browser runs
-
-The user usually works in T3 Code through a Cloudflare tunnel. T3's preview browser runs on the **viewing device**, which can be a different machine from the one the agent runs on. In that browser, `localhost` is the viewing device, so a server on the agent's machine is unreachable at a localhost address. The only public route from the agent's machine is a Cloudflare quick tunnel.
-
-## Self-contained HTML (default)
+## Direct HTML preview (default)
 
 For static pages and interactive mocks with no backend, write one `.html` file with CSS and JavaScript inline, and link its absolute path in the reply, for example `[Open the page](/tmp/demo/index.html)`.
 
-T3's file panel renders the file and runs its scripts over the existing connection, so no server or tunnel is needed. A file outside the workspace cannot load sibling files, so keep every asset inline. The `preview_*` tools drive the browser tab, not the file panel. When you need to click through or screenshot the page yourself, take the server route in [`tunnel.md`](tunnel.md). Otherwise report the link, and say which checks were done on the source and which visual checks remain for the user.
+T3's file panel renders HTML and runs its scripts over the existing connection, including remote connections. No server or separate tunnel is needed. Files inside the workspace can load sibling assets. For files outside the workspace, keep every asset inline.
 
-## Server and tunnel
+Report the file link and distinguish source checks from visual and interaction checks. The `preview_*` tools drive the browser tab, not the file panel. If you need browser automation, follow [server previews](server.md).
 
-A page that needs a backend, a dev server, or browser automation goes through a local server plus a public Cloudflare tunnel. Follow [`tunnel.md`](tunnel.md). The tunnel URL is public, so serve only the preview directory.
+## Server previews
+
+For a backend, dev server, or browser automation, follow [server previews](server.md). Use an address reachable from the viewing device. Use a Cloudflare quick tunnel only when no existing route reaches the preview server.
