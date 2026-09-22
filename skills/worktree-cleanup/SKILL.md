@@ -5,11 +5,13 @@ description: Worktree cleanup. Use for cleanup, resource audits, close this lane
 
 # Worktree cleanup
 
-First, check the lane's conversation, notes, and linked PRs for unfinished work or unrecorded follow-ups. If anything needs handling or recording before closeout, report it and stop before auditing resources or making changes. Stop on missing completion evidence too.
+First, check the lane's conversation, notes, and linked PRs for unfinished work or unrecorded follow-ups. For explicitly abandoned work, check the recorded disposition of remaining requirements. If anything needs handling or recording before closeout, report it and stop before auditing resources or making changes. Stop on missing completion or abandonment evidence too.
 
 "Close this lane" means the current T3 thread unless specified otherwise. Resource questions are read-only.
 
-Inventory worktrees and associated resources, including leftovers outside deleted worktrees. Establish ownership from thread and launch records. Retain unknown, shared, active, pinned, or data-bearing targets whose disposal is undecided. Current-thread tools cannot establish other threads' inactivity.
+Inventory worktrees and associated resources, including leftovers outside deleted worktrees. Establish ownership from thread and launch records. Retain unknown targets and resources shared outside the cleanup scope. Retain active, pinned, or data-bearing targets whose disposal is undecided. Current-thread tools cannot establish other threads' inactivity.
+
+For artifacts from orchestrate or multi-phase-plan, follow [program closeout](PROGRAM.md) before removing their stores or workspaces. A worker lane's cleanup does not authorize disposal of its shared program store.
 
 Stop disposable resources before removing their worktrees:
 
