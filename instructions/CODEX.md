@@ -1,8 +1,9 @@
 ## Codex preferences
 
 For long noninteractive tests, builds, and finite jobs, use the
-`codex-background-jobs` skill to queue completion, end the turn, and resume
-when the job finishes. Preserve the process session and result paths.
+`codex-background-jobs` skill to queue completion and end the turn in a supported,
+loaded thread. Preserve the process session and result paths. Follow the skill's
+recovery steps when completion delivery or resumption is unverified.
 
 For interactive commands or unavailable completion queues, keep the process
 session and use the longest permitted native wait. Cap waits at 60 seconds when

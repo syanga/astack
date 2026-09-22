@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 import os
 from pathlib import Path
 import signal
@@ -30,6 +31,14 @@ with Path(os.environ['QUEUE_RECORD']).open('a') as stream:
 if os.environ.get('CANCEL_QUEUE'):
     import signal
     os.kill(os.getppid(), signal.SIGTERM)
+    signal.pause()
+if os.environ.get('INVALID_QUEUE_OUTPUT'):
+    os.write(1, b'accepted \\xff\\n')
+    os.write(2, b'diagnostic \\xfe\\n')
+    sys.exit(0)
+if os.environ.get('HANG_QUEUE'):
+    import signal
+    print('accepted', flush=True)
     signal.pause()
 print('accepted' if os.environ.get('QUEUE_EXIT', '0') == '0' else 'queue unavailable')
 sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
@@ -64,6 +73,11 @@ sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
                 self.assertEqual(result['status'], 'completed')
                 self.assertEqual(result['exit_code'], code)
                 self.assertEqual(result['notification'], 'queued')
+                times = [datetime.fromisoformat(result[key]) for key in
+                         ('started_at', 'finished_at', 'notification_started_at',
+                          'notification_finished_at')]
+                self.assertTrue(all(value.utcoffset().total_seconds() == 0 for value in times))
+                self.assertEqual(times, sorted(times))
                 self.assertCountEqual(Path(result['log']).read_text().splitlines(),
                                       ['JOB_OUTPUT_91', 'error output'])
                 queued = self.queued()
@@ -104,6 +118,77 @@ sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
         self.assertEqual(result['notification'], 'failed')
         self.assertEqual(result['queue_exit_code'], 9)
         self.assertEqual(Path(result['log']).read_text(), 'finished once\n')
+        self.assertEqual(len(self.queued()), 1)
+
+    def test_result_write_failure_still_delivers_completed_job_status(self):
+        release = self.root / 'release'
+        os.mkfifo(release)
+        process = subprocess.Popen(self.argv(
+            'import sys; open("release").read(); print("finished once"); sys.exit(7)'),
+            cwd=self.root, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            receipt = json.loads(process.stdout.readline())
+            result_path = Path(receipt['result'])
+            result_path.with_suffix('.tmp').mkdir()
+            release.write_text('finish')
+            output, error = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 74, error)
+            final = json.loads(output.splitlines()[-1])
+            self.assertEqual(final['status'], 'completed')
+            self.assertEqual(final['exit_code'], 7)
+            self.assertEqual(final['notification'], 'queued')
+            self.assertIn('result_write_error', final)
+            self.assertIn('result_write_error', error)
+            self.assertEqual(json.loads(result_path.read_text())['status'], 'running')
+            self.assertEqual(Path(final['log']).read_text(), 'finished once\n')
+            queued = self.queued()
+            self.assertEqual(len(queued), 1)
+            self.assertIn('Status: completed; exit code: 7', queued[0][4])
+            self.assertIn('result.json may be stale', queued[0][4])
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+
+    def test_invalid_utf8_queue_output_preserves_acceptance(self):
+        self.env['INVALID_QUEUE_OUTPUT'] = '1'
+        completed, _, result = self.run_job('print("finished once")')
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(result['notification'], 'queued')
+        self.assertEqual(result['queue_output'], 'accepted \ufffd\n')
+        self.assertEqual(result['queue_error'], 'diagnostic \ufffd\n')
+        self.assertEqual(result['exit_code'], 0)
+        self.assertEqual(Path(result['log']).read_text(), 'finished once\n')
+        self.assertEqual(len(self.queued()), 1)
+
+    def test_closed_receipt_pipe_does_not_stop_job_or_delivery(self):
+        process = subprocess.Popen(self.argv('import sys; print("finished once"); sys.exit(7)'),
+                                   cwd=self.root, env=self.env, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, text=True)
+        process.stdout.close()
+        _, error = process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 7, error)
+        result_path, = self.root.glob('astack-codex-job-*/result.json')
+        result = json.loads(result_path.read_text())
+        self.assertEqual(result['status'], 'completed')
+        self.assertEqual(result['exit_code'], 7)
+        self.assertEqual(result['notification'], 'queued')
+        self.assertEqual(Path(result['log']).read_text(), 'finished once\n')
+        self.assertEqual(len(self.queued()), 1)
+
+    def test_queue_timeout_records_uncertainty_without_repeating_job(self):
+        self.env['HANG_QUEUE'] = '1'
+        completed = subprocess.run(self.argv(
+            'open("runs", "a").write("run\\n"); print("finished once")'),
+            cwd=self.root, env=self.env, capture_output=True, text=True, timeout=40)
+        result = json.loads(completed.stdout.splitlines()[-1])
+        self.assertEqual(completed.returncode, 75, completed.stderr)
+        self.assertEqual(result['status'], 'completed')
+        self.assertEqual(result['exit_code'], 0)
+        self.assertEqual(result['notification'], 'unknown')
+        self.assertIn('timed out', result['queue_error'])
+        self.assertEqual(Path(result['log']).read_text(), 'finished once\n')
+        self.assertEqual((self.root / 'runs').read_text(), 'run\n')
         self.assertEqual(len(self.queued()), 1)
 
     def test_timeout_stops_job_and_queues_failure(self):
