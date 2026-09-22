@@ -13,7 +13,8 @@ Use the plan's directory, `<project repo>/.scratch/<program>/` by default. Resol
 it from the project checkout hosting the plan. Workers use that same path.
 If an existing effort already has a store elsewhere, reuse it. Record the absolute
 store and plan paths in the plan and every session handoff. Keep the store outside disposable worker
-worktrees and preserve it through worktree cleanup. For another machine or a
+worktrees and preserve it through worker cleanup. Whole-program teardown follows
+[program closeout](../worktree-cleanup/PROGRAM.md). For another machine or a
 remote session, explicitly transfer the current store or publish it to an
 authorized shared location. Local files alone do not synchronize across machines.
 
@@ -172,6 +173,6 @@ Reuse the same store when execution changes between these modes.
 ## Close
 
 Audit the decision trail through show-me-your-work before handing back. Include
-its review findings with the plan and store links. Preserve the store and its
-receipts after completion. Follow [worktree-cleanup](../worktree-cleanup/SKILL.md)
-for workspace teardown when authorized.
+its review findings with the plan and store links. When cleanup is authorized,
+follow [program closeout](../worktree-cleanup/PROGRAM.md) to archive final records
+and remove disposable artifacts. Otherwise preserve the store and its receipts.

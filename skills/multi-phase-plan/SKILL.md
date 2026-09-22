@@ -142,6 +142,7 @@ Each lane uses an isolated workspace at the PR head when it writes files or stat
 
 - [ ] Every box above is checked with its evidence.
 - [ ] Audit the decision trail through show-me-your-work, including its independent review.
+- [ ] When program cleanup is authorized, follow `<installed skills directory>/worktree-cleanup/PROGRAM.md`. Otherwise retain the plan, store, and evidence for later closeout.
 - [ ] Reply to the operator with the report the execution skill names and the trail's Attention findings.
 
 ## Appendix A. Prototype evidence
