@@ -47,7 +47,7 @@ Lay it out with a clean hierarchy, top to bottom:
 
 Choose scenarios that demonstrate the awkward cases, the ones hard to reason about on paper: the happy path, a tricky edge case, an attempt at something that should be illegal.
 
-Use a true black background, white primary text, dense layout, and minimal copy. No animations, no decorative card or pill chrome, and no light-gray subtitle lines above sections. Keep the state and buttons readable.
+Follow the project's visual conventions when the demo represents an existing product. For standalone demos, follow the user's visual preferences. Keep the state and buttons readable. No animations.
 
 ### 4. Hand it over
 
