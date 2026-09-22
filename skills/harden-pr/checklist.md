@@ -55,7 +55,7 @@ When the diff introduces a new enum value, status string, tier name, or type con
 
 ## Completeness Gaps
 - Shortcut implementations that omit required behavior (e.g., partial enum handling, incomplete error paths, missing edge cases that are straightforward to add)
-- Test coverage gaps in required behavior (e.g., missing negative-path tests, missing edge case tests that mirror happy-path structure)
+- Test coverage gaps that meet the [testing finding standard](specialists/testing.md#finding-standard)
 - Required behavior left incomplete
 
 ## Time Window Safety

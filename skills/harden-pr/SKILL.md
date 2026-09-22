@@ -1,6 +1,6 @@
 ---
 name: harden-pr
-description: Review consequential changes with specialist and adversarial reviewers, fix findings, and post actionable findings on an existing PR.
+description: Review consequential changes with independent native and outside reviewers, fix findings, and post actionable findings on an existing PR.
 disable-model-invocation: true
 ---
 
@@ -30,13 +30,11 @@ For behavior-preserving refactors, include observable outputs and relevant valid
 
 State the intent and what was delivered. Report unrequested changes, missing or partial requirements, and gaps in verification, then continue with the review. Resolve findings through the fix process below.
 
-## Step 3: Review the code
+## Step 3: Prepare the review
 
-Read [checklist.md](checklist.md). If it cannot be read, stop and report the error. Read the full diff and apply every category, respecting the checklist's suppressions.
+Read [checklist.md](checklist.md). If it cannot be read, stop and report the error. Assign the full diff and checklist to the native reviewer as described in [adversarial.md](sections/adversarial.md). The parent establishes requirements, verifies reported findings, and coordinates repairs.
 
-When the diff introduces an enum value, status, tier, or type constant, find every reference to sibling values and check whether it handles the new value.
-
-When recommending a fix pattern, check the official documentation for the framework version in use:
+When verifying a recommended fix pattern, check the official documentation for the framework version in use:
 
 - Verify the recommended pattern
 - Check for a built-in solution before recommending a workaround
@@ -46,15 +44,15 @@ When recommending a fix pattern, check the official documentation for the framew
 
 Before reporting a finding, verify it against the relevant implementation and explain the conditions under which it fails. Cite the supporting code or reproduction. For generated or inherited behavior, inspect the source that defines it. State any unresolved assumptions.
 
-For claims that behavior is safe or handled elsewhere, cite the handling code. For claims about test coverage, name the test.
+For claims that behavior is safe or handled elsewhere, cite the handling code. For claims about test coverage, name the test. Assess coverage defects using the [testing finding standard](specialists/testing.md#finding-standard).
 
 Assign severity from the demonstrated consequence and the conditions required to trigger it. Use CRITICAL for serious correctness, security, availability, or data-integrity defects; use INFORMATIONAL for lower-impact problems. A checklist category or reviewer specialty does not determine severity. Keep advisory simplifications separate from defects.
 
 ---
 
-## Step 4: Run local reviews
+## Step 4: Run independent reviews
 
-Read [specialists.md](sections/specialists.md) and [adversarial.md](sections/adversarial.md). Run the selected specialists and native adversarial reviewer against the same snapshot, keeping their briefs independent. Queue work within available capacity. Collect every outcome before batching fixes, recording failed or unavailable reviews as missing coverage.
+Read [specialists.md](sections/specialists.md) and [adversarial.md](sections/adversarial.md). Default to one native reviewer and one available outside reviewer, launched concurrently against the same snapshot. Add specialists for concrete risks or explicit requests under the specialist selection rules. Keep reviewer briefs independent and queue work within available capacity. Collect every dispatched outcome before batching fixes, recording failed or unavailable reviews as missing coverage. Follow adversarial.md's sequencing exception when substantial repairs are already known to be needed.
 
 ---
 
@@ -82,7 +80,7 @@ When a finding includes a `test_stub`, verify the proposed test, then add it wit
 
 ### Automatic fixes
 
-Batch supported fixes after collecting the local reviews. Report each fix's location, problem, and change.
+Batch supported fixes after collecting the dispatched reviews. Report each fix's location, problem, and change.
 
 After every two fix-and-review rounds, checkpoint in the review record and report the remaining defects, severity trend, recurring causes, and next action. Reassess the mechanism when repairs repeatedly reopen the same invariant or add substantial machinery. Continue authorized repairs while making progress. If progress stalls, report the unresolved blockers and what would unblock them. Ask only for a real scope, product, or authorization decision. Honor an explicit time or token budget and report unfinished coverage when it expires.
 
@@ -98,9 +96,9 @@ Apply [no-comments](../no-comments/SKILL.md) to changed code and [unslop](../uns
 
 ---
 
-## Step 6: Complete outside review and reconcile coverage
+## Step 6: Verify repairs and reconcile coverage
 
-Follow [adversarial.md](sections/adversarial.md) for affected local re-review, outside review after local convergence, synthesis, and final evidence reconciliation.
+Follow [adversarial.md](sections/adversarial.md) for focused repair verification, any deferred outside review, synthesis, and final evidence reconciliation.
 
 ## Step 7: Record the review result
 
