@@ -44,9 +44,11 @@ claude --print --safe-mode \
 
 These invocations leave source unchanged. A design candidate returns its sketch
 as text. A code candidate returns a patch or complete files for the parent to
-materialize and test in its assigned worktree. Supply diffs explicitly for
-Claude because this invocation has no shell tool. Native code-writing runners
-may edit their assigned worktree when the task authorizes implementation.
+materialize and test in its assigned worktree. Embed the assigned diff text in
+the prompt for Claude; a diff pathname alone is insufficient. Put referenced
+supporting files inside the provider's readable checkout or snapshot. Native
+code-writing runners may edit their assigned worktree when the task authorizes
+implementation.
 
 Preserve stdout, stderr, and the final response. Claude returns a JSON envelope.
 Read its result text and error status. Inspect Codex's final response and events.

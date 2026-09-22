@@ -2,13 +2,19 @@
 
 Read and apply [test-behavior-not-implementation.md](../../principles/test-behavior-not-implementation.md) when evaluating existing or proposed tests relevant to the change.
 
+## Finding standard
+
+For a coverage defect, name the required behavior, a plausible failure under supported conditions, and why the relevant existing tests would miss it. Cite the requirement and inspected tests, or state that no relevant test exists. An untested branch or utility without a direct unit test is an investigation prompt, not a defect by itself. Tests through callers count when their assertions detect the failure.
+
+Use the categories below to investigate relevant failures. Report test isolation or flakiness defects with their trigger and observable consequence under the skill's evidence requirements.
+
 ## Categories
 
 ### Missing Negative-Path Tests
-- New code paths that handle errors, rejections, or invalid input with NO corresponding test
-- Guard clauses and early returns that are untested
-- Error branches in try/catch, rescue, or error boundaries with no failure-path test
-- Permission/auth checks that are asserted in code but never tested for the "denied" case
+- Required rejection or recovery behavior that tests would still pass if broken
+- Guards whose removal would permit an invalid operation without failing a test
+- Error paths whose incorrect result or cleanup would escape existing assertions
+- Required access denial that existing tests do not verify
 
 ### Missing Edge-Case Coverage
 - Boundary values: zero, negative, max-int, empty string, empty array, nil/null/undefined
@@ -35,6 +41,6 @@ Read and apply [test-behavior-not-implementation.md](../../principles/test-behav
 - CSRF/CORS configuration with no integration test
 
 ### Coverage Gaps
-- New public methods/functions with zero test coverage
-- Changed methods where existing tests only cover the old behavior, not the new branch
-- Utility functions called from multiple places but tested only indirectly
+- Required behavior of a new public operation that existing tests do not exercise
+- Changed behavior where tests assert only the old contract
+- Caller tests whose assertions miss a plausible failure in a shared utility

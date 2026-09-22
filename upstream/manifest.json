@@ -72,7 +72,7 @@
       "a6b3a57512ca6d5c6aa5b68f74f736195021f96e"
     ],
     "license": "MIT, kept in skills/harden-pr/LICENSE-pstack, LICENSE-mattpocock, and LICENSE-gstack",
-    "note": "Uses generated gstack review Markdown without its generator or global runtime. Scope follows current user requirements. Findings require evidence rather than numerical scores. Testing and maintainability always run because astack has no specialist hit-rate store. PR transport retains earlier pstack and Matt material."
+    "note": "Uses generated gstack review Markdown without its generator or global runtime. Scope follows current user requirements. Findings require evidence rather than numerical scores. PR transport retains earlier pstack and Matt material."
   },
   "grilling": {
     "repository": "https://github.com/mattpocock/skills.git",
