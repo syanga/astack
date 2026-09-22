@@ -34,11 +34,12 @@ Other harnesses and interactive commands use their native process sessions.
    Answer status questions briefly, then continue the remaining authorized work.
    Apply later cancellation or scope changes before acting on delayed messages.
 
-The helper attempts one notification after success, failure, or timeout. Interrupting
-its process session while the job runs stops the job and skips notification.
-Use that session to cancel before ending the turn if the job is no longer wanted.
-An interrupt during delivery records `notification: unknown`; a message already
-accepted by Codex cannot be recalled.
+The helper attempts one notification after success, failure, or timeout. When it
+receives SIGINT or SIGTERM while the job runs, it stops the job and skips notification.
+Verify the cancellation receipt. A host can terminate the process session without
+running this cleanup, leaving the job alive and its result stale.
+A handled interrupt during delivery records `notification: unknown`; the helper
+cannot recall a message already accepted by Codex.
 
 ## Recover a failed completion
 
@@ -60,10 +61,15 @@ the first resumed action. A notification visible after a user message does not
 prove that it started a turn. Report missing evidence instead of inferring which
 message caused execution.
 
-The helper cannot report its own forced termination or a stopped host. A stale
-result is not evidence that a job is still alive. Recovery from helper death or
-host shutdown requires supervision outside the helper. Keep those cases separate
-from the handled job failures and delivery errors.
+The helper cannot report its own forced termination or a stopped host. Losing the
+launching tool connection can kill the helper even while the host and job continue.
+A stale result is not evidence that either process is still alive. Automatic recovery
+requires supervision outside that connection with a durable cancellation mechanism.
+
+An unloaded thread can accept a notification without starting a turn. Resuming the
+whole thread can execute other pending messages too. Leave automatic thread loading
+to a host that checks authorization and cancellation for every pending task. Keep
+these host failures separate from the handled job failures and delivery errors.
 
 Codex can check its queue internally on a timer. This workflow removes model
 polling and does not provide a T3 Monitoring badge.
