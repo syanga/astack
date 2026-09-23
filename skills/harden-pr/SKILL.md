@@ -1,6 +1,6 @@
 ---
 name: harden-pr
-description: Review consequential changes with independent native and outside reviewers, fix findings, and post actionable findings on an existing PR.
+description: Review consequential changes with independent native and outside reviewers, fix findings, and finalize existing PRs.
 disable-model-invocation: true
 ---
 
@@ -92,7 +92,7 @@ If there are ASK items remaining, present the decisions together. Explain the pr
 
 Apply the approved fixes and report what changed.
 
-Apply [no-comments](../no-comments/SKILL.md) to changed code and [unslop](../unslop/SKILL.md) to changed prose. Commit, push, or merge only when the user requested that follow-through.
+Apply [no-comments](../no-comments/SKILL.md) to changed code and [unslop](../unslop/SKILL.md) to changed prose.
 
 ---
 
@@ -110,6 +110,6 @@ For an existing PR, post actionable findings using [posting.md](posting.md). Rep
 
 Keep optional ideas and out-of-scope work in one `Deferred follow-ups` section in the PR description. Preserve other authors' content and merge duplicate ideas. Give each item the problem, supporting evidence, and reason for deferral. Label speculative ideas as unverified. These items are outside this PR's acceptance criteria and do not authorize implementation or another hardening round. A defect that prevents required behavior remains a blocker. If PR publication is unavailable, retain the section in the review record and report the pending update. Without a PR, keep it in that record.
 
-For requested PR follow-through, continue with [ship-pr](../ship-pr/SKILL.md).
+For existing PRs, [finalize the PRs](pr-work.md#finalize-reviewed-prs), including committing and pushing verified repairs. Without a PR, return the review and local repairs to the caller's delivery workflow.
 
 Keep the assessment concise. Explain each remaining problem and its proposed fix.
