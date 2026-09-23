@@ -84,7 +84,9 @@ If the spec is missing, skip the Spec sub-agent and note this in the final repor
 
 ### 5. Aggregate
 
-In fix-and-review mode, collect the applicable reports. Have the parent fix verified in-scope problems and rerun the caller's affected acceptance checks. Refresh the diff against the same base, including uncommitted repairs, and repeat both applicable reviews. Finish when the final changes have no unresolved verified problems, required checks pass, and applicable reviews are complete. Optional suggestions do not block completion. If progress stalls or a decision is needed, report the remaining blockers.
+In fix-and-review mode, collect the applicable reports. Have the parent fix verified in-scope problems and rerun the caller's affected acceptance checks. Refresh the diff against the same base, including uncommitted repairs, and repeat both applicable reviews. Converge when the final changes have no unresolved verified problems, required checks pass, and applicable reviews are complete. Optional suggestions do not block completion. If progress stalls or a decision is needed, report the remaining blockers.
+
+For existing PRs, fix-and-review includes committing and pushing verified repairs under [Finalize reviewed PRs](../harden-pr/pr-work.md#finalize-reviewed-prs). Complete that procedure before reporting completion. Honor explicit report-only, read-only, or local-only limits. Without a PR, return the reviewed changes to the caller's delivery workflow. Merging requires separate authorization.
 
 Present the two reports under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings, because the two axes are deliberately separate (see _Why two axes_).
 

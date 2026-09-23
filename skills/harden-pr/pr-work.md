@@ -24,10 +24,21 @@ Apply [open-pr's diff cleanup and pre-push protection](../open-pr/SKILL.md) to f
 
 Take a fresh snapshot after each push. Use `pr.py wait --pr <n> --max-minutes 0.5` to wait in short intervals while checks or mergeability settle. It returns when they settle, the head changes, the PR closes, checks fail or stall, or the interval expires. Inspect the returned snapshot; returning does not imply success. An API failure is missing state, never a clean result. Retry a transient failure, then report it if it persists. Stay quiet during routine waiting.
 
+## Finalize reviewed PRs
+
+For hardening and fix-and-review requests on existing PRs, finalize every PR in scope after repair verification. Explicit report-only, read-only, or local-only requests retain their narrower stopping state.
+
+1. Commit and push verified in-scope repairs using the push procedure above. Preserve unrelated work. For a stack, route base updates and restacks through its designated owner, then refresh affected verification at the resulting heads.
+2. Update PR descriptions and test results to match the delivered changes. Address review threads through the procedure above and publish remaining actionable findings through [posting.md](posting.md).
+3. Check each remote PR head against the reviewed and tested candidate. Reconcile affected evidence after any head or base change. Wait for required checks and resolve failures within scope.
+4. Report each PR's URL, final head SHA, verification, and remaining approvals. A PR is finalized when its repairs are pushed, its metadata and review threads are current, required checks pass, and applicable review coverage is complete with no unresolved in-scope defects. Local repair completion alone does not satisfy this state.
+
+If publication, required verification, or a needed decision is blocked, report the unfinished PRs and the exact blocker. Keep missing coverage visible. Optional follow-ups do not block finalization. Leave finalized PRs open unless merging is authorized.
+
 ## Finish or merge
 
 When hardening was requested, confirm its assessment covers the final head, refreshing affected coverage through [harden-pr](SKILL.md) as needed. For a narrower follow-through request, finish when its findings and checks are addressed. Report what changed, remaining findings, CI, required approvals, and unavailable coverage. A bot that reviewed an earlier commit may not have reviewed the final head.
 
-Before an authorized merge, take a fresh snapshot, confirm that findings and user decisions are addressed and required checks and approvals pass on the intended head, and use `gh pr merge <n> --squash --match-head-commit <sha>`. Respect the user's merge disposition. If it is absent, report readiness and ask. For stacked PRs, retarget children to the parent's base before deleting the parent branch.
+Before an authorized merge, take a fresh snapshot, confirm that findings and user decisions are addressed and required checks and approvals pass on the intended head, and use `gh pr merge <n> --squash --match-head-commit <sha>`. Respect the user's merge disposition. If it is absent, stop with the finalized PRs open. For stacked PRs, retarget children to the parent's base before deleting the parent branch.
 
 For merge-when-ready, wait and merge the verified head explicitly. Use auto-merge only when requested and repository controls prevent unverified head changes while pending. Matching the head at scheduling time alone is insufficient. Confirm the merged state before reporting the PR as landed.

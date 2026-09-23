@@ -26,7 +26,7 @@ Leave `body` empty and put each actionable finding in `comments` with bucket `ac
 
 When screenshots or recordings demonstrate a finding, follow [open-pr's attachment guidance](../open-pr/SKILL.md).
 
-If fixes remain local, report them in the conversation. After an authorized push, review the fixes and post any remaining actionable findings.
+If an explicit delivery limit or blocker leaves fixes local, report that state in the conversation. After a push, post any remaining actionable findings against the reviewed head. In repair workflows, finish [PR finalization](pr-work.md#finalize-reviewed-prs) before reporting completion.
 
 For a two-axis review, label each finding with its axis.
 
