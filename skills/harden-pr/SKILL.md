@@ -6,8 +6,6 @@ disable-model-invocation: true
 
 For a request limited to PR status, comments, or CI, follow [ship-pr](../ship-pr/SKILL.md). Otherwise run the review below.
 
-For existing PRs, hardening includes committing and pushing verified repairs under [Finalize reviewed PRs](pr-work.md#finalize-reviewed-prs). Honor explicit report-only, read-only, or local-only limits. Merging requires separate authorization.
-
 ## Step 1: Pin the fixed point
 
 Whatever the user said is the fixed point (a commit SHA, branch name, tag, `main`, `HEAD~5`, etc.). If they didn't specify one, use the PR's target branch when available; otherwise ask for it.
@@ -112,6 +110,6 @@ For an existing PR, post actionable findings using [posting.md](posting.md). Rep
 
 Keep optional ideas and out-of-scope work in one `Deferred follow-ups` section in the PR description. Preserve other authors' content and merge duplicate ideas. Give each item the problem, supporting evidence, and reason for deferral. Label speculative ideas as unverified. These items are outside this PR's acceptance criteria and do not authorize implementation or another hardening round. A defect that prevents required behavior remains a blocker. If PR publication is unavailable, retain the section in the review record and report the pending update. Without a PR, keep it in that record.
 
-For existing PRs within the authorized delivery scope, follow [Finalize reviewed PRs](pr-work.md#finalize-reviewed-prs) before reporting completion. Without a PR, return the review and local repairs to the caller's delivery workflow.
+For existing PRs, [finalize the PRs](pr-work.md#finalize-reviewed-prs), including committing and pushing verified repairs. Without a PR, return the review and local repairs to the caller's delivery workflow.
 
 Keep the assessment concise. Explain each remaining problem and its proposed fix.

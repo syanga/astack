@@ -26,18 +26,13 @@ Take a fresh snapshot after each push. Use `pr.py wait --pr <n> --max-minutes 0.
 
 ## Finalize reviewed PRs
 
-For hardening and fix-and-review requests on existing PRs, finalize every PR in scope after repair verification. Explicit report-only, read-only, or local-only requests retain their narrower stopping state.
+Hardening and fix-and-review finish when every in-scope PR has its repairs committed and pushed, current descriptions and review threads, and passing required checks. Required reviews must be complete and apply to each remote head, with no unresolved in-scope defects. Use the procedures above, routing stack changes through the designated owner.
 
-1. Commit and push verified in-scope repairs using the push procedure above. Preserve unrelated work. For a stack, route base updates and restacks through its designated owner, then refresh affected verification at the resulting heads.
-2. Update PR descriptions and test results to match the delivered changes. Address review threads through the procedure above and publish remaining actionable findings through [posting.md](posting.md).
-3. Check each remote PR head against the reviewed and tested candidate. Reconcile affected evidence after any head or base change. Wait for required checks and resolve failures within scope.
-4. Report each PR's URL, final head SHA, verification, and remaining approvals. A PR is finalized when its repairs are pushed, its metadata and review threads are current, required checks pass, and applicable review coverage is complete with no unresolved in-scope defects. Local repair completion alone does not satisfy this state.
-
-If publication, required verification, or a needed decision is blocked, report the unfinished PRs and the exact blocker. Keep missing coverage visible. Optional follow-ups do not block finalization. Leave finalized PRs open unless merging is authorized.
+Honor explicit report-only, read-only, or local-only limits. If publication, verification, or a needed decision is blocked, report the unfinished PRs and the blocker.
 
 ## Finish or merge
 
-When hardening was requested, confirm its assessment covers the final head, refreshing affected coverage through [harden-pr](SKILL.md) as needed. For a narrower follow-through request, finish when its findings and checks are addressed. Report what changed, remaining findings, CI, required approvals, and unavailable coverage. A bot that reviewed an earlier commit may not have reviewed the final head.
+When hardening was requested, confirm its assessment covers the final head, refreshing affected coverage through [harden-pr](SKILL.md) as needed. For a narrower follow-through request, finish when its findings and checks are addressed. Report each PR's URL and final head SHA, what changed, remaining findings, CI, required approvals, and unavailable coverage.
 
 Before an authorized merge, take a fresh snapshot, confirm that findings and user decisions are addressed and required checks and approvals pass on the intended head, and use `gh pr merge <n> --squash --match-head-commit <sha>`. Respect the user's merge disposition. If it is absent, stop with the finalized PRs open. For stacked PRs, retarget children to the parent's base before deleting the parent branch.
 

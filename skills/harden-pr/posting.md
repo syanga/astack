@@ -26,8 +26,6 @@ Leave `body` empty and put each actionable finding in `comments` with bucket `ac
 
 When screenshots or recordings demonstrate a finding, follow [open-pr's attachment guidance](../open-pr/SKILL.md).
 
-If an explicit delivery limit or blocker leaves fixes local, report that state in the conversation. After a push, post any remaining actionable findings against the reviewed head. In repair workflows, finish [PR finalization](pr-work.md#finalize-reviewed-prs) before reporting completion.
-
 For a two-axis review, label each finding with its axis.
 
 GitHub inline comments need a line in the PR diff. For a finding in unchanged code, anchor it on the changed line that causes the problem and name the actual location in the comment. For a finding about the title or description, use a diff line and explicitly label it as a metadata finding. These findings still need entries so the helper can preserve them if inline posting fails.
