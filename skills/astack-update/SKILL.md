@@ -1,5 +1,5 @@
 ---
-name: update-astack
+name: astack-update
 description: Update or reinstall astack.
 disable-model-invocation: true
 ---
