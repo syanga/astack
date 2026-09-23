@@ -92,7 +92,7 @@ Pass upstream findings to dependent workers before dispatch. Audit one sampled w
 
 ## Verification
 
-Scale verification to the unit. When VERIFY is a single cheap command, the worker runs it and reports the output, and the coordinator spot-checks receipts. Use a dedicated verifier for expensive checks, judgments that need independent review, or changes with broad effects. Run dedicated verifiers as fresh native agents on the session's model. When a judgment needs independent review, also run an outside provider review when available and permitted by the session's model policy: Codex when hosted in Claude, and Claude when hosted in Codex. Follow [provider execution](../arena/PROVIDERS.md). Treat its findings as evidence for acceptance, not as a ledger receipt.
+Scale verification to the unit. When VERIFY is a single cheap command, the worker runs it and reports the output, and the coordinator spot-checks receipts. Use a dedicated verifier for expensive checks, judgments that need independent review, or changes with broad effects. Run dedicated verifiers as native agents on the session's model. For a judgment that needs independent review, also get a review from Codex when hosted in Claude or from Claude when hosted in Codex, following [provider execution](../arena/PROVIDERS.md). Treat its findings as evidence for acceptance, not as a ledger receipt.
 
 Follow [STATE.md's verification procedure](STATE.md#accept-verification) to record and accept receipts. It defines verdicts, verifier precedence, evidence checks, and verification after a head change.
 

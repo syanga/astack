@@ -72,17 +72,15 @@ If the work diverged from what a row claims, append the corrected result with ev
 
 ## Independent review of the trail
 
-Before handing back, spawn an independent reviewer to read the audit trail and
-the run's transcript, or the available records, and flag what the user should
-inspect. It reviews decisions and evidence without redoing the work. Use an
-outside provider when available and permitted by the session's model policy:
-Codex when hosted in Claude, and Claude when hosted in Codex. Run it per
-[provider execution](../arena/PROVIDERS.md), with copies of the trail and
-transcript inside its readable snapshot. If an outside provider is unavailable,
-not permitted, or fails, use a fresh native agent on the session's model. If
-delegation is unavailable, perform the audit yourself and report that
-independent review was unavailable. Self-review does not count as independent
-review.
+Before handing back, spawn an independent reviewer. Run Codex when hosted in
+Claude and Claude when hosted in Codex, following
+[provider execution](../arena/PROVIDERS.md). If the outside provider is
+unavailable, not permitted, or fails, use a fresh native agent on the session's
+model. The reviewer reads the audit trail and the run's transcript, or the
+available records, and flags what the user should inspect. It reviews decisions
+and evidence without redoing the work. If delegation is unavailable, perform the
+audit yourself and report that independent review was unavailable. Self-review
+does not count as independent review.
 
 - Decisions logged with weak or absent evidence.
 - Verification steps skipped or claimed without proof in the transcript.
