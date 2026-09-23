@@ -70,14 +70,17 @@ At the end of the run, before handing back, check the log told the truth. Read t
 
 If the work diverged from what a row claims, append the corrected result with evidence. Preserve the original row so the correction remains reviewable.
 
-## Cross-model review of the trail
+## Independent review of the trail
 
-Before handing back, spawn an independent reviewer. Use a different model family
-when available and permitted by the session's model policy. The reviewer reads
-the audit trail and the run's transcript, or the available records, and flags
-what the user should inspect. It reviews decisions and evidence without redoing
-the work. If delegation is unavailable, perform the audit yourself and report
-that independent review was unavailable. Self-review does not count as independent review.
+Before handing back, spawn an independent reviewer. Run Codex when hosted in
+Claude and Claude when hosted in Codex, following
+[provider execution](../arena/PROVIDERS.md). If the outside provider is
+unavailable, not permitted, or fails, use a fresh native agent on the session's
+model. The reviewer reads the audit trail and the run's transcript, or the
+available records, and flags what the user should inspect. It reviews decisions
+and evidence without redoing the work. If delegation is unavailable, perform the
+audit yourself and report that independent review was unavailable. Self-review
+does not count as independent review.
 
 - Decisions logged with weak or absent evidence.
 - Verification steps skipped or claimed without proof in the transcript.
@@ -87,8 +90,8 @@ that independent review was unavailable. Self-review does not count as independe
 Every handoff or final reply for a run that produced a trail ends with an
 "Attention" section. Name the reviewer and model when known, or state that only
 self-review was available. List flags with links to specific rows or events,
-and disclose unavailable transcript or model diversity coverage. "No flags" is
-a valid finding, but it does not replace the review attribution.
+and disclose unavailable transcript or outside-provider coverage. "No flags"
+is a valid finding, but it does not replace the review attribution.
 
 ## Reviewing the trail
 
