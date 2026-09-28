@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Implement a feature, spec, or set of tickets with design ownership, independent review, and verified slices. Multi-phase plans start with orchestrate.
+description: Implement a feature, spec, or set of tickets with design ownership, independent review, and verified slices.
 disable-model-invocation: true
 ---
 

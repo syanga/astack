@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Orchestrate
 
-**You own the program.** Author briefs, drain completions, maintain the merge frontier, and make coordination decisions. Use this workflow for a project with multiple owners and dependent PRs that needs a standing coordinator across sessions. Use [implement](../implement/SKILL.md) for work one agent can finish in a session. Use [multi-phase-plan](../multi-phase-plan/SKILL.md) first when the PR sequence still needs a plan.
+**You own the program.** Author briefs, drain completions, maintain the merge frontier, and make coordination decisions. Use this workflow to execute a multi-phase plan or to run a project with multiple owners and dependent PRs across sessions. Frame hands single-agent work to [implement](../implement/SKILL.md). Use [multi-phase-plan](../multi-phase-plan/SKILL.md) first when the PR sequence still needs a plan.
 
 Scale coordination to the work. For small, similar units, use the simpler procedures noted below.
 
