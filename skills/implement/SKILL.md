@@ -10,7 +10,7 @@ Implement the work described by the user in the spec or tickets. Carry forward d
 
 For a substantial behavior-preserving phase, follow [refactoring](../refactoring/SKILL.md), reusing the design and evidence already established. Keep incidental cleanup within this workflow. Apply [TypeScript guidance](../typescript-best-practices/SKILL.md) when writing or reviewing TypeScript.
 
-To execute a multi-phase plan, use [orchestrate](../orchestrate/SKILL.md). For a unit it assigns, [Work a unit under orchestrate](#work-a-unit-under-orchestrate) overrides the delegation stance below and the steps it names.
+To execute a multi-phase plan, including one that names implement, use [orchestrate](../orchestrate/SKILL.md). For a unit it assigns, [Work a unit under orchestrate](#work-a-unit-under-orchestrate) overrides the delegation stance below and the steps it names.
 
 For a requested pause or transfer to another session, read [handoff](../handoff/SKILL.md). Standalone implementation needs only a handoff note.
 
