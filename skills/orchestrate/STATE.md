@@ -68,7 +68,7 @@ Verdicts are `live-ui-verified`, `unit-test-verified`, `type-check-only`,
 `verifier-blocked`, and `verifier-failed`. Inspect the evidence and compare its SHA
 with the current PR head before accepting the result. Treat a receipt as
 evidence only when it links saved files that hold the raw output of every
-verification command it reports. CI success contributes
+verification command or CI job it reports. CI success contributes
 evidence but does not establish a verdict. Behavioral work needs more than
 `type-check-only`. A blocked check resumes when its environment is available;
 a failed check needs a fix before new verification. Neither satisfies acceptance.
