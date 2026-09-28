@@ -11,7 +11,7 @@ disable-model-invocation: true
 1. When the change is one or two files with an obvious approach, skip the plan. Say so and stop.
 2. Settle open questions before you write. Use [prototype](../prototype/SKILL.md) for questions an experiment can answer, [architect](../architect/SKILL.md) for code structure, and [wayfinder](../wayfinder/SKILL.md) when decisions span sessions. Reuse existing evidence. Keep the branch, the SHA, and the artifacts for Appendix A. Ask the operator only about a product or preference call that no run can settle.
 3. Explore independent areas in subagents when available and permitted, within the harness's capacity. Each returns file pointers, conventions, test commands, and entry points. No inlined dumps. Explore directly when delegation is unavailable or adds no value.
-4. Copy the skeleton below into the plan file and fill every placeholder. Unless the operator names a path, write `.scratch/<program>/plan.md`. Keep every heading and every sub-block in the order shown. One section per PR. One PR is one change with its own evidence, per [Sequence Verifiable Units](../principles/sequence-verifiable-units.md). Name [implement](../implement/SKILL.md) as the execution skill for bounded work or [orchestrate](../orchestrate/SKILL.md) for a standing program. Both use the [shared execution-state convention](../orchestrate/STATE.md) and its [show-me-your-work](../show-me-your-work/SKILL.md) decision trail. Read the state convention and record the absolute store path in the plan. Record execution and merge authorization separately.
+4. Copy the skeleton below into the plan file and fill every placeholder. Unless the operator names a path, write `.scratch/<program>/plan.md`. Keep every heading and every sub-block in the order shown. One section per PR. One PR is one change with its own evidence, per [Sequence Verifiable Units](../principles/sequence-verifiable-units.md). Name [orchestrate](../orchestrate/SKILL.md) as the execution skill. It uses the [shared execution-state convention](../orchestrate/STATE.md) and its [show-me-your-work](../show-me-your-work/SKILL.md) decision trail. Read the state convention and record the absolute store path in the plan. Record execution and merge authorization separately.
 5. Write under [technical-writing](../technical-writing/SKILL.md) in full, then [unslop](../unslop/SKILL.md). The body is one Diátaxis mode, how-to. Appendices hold explanation and reference. Each heading states the task or the finding. No long dashes. No mid-sentence colons.
 6. Run `python3 <this skill's directory>/scripts/check_plan.py <plan.md>` and fix every problem it prints. The checker validates structure, evidence fields, and probe references. Review the dependencies and the adequacy of the verification yourself.
 7. Hand back. Post the plan path and the script's output, then stop. Execution starts under the named skill when the user authorizes it. Honor authorization already given for execution after planning. For a requested transfer to another session, use [handoff](../handoff/SKILL.md) to link the plan and record remaining approvals. Planning alone does not initialize an execution store.
@@ -37,7 +37,7 @@ Record human review gates required by the user or repository, including UI selec
 
 One box is one unit of work. Every box names the evidence that checks it. A nested box is a sub-step of the box above it. Check a box only when its evidence exists, a file, a log line, a screenshot, a test run, or a SHA. The body is a how-to. The appendices explain and record.
 
-The program runs `<installed skills directory>/<implement or orchestrate>/SKILL.md`. <Who merges, and which PR ids are the operator's items that stop at merge-ready.>
+The program runs `<installed skills directory>/orchestrate/SKILL.md`. <Who merges, and which PR ids are the operator's items that stop at merge-ready.>
 
 Shared execution state lives at `<absolute store path>`, using `<installed skills directory>/orchestrate/STATE.md`. Use that same store for sequential and delegated execution, and link it in every session handoff.
 
@@ -70,7 +70,7 @@ Select a probe with `python3 <installed skills directory>/multi-phase-plan/scrip
 - [ ] Follow the installed open-pr skill. Independent PRs target the default branch. A stack child targets its parent branch.
 - [ ] Run required repository checks and push with hooks on.
 - [ ] Apply technical-writing and unslop to prose, and no-comments before review.
-- [ ] Address review findings within scope. Use harden-pr when the user requests hardening.
+- [ ] Address review findings within scope. When the user requests hardening, the stack's hardening owner uses harden-pr.
 - [ ] Update the base through the assigned stack owner, then verify the resulting head before reporting merge-ready.
 
 ### Verdict and merge, for every PR

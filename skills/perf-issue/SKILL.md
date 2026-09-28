@@ -29,6 +29,6 @@ For a diagnosis-only request, stop before implementation with the measurements, 
 5. Run [review-pr](../review-pr/SKILL.md) in fix-and-review mode. Cite the commands, results, and artifact paths in the PR.
 6. Use [open-pr](../open-pr/SKILL.md) within the task's delivery scope. Honor a request for local edits only. Merging is a separate action.
 
-For a unit in a multi-phase plan, follow [the shared execution-state convention](../orchestrate/STATE.md). Reuse its store. Delegated workers return evidence to the coordinator. For a session transfer, read [handoff](../handoff/SKILL.md) and include the measurement command, workload, results, and artifact paths.
+When orchestrate assigns this workflow a plan unit, also follow [implement's unit rules](../implement/SKILL.md#work-a-unit-under-orchestrate). To run plan units directly, start [orchestrate](../orchestrate/SKILL.md) scoped to those units. For a session transfer, read [handoff](../handoff/SKILL.md) and include the measurement command, workload, results, and artifact paths.
 
 **Reply:** metric, baseline number, post-fix number, delta, variation, correctness checks, and artifact paths. State when the evidence is inconclusive.

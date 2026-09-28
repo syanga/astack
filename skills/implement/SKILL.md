@@ -10,9 +10,9 @@ Implement the work described by the user in the spec or tickets. Carry forward d
 
 For a substantial behavior-preserving phase, follow [refactoring](../refactoring/SKILL.md), reusing the design and evidence already established. Keep incidental cleanup within this workflow. Apply [TypeScript guidance](../typescript-best-practices/SKILL.md) when writing or reviewing TypeScript.
 
-When executing a multi-phase plan, read [the shared execution-state convention](../orchestrate/STATE.md). A sequential execution owner initializes or resumes the plan's existing store, checkpoints progress, and leaves its next action there before ending a session. At completion, follow the store's close procedure, including the show-me-your-work audit. A delegated worker returns receipts to its coordinator, which owns the shared state updates and final audit.
+To execute a multi-phase plan, use [orchestrate](../orchestrate/SKILL.md). For a unit it assigns, [Work a unit under orchestrate](#work-a-unit-under-orchestrate) overrides the delegation stance below and the steps it names.
 
-For a requested pause or transfer to another session, read [handoff](../handoff/SKILL.md). Reuse the execution store when present; standalone implementation needs only a handoff note.
+For a requested pause or transfer to another session, read [handoff](../handoff/SKILL.md). Standalone implementation needs only a handoff note.
 
 **You own the design. Plan, review, verify.** Delegate implementation. Stay in the lead.
 
@@ -34,3 +34,14 @@ For a requested pause or transfer to another session, read [handoff](../handoff/
 Code-coupled work (one feature, one migration) goes to a single owner with the checkpoint inline. That owner fans out internally after the blocking phase. Parent-level fan-out is for slices that produce independent artifacts (audits, cross-subsystem investigations, competing experiments). Rewrite the checkpoint at phase boundaries. Spawn a fresh owner rather than chaining interrupts.
 
 **Reply:** what you built, what you chose and why, the throughput checkpoint, open decisions. Tables for design alternatives.
+
+## Work a unit under orchestrate
+
+The plan and brief replace parts of this workflow. Steps not named here still apply.
+
+- Skip how, architect, and the throughput checkpoint for design the plan settled, unless the plan or brief calls for them. A companion workflow such as bug-fix or perf-issue keeps its diagnosis and measurement steps.
+- Write the code yourself. review-pr's separate reviewers provide the review separation. A hillclimb unit keeps its delegated attempts.
+- Verify with the brief's VERIFY and return its output as receipts.
+- Make small, ordered commits. Leave rebases, stack changes, and hardening to the owners the coordinator assigns, including during review-pr's finalize step. Report base drift instead.
+- Run review-pr in fix-and-review mode against the base the brief names. Then use open-pr against that base, skipping its rebase step.
+- Reply with the brief's REPORT. The coordinator owns the shared store, handoffs, and final audit.

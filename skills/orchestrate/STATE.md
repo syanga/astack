@@ -1,8 +1,8 @@
 # Maintain shared execution state
 
-Use this convention for every multi-phase plan, whether implement runs its units
-sequentially or orchestrate coordinates several owners. Keep one store when
-switching execution skills. The current execution owner writes its shared files.
+Use this convention for every multi-phase plan, whether orchestrate runs its
+units sequentially or coordinates several owners. Keep one store when
+switching between these modes. The current execution owner writes its shared files.
 With several agents, that owner is the coordinator; workers return reports
 instead of editing the shared tables. A track coordinator may own a separate
 track store, but sends rollups instead of writing the parent's files.
@@ -167,7 +167,7 @@ restrictions on checkpoint writes. Select the next unfinished unit whose
 dependencies and approvals are satisfied and whose work the current hold permits.
 If the hold prevents all execution, report the saved
 resume point and its release condition. Otherwise continue from the recorded next
-action, either directly with implement or through orchestrate's drain cycle.
+action, either directly in a sequential run or through orchestrate's drain cycle.
 Reuse the same store when execution changes between these modes.
 
 ## Close

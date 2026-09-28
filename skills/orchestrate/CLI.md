@@ -1,7 +1,7 @@
 # Orchestration CLI
 
 Use the imported pstack runtime to maintain the execution store defined in
-[STATE.md](STATE.md). Sequential implement sessions and coordinators use the
+[STATE.md](STATE.md). Sequential runs and coordinators use the
 same CLI. Read this file before the first command or when recovering a store.
 
 ## Setup and invocation

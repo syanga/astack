@@ -1,12 +1,12 @@
 ---
 name: orchestrate
-description: Coordinate a multi-session program with multiple owners, dependent PRs, and durable verification records.
+description: Execute a multi-phase plan or coordinate a multi-owner program with dependent PRs and durable verification records.
 disable-model-invocation: true
 ---
 
 # Orchestrate
 
-**You own the program.** Author briefs, drain completions, maintain the merge frontier, and make coordination decisions. Use this workflow for a project with multiple owners and dependent PRs that needs a standing coordinator across sessions. Use [implement](../implement/SKILL.md) for work one agent can finish in a session. Use [multi-phase-plan](../multi-phase-plan/SKILL.md) first when the PR sequence still needs a plan.
+**You own the program.** Author briefs, drain completions, maintain the merge frontier, and make coordination decisions. Use this workflow for executing every multi-phase plan and for any project with multiple owners and dependent PRs. Use [implement](../implement/SKILL.md) for a single change without a plan. Use [multi-phase-plan](../multi-phase-plan/SKILL.md) first when the PR sequence still needs a plan.
 
 Scale coordination to the work. For small, similar units, use the simpler procedures noted below.
 
@@ -18,7 +18,7 @@ Follow these rules.
 
 ## Roles and placement
 
-- **Coordinator (this chat).** The local coordinator defines the program, writes briefs, drains the inbox, reports progress, and makes coordination decisions. It delegates code changes. Conflicted merges, restacks, and code changes are always tasks. The coordinator may integrate a verified unit when local Git is cheap. Any integration that changes the head needs verification at the resulting SHA. Follow [ship-pr](../ship-pr/SKILL.md) for authorized merges. Integrate verified work as it becomes ready. Use the active harness's agent tools for dispatch, status, messages, and completion events. Read [STATE.md](STATE.md) before creating the store and [CLI.md](CLI.md) before running its bookkeeping commands. If agent tools are unavailable, leave the executable plan and a concrete handoff instead of simulating workers.
+- **Coordinator (this chat).** The local coordinator defines the program, writes briefs, drains the inbox, reports progress, and makes coordination decisions. Outside a sequential run, it delegates code changes, conflicted merges, and restacks as tasks. The coordinator may integrate a verified unit when local Git is cheap. Any integration that changes the head needs verification at the resulting SHA. Follow [ship-pr](../ship-pr/SKILL.md) for authorized merges. Integrate verified work as it becomes ready. Use the active harness's agent tools for dispatch, status, messages, and completion events. Read [STATE.md](STATE.md) before creating the store and [CLI.md](CLI.md) before running its bookkeeping commands. If agent tools are unavailable and the program is too large for a sequential run, leave the executable plan and a concrete handoff instead of simulating workers.
 - **Sub-coordinator.** Always local, durable, one per track, and only when the program exceeds what one coordinator's drains can manage. A track the coordinator can drain itself needs no middle layer. Each layer needs its own context. A sub-coordinator must report progress while its children run. It owns its track's units, writes briefs, and spawns workers and verifiers within the available nesting and concurrency limits. It reports aggregates at wave boundaries instead of forwarding raw child reports. Cap in-flight children at what one drain can process, up to the available agent slots, as a rolling window. Refill slots as workers finish instead of waiting for a whole batch.
 - **Worker / verifier.** Use an isolated worktree or remote workspace when available. Keep work local when it needs local files, browser state, simulators, or authentication. Remote agents cannot read the local store, so their briefs inline what they need or point at accessible repo paths. Prefer fewer, broader workers. One writer per worktree or branch, per [Separate Before Serializing Shared State](../principles/separate-before-serializing-shared-state.md).
 
@@ -26,7 +26,7 @@ Keep at most three levels: coordinator, track coordinator, and worker. Choose tr
 
 ## Store layout
 
-Reuse the plan's execution store, `.scratch/<program>/` by default, including any progress from sequential implement sessions. The execution owner maintains the store through the CLI and the decision-log helper. Owners publish facts, readers aggregate at read time. [STATE.md](STATE.md) defines the shared files, checkpoint and resume procedure, and additional coordination files. Record the absolute path in the plan and handoffs. Keep the store outside disposable worker workspaces.
+Reuse the plan's execution store, `.scratch/<program>/` by default, including progress from earlier sessions. The execution owner maintains the store through the CLI and the decision-log helper. Owners publish facts, readers aggregate at read time. [STATE.md](STATE.md) defines the shared files, checkpoint and resume procedure, and additional coordination files. Record the absolute path in the plan and handoffs. Keep the store outside disposable worker workspaces.
 
 For a requested pause or transfer to another session, read [handoff](../handoff/SKILL.md). Keep the handoff in this store and reconcile active owners before transferring their work.
 
@@ -52,12 +52,12 @@ ACCEPTANCE   checkable criteria, one per line
 VERIFY       exact commands or the control-skill path, plus known gotchas
 TIMEBOX      rough cap on runtime; on expiry, return partial findings and stop rather than run on
 FORBIDDEN    no stack mutation, no rebase, no force-push, no fixes outside scope, plus unit-specific bans
-REPORT       status, branch, head SHA, PRs, verdict, what you actually ran, deviations,
-             suggested follow-ups
+REPORT       status, branch, head SHA, PRs, verdict, what you actually ran, review-pr
+             outcome and reviewed SHA, deviations, suggested follow-ups
 STANDING     <preferences.md pasted verbatim>
 ```
 
-Size the brief to the unit. A one-command unit gets the template collapsed to a paragraph that still names goal, scope, the verify command, and the report shape. Local spawns may reference the standing-orders file by store path. Verbatim paste is for cloud spawns and every resume.
+Size the brief to the unit. A one-command unit gets the template collapsed to a paragraph that still names goal, scope, the verify command, and the report shape. Local spawns may reference the standing-orders file by store path. Verbatim paste is for cloud spawns and every resume. Point each PR owner at [implement's unit rules](../implement/SKILL.md#work-a-unit-under-orchestrate) in CONTEXT, alongside the unit's bug-fix, perf-issue, refactoring, or hillclimb workflow when it has one.
 
 A sub-coordinator brief adds its track boundary and unit list, its spawn budget and workspace requirements, the drain protocol, and the rollup format (per child: name, status, PR, head SHA, verdict, one line, plus track status and frontier delta).
 
@@ -65,13 +65,15 @@ Pass upstream findings to dependent workers before dispatch. Audit one sampled w
 
 ## Steps
 
-1. **Frame.** State the done predicate as something countable ("all 126 units merged, each ledger-verified `unit-test-verified` or better"). Quantify scope: units, rough effort, expected stacks, and the wall-clock budget. If one agent could finish inside that budget, stop here and use [implement](../implement/SKILL.md) instead. Collapsing must not depend on another document being present. It means do the work directly in this session, plain workers where they help, verification inline, landing as you go, and no new coordination machinery. When following an existing multi-phase plan, keep its shared store and checkpoint under [STATE.md](STATE.md). Schedule landing against the budget. By roughly 70% of it, stop spawning and land what is verified. Name the tracks per project. Settle a contested decomposition through [architect](../architect/SKILL.md) before the pilot. Use [wayfinder](../wayfinder/SKILL.md) when unresolved decisions need several sessions. Present the framing once. Reversible prep proceeds without waiting.
+1. **Frame.** State the done predicate as something countable ("all 126 units merged, each ledger-verified `unit-test-verified` or better"). Quantify scope: units, rough effort, expected stacks, and the wall-clock budget. If one agent could finish inside that budget, use a sequential run, described after these steps. When following an existing multi-phase plan, keep its shared store and checkpoint under [STATE.md](STATE.md). Schedule landing against the budget. By roughly 70% of it, stop spawning and land what is verified. Name the tracks per project. Settle a contested decomposition through [architect](../architect/SKILL.md) before the pilot. Use [wayfinder](../wayfinder/SKILL.md) when unresolved decisions need several sessions. Present the framing once. Reversible prep proceeds without waiting.
 2. **Initialize or resume the store.** Follow [STATE.md](STATE.md), reconciling existing progress before assigning work. Open the trail through [show-me-your-work](../show-me-your-work/SKILL.md). Write the standing orders before any spawn, record the execution and merge authorization, and seed `frontier.json` from existing PRs and their current heads.
 3. **Pilot.** Push one unit through the whole path: brief, worker, verification, stack entry, ledger row, and merge when authorized. Otherwise the pilot ends at merge-ready. Use the pilot to test the brief, verification procedure, and unit size. Correct them before dispatching more workers. Scale the pilot to the unit. On programs of near-identical cheap units, the first unit is the pilot, run as a normal unit with its verify command inline, and fan-out starts the moment it completes the authorized delivery step. The dedicated pilot pipeline (separate verifier agent, audit gate) is for expensive or novel unit shapes. Use the simpler pilot for repeated, well-understood units.
 4. **Scale.** Spawn a rolling window of workers up to the in-flight cap, refilling as children finish. Spawn track sub-coordinators only past the one-drain threshold in Roles. Recompute ready work after each drain. Relay upstream reports into downstream briefs. Keep sibling communication upward only. The sampled brief audit runs alongside the wave it samples and stops the next refill on failure, not the current one.
 5. **Drain.** Run the queue discipline below at every drain point.
 6. **Land.** Within the user's merge authorization, landing is continuous, never a terminal phase. Otherwise keep verified units merge-ready. Integration starts with the first verified unit and runs alongside the remaining waves. On heavy repos the stacker is a standing role from wave one, integrating as units verify. On repos where local git is cheap, the coordinator lands verified units itself per Roles. Resolve blockers at the lowest unmerged PR before starting upper-stack work. Stack safety governs. Recompute `frontier.json` on merge, stack mutation, or reported new head SHAs.
 7. **Close.** Drain the final inbox. Reconcile every spawned agent to done, abandoned, or zombie-reconciled, or leave a merge-ready handoff when merging is outside scope. Confirm the done predicate on the real artifact and each landed PR's verdict at its final head SHA. Audit the trail through [show-me-your-work](../show-me-your-work/SKILL.md), including its independent review. Encode recurring corrections into `preferences.md` or the brief template. Follow [STATE.md's close procedure](STATE.md#close) for record retention and authorized cleanup.
+
+**Sequential run.** Work each unit in this session under [implement's unit rules](../implement/SKILL.md#work-a-unit-under-orchestrate), with its plan section or framing as the brief. This session is also the stacker and store owner, so it writes code, restacks, re-verifies at the new head, and records receipts directly. It needs no agent tools, but uses them when available for review-pr's reviewers and dedicated verifiers. Skip Pilot, Scale, and Drain. Follow Initialize or resume the store, Land, and Close.
 
 ## Queue and drain
 
@@ -92,7 +94,7 @@ Pass upstream findings to dependent workers before dispatch. Audit one sampled w
 
 ## Verification
 
-Scale verification to the unit. When VERIFY is a single cheap command, the worker runs it and reports the output, and the coordinator spot-checks receipts. Use a dedicated verifier for expensive checks, judgments that need independent review, or changes with broad effects. Run dedicated verifiers as native agents on the session's model. For a judgment that needs independent review, also get a review from Codex when hosted in Claude or from Claude when hosted in Codex, following [provider execution](../arena/PROVIDERS.md). Treat its findings as evidence for acceptance, not as a ledger receipt.
+Scale verification to the unit. When VERIFY is a single cheap command, the worker runs it and reports the output, and the coordinator spot-checks receipts. Use a dedicated verifier for expensive checks, judgments that need independent review, or changes with broad effects. It checks acceptance at the merge-ready SHA. For expensive checks or broad effects, it reuses the worker's review-pr result when the reported reviewed SHA matches the merge-ready SHA. When the SHAs differ, it runs `git range-diff` between them and reviews only the patches that differ. Run dedicated verifiers as native agents on the session's model. A judgment that needs independent review gets a fresh review-pr run from the verifier, plus a review from Codex when hosted in Claude or from Claude when hosted in Codex, following [provider execution](../arena/PROVIDERS.md). Treat the other provider's findings as evidence for acceptance, not as a ledger receipt.
 
 Follow [STATE.md's verification procedure](STATE.md#accept-verification) to record and accept receipts. It defines verdicts, verifier precedence, evidence checks, and verification after a head change.
 

@@ -10,7 +10,7 @@ disable-model-invocation: true
 
 If the cleanup reveals a missing feature or a real bug, record it as a follow-up. Changing that behavior needs its own authorized scope under [implement](../implement/SKILL.md) or [bug-fix](../bug-fix/SKILL.md). Preserve the current contract during the refactor. If a defect prevents safe delivery, report the blocker instead of shipping it.
 
-For work spanning several PRs, use [multi-phase-plan](../multi-phase-plan/SKILL.md) when a plan is needed. Keep an existing execution owner and [shared store](../orchestrate/STATE.md). For a pause or transfer, follow [handoff](../handoff/SKILL.md).
+For work spanning several PRs, use [multi-phase-plan](../multi-phase-plan/SKILL.md) when a plan is needed. Execute the plan under [orchestrate](../orchestrate/SKILL.md). For a pause or transfer, follow [handoff](../handoff/SKILL.md).
 
 1. Establish the behavior contract first. Use [how](../how/SKILL.md) over the affected subsystem, reusing prior grounding. Run existing characterization tests, snapshots, or an equivalence harness against the unchanged code. Add missing coverage before moving structure, following [test behavior](../principles/test-behavior-not-implementation.md). Include relevant outputs, errors and their timing, side effects, and cleanup order. Type check and lint alone do not establish the contract.
 2. Name the structure the code is missing per [model the domain](../principles/model-the-domain.md). Keep code whose structure is already clear and local. The reshape must remove complexity, not add indirection.

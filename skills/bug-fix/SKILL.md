@@ -17,6 +17,6 @@ Be scientific. Tie each fix to runtime evidence. When evidence refutes a hypothe
 5. Keep the failing-before and passing-after evidence. Follow [sequence-verifiable-units](../principles/sequence-verifiable-units.md) for ordered commits when the work has several units. Run [review-pr](../review-pr/SKILL.md) in fix-and-review mode before delivery.
 6. Use [open-pr](../open-pr/SKILL.md) within the task's delivery scope. Honor a request for local edits only. Merging is a separate action.
 
-For a unit in a multi-phase plan, follow [the shared execution-state convention](../orchestrate/STATE.md). Reuse its store. Delegated workers return evidence to the coordinator. For a session transfer, read [handoff](../handoff/SKILL.md). Include the reproduction command, hypotheses ruled out, current instrumentation, and evidence paths.
+When orchestrate assigns this workflow a plan unit, also follow [implement's unit rules](../implement/SKILL.md#work-a-unit-under-orchestrate). To run plan units directly, start [orchestrate](../orchestrate/SKILL.md) scoped to those units. For a session transfer, read [handoff](../handoff/SKILL.md). Include the reproduction command, hypotheses ruled out, current instrumentation, and evidence paths.
 
 **Reply:** what was broken, root cause, fix, and verification. Include redacted failing-before and passing-after output, or state which evidence is unavailable.

@@ -196,7 +196,7 @@
       "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
     ],
     "license": "MIT, kept in skills/implement/LICENSE-pstack and skills/implement/LICENSE-mattpocock",
-    "note": "The pstack Feature playbook supplies task ownership and delegation. Matt supplies TDD and implementation checks. Multi-phase work reuses the existing execution store so switching owners or workflows does not create competing state."
+    "note": "The pstack Feature playbook supplies task ownership and delegation. Matt supplies TDD and implementation checks."
   },
   "tdd": {
     "repository": [
@@ -275,7 +275,7 @@
     ],
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/orchestrate/LICENSE-pstack",
-    "note": "Retains the original Bun runtime and lockfile as an exception to astack's Python convention. Adds a GitHub adapter beside Graphite. Shared ownership, retained drain batches, and verifier precedence support recovery across sessions without losing evidence. The CLI records claims. The coordinator still judges them.",
+    "note": "Retains the original Bun runtime and lockfile as an exception to astack's Python convention. Adds a GitHub adapter beside Graphite. Shared ownership, retained drain batches, and verifier precedence support recovery across sessions without losing evidence. The CLI records claims. The coordinator still judges them. Owns all plan execution because agents offered both skills after multi-phase-plan often chose implement.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/orchestrate.md": "skills/orchestrate/SKILL.md",
       "pstack/skills/poteto-mode/scripts/orch/orch.ts": "skills/orchestrate/scripts/orch/orch.ts",
