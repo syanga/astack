@@ -18,7 +18,7 @@ Copy [the header template](references/decision-log-template.tsv) to start a clea
 - **phase.** The phase or workstream.
 - **decision.** What was chosen or done, one line.
 - **why.** The reason in plain words. If a principle drove it, say it plainly, not as a jargon tag.
-- **evidence.** A link or path that proves it: commit SHA, PR number, `file:line`, or an artifact, trace, or screenshot path. Never a paragraph.
+- **evidence.** A commit SHA, or the path to a saved file or directory that proves the row. Examples are raw command output, an artifact, a trace, or a screenshot. Add `:line` to point inside a file. Harness task IDs, agent IDs, and chat or command output that exists only in the session do not count.
 - **result.** The outcome or predicate state: `tests green`, `reverted`, `pixel-diff 0`, `INCONCLUSIVE`, `open`.
 
 An example, plain-spoken so a reviewer reads it at a glance. This is illustration only. Don't copy these rows into a real log.
@@ -27,8 +27,8 @@ An example, plain-spoken so a reviewer reads it at a glance. This is illustratio
 ts	phase	decision	why	evidence	result
 2026-05-24T09:02:00Z	frame	counted the work first, about 100 components and roughly 75 hours	wanted to know the size before starting a long run	commit 3a9f1c2	found 5 things to sort out before starting
 2026-05-24T09:40:00Z	harness	took screenshots of the old version before changing anything	so we can compare old against new and catch any visual change	scripts/snapshot.sh, baseline/	saved 120 reference screenshots
-2026-05-24T11:15:00Z	widget	moved the widget styles over without changing how it looks	keep the change small and the result identical	commit 7c21e0a, pixel-diff 0	looks identical, tests pass
-2026-05-24T12:30:00Z	widget	threw out a helper's work because its screenshots were blank	checked the real files instead of trusting its summary	worktree reset	reverted, tightened the instructions for next time
+2026-05-24T11:15:00Z	widget	moved the widget styles over without changing how it looks	keep the change small and the result identical	commit 7c21e0a, logs/widget-pixel-diff.log, logs/widget-tests.log	looks identical, tests pass
+2026-05-24T12:30:00Z	widget	threw out a helper's work because its screenshots were blank	checked the real files instead of trusting its summary	reports/widget-helper-review.md	reverted, tightened the instructions for next time
 ```
 
 ## Logging a row
