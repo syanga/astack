@@ -18,7 +18,7 @@ Copy [the header template](references/decision-log-template.tsv) to start a clea
 - **phase.** The phase or workstream.
 - **decision.** What was chosen or done, one line.
 - **why.** The reason in plain words. If a principle drove it, say it plainly, not as a jargon tag.
-- **evidence.** A commit SHA, or the path to a saved file or directory that proves the row, such as a command's raw output, an artifact, a trace, or a screenshot. Add `:line` to point inside a file. Harness task IDs, agent IDs, and chat or command output that exists only in the session do not count.
+- **evidence.** A commit SHA, or the path to a saved file or directory that proves the row. Examples are raw command output, an artifact, a trace, or a screenshot. Add `:line` to point inside a file. Harness task IDs, agent IDs, and chat or command output that exists only in the session do not count.
 - **result.** The outcome or predicate state: `tests green`, `reverted`, `pixel-diff 0`, `INCONCLUSIVE`, `open`.
 
 An example, plain-spoken so a reviewer reads it at a glance. This is illustration only. Don't copy these rows into a real log.
