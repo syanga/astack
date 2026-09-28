@@ -83,10 +83,10 @@ a PR head or base changes, or a blocking decision arrives. Save partial progress
 before ending a session. Sequential owners record their own results directly;
 coordinators drain worker completions first using the procedure below.
 
-1. Save the receipt under `reports/`, including the unit, head SHA, commands,
-   results, artifact paths, and links to each verification command's saved raw
-   output as [Accept verification](#accept-verification) requires. Update the
-   unit row and append any ledger verdict. Log decisions and checkpoints through
+1. Save the receipt under `reports/` with the unit, head SHA, commands, results,
+   and artifact paths. Link each verification command's saved raw output, as
+   [Accept verification](#accept-verification) requires. Update the unit row and
+   append any ledger verdict. Log decisions and checkpoints through
    show-me-your-work.
 2. Check plan boxes only when their evidence exists. Link that evidence from the
    box. The unit table owns execution state; a stale checkbox cannot override
