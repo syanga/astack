@@ -83,11 +83,11 @@ a PR head or base changes, or a blocking decision arrives. Save partial progress
 before ending a session. Sequential owners record their own results directly;
 coordinators drain worker completions first using the procedure below.
 
-1. Save the receipt under `reports/` with the unit, head SHA, commands, results,
-   and artifact paths. Link each verification command's saved raw output, as
-   [Accept verification](#accept-verification) requires. Update the unit row and
-   append any ledger verdict. Log decisions and checkpoints through
-   show-me-your-work.
+1. Save the receipt under `reports/`, including the unit, head SHA, commands,
+   results, and artifact paths. Save each verification command's raw output to a
+   file and link it, as [Accept verification](#accept-verification) requires.
+   Update the unit row and append any ledger verdict.
+   Log decisions and checkpoints through show-me-your-work.
 2. Check plan boxes only when their evidence exists. Link that evidence from the
    box. The unit table owns execution state; a stale checkbox cannot override
    current Git state or a missing verdict at the current SHA.
@@ -110,7 +110,7 @@ partial result. Session termination alone never marks work done.
 
 1. Save each completion with `orch inbox push`, including agent, unit, reported
    status, and a durable report path. Reports include the head SHA, commands,
-   results, artifacts, and links to each verification command's saved raw output
+   results, artifacts, and links to each verification command's saved raw output,
    as [Accept verification](#accept-verification) requires. Retain the source
    event ID in the report when available.
 2. Read `orch --json inbox drain`. It rotates the pending queue and retains the
