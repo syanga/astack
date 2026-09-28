@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: Coordinate a multi-session program with multiple owners, dependent PRs, and durable verification records.
+description: Execute a multi-phase plan, or coordinate a multi-session program with multiple owners, dependent PRs, and durable verification records.
 disable-model-invocation: true
 ---
 
