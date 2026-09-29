@@ -19,7 +19,7 @@ python3 {core} --timeout SECONDS -- COMMAND [ARG...]
 For a long-lived process, such as a dev server:
 python3 {core} --no-timeout -- COMMAND [ARG...]
 Put pipes, redirections, and other shell syntax inside sh -c '...'.
-Read the run-job skill for exit codes and watcher rules.'''.format(core=shlex.quote(str(CORE)))
+Read run-job/SKILL.md from the installed skills for exit codes and watcher rules.'''.format(core=shlex.quote(str(CORE)))
 
 
 class Denied(Exception):

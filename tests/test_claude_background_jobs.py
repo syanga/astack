@@ -7,8 +7,9 @@ import tempfile
 import unittest
 
 
-SKILLS = Path(__file__).resolve().parents[1] / 'skills'
-LAUNCHER = 'python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/claude-background-jobs/scripts/hook.py" || exit 1'
+REPO = Path(__file__).resolve().parents[1]
+SKILLS = REPO / 'skills'
+LAUNCHER = json.loads((REPO / 'settings/claude.json').read_text())['hooks']['PreToolUse']['$entries'][0]['hooks'][0]['command']
 CORE = 'skills/run-job/scripts/run_job.py'
 
 
@@ -149,6 +150,22 @@ class HookTests(unittest.TestCase):
         completed = self.hook(background('make test'), CLAUDE_CONFIG_DIR=str(self.root / 'empty'))
         self.assertEqual((completed.returncode, completed.stdout), (1, ''))
 
+
+    def test_installed_settings_run_the_installed_hook(self):
+        subprocess.run([str(REPO / 'install.sh'), '--home', str(self.home), '--target', 'claude'],
+                       check=True, capture_output=True, text=True, timeout=60)
+        settings = json.loads((self.home / '.claude/settings.json').read_text())
+        command, = [hook['command'] for group in settings['hooks']['PreToolUse'] for hook in group['hooks']]
+        core = self.home / '.claude' / CORE
+        for tool_command, expected in (('make test', 'deny'),
+                                       ('python3 {} --timeout 60 -- make test'.format(core), 'allow')):
+            with self.subTest(command=tool_command):
+                completed = subprocess.run(['sh', '-c', command], input=json.dumps(background(tool_command)),
+                                           capture_output=True, text=True, env=self.env, timeout=15)
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                decision = json.loads(completed.stdout)['hookSpecificOutput']['permissionDecision'] \
+                    if completed.stdout else 'allow'
+                self.assertEqual(decision, expected)
 
 if __name__ == '__main__':
     unittest.main()

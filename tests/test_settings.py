@@ -32,7 +32,9 @@ class SettingsTests(InstallerFixture):
         codex = self.config("codex", "not even valid TOML; leave untouched\n")
         before = codex.read_bytes(), codex.stat().st_mtime_ns
         self.run_installer()
-        self.assertEqual(json.loads((self.home / ".claude/settings.json").read_text()), {"autoMemoryEnabled": False})
+        hook = json.loads((self.repo / "settings/claude.json").read_text())["hooks"]["PreToolUse"]["$entries"]
+        self.assertEqual(json.loads((self.home / ".claude/settings.json").read_text()),
+                         {"autoMemoryEnabled": False, "hooks": {"PreToolUse": hook}})
         self.assertEqual(before, (codex.read_bytes(), codex.stat().st_mtime_ns))
         self.assertEqual(self.manifest()["version"], 3)
         self.assertNotIn("codex", self.manifest()["settings"])
@@ -387,6 +389,7 @@ class SettingsTests(InstallerFixture):
         self.assertEqual(self.manifest()["settings"], {})
 
     def test_list_entries_keep_empty_list_the_user_created_after_first_install(self):
+        self.source("claude", {"autoMemoryEnabled": False})
         path = self.config("claude", '{}')
         self.run_installer("--target", "claude")
         path.write_text('{"autoMemoryEnabled": false, "hooks": {"PreToolUse": []}}')
