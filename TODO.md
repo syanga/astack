@@ -10,6 +10,8 @@ When Codex adds that marker, add a hook like `claude-background-jobs` that denie
 background calls that skip the helper.
 
 - Each new Codex hook needs trust review in the TUI before it runs.
-- The installer's `$entries` syntax can own one entry in a `hooks.json` list.
-  It cannot manage a hook in a `config.toml` `[hooks]` table, because astack
-  does not manage TOML tables.
+- The installer's `$entries` syntax can own one entry in a JSON list such as the
+  `PreToolUse` list in `hooks.json`, but Codex's only settings target in
+  `harnesses.json` is `config.toml`. Add a JSON settings target for `hooks.json`
+  first. astack cannot manage a hook in a `config.toml` `[hooks]` table, because
+  it does not manage TOML tables.

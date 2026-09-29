@@ -8,10 +8,11 @@ describes. Follow the skill's recovery steps when completion delivery or
 resumption is unverified.
 
 When the completion queue is unavailable, read `run-job/SKILL.md` from the
-installed skills and still run the command through its helper. Keep interactive
-commands in attended native sessions. In both cases, keep the process session
-and use the longest permitted native wait. Cap waits at 60 seconds when periodic
-progress updates are required. Keep input prompts visible.
+installed skills and still run the command through its helper, started with
+`tty: true`. Keep interactive commands in attended native sessions with their
+input prompts visible. For either, keep the process session and use the longest
+permitted native wait. Cap waits at 60 seconds when periodic progress updates
+are required.
 
 Never spend model turns on repeated sleep-and-tail, process-list, or file-status
 checks when completion notifications or native waits are available. Short session

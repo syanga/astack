@@ -10,9 +10,12 @@ import sys
 import tempfile
 import uuid
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'run-job' / 'scripts'))
+RUN_JOB = Path(__file__).resolve().parents[2] / 'run-job' / 'scripts'
+sys.path.insert(0, str(RUN_JOB))
 import run_job
 from run_job import Cancelled, Exited, JobSpec, LaunchFailed, TimedOut
+
+FALLBACK = 'run the command through {} and attend it with a native process wait'.format(RUN_JOB / 'run_job.py')
 
 
 PROBE_SECONDS = 15
@@ -102,12 +105,11 @@ def check_queue(parser, codex):
                               subprocess.DEVNULL, subprocess.DEVNULL)
     match probe.outcome:
         case TimedOut(seconds):
-            parser.error(f'cannot check codex queue: timed out after {seconds:g} seconds; use a native process wait')
+            parser.error(f'cannot check codex queue: timed out after {seconds:g} seconds; {FALLBACK}')
         case LaunchFailed(number, message):
-            parser.error(f'cannot check codex queue: {launch_error(codex, number, message)}; '
-                         'use a native process wait')
+            parser.error(f'cannot check codex queue: {launch_error(codex, number, message)}; {FALLBACK}')
         case Exited(returncode) if returncode:
-            parser.error('codex queue is unavailable; use a native process wait')
+            parser.error('codex queue is unavailable; ' + FALLBACK)
 
 
 def main():
@@ -121,10 +123,10 @@ def main():
     try:
         uuid.UUID(thread)
     except ValueError:
-        parser.error('CODEX_THREAD_ID must identify the current Codex thread')
+        parser.error('CODEX_THREAD_ID must identify the current Codex thread; ' + FALLBACK)
     codex = shutil.which('codex')
     if not codex:
-        parser.error('codex is not on PATH; use a native process wait')
+        parser.error('codex is not on PATH; ' + FALLBACK)
 
     with run_job.latching_signals() as latch:
         check_queue(parser, codex)

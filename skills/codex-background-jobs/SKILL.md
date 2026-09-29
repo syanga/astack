@@ -1,6 +1,6 @@
 ---
 name: codex-background-jobs
-description: Run Codex background commands and queue completion to their thread. Use for tests, builds, watchers, dev servers, or other commands that would otherwise need repeated waits.
+description: Run Codex background commands and queue completion to their thread. Use in Codex for tests, builds, watchers, dev servers, or other commands that would otherwise need repeated waits.
 ---
 
 # Resume when a job finishes
@@ -10,11 +10,10 @@ supports `codex queue`. Keep the hosting session open until the job finishes.
 Other harnesses and interactive commands use their native process sessions.
 
 Run finite jobs, watchers, and long-lived processes through this helper. It runs
-the command with the `run-job` helper, which stops the command's process group at
-the deadline, on cancellation, and when the command exits.
+the command through the [`run-job`](../run-job/SKILL.md) helper.
 
-1. Before your first job and before starting a watcher, read `run-job/SKILL.md`
-   from the installed skills. Its rules for the command and its watcher contract
+1. Before your first job and before starting a watcher, read
+   [`run-job/SKILL.md`](../run-job/SKILL.md). Its rules for the command and its watcher contract
    apply to this helper. Choose an authorized, noninteractive command and a
    deadline well past its normal duration. For a long-lived process, such as a
    dev server, use `--no-timeout` instead. Its exit or crash still queues a
@@ -53,8 +52,8 @@ accepted by Codex.
 
 To stop a job or watcher you replace or no longer need, write Ctrl-C (`\u0003`)
 to its retained process session. The helper stops the job's process group. Read
-the result. It says `cancelled`, or `completed` with `notification: unknown` if
-the interrupt arrived during delivery. Before starting a replacement that needs
+the result. It says `cancelled`, or the job's final status with
+`notification: unknown` if the interrupt arrived during delivery. Before starting a replacement that needs
 the same locks or ports, confirm the result says `cleanup: ok`.
 
 If the session is gone or does not accept input, run
@@ -62,10 +61,16 @@ If the session is gone or does not accept input, run
 shows this helper with the job's label, run `kill -TERM <runner_pid>` and read
 the result as above.
 
+If the helper is gone but the result still says `running`, the host killed the
+helper and the job's process group is still alive. Run
+`ps -o pgid=,command= -p <command_pid>`. If the process group ID equals
+`command_pid` and the command is the job's, run `kill -TERM -- -<command_pid>`.
+
 ## Recover a failed completion
 
-If the CLI lacks `queue`, the helper refuses to start the job. Run the command
-with the `run-job` helper and use a native wait.
+If the CLI lacks `queue`, the helper refuses to start the job and names the
+`run-job` helper to use instead. Run the command through it and attend it with a
+native wait.
 If delivery fails or its outcome is unknown, inspect the retained process session
 and result on the next turn. Reuse completed work instead of rerunning the job.
 An unknown delivery may already have been accepted. Reconcile delayed or duplicate
