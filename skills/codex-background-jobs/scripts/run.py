@@ -145,7 +145,7 @@ def main():
         save(result_path, record, required=True)
         if latch.signum is not None:
             record.update(status='cancelled', exit_code=128 + latch.signum, notification='skipped',
-                          finished_at=timestamp())
+                          cleanup='ok', finished_at=timestamp())
             save(result_path, record)
             emit(record)
             return 128 + latch.signum

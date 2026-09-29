@@ -53,8 +53,9 @@ accepted by Codex.
 To stop a job or watcher you replace or no longer need, write Ctrl-C (`\u0003`)
 to its retained process session. The helper stops the job's process group, which
 can take up to 10 seconds. Wait for the session to exit, then read the result. It
-says `cancelled`, or the job's final status with `notification: unknown` if the
-interrupt arrived during delivery. Before starting a replacement that needs the
+says `cancelled` if the job was running. If the job had already finished, it keeps
+the job's final status with `notification: skipped`, or `notification: unknown`
+if the interrupt arrived during delivery. Before starting a replacement that needs the
 same locks or ports, confirm the result says `cleanup: ok`.
 
 If the session is gone or does not accept input, use the result's process IDs.
