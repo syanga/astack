@@ -45,7 +45,8 @@ Every spawn carries a complete brief. Resolve missing fields before dispatch. Fo
 
 ```
 GOAL         one sentence, the outcome, executable by a stranger with no chat access
-SCOPE        paths this unit may write; paths it may not; its exclusive worktree or branch
+SCOPE        paths this unit may write, including where it saves verification output;
+             paths it may not; its exclusive worktree or branch
 CONTEXT      pointers to files and PRs; upstream reports pasted in full when this unit
              depends on them, because workers cannot see siblings
 ACCEPTANCE   checkable criteria, one per line
@@ -53,9 +54,10 @@ VERIFY       exact commands or the control-skill path, plus known gotchas
 TIMEBOX      rough cap on runtime; on expiry, return partial findings and stop rather than run on
 FORBIDDEN    no stack mutation, no rebase, no force-push, no fixes outside scope, plus unit-specific bans
 REPORT       status, branch, head SHA, PRs, verdict, deviations, suggested follow-ups,
-             and each verification command you ran with the path to its saved raw
-             output and exit status. Save them under the store's reports/ or the
-             evidence directory the plan names. A remote worker returns them instead.
+             and each verification command you ran with the path to a saved file
+             holding its raw output and exit status. Save these files under the
+             store's reports/ or the evidence directory the plan names. A remote
+             worker returns the raw output and exit status instead.
 STANDING     <preferences.md pasted verbatim>
 ```
 

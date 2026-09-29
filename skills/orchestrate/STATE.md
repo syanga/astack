@@ -84,8 +84,8 @@ before ending a session. Sequential owners record their own results directly;
 coordinators drain worker completions first using the procedure below.
 
 1. Save the receipt under `reports/`, including the unit, head SHA, commands,
-   results, and artifact paths. Save any verification output and exit status that
-   exist only in the session to a file, then link the files that
+   results, and artifact paths. Save any raw output and exit status that exist
+   only in the session to a file. Link the files that
    [Accept verification](#accept-verification) requires.
    Update the unit row and append any ledger verdict.
    Log decisions and checkpoints through show-me-your-work.
