@@ -60,7 +60,7 @@ REPORT       status, branch, head SHA, PRs, verdict, each verification command y
 STANDING     <preferences.md pasted verbatim>
 ```
 
-Size the brief to the unit. A one-command unit gets the template collapsed to a paragraph that still names goal, scope, the verify command, and the report shape. Local spawns may reference the standing-orders file by store path. Verbatim paste is for cloud spawns and every resume.
+Size the brief to the unit. A one-command unit gets the template collapsed to a paragraph that still names goal, scope, the verify command, and the report shape, including where to save raw output. Local spawns may reference the standing-orders file by store path. Verbatim paste is for cloud spawns and every resume.
 
 A sub-coordinator brief adds its track boundary and unit list, its spawn budget and workspace requirements, the drain protocol, and the rollup format (per child: name, status, PR, head SHA, verdict, absolute receipt path, one line, plus track status and frontier delta).
 
@@ -95,7 +95,7 @@ Pass upstream findings to dependent workers before dispatch. Audit one sampled w
 
 ## Verification
 
-Scale verification to the unit. When VERIFY is a single cheap command, the worker runs it and saves its output as the REPORT field says. Save a remote worker's returned raw output and exit status to a file under `reports/`. Spot-check every receipt against its saved files. Use a dedicated verifier for expensive checks, judgments that need independent review, or changes with broad effects. Run dedicated verifiers as native agents on the session's model. For a judgment that needs independent review, also get a review from Codex when hosted in Claude or from Claude when hosted in Codex, following [provider execution](../arena/PROVIDERS.md). Treat its findings as evidence for acceptance, not as a ledger receipt.
+Scale verification to the unit. When VERIFY is a single cheap command, the worker runs it. Save a remote worker's returned raw output and exit status to a file under `reports/`. Check every receipt against its saved files. Use a dedicated verifier for expensive checks, judgments that need independent review, or changes with broad effects. Run dedicated verifiers as native agents on the session's model. For a judgment that needs independent review, also get a review from Codex when hosted in Claude or from Claude when hosted in Codex, following [provider execution](../arena/PROVIDERS.md). Treat its findings as evidence for acceptance, not as a ledger receipt.
 
 Follow [STATE.md's verification procedure](STATE.md#accept-verification) to record and accept receipts. It defines verdicts, verifier precedence, evidence checks, and verification after a head change.
 
