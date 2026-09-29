@@ -179,7 +179,7 @@ class RunJobTests(unittest.TestCase):
         cases = ([], ['--timeout', '5'], ['--no-timeout'], touch,
                  ['--timeout', '0', *touch], ['--timeout', '-1', *touch], ['--timeout', 'inf', *touch],
                  ['--timeout', 'nan', *touch], ['--timeout', 'soon', *touch],
-                 ['--timeout', '5', '--no-timeout', *touch])
+                 ['--timeout', '5', '--no-timeout', *touch], ['--time', '5', *touch])
         for argv in cases:
             with self.subTest(argv=argv):
                 completed = self.run_helper(*argv)
@@ -203,13 +203,26 @@ class RunJobTests(unittest.TestCase):
         self.assert_stops(started[0])
 
     def test_reports_a_group_that_cannot_be_verified_empty(self):
+        for failure in ({'return_value': 1}, {'side_effect': OSError('ps is unavailable')}):
+            with self.subTest(failure=failure):
+                self.pidfile.unlink(missing_ok=True)
+                run_job = load()
+                stderr = io.StringIO()
+                with mock.patch.object(run_job, 'live_members', **failure), contextlib.redirect_stderr(stderr):
+                    code = run_job.main(['--timeout', '30', *self.python(ZOMBIE_MEMBER, str(self.pidfile))])
+                self.job_pid()
+                self.assertEqual(code, 125)
+                self.assertRegex(stderr.getvalue(), r'run-job: could not stop process group \d+\n$')
+
+    def test_deadline_counts_from_the_start_of_the_job(self):
         run_job = load()
-        stderr = io.StringIO()
-        with mock.patch.object(run_job, 'live_members', return_value=1), contextlib.redirect_stderr(stderr):
-            code = run_job.main(['--timeout', '30', *self.python(ZOMBIE_MEMBER, str(self.pidfile))])
-        self.job_pid()
-        self.assertEqual(code, 125)
-        self.assertRegex(stderr.getvalue(), r'run-job: could not stop process group \d+\n$')
+        parser = argparse.ArgumentParser()
+        run_job.add_arguments(parser)
+        spec = run_job.spec_from(parser.parse_args(['--timeout', '2', '--', 'sleep', '60']))
+        started = time.monotonic()
+        result = run_job.supervise(spec, None, None, lambda process: time.sleep(2))
+        self.assertEqual(result.outcome, run_job.TimedOut(2.0))
+        self.assertLess(time.monotonic() - started, 3)
 
 
 if __name__ == '__main__':

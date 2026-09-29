@@ -171,11 +171,11 @@ def supervise(spec: JobSpec, stdout=None, stderr=None, on_start=None) -> Result:
                                        start_new_session=True)
         except OSError as error:
             return Result(LaunchFailed(error.errno, error.strerror), True)
+        deadline = None if spec.timeout is None else time.monotonic() + spec.timeout
         outcome = None
         try:
             if on_start is not None:
                 on_start(process)
-            deadline = None if spec.timeout is None else time.monotonic() + spec.timeout
             while outcome is None:
                 if latch.signum is not None:
                     outcome = Cancelled(latch.signum)
@@ -191,24 +191,23 @@ def supervise(spec: JobSpec, stdout=None, stderr=None, on_start=None) -> Result:
 
 
 def exit_code(spec, result):
-    if not result.cleanup_ok:
-        return 125
     match result.outcome:
         case Exited(returncode):
-            return returncode if returncode >= 0 else 128 - returncode
+            code = returncode if returncode >= 0 else 128 - returncode
         case TimedOut(limit):
             print('run-job: deadline {:g}s reached; stopped the process group'.format(limit), file=sys.stderr)
-            return 124
+            code = 124
         case Cancelled(signum):
-            return 128 + signum
+            code = 128 + signum
         case LaunchFailed(number, message):
             print('run-job: cannot start {}: {}'.format(spec.command[0], message), file=sys.stderr)
-            return 127 if number == errno.ENOENT else 126
+            code = 127 if number == errno.ENOENT else 126
+    return code if result.cleanup_ok else 125
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog='run_job.py',
+        prog='run_job.py', allow_abbrev=False,
         description='Run a command in its own process group and stop the group at a deadline, '
                     'on SIGINT, SIGTERM, or SIGHUP, and when the command exits.')
     add_arguments(parser)

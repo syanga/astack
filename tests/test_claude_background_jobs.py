@@ -49,6 +49,7 @@ class HookTests(unittest.TestCase):
         core = self.install(self.home / '.claude')
         allowed = [
             'python3 {} --timeout 1800 -- make test'.format(core),
+            'python3 {} --timeout 1800 -- make test\n'.format(core),
             'python3.12 {} --timeout 60 -- make test'.format(core),
             '/opt/homebrew/bin/python3.12 {} --no-timeout -- npm run dev'.format(core),
             'exec python3 {} --timeout 60 -- make test'.format(core),
@@ -166,6 +167,9 @@ class HookTests(unittest.TestCase):
                 decision = json.loads(completed.stdout)['hookSpecificOutput']['permissionDecision'] \
                     if completed.stdout else 'allow'
                 self.assertEqual(decision, expected)
+        allowed = subprocess.run(['sh', '-c', 'python3 {} --timeout 60 -- echo ran-through-core'.format(core)],
+                                 capture_output=True, text=True, env=self.env, timeout=30)
+        self.assertEqual((allowed.returncode, allowed.stdout), (0, 'ran-through-core\n'))
 
 if __name__ == '__main__':
     unittest.main()

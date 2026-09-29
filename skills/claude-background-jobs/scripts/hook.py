@@ -150,7 +150,7 @@ def decide(event: dict) -> str | None:
     if not isinstance(command, str):
         raise TypeError('tool_input.command is not a string')
     try:
-        return None if goes_through_core(lex(command)) else REASON
+        return None if goes_through_core(lex(command.rstrip(' \t\n'))) else REASON
     except Denied:
         return REASON
 
