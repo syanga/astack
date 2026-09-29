@@ -60,7 +60,9 @@ python3 <skill-directory>/scripts/run_job.py --timeout 5400 -- gh pr checks 42 -
 ```
 
 - Make the watcher exit on every outcome: success, failure, an error from the
-  check itself, and the watched process ending.
+  check itself, and the watched process ending. When the watched process runs
+  through its own helper call, that call's exit reports a crash; stop the watcher
+  then.
 - Make it print its first check before its first sleep.
 - Before you end the turn, read that first check in the output and confirm it ran
   without errors.

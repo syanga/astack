@@ -50,6 +50,8 @@ class HookTests(unittest.TestCase):
         allowed = [
             'python3 {} --timeout 1800 -- make test'.format(core),
             'python3 {} --timeout 1800 -- make test\n'.format(core),
+            'cd /tmp && \\\npython3 {} --timeout 60 -- make \\\n  test'.format(core),
+            'python3 {} --timeout 60 -- echo "a \\\nb"'.format(core),
             'python3.12 {} --timeout 60 -- make test'.format(core),
             '/opt/homebrew/bin/python3.12 {} --no-timeout -- npm run dev'.format(core),
             'exec python3 {} --timeout 60 -- make test'.format(core),
@@ -65,6 +67,10 @@ class HookTests(unittest.TestCase):
         ]
         denied = [
             'make test',
+            "cd $'\\'' ; sleep 99999 ; true \\' && python3 {} --timeout 60 -- make".format(core),
+            "A=$'\\'' ; sleep 99999 ; B=\\' python3 {} --timeout 60 -- make".format(core),
+            "python3 {} --timeout 60 -- echo $'\\'' ; sleep 99999 ; \\'".format(core),
+            "python3 {} --timeout 60 -- echo $'plain'".format(core),
             'sleep 600',
             'nohup python3 {} --timeout 60 -- make test'.format(core),
             'python {} --timeout 60 -- make test'.format(core),

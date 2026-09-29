@@ -34,7 +34,7 @@ class Word:
 
 def expansion(command, index, parts):
     rest = command[index + 1:]
-    if rest.startswith('('):
+    if rest.startswith(('(', "'")):
         raise Denied
     if rest.startswith('{'):
         close = command.find('}', index + 2)
@@ -57,7 +57,9 @@ def double_quoted(command, index, parts):
             raise Denied
         if char == '$':
             index = expansion(command, index, parts)
-        elif char == '\\' and command[index + 1:index + 2] in ('$', '`', '"', '\\', '\n'):
+        elif command.startswith('\\\n', index):
+            index += 2
+        elif char == '\\' and command[index + 1:index + 2] in ('$', '`', '"', '\\'):
             parts.append(('text', command[index + 1]))
             index += 2
         else:
@@ -70,6 +72,9 @@ def lex(command: str) -> list[Word | str]:
     tokens, parts, start, index = [], None, 0, 0
     while index < len(command):
         char = command[index]
+        if command.startswith('\\\n', index):
+            index += 2
+            continue
         if char in ' \t' or char in OPERATORS:
             if parts is not None:
                 tokens.append(Word(command[start:index], tuple(parts)))

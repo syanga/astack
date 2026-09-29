@@ -195,7 +195,8 @@ def exit_code(spec, result):
         case Exited(returncode):
             code = returncode if returncode >= 0 else 128 - returncode
         case TimedOut(limit):
-            print('run-job: deadline {:g}s reached; stopped the process group'.format(limit), file=sys.stderr)
+            stopped = '; stopped the process group' if result.cleanup_ok else ''
+            print('run-job: deadline {:g}s reached{}'.format(limit, stopped), file=sys.stderr)
             code = 124
         case Cancelled(signum):
             code = 128 + signum
