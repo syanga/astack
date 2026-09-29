@@ -8,25 +8,26 @@ disable-model-invocation: true
 
 `scripts/hook.py` is a Claude Code `PreToolUse` hook for the Bash tool. It denies
 a `run_in_background` call unless the command runs the helper from the
-[`run-job`](../run-job/SKILL.md) skill. It allows every other call. A background
-command must have this shape:
+[`run-job`](../run-job/SKILL.md) skill, written literally:
 
 ```sh
-[cd DIR &&] [NAME=VALUE ...] [exec] python3 CORE [ARG ...]
+python3 /absolute/path/to/run-job/scripts/run_job.py ARG ...
 ```
 
 - `python3` can also be `python3.N` or an absolute path to either name.
-- `CORE` must resolve to the installed `run-job/scripts/run_job.py`. Write it as
-  an absolute path, or start it with `~/`, `$HOME`, `${HOME}`, or
-  `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`.
-- An unquoted, unescaped `;`, `|`, `&`, `(`, `)`, `<`, `>`, newline, `$(...)`, or
-  backtick denies the call, and so do `$(...)` and backticks inside double quotes.
-  Inside single quotes, all of these are text.
+- The helper path must be the installed `run_job.py`, written as an absolute path.
+- Every word is plain text made of letters, digits, and `_ . / : = @ % + , -`, or
+  text in single quotes. Anything the shell would expand or interpret, such as
+  `$`, a backtick, a double quote, a backslash, `~`, a glob, a brace, a newline,
+  or an operator, denies the call.
 
-Shell syntax inside `sh -c '...'` is a quoted argument, so the hook allows it.
-Redirections are denied because opening a FIFO or a device can block before the
-helper starts. A denied call gets a message with the helper's absolute path in
-the command forms for a finite job and a long-lived process.
+Shell syntax, `cd`, and `VAR=value` go inside the command, as `sh -c '...'` or
+`env VAR=value`, where they are single-quoted text to the hook. A denied call
+gets a message with the helper's absolute path in the command forms for a
+finite job and a long-lived process. It allows every other call.
+
+The hook checks the command text, not the shell it runs in. A shell function or
+alias named `python3` in the user's own shell setup is outside what it checks.
 
 The hook fails open. If the event is malformed, or the script or `python3` is
 missing, the hook exits with code 1. Claude Code reports the hook error and runs
