@@ -13,39 +13,26 @@ CORE = Path(os.path.abspath(__file__)).parents[2] / 'run-job' / 'scripts' / 'run
 SEGMENT = r"[A-Za-z0-9_./:=@%+,-]|'[^']*'"
 WORD = r'(?:{})+'.format(SEGMENT)
 COMMAND = re.compile(r'[ \t]*{0}(?:[ \t]+{0})*[ \t\n]*'.format(WORD))
-PYTHON = re.compile(r'python3(?:\.[0-9]+)?')
-REASON = '''Run background Bash commands through the run-job helper, written literally.
-For a finite job or a watcher, with a deadline well past its normal duration:
+PYTHON = re.compile(r'(?s)(?:/(?:.*/)?)?python3(?:\.[0-9]+)?')
+REASON = '''Run background Bash commands through the run-job helper, in one of these forms.
+For a finite job or a watcher, set SECONDS well past its normal duration:
 python3 {core} --timeout SECONDS -- COMMAND [ARG...]
 For a long-lived process, such as a dev server:
 python3 {core} --no-timeout -- COMMAND [ARG...]
-Quote arguments with single quotes only. Put cd, VAR=value, pipes, redirections, and other shell syntax inside the command, as sh -c '...' or env VAR=value.
-Read run-job/SKILL.md from the installed skills for exit codes and watcher rules.'''.format(core=shlex.quote(str(CORE)))
-
-
-def words(command):
-    for word in re.finditer(WORD, command):
-        yield ''.join(segment.strip("'") if segment.startswith("'") else segment
-                      for segment in re.findall(SEGMENT, word.group()))
+Write each argument as plain text or in single quotes. Put cd, pipes, redirections, and other shell syntax inside sh -c '...', and set variables with env VAR=value.
+For exit codes and watcher rules, read run-job/SKILL.md from the installed skills.'''.format(core=shlex.quote(str(CORE)))
 
 
 def runs_core(command: str) -> bool:
-    if not COMMAND.fullmatch(command):
-        return False
-    values = list(words(command))
-    interpreter = values[0] if values else ''
-    return (len(values) >= 2 and PYTHON.fullmatch(os.path.basename(interpreter)) is not None
-            and (interpreter.startswith('/') or '/' not in interpreter)
-            and values[1] in (str(CORE), os.path.realpath(CORE)))
+    words = [word.replace("'", '') for word in re.findall(WORD, command)] if COMMAND.fullmatch(command) else []
+    return (len(words) >= 2 and PYTHON.fullmatch(words[0]) is not None
+            and words[1] in (str(CORE), os.path.realpath(CORE)))
 
 
 def decide(event: dict) -> str | None:
     if event['tool_name'] != 'Bash' or event['tool_input'].get('run_in_background') is not True:
         return None
-    command = event['tool_input']['command']
-    if not isinstance(command, str):
-        raise TypeError('tool_input.command is not a string')
-    return None if runs_core(command) else REASON
+    return None if runs_core(event['tool_input']['command']) else REASON
 
 
 def main():

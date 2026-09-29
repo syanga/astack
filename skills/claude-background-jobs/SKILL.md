@@ -16,19 +16,17 @@ python3 /absolute/path/to/run-job/scripts/run_job.py ARG ...
 
 - `python3` can also be `python3.N` or an absolute path to either name.
 - The helper path must be the installed `run_job.py`, written as an absolute path.
-- Every word is plain text made of letters, digits, and `_ . / : = @ % + , -`, or
-  text in single quotes. Anything the shell would expand or interpret, such as
-  `$`, a backtick, a double quote, a backslash, `~`, a glob, a brace, a newline,
-  or an operator, denies the call.
+- Each word is made of letters, digits, `_ . / : = @ % + , -`, and single-quoted
+  text. Any other character, such as `$`, `~`, a double quote, or a newline,
+  denies the call.
 
-Shell syntax, `cd`, and `VAR=value` go inside the command, as `sh -c '...'` or
-`env VAR=value`, where they are single-quoted text to the hook. A denied call
-gets a message with the helper's absolute path in the command forms for a
-finite job and a long-lived process. It allows every other call.
+Put shell syntax and `cd` inside `sh -c '...'`, and set variables with
+`env VAR=value`. The deny message gives the command forms for a finite job and a
+long-lived process, with the helper's absolute path.
 
-The hook checks the command text, not the shell it runs in. Shell functions and
-aliases from the user's own shell setup, including zsh global aliases that expand
-inside arguments, are outside what it checks.
+The hook checks only the command text. Shell functions and aliases in the user's
+shell setup, including zsh global aliases that expand inside arguments, can still
+change what runs.
 
 The hook fails open. If the event is malformed, or the script or `python3` is
 missing, the hook exits with code 1. Claude Code reports the hook error and runs

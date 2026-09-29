@@ -61,22 +61,17 @@ class Latch:
             self.signum = signum
 
 
-_active_latch = None
-
-
 @contextlib.contextmanager
 def latching_signals():
-    global _active_latch
-    if _active_latch is not None:
-        yield _active_latch
+    active = signal.getsignal(signal.SIGINT)
+    if isinstance(active, Latch):
+        yield active
         return
     latch = Latch()
     previous = {signum: signal.signal(signum, latch) for signum in SIGNALS}
-    _active_latch = latch
     try:
         yield latch
     finally:
-        _active_latch = None
         for signum, handler in previous.items():
             signal.signal(signum, handler)
 
@@ -125,8 +120,8 @@ def group_alive(pgid: int) -> bool:
         return True
 
 
-def wait_empty(process, seconds):
-    deadline = time.monotonic() + seconds
+def wait_empty(process):
+    deadline = time.monotonic() + GRACE_SECONDS
     while True:
         process.poll()
         if not group_alive(process.pid):
@@ -137,31 +132,19 @@ def wait_empty(process, seconds):
         time.sleep(POLL_SECONDS)
 
 
-def stop_group(process, first_signal):
-    process.poll()
-    if first_signal is None:
+def stop_group(process, outcome):
+    if isinstance(outcome, Exited):
         if not group_alive(process.pid):
             return True
         print('run-job: stopped leftover processes', file=sys.stderr)
-        first_signal = signal.SIGTERM
-    send(process.pid, first_signal)
-    if wait_empty(process, GRACE_SECONDS):
+    send(process.pid, outcome.signum if isinstance(outcome, Cancelled) else signal.SIGTERM)
+    if wait_empty(process):
         return True
     send(process.pid, signal.SIGKILL)
-    if wait_empty(process, GRACE_SECONDS):
+    if wait_empty(process):
         return True
     print('run-job: could not stop process group {}'.format(process.pid), file=sys.stderr)
     return False
-
-
-def first_signal(outcome):
-    match outcome:
-        case Exited():
-            return None
-        case Cancelled(signum):
-            return signum
-        case _:
-            return signal.SIGTERM
 
 
 def supervise(spec: JobSpec, stdout=None, stderr=None, on_start=None) -> Result:
@@ -186,7 +169,7 @@ def supervise(spec: JobSpec, stdout=None, stderr=None, on_start=None) -> Result:
                 else:
                     time.sleep(POLL_SECONDS)
         finally:
-            cleanup_ok = stop_group(process, first_signal(outcome))
+            cleanup_ok = stop_group(process, outcome)
         return Result(outcome, cleanup_ok)
 
 
@@ -210,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog='run_job.py', allow_abbrev=False,
         description='Run a command in its own process group and stop the group at a deadline, '
-                    'on SIGINT, SIGTERM, or SIGHUP, and when the command exits.')
+                    'on SIGINT, SIGTERM, or SIGHUP, or when the command exits.')
     add_arguments(parser)
     spec = spec_from(parser.parse_args(argv))
     return exit_code(spec, supervise(spec))

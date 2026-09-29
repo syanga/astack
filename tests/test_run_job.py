@@ -1,4 +1,3 @@
-import argparse
 import contextlib
 import importlib.util
 import io
@@ -72,7 +71,24 @@ def load():
     return module
 
 
-class RunJobTests(unittest.TestCase):
+class ProcessAssertions:
+    def pid_from(self, path):
+        deadline = time.monotonic() + 10
+        while not path.exists():
+            self.assertLess(time.monotonic(), deadline, 'job did not write its pid')
+            time.sleep(0.02)
+        pid = int(path.read_text())
+        self.addCleanup(kill, pid)
+        return pid
+
+    def assert_stops(self, pid):
+        deadline = time.monotonic() + 5
+        while alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertFalse(alive(pid), 'process {} is still running'.format(pid))
+
+
+class RunJobTests(ProcessAssertions, unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -87,19 +103,7 @@ class RunJobTests(unittest.TestCase):
         return ['--', sys.executable, '-c', code, *extra]
 
     def job_pid(self):
-        deadline = time.monotonic() + 10
-        while not self.pidfile.exists():
-            self.assertLess(time.monotonic(), deadline, 'job did not write its pid')
-            time.sleep(0.02)
-        pid = int(self.pidfile.read_text())
-        self.addCleanup(kill, pid)
-        return pid
-
-    def assert_stops(self, pid):
-        deadline = time.monotonic() + 5
-        while alive(pid) and time.monotonic() < deadline:
-            time.sleep(0.05)
-        self.assertFalse(alive(pid), 'process {} is still running'.format(pid))
+        return self.pid_from(self.pidfile)
 
     def test_passes_through_output_and_exit_code(self):
         completed = self.run_helper('--timeout', '10', *self.python('print("done"); raise SystemExit(3)'))
@@ -188,9 +192,7 @@ class RunJobTests(unittest.TestCase):
 
     def test_stops_the_group_when_the_start_callback_fails(self):
         run_job = load()
-        parser = argparse.ArgumentParser()
-        run_job.add_arguments(parser)
-        spec = run_job.spec_from(parser.parse_args(['--timeout', '30', '--', 'sleep', '60']))
+        spec = run_job.JobSpec(('sleep', '60'), 30.0)
         started = []
 
         def fail(process):
@@ -216,9 +218,7 @@ class RunJobTests(unittest.TestCase):
 
     def test_deadline_counts_from_the_start_of_the_job(self):
         run_job = load()
-        parser = argparse.ArgumentParser()
-        run_job.add_arguments(parser)
-        spec = run_job.spec_from(parser.parse_args(['--timeout', '2', '--', 'sleep', '60']))
+        spec = run_job.JobSpec(('sleep', '60'), 2.0)
         started = time.monotonic()
         result = run_job.supervise(spec, None, None, lambda process: time.sleep(2))
         self.assertEqual(result.outcome, run_job.TimedOut(2.0))

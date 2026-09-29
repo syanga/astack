@@ -6,9 +6,9 @@ disable-model-invocation: true
 
 # Run a bounded job
 
-A background command that hangs never exits, so nothing that waits for its exit
-fires. `scripts/run_job.py` runs a command in its own process group. It stops the
-whole group:
+A background command that hangs never exits, so the notification that waits for
+its exit never arrives. `scripts/run_job.py` runs a command in its own process
+group. It stops the whole group:
 
 - at the deadline,
 - when the helper receives SIGINT, SIGTERM, or SIGHUP,
@@ -33,8 +33,8 @@ launcher detaches its worker and exits, the helper stops the worker as a leftove
 process. Keep the project's test locks, worker limits, and execution wrappers.
 
 The helper needs Python 3.10 or later. It inherits the current directory and
-environment, reads stdin from `/dev/null`, and passes stdout and stderr through. Its own status lines go to
-stderr and start with `run-job:`.
+environment, reads stdin from `/dev/null`, and passes stdout and stderr through.
+Its own status lines go to stderr and start with `run-job:`.
 
 | Exit code | Meaning |
 | --- | --- |
@@ -46,9 +46,9 @@ stderr and start with `run-job:`.
 | 127 | The command was not found. |
 | 128+N | The helper received signal N and stopped the process group. |
 
-A command can exit with one of these codes itself. Codes 124 through 127 from the
-helper come with a `run-job:` status line, and its code 2 comes with a
-`usage: run_job.py` line.
+A command can exit with one of these codes itself. The helper prints a
+`run-job:` status line with codes 124 through 127 and a `usage: run_job.py` line
+with code 2.
 
 ## Bound a watcher and confirm its first check
 
@@ -60,9 +60,9 @@ python3 <skill-directory>/scripts/run_job.py --timeout 5400 -- gh pr checks 42 -
 ```
 
 - Make the watcher exit on every outcome: success, failure, an error from the
-  check itself, and the watched process ending. When the watched process runs
-  through its own helper call, that call's exit reports a crash; stop the watcher
-  then.
+  check itself, and the watched process ending. If the watched process runs
+  through its own `run_job.py` call, that call's exit notification reports a
+  crash. Stop the watcher when it arrives.
 - Make it print its first check before its first sleep.
 - Before you end the turn, read that first check in the output and confirm it ran
   without errors.

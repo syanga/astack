@@ -34,13 +34,13 @@ class HookTests(unittest.TestCase):
                             ignore=shutil.ignore_patterns('__pycache__'))
         return '{}/{}'.format(config, CORE)
 
-    def hook(self, event, **env):
+    def hook(self, event, launcher=LAUNCHER, **env):
         stdin = event if isinstance(event, str) else json.dumps(event)
-        return subprocess.run(['sh', '-c', LAUNCHER], input=stdin, capture_output=True, text=True,
+        return subprocess.run(['sh', '-c', launcher], input=stdin, capture_output=True, text=True,
                               env={**self.env, **env}, timeout=15)
 
-    def decision(self, command, **env):
-        completed = self.hook(background(command), **env)
+    def decision(self, command, launcher=LAUNCHER, **env):
+        completed = self.hook(background(command), launcher, **env)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         if not completed.stdout:
             return 'allow'
@@ -181,12 +181,7 @@ class HookTests(unittest.TestCase):
         for tool_command, expected in (('make test', 'deny'),
                                        ('python3 {} --timeout 60 -- make test'.format(core), 'allow')):
             with self.subTest(command=tool_command):
-                completed = subprocess.run(['sh', '-c', command], input=json.dumps(background(tool_command)),
-                                           capture_output=True, text=True, env=self.env, timeout=15)
-                self.assertEqual(completed.returncode, 0, completed.stderr)
-                decision = json.loads(completed.stdout)['hookSpecificOutput']['permissionDecision'] \
-                    if completed.stdout else 'allow'
-                self.assertEqual(decision, expected)
+                self.assertEqual(self.decision(tool_command, command), expected)
 
 
 if __name__ == '__main__':
