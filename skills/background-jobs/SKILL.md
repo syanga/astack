@@ -1,6 +1,6 @@
 ---
 name: background-jobs
-description: Run long background jobs and watchers with a deadline and a wake-up on completion. Use for slow tests, builds, or waiting on a ready line or CI result.
+description: Run long background jobs and watchers with a deadline in Claude Code or Codex. Use for slow tests, builds, or waiting on a ready line or CI result.
 ---
 
 # Wake when a job finishes
@@ -26,15 +26,17 @@ exits.
 python3 <skill-directory>/scripts/run.py --timeout 1800 -- make test
 ```
 
-To wait for a condition, such as a ready line or a CI result, run the watcher
-through the helper the same way, such as
+To wait for one outcome, such as a ready line or a CI result, run a watcher
+through the helper the same way, for example
 `run.py --timeout 5400 -- gh pr checks 42 --watch`. Make the watcher exit on
-every outcome, including failure and error lines. Start a long-lived process
+every outcome, including failure and error lines. Use Monitor only for a stream
+of events, with `timeout_ms` as its deadline. Start a long-lived process
 that produces the condition, such as a dev server, in its own plain
 `run_in_background` call without the helper. Its exit wakes you if it crashes.
 
 Have the watcher print its first check before it sleeps. Before you end the turn,
-confirm in its output file that the check ran without errors. Stop a job or
+read its output file until the first check appears, and confirm it ran without
+errors. Stop a job or
 watcher you replace or no longer need with TaskStop.
 
 ## Codex

@@ -210,9 +210,12 @@ def main():
         parser.error('a command is required after --')
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error('--timeout must be positive and finite')
+    if args.label and not args.codex:
+        parser.error('--label requires --codex')
     if args.codex:
         return run_queued(args, command, *codex_queue(parser, args))
     return run_plain(command, args.timeout)
+
 
 if __name__ == '__main__':
     sys.exit(main())

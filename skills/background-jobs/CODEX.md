@@ -7,7 +7,8 @@ Interactive commands use their native process sessions.
 1. Start the helper through the shell tool, with a short initial yield:
 
    ```sh
-   python3 <skill-directory>/scripts/run.py --codex --label 'unit tests' --timeout 1800 -- make test
+   python3 <skill-directory>/scripts/run.py --codex --label 'unit tests' \
+     --timeout 1800 -- make test
    ```
 
    With `--codex`, the helper saves combined output in a private temporary
@@ -26,8 +27,9 @@ Interactive commands use their native process sessions.
 
 The helper attempts one notification after success, failure, or timeout. When it
 receives SIGINT, SIGTERM, or SIGHUP while the job runs, it stops the job and
-skips notification. Verify the cancellation receipt. A host can terminate the process session without
-running this cleanup, leaving the job alive and its result stale.
+skips notification. Verify the cancellation receipt. A host can terminate the
+process session without running this cleanup, leaving the job alive and its
+result stale.
 A handled interrupt during delivery records `notification: unknown`; the helper
 cannot recall a message already accepted by Codex.
 

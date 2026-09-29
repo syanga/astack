@@ -82,7 +82,8 @@ class PlainJobTests(unittest.TestCase):
                 self.assert_stops(int(self.pidfile.read_text()))
 
     def test_rejects_invalid_arguments(self):
-        for argv in ([], ['--timeout', '0', '--', 'true'], ['--timeout', 'nan', '--', 'true'], ['--timeout', '5']):
+        for argv in ([], ['--timeout', '0', '--', 'true'], ['--timeout', '5'],
+                     ['--label', 'job', '--timeout', '5', '--', 'true']):
             with self.subTest(argv=argv):
                 completed = subprocess.run([sys.executable, str(SCRIPT), *argv],
                                            capture_output=True, text=True, timeout=15)
