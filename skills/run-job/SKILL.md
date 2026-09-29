@@ -32,8 +32,8 @@ commands, use `sh -c '...'`. Run the work in the command's foreground. If a
 launcher detaches its worker and exits, the helper stops the worker as a leftover
 process. Keep the project's test locks, worker limits, and execution wrappers.
 
-The helper inherits the current directory and environment, reads stdin from
-`/dev/null`, and passes stdout and stderr through. Its own status lines go to
+The helper needs Python 3.10 or later. It inherits the current directory and
+environment, reads stdin from `/dev/null`, and passes stdout and stderr through. Its own status lines go to
 stderr and start with `run-job:`.
 
 | Exit code | Meaning |
