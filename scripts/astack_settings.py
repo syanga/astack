@@ -9,6 +9,8 @@ import astack_files as files
 from _vendor.tomllib import loads as toml_loads
 from _vendor.tomllib._parser import parse_key, parse_value, skip_chars
 
+ENTRIES = "$entries"
+
 
 @dataclass
 class SettingsChange:
@@ -27,7 +29,10 @@ class SettingsChange:
             raise ValueError("Settings changed during {}; retry: {}".format(stage, self.path))
 
     def apply(self, state, state_path, backup_root, dry_run=False):
-        """Apply this change and save ownership; restore its payload if saving fails."""
+        """Apply this change and save ownership; restore its payload if saving fails.
+
+        A crash between the two writes leaves the applied change unowned.
+        """
         self.check_unchanged("installation")
         if self.conflicts:
             backup = backup_root / str(self.path).lstrip("/")
@@ -107,13 +112,59 @@ def json_loads(text):
     return result
 
 
+@dataclass(frozen=True)
+class Entries:
+    values: list
+
+
+def entries(value, path):
+    values = value[ENTRIES]
+    if list(value) != [ENTRIES] or not isinstance(values, list) or not values:
+        raise ValueError("{} must be the only key, with a non-empty list: {!r}".format(ENTRIES, path))
+    if any(same(a, b) for i, a in enumerate(values) for b in values[i + 1:]):
+        raise ValueError("{} values must be distinct: {!r}".format(ENTRIES, path))
+    return Entries(values)
+
+
 def leaves(data, prefix=()):
     for key, value in data.items():
         path = prefix + (key,)
-        if isinstance(value, dict):
+        if key == ENTRIES:
+            raise ValueError("{} needs a parent key: {!r}".format(ENTRIES, path))
+        if isinstance(value, dict) and ENTRIES in value:
+            yield path, entries(value, path)
+        elif isinstance(value, dict):
             yield from leaves(value, path)
         else:
             yield path, value
+
+
+def entry_list(entry, path):
+    items = entry["value"] if entry["exists"] else []
+    if not isinstance(items, list):
+        raise ValueError("{} destination is not a list: {!r}".format(ENTRIES, path))
+    return items
+
+
+def merge_entries(current, wanted, owned):
+    """Return the new list, the owned values in it, and a "missing" or "ambiguous" conflict per owned value."""
+    result, kept, conflicts = list(current), [], []
+    for value in owned:
+        count = sum(same(item, value) for item in current)
+        if count != 1:
+            conflicts.append("missing" if count == 0 else "ambiguous")
+        elif any(same(value, item) for item in wanted):
+            kept.append(value)
+        else:
+            result = [item for item in result if not same(item, value)]
+    new_owned = []
+    for value in wanted:
+        if any(same(value, item) for item in kept):
+            new_owned.append(value)
+        elif not any(same(value, item) for item in result):
+            result.append(copy.deepcopy(value))
+            new_owned.append(value)
+    return result, new_owned, conflicts
 
 
 def lookup(data, path):
@@ -275,26 +326,58 @@ def plan(format_name, text, desired, previous, existed, force=False):
     """Return new text, ownership record, changed key labels, and local conflicts."""
     doc = document(format_name, text)
     desired = dict(leaves(desired))
+    if format_name != "json" and any(isinstance(value, Entries) for value in desired.values()):
+        raise ValueError(ENTRIES + " requires a JSON settings destination")
     prior = previous.get("keys", {}) if previous else {}
     keys = dict(prior)
     changes, conflicts = [], []
+
+    def put(path, target):
+        if not same(doc.get(path), target):
+            doc.set(path, target)
+            changes.append(".".join(path))
+
+    def put_entries(path, items, created):
+        put(path, {"exists": True, "value": items} if items or not created else {"exists": False})
+
     for path in sorted(set(desired) | {tuple(json.loads(key)) for key in prior}):
         key = json.dumps(path)
         current = doc.get(path)
         old = prior.get(key)
-        if old and not same(current, old["installed"]):
+        entries_old = old if old and "entries" in old else None
+        value_old = None if entries_old else old
+        wanted = desired.get(path)
+        new_entries = wanted.values if isinstance(wanted, Entries) else []
+        new_value = path in desired and not new_entries
+        record = None
+        if entries_old:
+            items, owned, reasons = merge_entries(entry_list(current, path), new_entries, entries_old["entries"])
+            conflicts.extend("{} ({} entry)".format(".".join(path), reason) for reason in sorted(set(reasons)))
+            if "ambiguous" in reasons and force:
+                raise ValueError("Owned {} value is duplicated: {!r}".format(ENTRIES, path))
+            if reasons and not force:
+                continue
+            put_entries(path, items, entries_old["created"])
+            record = {"entries": owned, "created": entries_old["created"]} if owned else None
+        elif value_old and not same(current, value_old["installed"]):
             conflicts.append(".".join(path))
             if not force:
                 continue
-        before = old["before"] if old else current
-        target = {"exists": True, "value": desired[path]} if path in desired else before
-        if format_name == "toml" and "value" in target:
-            target = {"exists": True, "raw": literal(target["value"])}
-        if not same(current, target):
-            doc.set(path, target)
-            changes.append(".".join(path))
-        if path in desired:
-            keys[key] = {"before": before, "installed": doc.get(path)}
+        if value_old or new_value:
+            before = value_old["before"] if value_old else doc.get(path)
+            target = {"exists": True, "value": wanted} if new_value else before
+            if format_name == "toml" and "value" in target:
+                target = {"exists": True, "raw": literal(target["value"])}
+            put(path, target)
+            if new_value:
+                record = {"before": before, "installed": doc.get(path)}
+        if new_entries and not entries_old:
+            current = doc.get(path)
+            items, owned, _ = merge_entries(entry_list(current, path), new_entries, [])
+            put_entries(path, items, not current["exists"])
+            record = {"entries": owned, "created": not current["exists"]} if owned else None
+        if record:
+            keys[key] = record
         else:
             keys.pop(key, None)
     record = dict(previous) if previous else {

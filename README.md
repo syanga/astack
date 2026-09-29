@@ -45,6 +45,10 @@ The repository defines what gets installed:
 | [settings/](settings/) | Settings to manage |
 | [harnesses.json](harnesses.json) | Supported agents, destinations, and configuration sources |
 
+For a JSON destination, a source value of `{"$entries": [...]}` adds those values
+to the list at that key without replacing its other elements, and uninstall
+removes only those values.
+
 For contribution rules, see [AGENTS.md](AGENTS.md).
 
 ## Find a skill

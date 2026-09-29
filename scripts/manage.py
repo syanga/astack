@@ -145,9 +145,9 @@ def main():
     # Reject a blocked state directory before changing any managed files.
     files.validate_parents(state_path)
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {"version": 1, "targets": {}}
-    if state.get("version") not in (1, 2):
+    if state.get("version") not in (1, 2, 3):
         raise ValueError("Unsupported astack manifest version")
-    state["version"] = 2
+    state["version"] = 3
 
     skills = skill_files() if args.command == "install" else []
     settings = settings_operations(harnesses, selected, state, home, use_env, args)

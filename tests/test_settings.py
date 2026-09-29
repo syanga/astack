@@ -8,6 +8,10 @@ from unittest.mock import patch
 import test_install_lifecycle as lifecycle
 from test_install import InstallerFixture
 
+HOOK = {"matcher": "Bash", "hooks": [{"type": "command", "command": "check", "timeout": 10}]}
+OTHER = {"matcher": "Bash", "hooks": [{"type": "command", "command": "other"}]}
+MINE = {"matcher": "Edit", "hooks": [{"type": "command", "command": "mine"}]}
+
 
 class SettingsTests(InstallerFixture):
     manager = lifecycle.InstallerLifecycleTests.manager
@@ -30,7 +34,7 @@ class SettingsTests(InstallerFixture):
         self.run_installer()
         self.assertEqual(json.loads((self.home / ".claude/settings.json").read_text()), {"autoMemoryEnabled": False})
         self.assertEqual(before, (codex.read_bytes(), codex.stat().st_mtime_ns))
-        self.assertEqual(self.manifest()["version"], 2)
+        self.assertEqual(self.manifest()["version"], 3)
         self.assertNotIn("codex", self.manifest()["settings"])
         self.run_installer(command="uninstall")
         self.assertFalse((self.home / ".claude/settings.json").exists())
@@ -241,20 +245,22 @@ class SettingsTests(InstallerFixture):
         self.run_with_config(module, {}, "uninstall")
         self.assertTrue(all(not p.exists() for p in paths))
 
-    def test_version_one_install_migrates_without_losing_file_ownership(self):
-        self.source("claude", {})
-        self.run_installer()
-        state_path = self.home / ".local/state/astack/manifest.json"
-        state = self.manifest()
-        state["version"] = 1
-        state.pop("settings", None)
-        state_path.write_text(json.dumps(state))
-        self.source("claude", {"autoMemoryEnabled": False})
-        self.run_installer()
-        self.assertEqual(self.manifest()["version"], 2)
-        self.assertEqual(self.manifest()["targets"], state["targets"])
-        self.run_installer(command="uninstall")
-        self.assertEqual(self.manifest()["targets"], {})
+    def test_older_manifest_versions_migrate_without_losing_file_ownership(self):
+        for version in (1, 2):
+            with self.subTest(version=version):
+                self.source("claude", {})
+                self.run_installer()
+                state_path = self.home / ".local/state/astack/manifest.json"
+                state = self.manifest()
+                state["version"] = version
+                state.pop("settings", None)
+                state_path.write_text(json.dumps(state))
+                self.source("claude", {"autoMemoryEnabled": False})
+                self.run_installer()
+                self.assertEqual(self.manifest()["version"], 3)
+                self.assertEqual(self.manifest()["targets"], state["targets"])
+                self.run_installer(command="uninstall")
+                self.assertEqual(self.manifest()["targets"], {})
 
     def test_settings_state_write_failure_rolls_back_payload(self):
         original = '{"autoMemoryEnabled":true,"keep":1}'
@@ -338,3 +344,133 @@ class SettingsTests(InstallerFixture):
         self.assertEqual(self.manifest()["targets"], {})
         self.run_installer("--target", "claude", command="uninstall")
         self.assertFalse(path.exists())
+
+    def test_list_entries_join_user_list_idempotently_and_restore_exactly(self):
+        self.source("claude", {"hooks": {"PreToolUse": {"$entries": [HOOK]}}})
+        original = '{"hooks": {"PreToolUse": [%s]}, "keep": 1}\n' % json.dumps(MINE)
+        path = self.config("claude", original)
+        self.run_installer("--target", "claude")
+        self.assertEqual(json.loads(path.read_text()), {"hooks": {"PreToolUse": [MINE, HOOK]}, "keep": 1})
+        self.assertEqual(self.manifest()["version"], 3)
+        written = path.stat().st_mtime_ns
+        self.assertIn("KEEP SETTINGS", self.run_installer("--target", "claude").stdout)
+        self.assertEqual(written, path.stat().st_mtime_ns)
+        self.run_installer("--target", "claude", command="uninstall")
+        self.assertEqual(path.read_text(), original)
+        self.assertNotIn("claude", self.manifest()["settings"])
+
+    def test_list_entries_create_and_remove_absent_list_and_parents(self):
+        self.source("claude", {"autoMemoryEnabled": False, "hooks": {"PreToolUse": {"$entries": [HOOK, OTHER]}}})
+        path = self.config("claude", '{"env": {}}\n')
+        self.run_installer("--target", "claude")
+        self.assertEqual(json.loads(path.read_text()),
+                         {"env": {}, "autoMemoryEnabled": False, "hooks": {"PreToolUse": [HOOK, OTHER]}})
+        self.run_installer("--target", "claude", command="uninstall")
+        self.assertEqual(path.read_text(), '{"env": {}}\n')
+        path.unlink()
+        self.run_installer("--target", "claude")
+        self.run_installer("--target", "claude", command="uninstall")
+        self.assertFalse(path.exists())
+
+    def test_list_entries_update_and_uninstall_keep_user_elements(self):
+        self.source("claude", {"hooks": {"PreToolUse": {"$entries": [HOOK]}}})
+        path = self.config("claude", '{}')
+        self.run_installer("--target", "claude")
+        document = json.loads(path.read_text())
+        document["hooks"]["PreToolUse"].insert(0, MINE)
+        path.write_text(json.dumps(document))
+        self.source("claude", {"hooks": {"PreToolUse": {"$entries": [OTHER]}}})
+        self.run_installer("--target", "claude")
+        self.assertEqual(json.loads(path.read_text()), {"hooks": {"PreToolUse": [MINE, OTHER]}})
+        self.run_installer("--target", "claude", command="uninstall")
+        self.assertEqual(json.loads(path.read_text()), {"hooks": {"PreToolUse": [MINE]}})
+        self.assertEqual(self.manifest()["settings"], {})
+
+    def test_list_entries_keep_empty_list_the_user_created_after_first_install(self):
+        path = self.config("claude", '{}')
+        self.run_installer("--target", "claude")
+        path.write_text('{"autoMemoryEnabled": false, "hooks": {"PreToolUse": []}}')
+        self.source("claude", {"autoMemoryEnabled": False, "hooks": {"PreToolUse": {"$entries": [HOOK]}}})
+        self.run_installer("--target", "claude")
+        self.assertEqual(json.loads(path.read_text())["hooks"], {"PreToolUse": [HOOK]})
+        self.run_installer("--target", "claude", command="uninstall")
+        self.assertEqual(json.loads(path.read_text()), {"hooks": {"PreToolUse": []}})
+
+    def test_list_entry_already_present_is_left_to_the_user(self):
+        self.source("claude", {"hooks": {"PreToolUse": {"$entries": [HOOK, OTHER]}}})
+        path = self.config("claude", json.dumps({"hooks": {"PreToolUse": [HOOK]}}))
+        self.run_installer("--target", "claude")
+        self.assertEqual(json.loads(path.read_text()), {"hooks": {"PreToolUse": [HOOK, OTHER]}})
+        self.run_installer("--target", "claude", command="uninstall")
+        self.assertEqual(json.loads(path.read_text()), {"hooks": {"PreToolUse": [HOOK]}})
+
+    def test_missing_owned_entry_is_a_conflict_that_force_releases(self):
+        self.source("claude", {"hooks": {"PreToolUse": {"$entries": [HOOK]}}})
+        path = self.config("claude", json.dumps({"hooks": {"PreToolUse": [MINE]}}))
+        self.run_installer("--target", "claude")
+        path.write_text(json.dumps({"hooks": {"PreToolUse": [MINE]}, "edited": True}))
+        before = self.inventory()
+        for command in ("install", "uninstall"):
+            result = self.run_installer("--target", "claude", command=command, success=False)
+            self.assertIn("locally modified", result.stderr)
+            self.assertEqual(before, self.inventory())
+        self.run_installer("--target", "claude", "--force", command="uninstall")
+        self.assertEqual(json.loads(path.read_text()), {"hooks": {"PreToolUse": [MINE]}, "edited": True})
+        self.assertEqual(self.manifest()["settings"], {})
+
+    def test_duplicated_owned_entry_is_refused_even_with_force(self):
+        self.source("claude", {"hooks": {"PreToolUse": {"$entries": [HOOK]}}})
+        path = self.config("claude", '{}')
+        self.run_installer("--target", "claude")
+        path.write_text(json.dumps({"hooks": {"PreToolUse": [HOOK, MINE, HOOK]}}))
+        before = self.inventory()
+        for command in ("install", "uninstall"):
+            for flags in ((), ("--force",)):
+                with self.subTest(command=command, flags=flags):
+                    self.run_installer("--target", "claude", *flags, command=command, success=False)
+                    self.assertEqual(before, self.inventory())
+        path.write_text(json.dumps({"hooks": {"PreToolUse": [MINE, HOOK]}}))
+        self.run_installer("--target", "claude", command="uninstall")
+        self.assertEqual(json.loads(path.read_text()), {"hooks": {"PreToolUse": [MINE]}})
+
+    def test_non_list_entries_destination_is_refused_even_with_force(self):
+        self.source("claude", {"hooks": {"PreToolUse": {"$entries": [HOOK]}}})
+        for content in ('{"hooks": {"PreToolUse": {"matcher": "Bash"}}}', '{"hooks": {"PreToolUse": null}}'):
+            with self.subTest(content=content):
+                self.config("claude", content)
+                before = self.inventory()
+                self.run_installer("--target", "claude", "--force", success=False)
+                self.assertEqual(before, self.inventory())
+
+    def test_invalid_entries_sources_are_rejected_before_any_write(self):
+        path = self.config("codex", 'model = "x"\n')
+        self.source("codex", {"notify": {"$entries": ["tool"]}})
+        before = self.inventory()
+        self.run_installer("--target", "codex", success=False)
+        self.assertEqual(before, self.inventory())
+        self.assertEqual(path.read_text(), 'model = "x"\n')
+        for values in (
+            {"hooks": {"PreToolUse": {"$entries": []}}},
+            {"hooks": {"PreToolUse": {"$entries": HOOK}}},
+            {"hooks": {"PreToolUse": {"$entries": [HOOK, dict(HOOK)]}}},
+            {"hooks": {"PreToolUse": {"$entries": [HOOK], "extra": 1}}},
+            {"$entries": [HOOK]},
+        ):
+            with self.subTest(values=values):
+                self.source("claude", values)
+                self.run_installer("--target", "claude", success=False)
+                self.assertEqual(before, self.inventory())
+
+    def test_switching_between_value_and_entries_restores_original(self):
+        original = '{"hooks": {"PreToolUse": [%s]}}\n' % json.dumps(MINE)
+        path = self.config("claude", original)
+        self.source("claude", {"hooks": {"PreToolUse": [OTHER]}})
+        self.run_installer("--target", "claude")
+        self.source("claude", {"hooks": {"PreToolUse": {"$entries": [HOOK]}}})
+        self.run_installer("--target", "claude")
+        self.assertEqual(json.loads(path.read_text()), {"hooks": {"PreToolUse": [MINE, HOOK]}})
+        self.source("claude", {"hooks": {"PreToolUse": [OTHER]}})
+        self.run_installer("--target", "claude")
+        self.assertEqual(json.loads(path.read_text()), {"hooks": {"PreToolUse": [OTHER]}})
+        self.run_installer("--target", "claude", command="uninstall")
+        self.assertEqual(path.read_text(), original)
