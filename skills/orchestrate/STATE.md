@@ -67,8 +67,8 @@ or the latest worker receipt when no verifier exists. A new SHA needs a new rece
 Verdicts are `live-ui-verified`, `unit-test-verified`, `type-check-only`,
 `verifier-blocked`, and `verifier-failed`. Inspect the evidence and compare its SHA
 with the current PR head before accepting the result. Treat a receipt as
-evidence only when it links saved files that hold the raw output of every
-verification command it reports. CI success contributes
+evidence only when it links saved files that hold the raw output and exit
+status of every verification command it reports. CI success contributes
 evidence but does not establish a verdict. Behavioral work needs more than
 `type-check-only`. A blocked check resumes when its environment is available;
 a failed check needs a fix before new verification. Neither satisfies acceptance.
@@ -84,8 +84,9 @@ before ending a session. Sequential owners record their own results directly;
 coordinators drain worker completions first using the procedure below.
 
 1. Save the receipt under `reports/`, including the unit, head SHA, commands,
-   results, and artifact paths. Save each verification command's raw output to a
-   file and link it, as [Accept verification](#accept-verification) requires.
+   results, and artifact paths. Save any raw output and exit status that exist
+   only in the session to a file. Link the files that
+   [Accept verification](#accept-verification) requires.
    Update the unit row and append any ledger verdict.
    Log decisions and checkpoints through show-me-your-work.
 2. Check plan boxes only when their evidence exists. Link that evidence from the
@@ -110,9 +111,9 @@ partial result. Session termination alone never marks work done.
 
 1. Save each completion with `orch inbox push`, including agent, unit, reported
    status, and a durable report path. Reports include the head SHA, commands,
-   results, artifacts, and links to each verification command's saved raw output,
-   as [Accept verification](#accept-verification) requires. Retain the source
-   event ID in the report when available.
+   results, artifacts, and links to the saved files that
+   [Accept verification](#accept-verification) requires. Retain the source event
+   ID in the report when available.
 2. Read `orch --json inbox drain`. It rotates the pending queue and retains the
    drained batch under `processed/` before returning its pointers. Reconcile those
    reports against current PRs, heads, and existing rows before accepting claims.
