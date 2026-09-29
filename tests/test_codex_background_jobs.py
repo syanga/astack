@@ -186,6 +186,7 @@ sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
                 self.assertEqual(completed.returncode, 2)
                 self.assertIn('CODEX_THREAD_ID' if setting == 'CODEX_THREAD_ID' else 'queue is unavailable',
                               completed.stderr)
+                self.assertIn('run-job/scripts/run_job.py', completed.stderr)
                 self.assertEqual(receipts, [])
                 self.assertIsNone(result)
                 self.assertFalse((self.root / 'ran').exists())
