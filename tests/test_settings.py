@@ -427,6 +427,14 @@ class SettingsTests(InstallerFixture):
         self.assertEqual(json.loads(path.read_text()), {"hooks": {"PreToolUse": [MINE]}, "edited": True})
         self.assertEqual(self.manifest()["settings"], {})
 
+    def test_force_release_leaves_a_deleted_user_list_absent(self):
+        self.source("claude", {"hooks": {"PreToolUse": {"$entries": [HOOK]}}})
+        path = self.config("claude", json.dumps({"hooks": {"PreToolUse": [MINE]}}))
+        self.run_installer("--target", "claude")
+        path.write_text(json.dumps({"edited": True}))
+        self.run_installer("--target", "claude", "--force", command="uninstall")
+        self.assertEqual(json.loads(path.read_text()), {"edited": True})
+
     def test_duplicated_owned_entry_is_refused_even_with_force(self):
         self.source("claude", {"hooks": {"PreToolUse": {"$entries": [HOOK]}}})
         path = self.config("claude", '{}')

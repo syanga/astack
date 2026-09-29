@@ -344,7 +344,8 @@ def plan(format_name, text, desired, previous, existed, force=False):
             changes.append(".".join(path))
 
     def put_entries(path, items, created):
-        put(path, {"exists": True, "value": items} if items or not created else {"exists": False})
+        keep = items or (not created and doc.get(path)["exists"])
+        put(path, {"exists": True, "value": items} if keep else {"exists": False})
 
     for path in sorted(set(desired) | {tuple(json.loads(key)) for key in prior}):
         key = json.dumps(path)
