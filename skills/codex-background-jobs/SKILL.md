@@ -1,35 +1,43 @@
-# Resume a Codex thread when a job finishes
+---
+name: codex-background-jobs
+description: Run long noninteractive Codex jobs and queue completion to their thread. Use for tests, builds, or other finite commands that would otherwise need repeated waits.
+---
+
+# Resume when a job finishes
 
 Use this workflow in a loaded Codex thread with `CODEX_THREAD_ID` and a CLI that
 supports `codex queue`. Keep the hosting session open until the job finishes.
-Interactive commands use their native process sessions.
+Other harnesses and interactive commands use their native process sessions.
 
-1. Start the helper through the shell tool, with a short initial yield:
+1. Choose an authorized, noninteractive command and a realistic maximum duration.
+   Preserve the project's test locks, worker limits, and execution wrappers.
+   Run the work in the foreground of that command. A launcher that detaches its
+   worker can exit before the work finishes.
+2. Start the helper through the shell tool, with a short initial yield:
 
    ```sh
-   python3 <skill-directory>/scripts/run.py --codex --label 'unit tests' \
-     --timeout 1800 -- make test
+   python3 <skill-directory>/scripts/run.py --label 'unit tests' --timeout 1800 -- make test
    ```
 
-   With `--codex`, the helper saves combined output in a private temporary
-   directory and queues one completion message to the thread.
-2. Confirm the initial receipt says `running`. Retain the process session and
+   Pass the command as separate arguments. For shell syntax, explicitly use
+   `sh -c '...'`. The helper inherits the current directory and environment.
+   It closes stdin and saves combined output in a private temporary directory.
+3. Confirm the initial receipt says `running`. Retain the process session and
    the receipt's result and log paths. If startup fails, handle the error before
    ending the turn. If the helper has already finished, read its result now.
-3. Continue independent work. When only the job remains, tell the user what is
+4. Continue independent work. When only the job remains, tell the user what is
    running and end the turn. The queue requests automatic continuation in the
    loaded thread. Acceptance alone does not establish that execution resumed.
    Do not schedule status checks or ask the user to reply to resume.
-4. On notification, read the result and relevant output once. Continue the
+5. On notification, read the result and relevant output once. Continue the
    original task. A timeout or nonzero exit is a failure to investigate.
    Answer status questions briefly, then continue the remaining authorized work.
    Apply later cancellation or scope changes before acting on delayed messages.
 
 The helper attempts one notification after success, failure, or timeout. When it
-receives SIGINT, SIGTERM, or SIGHUP while the job runs, it stops the job and
-skips notification. Verify the cancellation receipt. A host can terminate the
-process session without running this cleanup, leaving the job alive and its
-result stale.
+receives SIGINT or SIGTERM while the job runs, it stops the job and skips notification.
+Verify the cancellation receipt. A host can terminate the process session without
+running this cleanup, leaving the job alive and its result stale.
 A handled interrupt during delivery records `notification: unknown`; the helper
 cannot recall a message already accepted by Codex.
 

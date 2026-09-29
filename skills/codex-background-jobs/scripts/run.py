@@ -13,9 +13,6 @@ import tempfile
 import uuid
 
 
-SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
-
-
 class Cancelled(Exception):
     def __init__(self, signum):
         self.signum = signum
@@ -55,45 +52,45 @@ def stop(process):
     try:
         os.killpg(process.pid, signal.SIGTERM)
         process.wait(timeout=5)
-    except (ProcessLookupError, PermissionError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired:
+        pass
+    except ProcessLookupError:
         pass
     finally:
         try:
             os.killpg(process.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
+        except ProcessLookupError:
             pass
         process.wait()
 
 
-def exit_status(code):
-    return code if code >= 0 else 128 - code
-
-
-def run_plain(command, timeout):
-    process = None
-    for signum in SIGNALS:
-        signal.signal(signum, cancel)
+def main():
+    parser = argparse.ArgumentParser(
+        description='Run a noninteractive job and queue its completion to this Codex thread.')
+    parser.add_argument('--label', required=True)
+    parser.add_argument('--timeout', type=float, required=True, help='job deadline in seconds')
+    parser.add_argument('command', nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    command = args.command[1:] if args.command[:1] == ['--'] else args.command
+    if not command:
+        parser.error('a command is required after --')
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error('--timeout must be positive and finite')
+    thread = os.environ.get('CODEX_THREAD_ID', '')
     try:
-        try:
-            process = subprocess.Popen(command, stdin=subprocess.DEVNULL, start_new_session=True)
-        except OSError as error:
-            print(f'run.py: cannot start {command[0]}: {error}', file=sys.stderr)
-            return 127
-        try:
-            return exit_status(process.wait(timeout=timeout))
-        except subprocess.TimeoutExpired:
-            stop(process)
-            print(f'run.py: timed out after {timeout:g}s; stopped the job', file=sys.stderr)
-            return 124
-    except Cancelled as error:
-        for signum in SIGNALS:
-            signal.signal(signum, signal.SIG_IGN)
-        if process is not None:
-            stop(process)
-        return 128 + error.signum
+        uuid.UUID(thread)
+    except ValueError:
+        parser.error('CODEX_THREAD_ID must identify the current Codex thread')
+    codex = shutil.which('codex')
+    if not codex:
+        parser.error('codex is not on PATH; use a native process wait')
+    try:
+        probe = subprocess.run([codex, 'queue', '--help'], capture_output=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        parser.error(f'cannot check codex queue: {error}; use a native process wait')
+    if probe.returncode:
+        parser.error('codex queue is unavailable; use a native process wait')
 
-
-def run_queued(args, command, thread, codex):
     directory = Path(tempfile.mkdtemp(prefix='astack-codex-job-')).resolve()
     result_path = directory / 'result.json'
     log_path = directory / 'output.log'
@@ -102,7 +99,7 @@ def run_queued(args, command, thread, codex):
                   status='starting', notification='pending')
     save(result_path, record, required=True)
     process = None
-    for signum in SIGNALS:
+    for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, cancel)
     try:
         try:
@@ -159,9 +156,9 @@ def run_queued(args, command, thread, codex):
             return 75
         if not persisted:
             return 74
-        return exit_status(record['exit_code'])
+        return record['exit_code'] if record['exit_code'] >= 0 else 128 - record['exit_code']
     except Cancelled as error:
-        for signum in SIGNALS:
+        for signum in (signal.SIGINT, signal.SIGTERM):
             signal.signal(signum, signal.SIG_IGN)
         if process is not None:
             stop(process)
@@ -174,47 +171,6 @@ def run_queued(args, command, thread, codex):
         save(result_path, record)
         emit(record)
         return 128 + error.signum
-
-
-def codex_queue(parser, args):
-    if not args.label:
-        parser.error('--codex requires --label')
-    thread = os.environ.get('CODEX_THREAD_ID', '')
-    try:
-        uuid.UUID(thread)
-    except ValueError:
-        parser.error('CODEX_THREAD_ID must identify the current Codex thread')
-    codex = shutil.which('codex')
-    if not codex:
-        parser.error('codex is not on PATH; use a native process wait')
-    try:
-        probe = subprocess.run([codex, 'queue', '--help'], capture_output=True, timeout=15)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        parser.error(f'cannot check codex queue: {error}; use a native process wait')
-    if probe.returncode:
-        parser.error('codex queue is unavailable; use a native process wait')
-    return thread, codex
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description='Run a noninteractive job and stop its process group at a deadline.')
-    parser.add_argument('--codex', action='store_true',
-                        help='queue completion to the current Codex thread')
-    parser.add_argument('--label', help='job name for the Codex notification')
-    parser.add_argument('--timeout', type=float, required=True, help='job deadline in seconds')
-    parser.add_argument('command', nargs=argparse.REMAINDER)
-    args = parser.parse_args()
-    command = args.command[1:] if args.command[:1] == ['--'] else args.command
-    if not command:
-        parser.error('a command is required after --')
-    if not math.isfinite(args.timeout) or args.timeout <= 0:
-        parser.error('--timeout must be positive and finite')
-    if args.label and not args.codex:
-        parser.error('--label requires --codex')
-    if args.codex:
-        return run_queued(args, command, *codex_queue(parser, args))
-    return run_plain(command, args.timeout)
 
 
 if __name__ == '__main__':
