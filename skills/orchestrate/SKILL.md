@@ -53,15 +53,16 @@ VERIFY       exact commands or the control-skill path, plus known gotchas
 TIMEBOX      rough cap on runtime; on expiry, return partial findings and stop rather than run on
 FORBIDDEN    no stack mutation, no rebase, no force-push, no fixes outside scope, plus unit-specific bans
 REPORT       status, branch, head SHA, PRs, verdict, each verification command you ran
-             with the path to its saved raw output and exit status (a remote worker
-             returns the raw output and exit status instead), deviations,
+             with the path to the file holding its raw output and exit status, saved
+             under the store's reports/ or the plan's evidence directory (a remote
+             worker returns the raw output and exit status instead), deviations,
              suggested follow-ups
 STANDING     <preferences.md pasted verbatim>
 ```
 
 Size the brief to the unit. A one-command unit gets the template collapsed to a paragraph that still names goal, scope, the verify command, and the report shape. Local spawns may reference the standing-orders file by store path. Verbatim paste is for cloud spawns and every resume.
 
-A sub-coordinator brief adds its track boundary and unit list, its spawn budget and workspace requirements, the drain protocol, and the rollup format (per child: name, status, PR, head SHA, verdict, receipt path, one line, plus track status and frontier delta).
+A sub-coordinator brief adds its track boundary and unit list, its spawn budget and workspace requirements, the drain protocol, and the rollup format (per child: name, status, PR, head SHA, verdict, absolute receipt path, one line, plus track status and frontier delta).
 
 Pass upstream findings to dependent workers before dispatch. Audit one sampled worker brief per sub-coordinator per wave, concurrently with the wave it samples, never as a gate in front of it. If a brief fails the audit, pause new dispatch for that track and correct the sub-coordinator's instructions. Start a fresh worker with consolidated scope when earlier briefs have become fragmented.
 
@@ -94,7 +95,7 @@ Pass upstream findings to dependent workers before dispatch. Audit one sampled w
 
 ## Verification
 
-Scale verification to the unit. When VERIFY is a single cheap command, the worker runs it. A local worker saves each verification command's raw output and exit status under the store's `reports/` or the plan's evidence directory. The coordinator saves a remote worker's returned raw output and exit status under `reports/`. The coordinator spot-checks receipts against their saved files. Use a dedicated verifier for expensive checks, judgments that need independent review, or changes with broad effects. Run dedicated verifiers as native agents on the session's model. For a judgment that needs independent review, also get a review from Codex when hosted in Claude or from Claude when hosted in Codex, following [provider execution](../arena/PROVIDERS.md). Treat its findings as evidence for acceptance, not as a ledger receipt.
+Scale verification to the unit. When VERIFY is a single cheap command, the worker runs it and saves its output as the REPORT field says. Save a remote worker's returned raw output and exit status to a file under `reports/`. Spot-check every receipt against its saved files. Use a dedicated verifier for expensive checks, judgments that need independent review, or changes with broad effects. Run dedicated verifiers as native agents on the session's model. For a judgment that needs independent review, also get a review from Codex when hosted in Claude or from Claude when hosted in Codex, following [provider execution](../arena/PROVIDERS.md). Treat its findings as evidence for acceptance, not as a ledger receipt.
 
 Follow [STATE.md's verification procedure](STATE.md#accept-verification) to record and accept receipts. It defines verdicts, verifier precedence, evidence checks, and verification after a head change.
 
