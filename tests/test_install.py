@@ -52,7 +52,6 @@ class InstallerTests(InstallerFixture):
         for config, filename, skills in [
             (".claude", "CLAUDE.md", ".claude/skills"),
             (".codex", "AGENTS.md", ".agents/skills"),
-            (".gemini", "GEMINI.md", ".gemini/skills"),
             (".config/opencode", "AGENTS.md", ".config/opencode/skills"),
         ]:
             self.assertIn("Personal coding instructions", (self.home / config / filename).read_text())
@@ -60,7 +59,7 @@ class InstallerTests(InstallerFixture):
                              (self.skill / "SKILL.md").read_bytes())
             self.assertTrue(os.access(self.home / skills / "test-skill/scripts/helper.sh", os.X_OK))
         self.assertFalse(list(self.home.rglob("replace-with-skill-name")))
-        self.assertEqual(len(self.manifest()["targets"]), 4)
+        self.assertEqual(len(self.manifest()["targets"]), 3)
 
     def test_dependency_cache_is_not_installed_or_validated_as_skill_source(self):
         cache = self.skill / "scripts/node_modules"
@@ -230,7 +229,7 @@ class InstallerTests(InstallerFixture):
     def test_overlapping_target_destinations_are_rejected(self):
         registry = self.repo / "harnesses.json"
         harnesses = json.loads(registry.read_text())
-        harnesses["gemini"]["skills"] = harnesses["codex"]["skills"]
+        harnesses["opencode"]["skills"] = harnesses["codex"]["skills"]
         registry.write_text(json.dumps(harnesses))
         result = self.run_installer("--target", "all", success=False)
         self.assertIn("distinct destinations", result.stderr)
