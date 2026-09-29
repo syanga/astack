@@ -35,7 +35,7 @@ Record human review gates required by the user or repository, including UI selec
 
 ## How to read this
 
-One box is one unit of work. Every box names the evidence that checks it. A nested box is a sub-step of the box above it. Check a box only when its evidence exists, a file, a log line, a screenshot, a test run, or a SHA. The body is a how-to. The appendices explain and record.
+One box is one unit of work. Every box names the evidence that checks it. A nested box is a sub-step of the box above it. Check a box only when its evidence exists and meets Accept verification in `<installed skills directory>/orchestrate/STATE.md`. The body is a how-to. The appendices explain and record.
 
 The program runs `<installed skills directory>/orchestrate/SKILL.md`. <Who merges, and which PR ids are the operator's items that stop at merge-ready.>
 
