@@ -51,20 +51,23 @@ accepted by Codex.
 ## Stop a replaced job
 
 To stop a job or watcher you replace or no longer need, write Ctrl-C (`\u0003`)
-to its retained process session. The helper stops the job's process group. Read
-the result. It says `cancelled`, or the job's final status with
-`notification: unknown` if the interrupt arrived during delivery. Before starting a replacement that needs
-the same locks or ports, confirm the result says `cleanup: ok`.
+to its retained process session. The helper stops the job's process group, which
+can take up to 10 seconds. Wait for the session to exit, then read the result. It
+says `cancelled`, or the job's final status with `notification: unknown` if the
+interrupt arrived during delivery. Before starting a replacement that needs the
+same locks or ports, confirm the result says `cleanup: ok`.
 
-If the session is gone or does not accept input, run
-`ps -o command= -p <runner_pid>` with the result's `runner_pid`. If the output
-shows this helper with the job's label, run `kill -TERM <runner_pid>` and read
-the result as above.
+If the session is gone or does not accept input, use the result's process IDs.
+Codex's sandbox blocks `ps` and signals to processes started by another command,
+so run these commands with escalated permissions outside the sandbox:
 
-If the helper is gone but the result still says `running`, the host killed the
-helper and the job's process group is still alive. Run
-`ps -o pgid=,command= -p <command_pid>`. If the process group ID equals
-`command_pid` and the command is the job's, run `kill -TERM -- -<command_pid>`.
+1. Run `ps -ww -o command= -p <runner_pid>`. If it shows this helper with the
+   job's label, run `kill -TERM <runner_pid>`, wait for it to exit, and read the
+   result as above.
+2. If the helper is gone but the result still says `running`, the host killed the
+   helper and the job's process group may still be alive. Run
+   `pgrep -l -g <command_pid>`. If it lists only this job's processes, run
+   `kill -TERM -- -<command_pid>`.
 
 ## Recover a failed completion
 

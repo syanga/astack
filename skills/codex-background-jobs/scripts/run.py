@@ -11,8 +11,12 @@ import tempfile
 import uuid
 
 RUN_JOB = Path(__file__).resolve().parents[2] / 'run-job' / 'scripts'
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(RUN_JOB))
-import run_job
+try:
+    import run_job
+except ImportError:
+    sys.exit('codex-background-jobs: the run-job skill is missing at {}; reinstall astack'.format(RUN_JOB))
 from run_job import Cancelled, Exited, JobSpec, LaunchFailed, TimedOut
 
 FALLBACK = 'run the command through {} and attend it with a native process wait'.format(RUN_JOB / 'run_job.py')
@@ -139,6 +143,12 @@ def main():
                       runner_pid=os.getpid(), log=str(log_path), result=str(result_path),
                       status='starting', notification='pending')
         save(result_path, record, required=True)
+        if latch.signum is not None:
+            record.update(status='cancelled', exit_code=128 + latch.signum, notification='skipped',
+                          finished_at=timestamp())
+            save(result_path, record)
+            emit(record)
+            return 128 + latch.signum
 
         def started(process):
             record.update(status='running', command_pid=process.pid, started_at=timestamp())

@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 import os
 from pathlib import Path
+import shutil
 import signal
 import subprocess
 import sys
@@ -392,6 +393,19 @@ sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
         self.assertEqual(result['notification'], 'queued')
         self.assertIn('exit code: 127', self.queued()[0][4])
 
+
+    def test_missing_run_job_skill_is_reported_before_anything_starts(self):
+        skill = self.root / 'skills' / 'codex-background-jobs'
+        shutil.copytree(SCRIPT.parents[1], skill, ignore=shutil.ignore_patterns('__pycache__'))
+        completed = subprocess.run(
+            [sys.executable, str(skill / 'scripts' / 'run.py'), '--label', 'fixture', '--timeout', '5',
+             '--', 'touch', str(self.root / 'ran')],
+            cwd=self.root, env=self.env, capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn('the run-job skill is missing', completed.stderr)
+        self.assertNotIn('Traceback', completed.stderr)
+        self.assertFalse((self.root / 'ran').exists())
+        self.assertEqual(self.queued(), [])
 
 if __name__ == '__main__':
     unittest.main()
