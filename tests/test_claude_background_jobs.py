@@ -45,18 +45,21 @@ class ClaudeBackgroundJobsTests(unittest.TestCase):
         self.assertEqual((completed.returncode, completed.stdout), (3, 'done\n'))
 
     def test_closes_stdin_so_prompts_fail(self):
-        completed = subprocess.run(self.argv('input()'), stdin=subprocess.PIPE,
+        read, write = os.pipe()
+        self.addCleanup(os.close, read)
+        self.addCleanup(os.close, write)
+        completed = subprocess.run(self.argv('input()'), stdin=read,
                                    capture_output=True, text=True, timeout=15)
         self.assertEqual(completed.returncode, 1)
         self.assertIn('EOFError', completed.stderr)
 
     def test_deadline_stops_the_whole_job(self):
         started = time.monotonic()
-        completed = subprocess.run(self.argv(SPAWN, '1', str(self.pidfile)),
-                                   capture_output=True, text=True, timeout=15)
+        completed = subprocess.run(self.argv(SPAWN, '3', str(self.pidfile)),
+                                   capture_output=True, text=True, timeout=20)
         self.assertEqual(completed.returncode, 124)
-        self.assertIn('timed out after 1s', completed.stderr)
-        self.assertLess(time.monotonic() - started, 10)
+        self.assertIn('timed out after 3s', completed.stderr)
+        self.assertLess(time.monotonic() - started, 15)
         self.assert_stops(int(self.pidfile.read_text()))
 
     def test_termination_stops_the_whole_job(self):

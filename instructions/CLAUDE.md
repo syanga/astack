@@ -1,3 +1,3 @@
 ## Claude Code preferences
 
-Before you start a long background job or a watcher, read the `claude-background-jobs` skill.
+Before you use Bash `run_in_background` or Monitor, use the `claude-background-jobs` skill.
