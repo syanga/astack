@@ -1,4 +1,3 @@
-import contextlib
 import json
 from datetime import datetime
 import os
@@ -8,50 +7,15 @@ import signal
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
+
+from test_run_job import GRANDCHILD, LEFTOVER, ZOMBIE_MEMBER, ProcessAssertions
 
 
 SKILLS = Path(__file__).resolve().parents[1] / 'skills'
 SCRIPT = SKILLS / 'codex-background-jobs/scripts/run.py'
 THREAD = '01234567-89ab-4def-8123-456789abcdef'
 LARGE = 1 << 20
-WRITE_PID = '''
-def write_pid(path, pid):
-    with open(path + '.tmp', 'w') as file:
-        file.write(str(pid))
-    os.replace(path + '.tmp', path)
-'''
-GRANDCHILD = 'import os, subprocess, sys\n' + WRITE_PID + '''
-child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
-write_pid(sys.argv[1], child.pid)
-child.wait()
-'''
-LEFTOVER = 'import os, subprocess, sys\n' + WRITE_PID + '''
-child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
-write_pid(sys.argv[1], child.pid)
-'''
-ZOMBIE_MEMBER = 'import os, subprocess, sys, time\n' + WRITE_PID + '''
-group = os.getpgid(0)
-holder = os.fork()
-if holder == 0:
-    null = os.open(os.devnull, os.O_WRONLY)
-    os.dup2(null, 1)
-    os.dup2(null, 2)
-    os.setpgid(0, 0)
-    member = os.fork()
-    if member == 0:
-        os.setpgid(0, group)
-        os._exit(0)
-    while not subprocess.run(['ps', '-o', 'stat=', '-p', str(member)],
-                             capture_output=True, text=True).stdout.strip().startswith('Z'):
-        time.sleep(0.01)
-    write_pid(sys.argv[1], os.getpid())
-    time.sleep(60)
-    os._exit(0)
-while not os.path.exists(sys.argv[1]):
-    time.sleep(0.01)
-'''
 UNVERIFIABLE_CLEANUP = '''
 import runpy, sys
 sys.path.insert(0, sys.argv[1])
@@ -63,20 +27,7 @@ runpy.run_path(sys.argv[0], run_name='__main__')
 '''
 
 
-def alive(pid):
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    return True
-
-
-def kill(pid):
-    with contextlib.suppress(ProcessLookupError):
-        os.kill(pid, signal.SIGKILL)
-
-
-class CodexBackgroundJobsTests(unittest.TestCase):
+class CodexBackgroundJobsTests(ProcessAssertions, unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -130,21 +81,6 @@ sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
     def queued(self):
         path = self.root / 'queued.jsonl'
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
-
-    def pid_from(self, path):
-        deadline = time.monotonic() + 10
-        while not path.exists():
-            self.assertLess(time.monotonic(), deadline, 'job did not write its pid')
-            time.sleep(0.02)
-        pid = int(path.read_text())
-        self.addCleanup(kill, pid)
-        return pid
-
-    def assert_stops(self, pid):
-        deadline = time.monotonic() + 5
-        while alive(pid) and time.monotonic() < deadline:
-            time.sleep(0.05)
-        self.assertFalse(alive(pid), f'process {pid} is still running')
 
     def test_success_and_failure_preserve_output_and_queue_once_to_current_thread(self):
         for code in [0, 7]:

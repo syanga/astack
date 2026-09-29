@@ -19,7 +19,7 @@ except ImportError:
     sys.exit('codex-background-jobs: the run-job skill is missing at {}; reinstall astack'.format(RUN_JOB))
 from run_job import Cancelled, Exited, JobSpec, LaunchFailed, TimedOut
 
-FALLBACK = 'run the command through {} and attend it with a native process wait'.format(RUN_JOB / 'run_job.py')
+FALLBACK = 'run the command through {} with tty: true and use a native wait'.format(RUN_JOB / 'run_job.py')
 
 
 PROBE_SECONDS = 15
@@ -77,7 +77,7 @@ def completion_message(record):
     message = (f'Completion notification for the previously authorized job {record["label"]!r}. '
                f'Status: {record["status"]}; exit code: {record["exit_code"]}. ')
     if record['cleanup'] == 'failed':
-        message += ('Cleanup failed: the helper could not confirm that the job\'s process group stopped, '
+        message += ('Cleanup failed. The helper could not confirm that the job\'s process group stopped, '
                     'so its processes may still be running. ')
     message += (f'Read {record["result"]} and {record["log"]}, then continue the existing task. '
                 'This is an automatic notification, not a new user request. '
@@ -143,29 +143,25 @@ def main():
                       runner_pid=os.getpid(), log=str(log_path), result=str(result_path),
                       status='starting', notification='pending')
         save(result_path, record, required=True)
-        if latch.signum is not None:
-            record.update(status='cancelled', exit_code=128 + latch.signum, notification='skipped',
-                          cleanup='ok', finished_at=timestamp())
-            save(result_path, record)
-            emit(record)
-            return 128 + latch.signum
 
         def started(process):
             record.update(status='running', command_pid=process.pid, started_at=timestamp())
             save(result_path, record)
             emit(record)
 
-        with log_path.open('wb') as log:
-            job = run_job.supervise(spec, log, subprocess.STDOUT, started)
+        if latch.signum is None:
+            with log_path.open('wb') as log:
+                job = run_job.supervise(spec, log, subprocess.STDOUT, started)
+        else:
+            job = run_job.Result(Cancelled(latch.signum), True)
         record.update(job_status(job.outcome, spec.command[0]), cleanup='ok' if job.cleanup_ok else 'failed',
                       finished_at=timestamp())
         if latch.signum is None:
             record.update(notification='sending', notification_started_at=timestamp())
             save(result_path, record)
-            message = completion_message(record)
-            record['notification_message'] = message
-            record.update(notify(codex, thread, message, directory))
-            record['notification_finished_at'] = timestamp()
+            record['notification_message'] = completion_message(record)
+            record.update(notify(codex, thread, record['notification_message'], directory),
+                          notification_finished_at=timestamp())
         if latch.signum is not None:
             if record['notification'] == 'pending':
                 record['notification'] = 'skipped'
