@@ -62,6 +62,19 @@ class JobDeadlineTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 15)
         self.assert_stops(int(self.pidfile.read_text()))
 
+    def test_deadline_kills_a_job_that_ignores_termination(self):
+        ignoring = 'import signal; signal.signal(signal.SIGTERM, signal.SIG_IGN)\n' + SPAWN
+        completed = subprocess.run(self.argv(ignoring, '3', str(self.pidfile)),
+                                   capture_output=True, text=True, timeout=30)
+        self.assertEqual(completed.returncode, 124)
+        self.assert_stops(int(self.pidfile.read_text()))
+
+    def test_reports_a_missing_command(self):
+        completed = subprocess.run([sys.executable, str(SCRIPT), '--timeout', '5', '--',
+                                    'astack-missing-command'], capture_output=True, text=True, timeout=15)
+        self.assertEqual(completed.returncode, 127)
+        self.assertIn('cannot start astack-missing-command', completed.stderr)
+
     def test_termination_stops_the_whole_job(self):
         for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             with self.subTest(signal=signum.name):
@@ -82,7 +95,6 @@ class JobDeadlineTests(unittest.TestCase):
                 completed = subprocess.run([sys.executable, str(SCRIPT), *argv],
                                            capture_output=True, text=True, timeout=15)
                 self.assertEqual(completed.returncode, 2)
-
 
 
 if __name__ == '__main__':
