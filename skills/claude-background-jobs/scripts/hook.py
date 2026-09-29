@@ -11,7 +11,7 @@ CORE = Path(os.path.abspath(__file__)).parents[2] / 'run-job' / 'scripts' / 'run
 SEGMENT = r"[A-Za-z0-9_./:=@%+,-]|'[^']*'"
 WORD = r'(?:{})+'.format(SEGMENT)
 COMMAND = re.compile(r'[ \t]*{0}(?:[ \t]+{0})*[ \t\n]*'.format(WORD))
-PYTHON = re.compile(r'(?:/[A-Za-z0-9_./+-]*/)?python3(?:\.[0-9]+)?')
+PYTHON = re.compile(r'python3(?:\.[0-9]+)?')
 REASON = '''Run background Bash commands through the run-job helper, written literally.
 For a finite job or a watcher, with a deadline well past its normal duration:
 python3 {core} --timeout SECONDS -- COMMAND [ARG...]
@@ -31,7 +31,9 @@ def runs_core(command: str) -> bool:
     if not COMMAND.fullmatch(command):
         return False
     values = list(words(command))
-    return (len(values) >= 2 and PYTHON.fullmatch(values[0]) is not None
+    interpreter = values[0] if values else ''
+    return (len(values) >= 2 and PYTHON.fullmatch(os.path.basename(interpreter)) is not None
+            and (interpreter.startswith('/') or '/' not in interpreter)
             and values[1] in (str(CORE), os.path.realpath(CORE)))
 
 

@@ -26,8 +26,9 @@ Shell syntax, `cd`, and `VAR=value` go inside the command, as `sh -c '...'` or
 gets a message with the helper's absolute path in the command forms for a
 finite job and a long-lived process. It allows every other call.
 
-The hook checks the command text, not the shell it runs in. A shell function or
-alias named `python3` in the user's own shell setup is outside what it checks.
+The hook checks the command text, not the shell it runs in. Shell functions and
+aliases from the user's own shell setup, including zsh global aliases that expand
+inside arguments, are outside what it checks.
 
 The hook fails open. If the event is malformed, or the script or `python3` is
 missing, the hook exits with code 1. Claude Code reports the hook error and runs
