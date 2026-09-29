@@ -45,8 +45,9 @@ Every spawn carries a complete brief. Resolve missing fields before dispatch. Fo
 
 ```
 GOAL         one sentence, the outcome, executable by a stranger with no chat access
-SCOPE        paths this unit may write, including where it saves verification output;
-             paths it may not; its exclusive worktree or branch
+SCOPE        paths this unit may write, including where it saves raw output and exit
+             status (the store's reports/ or the plan's evidence directory); paths it
+             may not; its exclusive worktree or branch
 CONTEXT      pointers to files and PRs; upstream reports pasted in full when this unit
              depends on them, because workers cannot see siblings
 ACCEPTANCE   checkable criteria, one per line
@@ -54,16 +55,15 @@ VERIFY       exact commands or the control-skill path, plus known gotchas
 TIMEBOX      rough cap on runtime; on expiry, return partial findings and stop rather than run on
 FORBIDDEN    no stack mutation, no rebase, no force-push, no fixes outside scope, plus unit-specific bans
 REPORT       status, branch, head SHA, PRs, verdict, deviations, suggested follow-ups,
-             and each verification command you ran with the path to a saved file
-             holding its raw output and exit status. Save these files under the
-             store's reports/ or the evidence directory the plan names. A remote
-             worker returns the raw output and exit status instead.
+             and, for each verification command you ran, the path to a saved file
+             holding its raw output and exit status (a remote worker returns these
+             instead)
 STANDING     <preferences.md pasted verbatim>
 ```
 
-Size the brief to the unit. A one-command unit gets the template collapsed to a paragraph that still names goal, scope, the verify command, and the report shape, including where to save raw output and exit status. Local spawns may reference the standing-orders file by store path. Verbatim paste is for cloud spawns and every resume.
+Size the brief to the unit. A one-command unit gets the template collapsed to a paragraph that still names goal, scope, the verify command, and the report shape. Local spawns may reference the standing-orders file by store path. Verbatim paste is for cloud spawns and every resume.
 
-A sub-coordinator brief adds its track boundary and unit list, its spawn budget and workspace requirements, the drain protocol, and the rollup format (per child: name, status, PR, head SHA, verdict, absolute receipt path, one line, plus track status and frontier delta).
+A sub-coordinator brief adds its track boundary and unit list, its spawn budget and workspace requirements, the drain protocol, and the rollup format (per child: name, status, PR, head SHA, verdict, absolute receipt or failure-report path, one line, plus track status and frontier delta).
 
 Pass upstream findings to dependent workers before dispatch. Audit one sampled worker brief per sub-coordinator per wave, concurrently with the wave it samples, never as a gate in front of it. If a brief fails the audit, pause new dispatch for that track and correct the sub-coordinator's instructions. Start a fresh worker with consolidated scope when earlier briefs have become fragmented.
 
