@@ -14,7 +14,7 @@ The CLI reports invalid configuration before starting a job.
 
 One box is one unit of work. Every box names the evidence that checks it.
 Check a box only when its evidence exists.
-The program runs `skills/implement/SKILL.md`.
+The program runs `skills/orchestrate/SKILL.md`.
 Tests alone are not sufficient verification. A PR is verified only when its applicable unit, live, and perf boxes are checked with evidence.
 
 ## Program checklist

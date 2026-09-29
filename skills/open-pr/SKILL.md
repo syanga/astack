@@ -7,7 +7,7 @@ description: Opening a pull request. Use when work is ready for review, or when 
 
 Check whether the branch already has an open PR and update it when it does. Review the diff against the intended base and make sure its contents match the user's goal. Keep PRs narrow and unpushed commits coherent. Preserve commits already under review and add new commits for updates.
 
-Before opening a new PR, rebase onto the latest default branch, or its parent's current tip for a stack child. Independent work and stack roots target the default branch. Each child targets its parent branch. Start substantial work on a new stack from the latest default branch.
+Before opening a new PR, rebase onto the latest default branch, or its parent's current tip for a stack child. When an orchestrate brief forbids rebasing, skip the rebase and state in your report how far the branch trails its target. Independent work and stack roots target the default branch. Each child targets its parent branch. Start substantial work on a new stack from the latest default branch.
 
 Apply [no-comments](../no-comments/SKILL.md) to the code diff before review. Follow [test results](test-results.md) to reuse verification, run the required checks, and publish the results on the PR.
 
