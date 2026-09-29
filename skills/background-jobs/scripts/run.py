@@ -71,6 +71,8 @@ def exit_status(code):
 
 def run_plain(command, timeout):
     process = None
+    for signum in SIGNALS:
+        signal.signal(signum, cancel)
     try:
         try:
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL, start_new_session=True)
@@ -100,6 +102,8 @@ def run_queued(args, command, thread, codex):
                   status='starting', notification='pending')
     save(result_path, record, required=True)
     process = None
+    for signum in SIGNALS:
+        signal.signal(signum, cancel)
     try:
         try:
             with log_path.open('wb') as log:
@@ -206,11 +210,8 @@ def main():
         parser.error('a command is required after --')
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error('--timeout must be positive and finite')
-    queue = codex_queue(parser, args) if args.codex else None
-    for signum in SIGNALS:
-        signal.signal(signum, cancel)
-    if queue:
-        return run_queued(args, command, *queue)
+    if args.codex:
+        return run_queued(args, command, *codex_queue(parser, args))
     return run_plain(command, args.timeout)
 
 if __name__ == '__main__':

@@ -68,15 +68,18 @@ class PlainJobTests(unittest.TestCase):
         self.assert_stops(int(self.pidfile.read_text()))
 
     def test_termination_stops_the_whole_job(self):
-        runner = subprocess.Popen(self.argv(SPAWN, '30', str(self.pidfile)))
-        self.addCleanup(runner.kill)
-        deadline = time.monotonic() + 5
-        while not self.pidfile.exists() or not self.pidfile.read_text():
-            self.assertLess(time.monotonic(), deadline)
-            time.sleep(0.05)
-        runner.send_signal(signal.SIGTERM)
-        self.assertEqual(runner.wait(timeout=15), 128 + signal.SIGTERM)
-        self.assert_stops(int(self.pidfile.read_text()))
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(signal=signum.name):
+                self.pidfile.unlink(missing_ok=True)
+                runner = subprocess.Popen(self.argv(SPAWN, '30', str(self.pidfile)))
+                self.addCleanup(runner.kill)
+                deadline = time.monotonic() + 5
+                while not self.pidfile.exists() or not self.pidfile.read_text():
+                    self.assertLess(time.monotonic(), deadline)
+                    time.sleep(0.05)
+                runner.send_signal(signum)
+                self.assertEqual(runner.wait(timeout=15), 128 + signum)
+                self.assert_stops(int(self.pidfile.read_text()))
 
     def test_rejects_invalid_arguments(self):
         for argv in ([], ['--timeout', '0', '--', 'true'], ['--timeout', 'nan', '--', 'true'], ['--timeout', '5']):

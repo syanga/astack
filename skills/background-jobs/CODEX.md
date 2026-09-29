@@ -25,8 +25,8 @@ Interactive commands use their native process sessions.
    Apply later cancellation or scope changes before acting on delayed messages.
 
 The helper attempts one notification after success, failure, or timeout. When it
-receives SIGINT, SIGTERM, or SIGHUP while the job runs, it stops the job and skips notification.
-Verify the cancellation receipt. A host can terminate the process session without
+receives SIGINT, SIGTERM, or SIGHUP while the job runs, it stops the job and
+skips notification. Verify the cancellation receipt. A host can terminate the process session without
 running this cleanup, leaving the job alive and its result stale.
 A handled interrupt during delivery records `notification: unknown`; the helper
 cannot recall a message already accepted by Codex.
