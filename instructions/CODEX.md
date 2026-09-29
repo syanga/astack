@@ -1,7 +1,7 @@
 ## Codex preferences
 
 For long noninteractive tests, builds, and finite jobs, use the
-`codex-background-jobs` skill to queue completion and end the turn in a supported,
+`background-jobs` skill to queue completion and end the turn in a supported,
 loaded thread. Preserve the process session and result paths. Follow the skill's
 recovery steps when completion delivery or resumption is unverified.
 
