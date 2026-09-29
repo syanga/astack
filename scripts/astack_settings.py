@@ -12,6 +12,10 @@ from _vendor.tomllib._parser import parse_key, parse_value, skip_chars
 ENTRIES = "$entries"
 
 
+class SettingsRefused(ValueError):
+    """A refusal whose message names only a settings path, so it is safe to show."""
+
+
 @dataclass
 class SettingsChange:
     target: str
@@ -86,6 +90,8 @@ def prepare(target, previous, desired, force=False):
         try:
             rendered, record, changes, conflicts = plan(
                 format_name, data.decode("utf-8"), values, old, path.exists(), force)
+        except SettingsRefused as error:
+            raise ValueError("Cannot merge settings at {}: {}".format(path, error)) from None
         except ValueError as error:
             raise ValueError("Cannot merge settings at {} ({})".format(path, type(error).__name__)) from None
         operations.append(SettingsChange(
@@ -117,7 +123,7 @@ class Entries:
     values: list
 
 
-def entries(value, path):
+def parse_entries(value, path):
     values = value[ENTRIES]
     if list(value) != [ENTRIES] or not isinstance(values, list) or not values:
         raise ValueError("{} must be the only key, with a non-empty list: {!r}".format(ENTRIES, path))
@@ -132,17 +138,17 @@ def leaves(data, prefix=()):
         if key == ENTRIES:
             raise ValueError("{} needs a parent key: {!r}".format(ENTRIES, path))
         if isinstance(value, dict) and ENTRIES in value:
-            yield path, entries(value, path)
+            yield path, parse_entries(value, path)
         elif isinstance(value, dict):
             yield from leaves(value, path)
         else:
             yield path, value
 
 
-def entry_list(entry, path):
-    items = entry["value"] if entry["exists"] else []
+def list_at(lookup_result, path):
+    items = lookup_result["value"] if lookup_result["exists"] else []
     if not isinstance(items, list):
-        raise ValueError("{} destination is not a list: {!r}".format(ENTRIES, path))
+        raise SettingsRefused("{} destination is not a list: {}".format(ENTRIES, ".".join(path)))
     return items
 
 
@@ -162,7 +168,7 @@ def merge_entries(current, wanted, owned):
         if any(same(value, item) for item in kept):
             new_owned.append(value)
         elif not any(same(value, item) for item in result):
-            result.append(copy.deepcopy(value))
+            result.append(value)
             new_owned.append(value)
     return result, new_owned, conflicts
 
@@ -348,13 +354,13 @@ def plan(format_name, text, desired, previous, existed, force=False):
         value_old = None if entries_old else old
         wanted = desired.get(path)
         new_entries = wanted.values if isinstance(wanted, Entries) else []
-        new_value = path in desired and not new_entries
+        new_value = path in desired and not isinstance(wanted, Entries)
         record = None
         if entries_old:
-            items, owned, reasons = merge_entries(entry_list(current, path), new_entries, entries_old["entries"])
+            items, owned, reasons = merge_entries(list_at(current, path), new_entries, entries_old["entries"])
             conflicts.extend("{} ({} entry)".format(".".join(path), reason) for reason in sorted(set(reasons)))
             if "ambiguous" in reasons and force:
-                raise ValueError("Owned {} value is duplicated: {!r}".format(ENTRIES, path))
+                raise SettingsRefused("an astack entry is duplicated in {}; remove one copy".format(".".join(path)))
             if reasons and not force:
                 continue
             put_entries(path, items, entries_old["created"])
@@ -373,7 +379,7 @@ def plan(format_name, text, desired, previous, existed, force=False):
                 record = {"before": before, "installed": doc.get(path)}
         if new_entries and not entries_old:
             current = doc.get(path)
-            items, owned, _ = merge_entries(entry_list(current, path), new_entries, [])
+            items, owned, _ = merge_entries(list_at(current, path), new_entries, [])
             put_entries(path, items, not current["exists"])
             record = {"entries": owned, "created": not current["exists"]} if owned else None
         if record:

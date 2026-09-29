@@ -32,6 +32,7 @@ def destination(spec, home, use_env):
 
 # Descriptions are loaded into every session; keep them short pointers, not summaries.
 DESCRIPTION_LIMIT = 200
+MANIFEST_VERSION = 3
 # Codex spells "user-invoked" in a sidecar file; generated from the frontmatter flag when absent.
 CODEX_POLICY = "policy:\n  allow_implicit_invocation: false\n"
 LINK = re.compile(r"\]\(([^)\s]+)\)")
@@ -145,9 +146,9 @@ def main():
     # Reject a blocked state directory before changing any managed files.
     files.validate_parents(state_path)
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {"version": 1, "targets": {}}
-    if state.get("version") not in (1, 2, 3):
+    if state.get("version") not in range(1, MANIFEST_VERSION + 1):
         raise ValueError("Unsupported astack manifest version")
-    state["version"] = 3
+    state["version"] = MANIFEST_VERSION
 
     skills = skill_files() if args.command == "install" else []
     settings = settings_operations(harnesses, selected, state, home, use_env, args)

@@ -396,6 +396,15 @@ class SettingsTests(InstallerFixture):
         self.run_installer("--target", "claude", command="uninstall")
         self.assertEqual(json.loads(path.read_text()), {"hooks": {"PreToolUse": []}})
 
+    def test_reformatted_and_reordered_entries_stay_owned(self):
+        self.source("claude", {"hooks": {"PreToolUse": {"$entries": [HOOK]}}})
+        path = self.config("claude", '{"hooks": {"PreToolUse": [%s]}}' % json.dumps(MINE))
+        self.run_installer("--target", "claude")
+        reordered = dict(reversed(list(HOOK.items())))
+        path.write_text(json.dumps({"hooks": {"PreToolUse": [reordered, MINE]}}, indent=4))
+        self.run_installer("--target", "claude", command="uninstall")
+        self.assertEqual(json.loads(path.read_text()), {"hooks": {"PreToolUse": [MINE]}})
+
     def test_list_entry_already_present_is_left_to_the_user(self):
         self.source("claude", {"hooks": {"PreToolUse": {"$entries": [HOOK, OTHER]}}})
         path = self.config("claude", json.dumps({"hooks": {"PreToolUse": [HOOK]}}))
@@ -427,7 +436,9 @@ class SettingsTests(InstallerFixture):
         for command in ("install", "uninstall"):
             for flags in ((), ("--force",)):
                 with self.subTest(command=command, flags=flags):
-                    self.run_installer("--target", "claude", *flags, command=command, success=False)
+                    result = self.run_installer("--target", "claude", *flags, command=command, success=False)
+                    self.assertIn("hooks.PreToolUse", result.stdout + result.stderr)
+                    self.assertIn("duplicated" if flags else "ambiguous", result.stdout + result.stderr)
                     self.assertEqual(before, self.inventory())
         path.write_text(json.dumps({"hooks": {"PreToolUse": [MINE, HOOK]}}))
         self.run_installer("--target", "claude", command="uninstall")
@@ -439,7 +450,8 @@ class SettingsTests(InstallerFixture):
             with self.subTest(content=content):
                 self.config("claude", content)
                 before = self.inventory()
-                self.run_installer("--target", "claude", "--force", success=False)
+                result = self.run_installer("--target", "claude", "--force", success=False)
+                self.assertIn("destination is not a list: hooks.PreToolUse", result.stderr)
                 self.assertEqual(before, self.inventory())
 
     def test_invalid_entries_sources_are_rejected_before_any_write(self):

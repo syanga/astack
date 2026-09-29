@@ -47,7 +47,7 @@ The repository defines what gets installed:
 
 For a JSON destination, a source value of `{"$entries": [...]}` adds those values
 to the list at that key without replacing its other elements, and uninstall
-removes only those values.
+removes only the values it added.
 
 For contribution rules, see [AGENTS.md](AGENTS.md).
 
