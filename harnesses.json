@@ -11,11 +11,6 @@
     "settings": {"default": ".codex", "env": "CODEX_HOME", "suffix": "config.toml", "format": "toml", "source": "codex.json"},
     "overlay": "CODEX.md"
   },
-  "gemini": {
-    "instructions": {"default": ".gemini", "suffix": "GEMINI.md"},
-    "skills": {"default": ".gemini", "suffix": "skills"},
-    "overlay": "GEMINI.md"
-  },
   "opencode": {
     "instructions": {"default": ".config", "env": "XDG_CONFIG_HOME", "suffix": "opencode/AGENTS.md"},
     "skills": {"default": ".config", "env": "XDG_CONFIG_HOME", "suffix": "opencode/skills"},

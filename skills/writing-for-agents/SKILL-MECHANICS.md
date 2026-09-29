@@ -7,7 +7,7 @@ The skill-specific branch of [`writing-for-agents`](SKILL.md). It covers what ch
 Two choices, trading the two loads:
 
 - A **model-invoked** skill keeps a `description`, so the agent can fire it autonomously, and other skills can reach it. You can still type its name. Model-invocation always _includes_ user reach; a description only ever adds agent discovery and never removes the human's. The description is the skill's top-level context pointer, forced to stay loaded at all times, so it trades permanent context load for discoverability. A model-invoked skill whose content is all reference is also one home for shared reference. Another skill can invoke it, so reference needed by several skills lives in one place. To make a skill model-invoked, omit `disable-model-invocation` and write a model-facing description carrying the trigger branches (the pointer-writing rules in `SKILL.md` apply in full).
-- A **user-invoked** skill strips the description from the agent's reach. Only the human typing its name can invoke it, and no other skill can. It costs zero context load but spends cognitive load, because you are the index that must remember it exists. To make a skill user-invoked, set `disable-model-invocation: true`; each harness spells this differently, see Harnesses below. The `description` then becomes human-facing, a one-line summary with trigger lists stripped.
+- A **user-invoked** skill strips the description from the agent's reach. Only the human typing its name can invoke it, and no other skill can. It costs zero context load but spends cognitive load, because you are the index that must remember it exists. To make a skill user-invoked, set `disable-model-invocation: true`; Codex and OpenCode handle this differently, see Harnesses below. The `description` then becomes human-facing, a one-line summary with trigger lists stripped.
 
 Pick model-invocation only when the agent must reach the skill on its own, or another skill must. If it only ever fires by hand, make it user-invoked and pay no context load.
 
@@ -23,16 +23,15 @@ When user-invoked skills multiply past what you can remember, a **router skill**
 
 ## Harnesses
 
-`disable-model-invocation: true` is Claude Code's spelling. The others differ, and two of them have no user-invoked mode at all.
+`disable-model-invocation: true` is Claude Code's spelling. Codex sets it in `agents/openai.yaml`, and OpenCode has no user-invoked mode.
 
 | Harness | User-invoked mechanism | Catalog cost |
 | --- | --- | --- |
 | Claude Code | `disable-model-invocation: true` in frontmatter | description truncated at 1536 characters |
 | Codex | `policy.allow_implicit_invocation: false` in `agents/openai.yaml` | whole catalog capped at 8000 characters or 2% of context |
-| Gemini CLI | none, every enabled skill is listed | every description injected each session |
 | OpenCode | none, every skill is listed | every description in the skill tool |
 
-Two consequences. Write every description as if the model will read it, because on two harnesses it will. Keep the model-invoked set small, because forty skills at 200 characters fill Codex's cap.
+This has two consequences. Write every description as if the model will read it, because OpenCode lists every skill's description, including user-invoked ones. Keep the model-invoked set small, because forty skills at 200 characters fill Codex's cap.
 
 ## Done when
 
