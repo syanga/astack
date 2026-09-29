@@ -446,7 +446,7 @@ class SettingsTests(InstallerFixture):
                 with self.subTest(command=command, flags=flags):
                     result = self.run_installer("--target", "claude", *flags, command=command, success=False)
                     self.assertIn("hooks.PreToolUse", result.stdout + result.stderr)
-                    self.assertIn("duplicated" if flags else "ambiguous", result.stdout + result.stderr)
+                    self.assertIn("twice" if flags else "duplicate", result.stdout + result.stderr)
                     self.assertEqual(before, self.inventory())
         path.write_text(json.dumps({"hooks": {"PreToolUse": [MINE, HOOK]}}))
         self.run_installer("--target", "claude", command="uninstall")
@@ -459,7 +459,7 @@ class SettingsTests(InstallerFixture):
                 self.config("claude", content)
                 before = self.inventory()
                 result = self.run_installer("--target", "claude", "--force", success=False)
-                self.assertIn("destination is not a list: hooks.PreToolUse", result.stderr)
+                self.assertIn("hooks.PreToolUse is not a list", result.stderr)
                 self.assertEqual(before, self.inventory())
 
     def test_invalid_entries_sources_are_rejected_before_any_write(self):

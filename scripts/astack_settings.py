@@ -148,29 +148,24 @@ def leaves(data, prefix=()):
 def list_at(lookup_result, path):
     items = lookup_result["value"] if lookup_result["exists"] else []
     if not isinstance(items, list):
-        raise SettingsRefused("{} destination is not a list: {}".format(ENTRIES, ".".join(path)))
+        raise SettingsRefused("{} is not a list".format(".".join(path)))
     return items
 
 
 def merge_entries(current, wanted, owned):
-    """Return the new list, the owned values in it, and a "missing" or "ambiguous" conflict per owned value."""
+    """Return the new list, the owned values in it, and a "missing" or "duplicate" conflict per owned value."""
     result, kept, conflicts = list(current), [], []
     for value in owned:
         count = sum(same(item, value) for item in current)
         if count != 1:
-            conflicts.append("missing" if count == 0 else "ambiguous")
+            conflicts.append("missing" if count == 0 else "duplicate")
         elif any(same(value, item) for item in wanted):
             kept.append(value)
         else:
             result = [item for item in result if not same(item, value)]
-    new_owned = []
-    for value in wanted:
-        if any(same(value, item) for item in kept):
-            new_owned.append(value)
-        elif not any(same(value, item) for item in result):
-            result.append(value)
-            new_owned.append(value)
-    return result, new_owned, conflicts
+    added = [value for value in wanted if not any(same(value, item) for item in result)]
+    owned = [value for value in wanted if any(same(value, item) for item in kept + added)]
+    return result + added, owned, conflicts
 
 
 def lookup(data, path):
@@ -343,9 +338,10 @@ def plan(format_name, text, desired, previous, existed, force=False):
             doc.set(path, target)
             changes.append(".".join(path))
 
-    def put_entries(path, items, created):
+    def put_entries(path, items, owned, created):
         keep = items or (not created and doc.get(path)["exists"])
         put(path, {"exists": True, "value": items} if keep else {"exists": False})
+        return {"entries": owned, "created": created} if owned else None
 
     for path in sorted(set(desired) | {tuple(json.loads(key)) for key in prior}):
         key = json.dumps(path)
@@ -360,12 +356,11 @@ def plan(format_name, text, desired, previous, existed, force=False):
         if entries_old:
             items, owned, reasons = merge_entries(list_at(current, path), new_entries, entries_old["entries"])
             conflicts.extend("{} ({} entry)".format(".".join(path), reason) for reason in sorted(set(reasons)))
-            if "ambiguous" in reasons and force:
-                raise SettingsRefused("an astack entry is duplicated in {}; remove one copy".format(".".join(path)))
+            if "duplicate" in reasons and force:
+                raise SettingsRefused("{} contains an astack entry twice. Remove one copy.".format(".".join(path)))
             if reasons and not force:
                 continue
-            put_entries(path, items, entries_old["created"])
-            record = {"entries": owned, "created": entries_old["created"]} if owned else None
+            record = put_entries(path, items, owned, entries_old["created"])
         elif value_old and not same(current, value_old["installed"]):
             conflicts.append(".".join(path))
             if not force:
@@ -381,8 +376,7 @@ def plan(format_name, text, desired, previous, existed, force=False):
         if new_entries and not entries_old:
             current = doc.get(path)
             items, owned, _ = merge_entries(list_at(current, path), new_entries, [])
-            put_entries(path, items, not current["exists"])
-            record = {"entries": owned, "created": not current["exists"]} if owned else None
+            record = put_entries(path, items, owned, not current["exists"])
         if record:
             keys[key] = record
         else:
