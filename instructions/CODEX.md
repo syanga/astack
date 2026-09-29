@@ -1,13 +1,17 @@
 ## Codex preferences
 
-For long noninteractive tests, builds, and finite jobs, use the
-`codex-background-jobs` skill to queue completion and end the turn in a supported,
-loaded thread. Preserve the process session and result paths. Follow the skill's
-recovery steps when completion delivery or resumption is unverified.
+Run long noninteractive jobs, watchers, and long-lived processes such as dev
+servers through the `codex-background-jobs` skill. It queues completion so you
+can end the turn in a supported, loaded thread. Preserve the process session and
+result paths. Stop a job or watcher you replace or no longer need as the skill
+describes. Follow the skill's recovery steps when completion delivery or
+resumption is unverified.
 
-For interactive commands or unavailable completion queues, keep the process
-session and use the longest permitted native wait. Cap waits at 60 seconds when
-periodic progress updates are required. Keep input prompts visible.
+When the completion queue is unavailable, read `run-job/SKILL.md` from the
+installed skills and still run the command through its helper. Keep interactive
+commands in attended native sessions. In both cases, keep the process session and use the longest
+permitted native wait. Cap waits at 60 seconds when periodic progress updates
+are required. Keep input prompts visible.
 
 Never spend model turns on repeated sleep-and-tail, process-list, or file-status
 checks when completion notifications or native waits are available. Short session

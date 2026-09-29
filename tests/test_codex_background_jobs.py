@@ -1,3 +1,4 @@
+import contextlib
 import json
 from datetime import datetime
 import os
@@ -6,11 +7,72 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 
-SCRIPT = Path(__file__).resolve().parents[1] / 'skills/codex-background-jobs/scripts/run.py'
+SKILLS = Path(__file__).resolve().parents[1] / 'skills'
+SCRIPT = SKILLS / 'codex-background-jobs/scripts/run.py'
 THREAD = '01234567-89ab-4def-8123-456789abcdef'
+LARGE = 1 << 20
+WRITE_PID = '''
+def write_pid(path, pid):
+    with open(path + '.tmp', 'w') as file:
+        file.write(str(pid))
+    os.replace(path + '.tmp', path)
+'''
+GRANDCHILD = 'import os, subprocess, sys\n' + WRITE_PID + '''
+child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+write_pid(sys.argv[1], child.pid)
+child.wait()
+'''
+LEFTOVER = 'import os, subprocess, sys\n' + WRITE_PID + '''
+child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+write_pid(sys.argv[1], child.pid)
+'''
+ZOMBIE_MEMBER = 'import os, subprocess, sys, time\n' + WRITE_PID + '''
+group = os.getpgid(0)
+holder = os.fork()
+if holder == 0:
+    null = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(null, 1)
+    os.dup2(null, 2)
+    os.setpgid(0, 0)
+    member = os.fork()
+    if member == 0:
+        os.setpgid(0, group)
+        os._exit(0)
+    while not subprocess.run(['ps', '-o', 'stat=', '-p', str(member)],
+                             capture_output=True, text=True).stdout.strip().startswith('Z'):
+        time.sleep(0.01)
+    write_pid(sys.argv[1], os.getpid())
+    time.sleep(60)
+    os._exit(0)
+while not os.path.exists(sys.argv[1]):
+    time.sleep(0.01)
+'''
+UNVERIFIABLE_CLEANUP = '''
+import runpy, sys
+sys.path.insert(0, sys.argv[1])
+import run_job
+run_job.live_members = lambda pgid: 1
+run_job.GRACE_SECONDS = 0.2
+sys.argv = sys.argv[2:]
+runpy.run_path(sys.argv[0], run_name='__main__')
+'''
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def kill(pid):
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGKILL)
 
 
 class CodexBackgroundJobsTests(unittest.TestCase):
@@ -23,14 +85,19 @@ class CodexBackgroundJobsTests(unittest.TestCase):
         codex = self.bin / 'codex'
         codex.write_text(f'#!{sys.executable}\n' + '''import json, os, sys
 from pathlib import Path
+if os.environ.get('LARGE_OUTPUT'):
+    sys.stdout.buffer.write(b'o' * (1 << 20))
+    sys.stderr.buffer.write(b'e' * (1 << 20))
 if sys.argv[1:] == ['queue', '--help']:
     print('Usage: codex queue --thread THREAD --message MESSAGE')
     sys.exit(int(os.environ.get('PROBE_EXIT', '0')))
 with Path(os.environ['QUEUE_RECORD']).open('a') as stream:
     stream.write(json.dumps(sys.argv[1:]) + '\\n')
+if os.environ.get('LARGE_OUTPUT'):
+    sys.exit(0)
 if os.environ.get('CANCEL_QUEUE'):
     import signal
-    os.kill(os.getppid(), signal.SIGTERM)
+    os.kill(os.getppid(), getattr(signal, os.environ['CANCEL_QUEUE']))
     signal.pause()
 if os.environ.get('INVALID_QUEUE_OUTPUT'):
     os.write(1, b'accepted \\xff\\n')
@@ -48,12 +115,12 @@ sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
                         CODEX_THREAD_ID=THREAD, TMPDIR=str(self.root),
                         QUEUE_RECORD=str(self.root / 'queued.jsonl'))
 
-    def argv(self, code, timeout='5', *extra):
-        return [sys.executable, str(SCRIPT), '--label', 'fixture', '--timeout', timeout,
+    def argv(self, code, *extra, limit=('--timeout', '5')):
+        return [sys.executable, str(SCRIPT), '--label', 'fixture', *limit,
                 '--', sys.executable, '-c', code, *extra]
 
-    def run_job(self, code, timeout='5', *extra):
-        completed = subprocess.run(self.argv(code, timeout, *extra), cwd=self.root,
+    def run_job(self, code, *extra, limit=('--timeout', '5')):
+        completed = subprocess.run(self.argv(code, *extra, limit=limit), cwd=self.root,
                                    env=self.env, capture_output=True, text=True, timeout=15)
         receipts = [json.loads(line) for line in completed.stdout.splitlines()]
         result = json.loads(Path(receipts[-1]['result']).read_text()) if receipts else None
@@ -62,6 +129,21 @@ sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
     def queued(self):
         path = self.root / 'queued.jsonl'
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def pid_from(self, path):
+        deadline = time.monotonic() + 10
+        while not path.exists():
+            self.assertLess(time.monotonic(), deadline, 'job did not write its pid')
+            time.sleep(0.02)
+        pid = int(path.read_text())
+        self.addCleanup(kill, pid)
+        return pid
+
+    def assert_stops(self, pid):
+        deadline = time.monotonic() + 5
+        while alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertFalse(alive(pid), f'process {pid} is still running')
 
     def test_success_and_failure_preserve_output_and_queue_once_to_current_thread(self):
         for code in [0, 7]:
@@ -90,7 +172,7 @@ sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
     def test_arguments_are_literal_and_stdin_is_closed(self):
         completed, _, result = self.run_job(
             'import sys; print(repr(sys.argv[1])); print(repr(sys.stdin.read()))',
-            '5', '$(touch unwanted); `false`')
+            '$(touch unwanted); `false`')
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(Path(result['log']).read_text(), "'$(touch unwanted); `false`'\n''\n")
         self.assertFalse((self.root / 'unwanted').exists())
@@ -192,7 +274,7 @@ sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
         self.assertEqual(len(self.queued()), 1)
 
     def test_timeout_stops_job_and_queues_failure(self):
-        completed, _, result = self.run_job('import signal; signal.pause()', '0.2')
+        completed, _, result = self.run_job('import signal; signal.pause()', limit=('--timeout', '0.2'))
         self.assertEqual(completed.returncode, 124, completed.stderr)
         self.assertEqual(result['status'], 'timed_out')
         self.assertEqual(result['notification'], 'queued')
@@ -201,32 +283,101 @@ sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
             os.kill(result['command_pid'], 0)
 
     def test_interrupt_stops_job_without_waking_cancelled_work(self):
-        process = subprocess.Popen(self.argv('import signal; signal.pause()'), cwd=self.root,
-                                   env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        try:
-            receipt = json.loads(process.stdout.readline())
-            process.send_signal(signal.SIGTERM)
-            _, error = process.communicate(timeout=10)
-            result = json.loads(Path(receipt['result']).read_text())
-            self.assertEqual(process.returncode, 143, error)
-            self.assertEqual(result['status'], 'cancelled')
-            self.assertEqual(result['notification'], 'skipped')
-            self.assertEqual(self.queued(), [])
-            with self.assertRaises(ProcessLookupError):
-                os.kill(result['command_pid'], 0)
-        finally:
-            if process.poll() is None:
-                process.kill()
-                process.communicate()
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(signal=signum.name):
+                pidfile = self.root / f'{signum.name}.pid'
+                process = subprocess.Popen(self.argv(GRANDCHILD, str(pidfile)), cwd=self.root,
+                                           env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                           text=True)
+                try:
+                    receipt = json.loads(process.stdout.readline())
+                    grandchild = self.pid_from(pidfile)
+                    process.send_signal(signum)
+                    _, error = process.communicate(timeout=10)
+                    result = json.loads(Path(receipt['result']).read_text())
+                    self.assertEqual(process.returncode, 128 + signum, error)
+                    self.assertEqual(result['status'], 'cancelled')
+                    self.assertEqual(result['exit_code'], 128 + signum)
+                    self.assertEqual(result['notification'], 'skipped')
+                    self.assertEqual(result['cleanup'], 'ok')
+                    self.assertEqual(self.queued(), [])
+                    with self.assertRaises(ProcessLookupError):
+                        os.kill(result['command_pid'], 0)
+                    self.assert_stops(grandchild)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.communicate()
 
     def test_interrupt_during_delivery_preserves_result_and_records_uncertainty(self):
-        self.env['CANCEL_QUEUE'] = '1'
-        completed, _, result = self.run_job('print("finished before cancellation")')
-        self.assertEqual(completed.returncode, 143, completed.stderr)
-        self.assertEqual(result['status'], 'completed')
-        self.assertEqual(result['exit_code'], 0)
-        self.assertEqual(result['notification'], 'unknown')
-        self.assertEqual(Path(result['log']).read_text(), 'finished before cancellation\n')
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(signal=signum.name):
+                (self.root / 'queued.jsonl').unlink(missing_ok=True)
+                self.env['CANCEL_QUEUE'] = signum.name
+                completed, _, result = self.run_job('print("finished before cancellation")')
+                self.assertEqual(completed.returncode, 128 + signum, completed.stderr)
+                self.assertEqual(result['status'], 'completed')
+                self.assertEqual(result['exit_code'], 0)
+                self.assertEqual(result['notification'], 'unknown')
+                self.assertEqual(Path(result['log']).read_text(), 'finished before cancellation\n')
+                self.assertEqual(len(self.queued()), 1)
+
+    def test_deadline_and_a_job_exiting_124_are_reported_differently(self):
+        for limit, code, status in [('5', 'import sys; sys.exit(124)', 'completed'),
+                                    ('0.2', 'import signal; signal.pause()', 'timed_out')]:
+            with self.subTest(status=status):
+                (self.root / 'queued.jsonl').unlink(missing_ok=True)
+                completed, _, result = self.run_job(code, limit=('--timeout', limit))
+                self.assertEqual(completed.returncode, 124, completed.stderr)
+                self.assertEqual((result['status'], result['exit_code']), (status, 124))
+                self.assertIn(f'Status: {status}; exit code: 124', self.queued()[0][4])
+
+    def test_long_lived_process_without_deadline_queues_its_exit(self):
+        completed, receipts, result = self.run_job(
+            'import time; time.sleep(0.5); print("server stopped"); raise SystemExit(3)',
+            limit=('--no-timeout',))
+        self.assertEqual(completed.returncode, 3, completed.stderr)
+        self.assertEqual(receipts[0]['status'], 'running')
+        self.assertEqual((result['status'], result['exit_code']), ('completed', 3))
+        self.assertEqual(result['notification'], 'queued')
+        self.assertEqual(Path(result['log']).read_text(), 'server stopped\n')
+        self.assertIn('Status: completed; exit code: 3', self.queued()[0][4])
+
+    def test_leftover_group_processes_stop_after_the_job_exits(self):
+        pidfile = self.root / 'leftover.pid'
+        completed, _, result = self.run_job(LEFTOVER, str(pidfile))
+        leftover = self.pid_from(pidfile)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual((result['status'], result['exit_code']), ('completed', 0))
+        self.assertEqual(result['cleanup'], 'ok')
+        self.assertEqual(result['notification'], 'queued')
+        self.assert_stops(leftover)
+
+    def test_unverified_cleanup_is_reported_in_result_notification_and_exit_code(self):
+        completed, _, result = self.run_job('print("clean")')
+        self.assertEqual((completed.returncode, result['cleanup']), (0, 'ok'))
+        self.assertNotIn('Cleanup failed', self.queued()[0][4])
+        pidfile = self.root / 'holder.pid'
+        completed = subprocess.run(
+            [sys.executable, '-c', UNVERIFIABLE_CLEANUP, str(SKILLS / 'run-job/scripts'),
+             *self.argv(ZOMBIE_MEMBER, str(pidfile))[1:]],
+            cwd=self.root, env=self.env, capture_output=True, text=True, timeout=15)
+        self.pid_from(pidfile)
+        result = json.loads(completed.stdout.splitlines()[-1])
+        self.assertEqual(completed.returncode, 125, completed.stderr)
+        self.assertEqual((result['status'], result['exit_code']), ('completed', 0))
+        self.assertEqual(result['cleanup'], 'failed')
+        self.assertEqual(result['notification'], 'queued')
+        self.assertEqual(len(self.queued()), 2)
+        self.assertIn('Status: completed; exit code: 0. Cleanup failed', self.queued()[1][4])
+
+    def test_large_probe_and_queue_output_is_captured_without_stalling(self):
+        self.env['LARGE_OUTPUT'] = '1'
+        completed, _, result = self.run_job('print("finished once")')
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(result['notification'], 'queued')
+        self.assertEqual(result['queue_output'], 'o' * LARGE)
+        self.assertEqual(result['queue_error'], 'e' * LARGE)
         self.assertEqual(len(self.queued()), 1)
 
     def test_launch_failure_is_reported_to_thread(self):

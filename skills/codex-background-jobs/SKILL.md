@@ -1,6 +1,6 @@
 ---
 name: codex-background-jobs
-description: Run long noninteractive Codex jobs and queue completion to their thread. Use for tests, builds, or other finite commands that would otherwise need repeated waits.
+description: Run Codex background commands and queue completion to their thread. Use for tests, builds, watchers, dev servers, or other commands that would otherwise need repeated waits.
 ---
 
 # Resume when a job finishes
@@ -9,41 +9,63 @@ Use this workflow in a loaded Codex thread with `CODEX_THREAD_ID` and a CLI that
 supports `codex queue`. Keep the hosting session open until the job finishes.
 Other harnesses and interactive commands use their native process sessions.
 
-1. Choose an authorized, noninteractive command and a realistic maximum duration.
-   Preserve the project's test locks, worker limits, and execution wrappers.
-   Run the work in the foreground of that command. A launcher that detaches its
-   worker can exit before the work finishes.
-2. Start the helper through the shell tool, with a short initial yield:
+Run finite jobs, watchers, and long-lived processes through this helper. It runs
+the command with the `run-job` helper, which stops the command's process group at
+the deadline, on cancellation, and when the command exits.
+
+1. Before your first job and before starting a watcher, read `run-job/SKILL.md`
+   from the installed skills. Its rules for the command and its watcher contract
+   apply to this helper. Choose an authorized, noninteractive command and a
+   deadline well past its normal duration. For a long-lived process, such as a
+   dev server, use `--no-timeout` instead. Its exit or crash still queues a
+   notification.
+2. Start the helper through the shell tool with `tty: true` and a short initial
+   yield. The TTY lets you stop the job with Ctrl-C.
 
    ```sh
    python3 <skill-directory>/scripts/run.py --label 'unit tests' --timeout 1800 -- make test
    ```
 
-   Pass the command as separate arguments. For shell syntax, explicitly use
-   `sh -c '...'`. The helper inherits the current directory and environment.
-   It closes stdin and saves combined output in a private temporary directory.
+   The helper saves combined output in a private temporary directory.
 3. Confirm the initial receipt says `running`. Retain the process session and
    the receipt's result and log paths. If startup fails, handle the error before
    ending the turn. If the helper has already finished, read its result now.
+   Before you end the turn with a watcher running, read its first check in the
+   log and confirm it ran without errors.
 4. Continue independent work. When only the job remains, tell the user what is
    running and end the turn. The queue requests automatic continuation in the
    loaded thread. Acceptance alone does not establish that execution resumed.
    Do not schedule status checks or ask the user to reply to resume.
 5. On notification, read the result and relevant output once. Continue the
-   original task. A timeout or nonzero exit is a failure to investigate.
-   Answer status questions briefly, then continue the remaining authorized work.
-   Apply later cancellation or scope changes before acting on delayed messages.
+   original task. A timeout, a nonzero exit, or `cleanup: failed` is a failure
+   to investigate. Answer status questions briefly, then continue the remaining
+   authorized work. Apply later cancellation or scope changes before acting on
+   delayed messages.
 
 The helper attempts one notification after success, failure, or timeout. When it
-receives SIGINT or SIGTERM while the job runs, it stops the job and skips notification.
-Verify the cancellation receipt. A host can terminate the process session without
-running this cleanup, leaving the job alive and its result stale.
-A handled interrupt during delivery records `notification: unknown`; the helper
-cannot recall a message already accepted by Codex.
+receives SIGINT, SIGTERM, or SIGHUP while the job runs, it stops the job and
+skips notification. A host can kill the helper without running this cleanup,
+leaving the job alive and its result stale. A handled interrupt during delivery
+records `notification: unknown`; the helper cannot recall a message already
+accepted by Codex.
+
+## Stop a replaced job
+
+To stop a job or watcher you replace or no longer need, write Ctrl-C (`\u0003`)
+to its retained process session. The helper stops the job's process group. Read
+the result. It says `cancelled`, or `completed` with `notification: unknown` if
+the interrupt arrived during delivery. Before starting a replacement that needs
+the same locks or ports, confirm the result says `cleanup: ok`.
+
+If the session is gone or does not accept input, run
+`ps -o command= -p <runner_pid>` with the result's `runner_pid`. If the output
+shows this helper with the job's label, run `kill -TERM <runner_pid>` and read
+the result as above.
 
 ## Recover a failed completion
 
-If the CLI lacks `queue`, the helper refuses to start the job. Use a native wait.
+If the CLI lacks `queue`, the helper refuses to start the job. Run the command
+with the `run-job` helper and use a native wait.
 If delivery fails or its outcome is unknown, inspect the retained process session
 and result on the next turn. Reuse completed work instead of rerunning the job.
 An unknown delivery may already have been accepted. Reconcile delayed or duplicate
