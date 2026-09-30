@@ -73,8 +73,9 @@ evidence but does not establish a verdict. Behavioral work needs more than
 `type-check-only`. A blocked check resumes when its environment is available;
 a failed check needs a fix before new verification. Neither satisfies acceptance.
 
-The CLI records claims. It does not run verification, validate evidence files,
-or enforce unit transitions. Check the recorded acceptance criteria yourself.
+The CLI records claims. It rejects evidence that is neither an http(s) URL nor
+an existing path, but it does not run verification, read evidence contents, or
+enforce unit transitions. Check the recorded acceptance criteria yourself.
 
 ## Checkpoint progress
 

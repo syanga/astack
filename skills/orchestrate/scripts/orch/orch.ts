@@ -347,7 +347,7 @@ function createProgram(io: Io): Command {
     .argument("<pr>", "pull request number", positiveInteger)
     .argument("<sha>", "commit SHA")
     .argument("<verdict>", "verification verdict", parseVerdict)
-    .requiredOption("--evidence <path>", "evidence path")
+    .requiredOption("--evidence <path>", "existing evidence path, relative to the store, or an http(s) URL")
     .option("--verifier <name>", "verifier name")
     .action(
       (

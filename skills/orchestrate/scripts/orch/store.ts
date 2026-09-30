@@ -325,6 +325,21 @@ function positiveInteger(value: number, label: string): number {
   return value;
 }
 
+async function existingEvidence(
+  store: string,
+  value: string
+): Promise<string> {
+  const evidence = requiredCell(value, "evidence");
+  if (/^https?:\/\//i.test(value)) {
+    return evidence;
+  }
+  const path = resolve(store, value);
+  if (!(await exists(path))) {
+    throw new UserError(`evidence ${value} does not exist at ${path}`);
+  }
+  return evidence;
+}
+
 async function exists(path: string): Promise<boolean> {
   try {
     await access(path);
@@ -1429,7 +1444,7 @@ export function openStore(
           pr: String(positiveInteger(params.pr, "PR")),
           sha: requiredCell(params.sha, "SHA"),
           verdict,
-          evidence: requiredCell(params.evidence, "evidence"),
+          evidence: await existingEvidence(store, params.evidence),
           verifier:
             params.verifier === undefined
               ? ""
