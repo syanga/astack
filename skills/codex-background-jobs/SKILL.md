@@ -34,10 +34,12 @@ which wraps the [`run-job`](../run-job/SKILL.md) helper.
    log.
 4. Continue independent work. When only the job remains, tell the user what is
    running and end the turn. If the user asked you to wait and the job fits in
-   one native wait, you may wait in the retained session instead. The queue
-   requests automatic continuation in the loaded thread. Acceptance alone does
-   not establish that execution resumed. Do not schedule status checks or ask
-   the user to reply to resume.
+   one native wait, you may wait in the retained session instead. The helper
+   still queues its notification; if it arrives after you reported the result,
+   acknowledge it without rerunning or re-reporting. The queue requests automatic
+   continuation in the loaded thread. Acceptance alone does not establish that
+   execution resumed. Do not schedule status checks or ask the user to reply to
+   resume.
 5. On notification, read the result and relevant output once. Continue the
    original task. A timeout, a nonzero exit, or `cleanup: failed` is a failure
    to investigate. Answer status questions briefly, then continue the remaining
