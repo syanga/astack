@@ -9,14 +9,13 @@ import sys
 import tempfile
 import unittest
 
-from test_run_job import GRANDCHILD, LEFTOVER, ZOMBIE_MEMBER, ProcessAssertions
+from test_run_job import GRANDCHILD, LEFTOVER, ZOMBIE_MEMBER, SYSTEM_PYTHON, ProcessAssertions, system_python_before_3_10
 
 
 SKILLS = Path(__file__).resolve().parents[1] / 'skills'
 SCRIPT = SKILLS / 'codex-background-jobs/scripts/run.py'
 THREAD = '01234567-89ab-4def-8123-456789abcdef'
 LARGE = 1 << 20
-SYSTEM_PYTHON = '/usr/bin/python3'
 UNVERIFIABLE_CLEANUP = '''
 import runpy, sys
 sys.path.insert(0, sys.argv[1])
@@ -26,11 +25,6 @@ run_job.GRACE_SECONDS = 0.2
 sys.argv = sys.argv[2:]
 runpy.run_path(sys.argv[0], run_name='__main__')
 '''
-
-
-def system_python_before_3_10():
-    return os.access(SYSTEM_PYTHON, os.X_OK) and subprocess.run(
-        [SYSTEM_PYTHON, '-c', 'import sys; sys.exit(sys.version_info >= (3, 10))'], timeout=30).returncode == 0
 
 
 class CodexBackgroundJobsTests(ProcessAssertions, unittest.TestCase):
