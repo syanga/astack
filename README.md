@@ -63,6 +63,9 @@ It updates managed files and removes skill files deleted from the source.
 Conflicting local edits stop installation. To back up and replace conflicts,
 preview with `--force --dry-run` before running with `--force`.
 
+astack-help offers this update when the installed commit differs from `main` on
+the checkout's `origin`.
+
 To remove an installation, use the same targets with `./uninstall.sh`.
 Preview removal with `--dry-run`. Uninstall preserves unrelated files and
 restores managed settings. It does not restore file backups automatically.

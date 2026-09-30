@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import subprocess
 import sys
 import uuid
 
@@ -20,6 +21,14 @@ import astack_settings
 def destination_identity(path):
     # Resolve directory aliases, but preserve a leaf symlink that we replace itself.
     return str(path.parent.resolve() / path.name)
+
+
+def git(*arguments):
+    try:
+        result = subprocess.run(["git", "-C", str(REPO), *arguments], capture_output=True, text=True)
+    except OSError:
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
 
 
 def destination(spec, home, use_env):
@@ -231,6 +240,10 @@ def main():
 
     for change in settings:
         change.apply(state, state_path, backup_root, dry_run=args.dry_run)
+    if args.command == "install" and not args.dry_run:
+        state["revision"] = git("rev-parse", "HEAD")
+        state["remote"] = git("remote", "get-url", "origin")
+        files.atomic_write(state_path, (json.dumps(state, indent=2) + "\n").encode(), 0o600)
     print("{} complete for {}.".format("Preview" if args.dry_run else args.command.capitalize(), ", ".join(selected)))
 
 
