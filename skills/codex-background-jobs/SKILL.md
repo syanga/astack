@@ -23,16 +23,21 @@ which wraps the [`run-job`](../run-job/SKILL.md) helper.
    python3 <skill-directory>/scripts/run.py --label 'unit tests' --timeout 1800 -- make test
    ```
 
-   The helper saves combined output in a private temporary directory.
+   Request escalated permissions for this command. `codex queue` writes to
+   `CODEX_HOME`, which the sandbox blocks, and the helper refuses to start when
+   it cannot write there. The helper saves combined output in a private
+   temporary directory.
 3. Confirm the initial receipt says `running`. Retain the process session and
    the receipt's result and log paths. If startup fails, handle the error before
    ending the turn. If the helper has already finished, read its result now.
    Before you end the turn with a watcher running, read its first check in the
    log.
 4. Continue independent work. When only the job remains, tell the user what is
-   running and end the turn. The queue requests automatic continuation in the
-   loaded thread. Acceptance alone does not establish that execution resumed.
-   Do not schedule status checks or ask the user to reply to resume.
+   running and end the turn. If the user asked you to wait and the job fits in
+   one native wait, you may wait in the retained session instead. The queue
+   requests automatic continuation in the loaded thread. Acceptance alone does
+   not establish that execution resumed. Do not schedule status checks or ask
+   the user to reply to resume.
 5. On notification, read the result and relevant output once. Continue the
    original task. A timeout, a nonzero exit, or `cleanup: failed` is a failure
    to investigate. Answer status questions briefly, then continue the remaining

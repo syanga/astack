@@ -66,6 +66,8 @@ sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
         self.env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
                         CODEX_THREAD_ID=THREAD, TMPDIR=str(self.root),
                         QUEUE_RECORD=str(self.root / 'queued.jsonl'))
+        (self.root / 'codex-home').mkdir()
+        self.env['CODEX_HOME'] = str(self.root / 'codex-home')
 
     def argv(self, code, *extra, limit=('--timeout', '5')):
         return [sys.executable, str(SCRIPT), '--label', 'fixture', *limit,
@@ -129,6 +131,20 @@ sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
                 self.assertFalse((self.root / 'ran').exists())
                 self.assertEqual(self.queued(), [])
                 self.env = original
+
+    @unittest.skipIf(os.geteuid() == 0, 'root can write to a read-only directory')
+    def test_preflight_refuses_when_codex_home_is_not_writable(self):
+        home = Path(self.env['CODEX_HOME'])
+        home.chmod(0o500)
+        self.addCleanup(home.chmod, 0o700)
+        completed, receipts, result = self.run_job('from pathlib import Path; Path("ran").touch()')
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn('cannot write to {}'.format(home), completed.stderr)
+        self.assertIn('escalated permissions', completed.stderr)
+        self.assertIn('run-job/scripts/run_job.py', completed.stderr)
+        self.assertEqual((receipts, result), ([], None))
+        self.assertFalse((self.root / 'ran').exists())
+        self.assertEqual(self.queued(), [])
 
     def test_queue_failure_retains_job_result_without_repeating_the_job(self):
         self.env['QUEUE_EXIT'] = '9'

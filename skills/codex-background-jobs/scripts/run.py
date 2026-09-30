@@ -116,6 +116,16 @@ def check_queue(parser, codex):
             parser.error('codex queue is unavailable; ' + FALLBACK)
 
 
+def check_codex_home(parser):
+    home = Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex')
+    try:
+        with tempfile.TemporaryFile(dir=home):
+            pass
+    except OSError as error:
+        parser.error(f'codex queue cannot write to {home} ({error.strerror}); rerun this command with '
+                     f'escalated permissions, or {FALLBACK}')
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Run a noninteractive job and queue its completion to this Codex thread.')
@@ -131,6 +141,7 @@ def main():
     codex = shutil.which('codex')
     if not codex:
         parser.error('codex is not on PATH; ' + FALLBACK)
+    check_codex_home(parser)
 
     with run_job.latching_signals() as latch:
         check_queue(parser, codex)
