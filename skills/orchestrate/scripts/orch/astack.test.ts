@@ -26,6 +26,7 @@ it("retains verdict history and verifier precedence without carrying a verdict t
   const { dir, store } = await fixture();
   await store.units.add({ id: "u1", track: "main" });
   await store.units.set({ id: "u1", state: "needs-verify", pr: 40, sha: "new-head", agent: "session-2" });
+  for (const name of ["test.log", "failure.log", "worker-retry.log"]) await writeFile(join(dir, name), "");
   await store.ledger.record({ pr: 40, sha: "old-head", verdict: "unit-test-verified", evidence: "test.log" });
   await store.ledger.record({ pr: 40, sha: "old-head", verdict: "verifier-failed", evidence: "failure.log", verifier: "reviewer" });
   await store.ledger.record({ pr: 40, sha: "old-head", verdict: "unit-test-verified", evidence: "worker-retry.log" });
@@ -44,6 +45,7 @@ it("reads the prior documented tables and preserves ownership and receipts on a 
   expect(await store.units.set({ id: "u1", state: "blocked" })).toEqual({
     id: "u1", track: "main", state: "blocked", agent: "session-1", branch: "feature", pr: "40", sha: "head", brief: "brief.md",
   });
+  await writeFile(join(dir, "worker.log"), "");
   await store.ledger.record({ pr: 40, sha: "head", verdict: "unit-test-verified", evidence: "worker.log" });
   expect((await store.ledger.check({ pr: 40, sha: "head" })).verdict).toBe("verifier-failed");
   const reopened = openStore(dir);

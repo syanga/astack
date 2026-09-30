@@ -257,7 +257,10 @@ describe("Store", () => {
   });
 
   it("records, checks, and summarizes effective typed ledger verdicts", async () => {
-    const { store } = await initializedStore();
+    const { directory, store } = await initializedStore();
+    await mkdir(join(directory, "reports"));
+    await writeFile(join(directory, "reports", "verify.md"), "");
+    await writeFile(join(directory, "reports", "live.md"), "");
 
     try {
       await store.ledger.check({ pr: 184530, sha: "abc123" });
@@ -576,6 +579,51 @@ describe("orch CLI", () => {
       sha: "",
       brief: "",
     });
+  });
+
+  it("records evidence that exists or is a URL and rejects missing evidence without writing", async () => {
+    const directory = await makeDirectory();
+    const outside = await makeDirectory();
+    expect(runCli(["--store", directory, "init"]).code).toBe(0);
+    await mkdir(join(directory, "reports"));
+    await writeFile(join(directory, "reports", "api-tests.md"), "ok\n");
+    await writeFile(join(outside, "screenshot.png"), "");
+    const record = (sha: string, evidence: string) =>
+      runCli([
+        "--store",
+        directory,
+        "ledger",
+        "record",
+        "42",
+        sha,
+        "unit-test-verified",
+        "--evidence",
+        evidence,
+      ]);
+    const verdict = (sha: string) =>
+      runCli(["--store", directory, "ledger", "check", "42", sha]).stdout;
+
+    const missingRelative = record("relative", "reports/missing.md");
+    expect(missingRelative.code).toBe(1);
+    expect(missingRelative.stderr).toContain(
+      `error: evidence reports/missing.md does not exist at ${join(directory, "reports", "missing.md")}`
+    );
+    const missingAbsolute = record("absolute", join(outside, "missing.png"));
+    expect(missingAbsolute.code).toBe(1);
+    expect(missingAbsolute.stderr).toContain(
+      `does not exist at ${join(outside, "missing.png")}`
+    );
+    expect(verdict("relative")).toBe("NOT-VERIFIED\n");
+    expect(verdict("absolute")).toBe("NOT-VERIFIED\n");
+
+    expect(record("relative", "reports/api-tests.md").code).toBe(0);
+    expect(record("absolute", join(outside, "screenshot.png")).code).toBe(0);
+    expect(
+      record("ci", "https://github.com/acme/api/actions/runs/1").code
+    ).toBe(0);
+    expect(verdict("relative")).toBe("unit-test-verified\n");
+    expect(verdict("absolute")).toBe("unit-test-verified\n");
+    expect(verdict("ci")).toBe("unit-test-verified\n");
   });
 
   it("maps user and not-found outcomes to the preserved exit codes", async () => {

@@ -49,7 +49,9 @@ bun "$ORCH_CLI" --json ledger check 42 "$verified_sha"
 bun "$ORCH_CLI" status
 ```
 
-Set `verified_sha` from the artifact actually tested. Follow
+Set `verified_sha` from the artifact actually tested. `--evidence` takes an
+http(s) URL or a file path, absolute or relative to the store; `ledger record`
+exits 1 and writes nothing when the path does not exist. Follow
 [STATE.md's verification procedure](STATE.md#accept-verification) when recording
 or accepting a result. A ledger check exits 0 for an existing row, including a
 failed or blocked verdict. Inspect the returned verdict. Missing units or
