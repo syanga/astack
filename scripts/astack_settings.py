@@ -63,7 +63,7 @@ class SettingsChange:
             self.path.unlink()
         state["settings"] = new_settings
         try:
-            files.atomic_write(state_path, (json.dumps(state, indent=2) + "\n").encode(), 0o600)
+            files.save_manifest(state_path, state)
         except OSError:
             state["settings"] = old_settings
             if self._original_hash is None:

@@ -234,16 +234,22 @@ def main():
             records[str(path)] = expected
         if not records:
             state["targets"].pop(target, None)
+            state.get("commits", {}).pop(target, None)
         # Record each completed operation. This is not a transaction across files:
         # interruption between a payload change and this write needs reconciliation.
-        files.atomic_write(state_path, (json.dumps(state, indent=2) + "\n").encode(), 0o600)
+        files.save_manifest(state_path, state)
 
     for change in settings:
         change.apply(state, state_path, backup_root, dry_run=args.dry_run)
     if args.command == "install" and not args.dry_run:
-        state["revision"] = git("rev-parse", "HEAD")
+        commit = git("rev-parse", "HEAD")
+        commits = state.setdefault("commits", {})
+        for target in selected:
+            commits.pop(target, None)
+            if commit:
+                commits[target] = commit
         state["remote"] = git("remote", "get-url", "origin")
-        files.atomic_write(state_path, (json.dumps(state, indent=2) + "\n").encode(), 0o600)
+        files.save_manifest(state_path, state)
     print("{} complete for {}.".format("Preview" if args.dry_run else args.command.capitalize(), ", ".join(selected)))
 
 
