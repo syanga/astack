@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import stat
 import tempfile
@@ -35,3 +36,7 @@ def atomic_write(path, data, mode=0o644):
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def save_manifest(path, state):
+    atomic_write(path, (json.dumps(state, indent=2) + "\n").encode(), 0o600)
