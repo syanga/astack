@@ -16,6 +16,7 @@ SKILLS = Path(__file__).resolve().parents[1] / 'skills'
 SCRIPT = SKILLS / 'codex-background-jobs/scripts/run.py'
 THREAD = '01234567-89ab-4def-8123-456789abcdef'
 LARGE = 1 << 20
+SYSTEM_PYTHON = '/usr/bin/python3'
 UNVERIFIABLE_CLEANUP = '''
 import runpy, sys
 sys.path.insert(0, sys.argv[1])
@@ -25,6 +26,11 @@ run_job.GRACE_SECONDS = 0.2
 sys.argv = sys.argv[2:]
 runpy.run_path(sys.argv[0], run_name='__main__')
 '''
+
+
+def system_python_before_3_10():
+    return os.access(SYSTEM_PYTHON, os.X_OK) and subprocess.run(
+        [SYSTEM_PYTHON, '-c', 'import sys; sys.exit(sys.version_info >= (3, 10))'], timeout=30).returncode == 0
 
 
 class CodexBackgroundJobsTests(ProcessAssertions, unittest.TestCase):
@@ -107,6 +113,17 @@ sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
                 self.assertIn(result['result'], queued[-1][4])
                 self.assertNotIn('JOB_OUTPUT_91', queued[-1][4])
         self.assertEqual(len(self.queued()), 2)
+
+    def test_queues_completion_under_the_system_python_before_3_10(self):
+        if not system_python_before_3_10():
+            self.skipTest(f'needs {SYSTEM_PYTHON} older than 3.10')
+        command = [SYSTEM_PYTHON, *self.argv('print("JOB_OUTPUT_39"); raise SystemExit(7)')[1:]]
+        completed = subprocess.run(command, cwd=self.root, env=self.env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(completed.returncode, 7, completed.stderr)
+        result = json.loads(completed.stdout.splitlines()[-1])
+        self.assertEqual((result['status'], result['exit_code'], result['notification']), ('completed', 7, 'queued'))
+        self.assertEqual(Path(result['log']).read_text(), 'JOB_OUTPUT_39\n')
+        self.assertIn('exit code: 7', self.queued()[0][4])
 
     def test_arguments_are_literal_and_stdin_is_closed(self):
         completed, _, result = self.run_job(

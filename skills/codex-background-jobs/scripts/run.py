@@ -57,15 +57,15 @@ def launch_error(program, number, message):
 
 
 def job_status(outcome, program):
-    match outcome:
-        case Exited(returncode):
-            return dict(status='completed', exit_code=returncode)
-        case TimedOut():
-            return dict(status='timed_out', exit_code=124)
-        case Cancelled(signum):
-            return dict(status='cancelled', exit_code=128 + signum)
-        case LaunchFailed(number, message):
-            return dict(status='failed_to_start', exit_code=127, error=launch_error(program, number, message))
+    if isinstance(outcome, Exited):
+        return dict(status='completed', exit_code=outcome.returncode)
+    elif isinstance(outcome, TimedOut):
+        return dict(status='timed_out', exit_code=124)
+    elif isinstance(outcome, Cancelled):
+        return dict(status='cancelled', exit_code=128 + outcome.signum)
+    elif isinstance(outcome, LaunchFailed):
+        return dict(status='failed_to_start', exit_code=127,
+                    error=launch_error(program, outcome.errno, outcome.message))
 
 
 def captured(stream):
@@ -92,28 +92,30 @@ def completion_message(record):
 def notify(codex, thread, message, directory):
     command = (codex, 'queue', '--thread', thread, '--message', message)
     with tempfile.TemporaryFile(dir=directory) as output, tempfile.TemporaryFile(dir=directory) as error:
-        match run_job.supervise(JobSpec(command, QUEUE_SECONDS), output, error).outcome:
-            case Exited(returncode):
-                return dict(notification='queued' if returncode == 0 else 'failed', queue_exit_code=returncode,
-                            queue_output=captured(output), queue_error=captured(error))
-            case TimedOut(seconds):
-                return dict(notification='unknown', queue_error=f'codex queue timed out after {seconds:g} seconds')
-            case Cancelled():
-                return dict(notification='unknown')
-            case LaunchFailed(number, reason):
-                return dict(notification='failed', queue_error=launch_error(codex, number, reason))
+        outcome = run_job.supervise(JobSpec(command, QUEUE_SECONDS), output, error).outcome
+        if isinstance(outcome, Exited):
+            return dict(notification='queued' if outcome.returncode == 0 else 'failed',
+                        queue_exit_code=outcome.returncode, queue_output=captured(output),
+                        queue_error=captured(error))
+        elif isinstance(outcome, TimedOut):
+            return dict(notification='unknown',
+                        queue_error=f'codex queue timed out after {outcome.seconds:g} seconds')
+        elif isinstance(outcome, Cancelled):
+            return dict(notification='unknown')
+        elif isinstance(outcome, LaunchFailed):
+            return dict(notification='failed', queue_error=launch_error(codex, outcome.errno, outcome.message))
 
 
 def check_queue(parser, codex):
     probe = run_job.supervise(JobSpec((codex, 'queue', '--help'), PROBE_SECONDS),
                               subprocess.DEVNULL, subprocess.DEVNULL)
-    match probe.outcome:
-        case TimedOut(seconds):
-            parser.error(f'cannot check codex queue: timed out after {seconds:g} seconds; {FALLBACK}')
-        case LaunchFailed(number, message):
-            parser.error(f'cannot check codex queue: {launch_error(codex, number, message)}; {FALLBACK}')
-        case Exited(returncode) if returncode:
-            parser.error('codex queue is unavailable; ' + FALLBACK)
+    outcome = probe.outcome
+    if isinstance(outcome, TimedOut):
+        parser.error(f'cannot check codex queue: timed out after {outcome.seconds:g} seconds; {FALLBACK}')
+    elif isinstance(outcome, LaunchFailed):
+        parser.error(f'cannot check codex queue: {launch_error(codex, outcome.errno, outcome.message)}; {FALLBACK}')
+    elif isinstance(outcome, Exited) and outcome.returncode:
+        parser.error('codex queue is unavailable; ' + FALLBACK)
 
 
 def check_codex_home(parser):
