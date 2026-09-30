@@ -32,7 +32,7 @@
     "path": "skills/engineering/code-review",
     "commit": "74ca5fe077456a0b3b2f5310cf9430999fd0b5fd",
     "license": "MIT, kept in skills/review-pr/LICENSE-mattpocock",
-    "note": "Preserves the independent Standards and Spec axes and Fowler smell baseline. Parent-owned repairs address implementation handoffs that previously stopped after reporting findings.",
+    "note": "Preserves the independent Standards and Spec axes and Fowler smell baseline. Parent-owned repairs address implementation handoffs that previously stopped after reporting findings. An outside-provider Correctness axis gives delegated implementations cross-model bug review without full hardening.",
     "files": {
       "SKILL.md": "skills/review-pr/SKILL.md"
     }

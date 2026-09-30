@@ -1,14 +1,15 @@
 ---
 name: review-pr
-description: Review changes against standards and requirements. Use for review requests and implementation handoffs.
+description: Review changes for standards, requirements, and correctness. Use for review requests and implementation handoffs.
 ---
 
-Two-axis review of the requested changes against a fixed point:
+Three-axis review of the requested changes against a fixed point:
 
 - **Standards**: does the code conform to this repo's documented coding standards?
 - **Spec**: does the code faithfully implement the originating issue / spec?
+- **Correctness**: does the code hold up under edge cases, failure paths, and hostile input?
 
-Both axes run as **separate sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
+The axes run as **separate reviewers** so they don't pollute each other's context, then this skill aggregates their findings.
 
 Use **report-only** for standalone review requests. Use **fix-and-review** when the user requests repairs or an implementation workflow hands off its authorized work. Explicit read-only requests take precedence.
 
@@ -22,9 +23,11 @@ Resolve the comparison base to a commit SHA once. For a PR, work from its head c
 
 Reuse existing verification and pass it to the applicable reviewers.
 
-Review the requested changes against the fixed point. Give both reviewers the same diff and relevant commit history.
+Review the requested changes against the fixed point. Give every reviewer the same diff and relevant commit history.
 
 Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, before dispatching reviewers.
+
+Save the reviewed source and diff in a temporary review directory, with the base SHA, the candidate identity (commit SHA, or HEAD plus the working-tree diff), and the capture command, for the Correctness reviewer. Refresh the snapshot before each Correctness pass.
 
 ### 2. Identify the spec source
 
@@ -61,11 +64,11 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 - **Middle Man**: a class or function that mostly just delegates onward. → cut it, call the real target direct.
 - **Refused Bequest**: a subclass or implementer that ignores or overrides most of what it inherits. → drop the inheritance, use composition.
 
-### 4. Spawn both sub-agents
+### 4. Dispatch the reviewers
 
-Run both reviewers in parallel when capacity permits. When capacity prevents concurrent dispatch, run them sequentially in separate contexts against the same pinned diff.
+In report-only mode, run the applicable reviewers in parallel when capacity permits. In fix-and-review mode, run Standards and Spec in parallel and hold Correctness until they converge in step 5. When capacity prevents concurrent dispatch, run them sequentially in separate contexts against the same pinned diff.
 
-Both reviewers report findings without changing code.
+Every reviewer reports findings without changing code.
 
 **Standards sub-agent prompt** should include:
 
@@ -82,23 +85,38 @@ Both reviewers report findings without changing code.
 
 If the spec is missing, skip the Spec sub-agent and note this in the final report.
 
+**Correctness reviewer prompt** should include:
+
+- The shared diff and relevant commit history.
+- The requirements or spec from step 2, when available.
+- The [shared adversarial brief](../harden-pr/sections/adversarial.md#shared-adversarial-brief), [the evidence requirements](../harden-pr/SKILL.md#verify-findings), and [the testing finding standard](../harden-pr/specialists/testing.md#finding-standard), pasted in full.
+
+Run it on an outside provider. Follow [outside-review.md](../harden-pr/outside-review.md) for execution, sizing, clarification, and results. The review completes when it meets the outside adversarial criterion in [the completion criteria](../harden-pr/sections/adversarial.md#completion-criteria). Correctness uses only this brief and the outside adversarial criterion, at any diff size. Route requests for structured or full review to [harden-pr](../harden-pr/SKILL.md).
+
+If outside coverage is unavailable, run the same prompt in a fresh native sub-agent labelled `native fallback` and report the outside coverage as missing.
+
 ### 5. Aggregate
 
-In fix-and-review mode, collect the applicable reports. Have the parent fix verified in-scope problems and rerun the caller's affected acceptance checks. Refresh the diff against the same base, including uncommitted repairs, and repeat both applicable reviews. Converge when the final changes have no unresolved verified problems, required checks pass, and applicable reviews are complete. Optional suggestions do not block completion. If progress stalls or a decision is needed, report the remaining blockers.
+In fix-and-review mode, collect the applicable reports. Have the parent fix verified in-scope problems and rerun the caller's affected acceptance checks. Refresh the diff against the same base, including uncommitted repairs, and repeat the applicable Standards and Spec reviews.
+
+Run Correctness once, on the first candidate where the applicable Standards and Spec reviews report no unresolved verified problems and required checks pass. For every later repair, from any axis, have a fresh native sub-agent verify it using the [focused brief](../harden-pr/sections/adversarial.md#re-review-after-fixes), and rerun Standards and Spec for what it touched. Rerun Correctness only when a repair substantially changes the design, on the outside provider when available and otherwise as the native fallback.
+
+Converge when the final changes have no unresolved verified problems, required checks pass, and applicable reviews are complete. A native fallback completes the Correctness review for convergence. Optional suggestions do not block completion. If progress stalls or a decision is needed, report the remaining blockers.
 
 In fix-and-review mode with existing PRs, [finalize the PRs](../harden-pr/pr-work.md#finalize-reviewed-prs), including committing and pushing verified repairs. Without a PR, return the reviewed changes to the caller's delivery workflow.
 
-Present the two reports under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings, because the two axes are deliberately separate (see _Why two axes_).
+Verify Correctness findings against the evidence requirements before presenting or posting them. Present each report under its axis heading (`## Standards`, `## Spec`, `## Correctness`), verbatim or lightly cleaned. Under `## Correctness`, name the reviewer (outside provider, `native fallback`, or not run with the reason), each finding's disposition, and any repair-verification result. Do **not** merge or rerank findings, because the axes are deliberately separate (see _Why three axes_).
 
 End with a one-line summary: remaining findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent.
 
 When a PR exists and publication is within the task's authorized delivery scope, follow [posting.md](../harden-pr/posting.md) for findings and [test results](../open-pr/test-results.md) for verification. Otherwise report both in the conversation.
 
-## Why two axes
+## Why three axes
 
-A change can pass one axis and fail the other:
+A change can pass one axis and fail another:
 
 - Code that follows every standard but implements the wrong thing → **Standards pass, Spec fail.**
 - Code that does exactly what the issue asked but breaks the project's conventions → **Spec pass, Standards fail.**
+- Code that follows the standards and implements the spec but crashes on empty input or swallows a failed write → **Standards and Spec pass, Correctness fail.**
 
-Reporting them separately stops one axis from masking the other.
+Reporting them separately stops one axis from masking another.
