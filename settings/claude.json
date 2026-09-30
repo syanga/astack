@@ -1,3 +1,19 @@
 {
-  "autoMemoryEnabled": false
+  "autoMemoryEnabled": false,
+  "hooks": {
+    "PreToolUse": {
+      "$entries": [
+        {
+          "matcher": "Bash",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/claude-background-jobs/scripts/hook.py\" || exit 1",
+              "timeout": 10
+            }
+          ]
+        }
+      ]
+    }
+  }
 }
