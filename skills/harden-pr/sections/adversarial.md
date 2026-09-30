@@ -26,7 +26,7 @@ Include this brief, [the evidence requirements](../SKILL.md#verify-findings), an
 
 Give this pass the current source snapshot, captured diff, requirements, and shared brief in a fresh context without inherited conversation when supported. Include the [core](../checklist.md), [testing](../specialists/testing.md), and [maintainability](../specialists/maintainability.md) checklists, the testing checklist's linked principle, and the repository's language and test conventions. For TypeScript changes, include [TypeScript guidance](../../typescript-best-practices/SKILL.md). Ask it to read the full diff and apply every checklist category and suppression. Keep other reviewers' findings out of its prompt so this pass remains independent. Also ask it to classify findings as FIXABLE when it knows how to fix them, or INVESTIGATE when human judgment is needed.
 
-Dispatch this reviewer in Step 4 with the outside reviewer and any selected specialists. Collect the dispatched reviews before fixing that snapshot. It runs in the same harness; record its model identity only when reported by the runtime.
+Dispatch this reviewer in Step 4 with the outside reviewer and any selected specialists. Collect the dispatched reviews before fixing that snapshot.
 
 Present findings under an `ADVERSARIAL REVIEW (native subagent):` header. Handle FIXABLE findings through [SKILL.md's fix process](../SKILL.md#step-5-fix-findings). INVESTIGATE findings retain their uncertainty and are assessed by their potential consequence; needing investigation does not make an issue low severity.
 
@@ -70,7 +70,7 @@ A native fallback does not count as outside completion. Preserve each pass's mis
 
 Verify findings from every source against [SKILL.md's evidence requirements](../SKILL.md#verify-findings). Merge reports of the same failure while preserving each source's evidence. Agreement between reviewers does not establish correctness. Report remaining defects, advisory suggestions, and unresolved investigations separately.
 
-Record each attempted pass: native adversarial, outside adversarial, outside structured, and gap-focused red team. Include its provider, reported model identity, reviewed snapshot, outcome, findings, and dispositions. Unknown model identity stays unknown.
+Record each attempted pass: native adversarial, outside adversarial, outside structured, and gap-focused red team. Include its provider, reported model identity and reasoning effort, reviewed snapshot, outcome, findings, and dispositions. Unreported values stay unknown.
 
 ### Re-review after fixes
 
