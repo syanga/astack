@@ -63,7 +63,8 @@ python3 <skill-directory>/scripts/run_job.py --timeout 5400 -- gh pr checks 42 -
   check itself, and the watched process ending. If the watched process runs
   through its own `run_job.py` call, that call's exit notification reports a
   crash. Stop the watcher when it arrives.
-- Make it print its first check before its first sleep.
+- Make it print its first check before its first sleep. Keep the check's stderr
+  in the watcher's output, since a check can print an error and still exit 0.
 - Before you end the turn, read that first check in the output and confirm it ran
   without errors.
 
