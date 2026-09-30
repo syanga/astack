@@ -48,7 +48,7 @@ Opt in to a checkpoint when the invoker explicitly asks: "/architect with checkp
 
 The synthesis can ship as its own commit either way, as the "scaffold first" mode of the [foundational-thinking](../principles/foundational-thinking.md) principle skill. Planned and scoped breakage during fill-in is fine, per the [outcome-oriented-execution](../principles/outcome-oriented-execution.md) principle skill. For requested adversarial pressure on the design before implementing, use [harden-pr](../harden-pr/SKILL.md) on the synthesized sketch.
 
-If the human pushes back on the shape (in a checkpoint or after the fact), treat that as Phase A evidence. Re-ground and re-run Phase B before writing more code.
+If the human pushes back on the shape (in a checkpoint or after the fact), treat that as Phase A evidence. When the pushback reveals an unstated constraint, settle the design's constraints with the human through [grilling](../grilling/SKILL.md). Add the settled constraints to arena's rubric. Re-ground and re-run Phase B before writing more code.
 
 ## Phase D: Implement against the sketch
 
