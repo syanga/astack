@@ -72,6 +72,6 @@ Verify the combined artifact, even when its source candidates passed. For a defe
 
 ## Outputs
 
-One synthesized artifact. One short synthesis note alongside, naming the base, the source of each graft, rejections, provider and model identities when known, dropouts, coverage limits, and verification results. Reuse the caller's rationale or task record. For an existing decision trail, reference the synthesis through [show-me-your-work](../show-me-your-work/SKILL.md).
+One synthesized artifact. One short synthesis note alongside, naming the base, the source of each graft, rejections, provider, model, and reasoning effort when known, dropouts, coverage limits, and verification results. Reuse the caller's rationale or task record. For an existing decision trail, reference the synthesis through [show-me-your-work](../show-me-your-work/SKILL.md).
 
 Before ending, reconcile every runner to completed, stopped, or still owned with an explicit handoff. For session transfer, follow [handoff](../handoff/SKILL.md), preserving candidate paths, the source snapshot, pending judgment, and workspace cleanup information.

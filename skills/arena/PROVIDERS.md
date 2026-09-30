@@ -2,8 +2,8 @@
 
 Use fresh native agents or the installed Claude and Codex CLIs. Follow the
 session's provider and model preferences. Keep each provider's configured model
-unless the user selects another. Record the provider and reported model identity.
-Leave unknown model identities unknown.
+unless the user selects another. Record the provider, reported model identity,
+and reported reasoning effort. Leave unreported values unknown.
 
 For outside coverage, choose Claude when hosted in Codex and Codex when hosted
 in Claude. In another host, choose an available provider. If host identity is
@@ -12,10 +12,17 @@ until the host is resolved. A completed result can still inform the work, but
 does not satisfy an outside-provider gate. A native agent is an independent
 context, not an outside provider.
 
-Check the installed CLI's help before invocation. A missing CLI, failed
-authentication, or unsupported option means unavailable coverage. Report it
-and use only the caller's permitted fallback. Preserve the difference between
-unavailable coverage and a completed task with no findings.
+Check the installed CLI's help before invocation. A missing CLI, or a failed
+authentication or unsupported option from an unsandboxed or approved
+invocation, means unavailable coverage. Report it and use only the caller's
+permitted fallback. Preserve the difference between unavailable coverage and a
+completed task with no findings.
+
+On a host with shell sandboxing, request approval to run the provider
+invocation outside the sandbox through the host's normal mechanism. A sandbox
+block can surface as an authentication or network error, so judge availability
+from the approved invocation's result. If approval is denied or cannot be
+requested, report unavailable coverage with the sandbox policy and any observed error.
 
 ## Supply the task and capture the result
 
@@ -28,9 +35,9 @@ because provider sessions may not inherit them.
 For Codex, run from the assigned repository or isolated worktree:
 
 ```bash
-codex exec --sandbox read-only --ephemeral --json \
+codex exec --sandbox read-only --ephemeral \
   --output-last-message '<response-file>' - \
-  < '<prompt-file>' > '<events-file>' 2> '<stderr-file>'
+  < '<prompt-file>' > '<stdout-file>' 2> '<stderr-file>'
 ```
 
 For Claude:
@@ -51,7 +58,17 @@ code-writing runners may edit their assigned worktree when the task authorizes
 implementation.
 
 Preserve stdout, stderr, and the final response. Claude returns a JSON envelope.
-Read its result text and error status. Inspect Codex's final response and events.
+Read its result text and error status. Its `modelUsage` lists helper models
+beside the main model; record the model with the most output tokens as the
+main model. The envelope does not report reasoning effort, so record it as
+unknown.
+
+Codex's stderr holds a header followed by the transcript of commands and output.
+Record the model and reasoning effort from the header. When the header shows
+`reasoning effort: none` and no config, profile, or `-c` override sets
+`model_reasoning_effort`, record the effort as unset (model default). Inspect
+Codex's final response and transcript.
+
 Process exit alone is not completion. Reject empty, refused, malformed, or
 incomplete output according to the caller's acceptance criteria. A candidate's
 claimed tests need observed evidence before they count as verification.
