@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import time
+from typing import Optional, Union
 
 
 SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
@@ -19,7 +20,7 @@ GRACE_SECONDS = 5
 @dataclass(frozen=True)
 class JobSpec:
     command: tuple[str, ...]
-    timeout: float | None
+    timeout: Optional[float]
 
 
 @dataclass(frozen=True)
@@ -43,7 +44,7 @@ class LaunchFailed:
     message: str
 
 
-Outcome = Exited | TimedOut | Cancelled | LaunchFailed
+Outcome = Union[Exited, TimedOut, Cancelled, LaunchFailed]
 
 
 @dataclass(frozen=True)
@@ -174,22 +175,22 @@ def supervise(spec: JobSpec, stdout=None, stderr=None, on_start=None) -> Result:
 
 
 def exit_code(spec, result):
-    match result.outcome:
-        case Exited(returncode):
-            code = returncode if returncode >= 0 else 128 - returncode
-        case TimedOut(limit):
-            stopped = '; stopped the process group' if result.cleanup_ok else ''
-            print('run-job: deadline {:g}s reached{}'.format(limit, stopped), file=sys.stderr)
-            code = 124
-        case Cancelled(signum):
-            code = 128 + signum
-        case LaunchFailed(number, message):
-            print('run-job: cannot start {}: {}'.format(spec.command[0], message), file=sys.stderr)
-            code = 127 if number == errno.ENOENT else 126
+    outcome = result.outcome
+    if isinstance(outcome, Exited):
+        code = outcome.returncode if outcome.returncode >= 0 else 128 - outcome.returncode
+    elif isinstance(outcome, TimedOut):
+        stopped = '; stopped the process group' if result.cleanup_ok else ''
+        print('run-job: deadline {:g}s reached{}'.format(outcome.seconds, stopped), file=sys.stderr)
+        code = 124
+    elif isinstance(outcome, Cancelled):
+        code = 128 + outcome.signum
+    elif isinstance(outcome, LaunchFailed):
+        print('run-job: cannot start {}: {}'.format(spec.command[0], outcome.message), file=sys.stderr)
+        code = 127 if outcome.errno == errno.ENOENT else 126
     return code if result.cleanup_ok else 125
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog='run_job.py', allow_abbrev=False,
         description='Run a command in its own process group and stop the group at a deadline, '

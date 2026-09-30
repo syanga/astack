@@ -13,6 +13,7 @@ from unittest import mock
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'skills/run-job/scripts/run_job.py'
+SYSTEM_PYTHON = '/usr/bin/python3'
 WRITE_PID = '''
 def write_pid(path, pid):
     with open(path + '.tmp', 'w') as file:
@@ -64,6 +65,11 @@ def kill(pid):
         os.kill(pid, signal.SIGKILL)
 
 
+def system_python_before_3_10():
+    return os.access(SYSTEM_PYTHON, os.X_OK) and subprocess.run(
+        [SYSTEM_PYTHON, '-c', 'import sys; sys.exit(sys.version_info >= (3, 10))'], timeout=30).returncode == 0
+
+
 def load():
     spec = importlib.util.spec_from_file_location('run_job', SCRIPT)
     module = importlib.util.module_from_spec(spec)
@@ -107,6 +113,14 @@ class RunJobTests(ProcessAssertions, unittest.TestCase):
 
     def test_passes_through_output_and_exit_code(self):
         completed = self.run_helper('--timeout', '10', *self.python('print("done"); raise SystemExit(3)'))
+        self.assertEqual((completed.returncode, completed.stdout, completed.stderr), (3, 'done\n', ''))
+
+    def test_runs_under_the_system_python_before_3_10(self):
+        if not system_python_before_3_10():
+            self.skipTest('needs {} older than 3.10'.format(SYSTEM_PYTHON))
+        completed = subprocess.run([SYSTEM_PYTHON, str(SCRIPT), '--timeout', '10',
+                                    *self.python('print("done"); raise SystemExit(3)')],
+                                   stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
         self.assertEqual((completed.returncode, completed.stdout, completed.stderr), (3, 'done\n', ''))
 
     def test_long_lived_mode_runs_until_the_command_exits(self):
