@@ -275,7 +275,7 @@
     ],
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/orchestrate/LICENSE-pstack",
-    "note": "Retains the original Bun runtime and lockfile as an exception to astack's Python convention. Adds a GitHub adapter beside Graphite. Shared ownership, retained drain batches, and verifier precedence support recovery across sessions without losing evidence. The CLI records claims. The coordinator still judges them. Gates go out as decision briefs because users missed decisions buried in run IDs, earlier messages, and unlinked files.",
+    "note": "Retains the original Bun runtime and lockfile as an exception to astack's Python convention. Adds a GitHub adapter beside Graphite. Shared ownership, retained drain batches, and verifier precedence support recovery across sessions without losing evidence. The CLI records claims. The coordinator still judges them. Drain messages report changes only, because repeated summaries hid open decisions.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/orchestrate.md": "skills/orchestrate/SKILL.md",
       "pstack/skills/poteto-mode/scripts/orch/orch.ts": "skills/orchestrate/scripts/orch/orch.ts",

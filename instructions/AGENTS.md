@@ -19,7 +19,6 @@ Answer questions without editing files, even when the implied change is trivial.
 
 * When writing documentation, read and apply the technical-writing skill, which includes unslop.
 * When writing other prose, read and apply the unslop skill.
-* Treat names coined during a session as new to the user. Any request for a decision defines them and reads without earlier messages.
 
 ## Visual and design work
 

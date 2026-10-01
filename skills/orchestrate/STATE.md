@@ -40,8 +40,8 @@ decisions that block an action. Open the decision trail through
 [show-me-your-work](../show-me-your-work/SKILL.md), which owns its format, helper,
 history, and audit procedure. Use `<store>/decisions.tsv`; the execution owner
 writes it. Follow that skill's transition procedure for an older log. Create
-`briefs/` when workers need separate briefs or a gate needs a decision brief, and
-`followups.md` at the first out-of-scope finding. The CLI maintains the completion
+`briefs/` when workers need separate briefs, and `followups.md` at the first
+out-of-scope finding. The CLI maintains the completion
 queue, archived drain batches, and merge frontier; use its commands instead of rewriting tables.
 
 The CLI owns the unit and ledger formats. Use `--json` for complete records.
@@ -179,9 +179,9 @@ dependencies and approvals are satisfied and whose work the current hold permits
 If the hold prevents all execution, report the saved
 resume point and its release condition. Otherwise continue from the recorded next
 action, either directly with implement or through orchestrate's drain cycle.
-Reuse the same store when execution changes between these modes. When gates are
-open, open the first reply after a resume with "Decisions you owe", per
-[Escalation](SKILL.md#escalation).
+Reuse the same store when execution changes between these modes. A coordinator
+with open gates starts the first reply after a resume with "Decisions you owe",
+per [Escalation](SKILL.md#escalation).
 
 ## Close
 

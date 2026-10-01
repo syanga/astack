@@ -36,7 +36,8 @@ For a requested pause or transfer to another session, read [handoff](../handoff/
 - `frontier.json` is the computed merge frontier, per Stack safety.
 - `ledger.tsv` is the verification ledger, per Verification.
 - `inbox/` holds completion pointers.
-- `gates.md` holds human decisions. Use `orch gate park` with a one-line plain question, the options and their consequences, and the recommendation as the default. Save the full [decision brief](#escalation) as `briefs/gate-<id>.md` and put its absolute path in the question. Silence is not approval.
+- `gates.md` holds human decisions. Use `orch gate park` with a one-line plain question that names what the gate blocks, the options, and the recommendation as the default. Silence is not approval.
+- `open-decisions.md` holds the full [decision request](#escalation) of each open gate. Update it when a gate opens, changes, or resolves.
 - `followups.md` holds findings outside the current scope, one heading each.
 - `decisions.tsv` is the trail maintained through [show-me-your-work](../show-me-your-work/SKILL.md).
 - `status.md` is derived from the unit and verification tables, gates, and latest overview handoff at each checkpoint, never hand-maintained. Regenerate it instead of narrating events into it.
@@ -63,11 +64,15 @@ REPORT       status, branch, head SHA, PRs, verdict, deviations, suggested follo
 STANDING     <preferences.md pasted verbatim>
 ```
 
-When a unit produces an artifact the user will decide on, its ACCEPTANCE asks the worker to save it under the store's `reports/` (a remote worker returns it inline), to open with the choice it supports and the recommended option, and to keep lines and tables under 100 columns, with wider tables in a linked file.
+When a unit produces an artifact the user will decide on, add these to its ACCEPTANCE:
+
+- Save the artifact under the store's `reports/`. A remote worker returns it inline.
+- Start the artifact with the choice it supports and the recommended option.
+- Keep lines and tables under 100 columns. Put a wider table in a linked file.
 
 Size the brief to the unit. A one-command unit gets the template collapsed to a paragraph that still names goal, scope, the verify command, and the report shape. Local spawns may reference the standing-orders file by store path. Verbatim paste is for cloud spawns and every resume.
 
-A sub-coordinator brief adds its track boundary and unit list, its spawn budget and workspace requirements, the drain protocol, and the rollup format (per child: name, status, PR, head SHA, verdict, absolute receipt or failure-report path, one line, plus track status and frontier delta).
+A sub-coordinator brief adds its track boundary and unit list, its spawn budget and workspace requirements, the drain protocol, and the rollup format (per child: name, status, PR, head SHA, verdict, absolute receipt or failure-report path, one line, plus track status, open gates, and frontier delta).
 
 Pass upstream findings to dependent workers before dispatch. Audit one sampled worker brief per sub-coordinator per wave, concurrently with the wave it samples, never as a gate in front of it. If a brief fails the audit, pause new dispatch for that track and correct the sub-coordinator's instructions. Start a fresh worker with consolidated scope when earlier briefs have become fragmented.
 
@@ -88,7 +93,13 @@ Pass upstream findings to dependent workers before dispatch. Audit one sampled w
 - Finish the current brief, stack operation, conflict decision, gate entry, or ledger or frontier update before draining completions.
 - Each drain classifies every pointer (landed, needs-verify, failed, zombie, noise), updates the unit rows and verification ledger, appends the acceptance handoff to `overview.md`, and regenerates `status.md` before spawning the next wave. The CLI retains each drained batch before returning it.
 - At each track rollup, record whether every spawned child returned, was respawned, or had its scope reassigned. Identify any missing findings before reassigning work.
-- A drain message to the user reports only what changed since the previous message to the user: one line per unit whose state changed, anything that stops dispatch or puts the done predicate at risk, then the gates, per [Escalation](#escalation). When no unit changed state, say so in one line. Detail lives in `status.md`.
+- A drain message to the user reports only what changed since the previous message to the user. It has these parts and no others:
+  - Gate content, per [Escalation](#escalation).
+  - One line of at most 25 words per unit whose state changed, or one line that says nothing changed.
+  - Anything that stops dispatch or puts the done predicate at risk.
+  - The open-gate line, per Escalation.
+
+  Without gate content, the message has at most 60 words, plus 25 for each changed unit after the first. Running work and unchanged units live in `status.md`. Evidence detail lives in `reports/`.
 
 ## Stack safety
 
@@ -101,6 +112,8 @@ Pass upstream findings to dependent workers before dispatch. Audit one sampled w
 ## Verification
 
 Scale verification to the unit. When VERIFY is a single cheap command, the worker runs it. Use a dedicated verifier for expensive checks, judgments that need independent review, or changes with broad effects. Run dedicated verifiers as native agents on the session's model. For a judgment that needs independent review, also get a review from Codex when hosted in Claude or from Claude when hosted in Codex, following [provider execution](../arena/PROVIDERS.md). Treat its findings as evidence for acceptance, not as a ledger receipt.
+
+Before setting a pass threshold on nondeterministic output, such as model extractions, measure how much repeat runs on identical input disagree. Set the threshold so that this disagreement alone cannot fail it.
 
 Save a remote worker's returned raw output and exit status to a file under `reports/`. Follow [STATE.md's verification procedure](STATE.md#accept-verification) to record and accept receipts. It defines verdicts, verifier precedence, evidence checks, and verification after a head change.
 
@@ -118,28 +131,37 @@ Publish each completed unit promptly. The worker pushes its branch, and the coor
 
 ## Escalation
 
-Honor authorization already given. Batch open decisions into the next report rather than asking per item. Ask the user for decisions, authorizations, and facts only the user holds. When a check needs access you lack, ask for read-only access rather than the answer. Gates include unauthorized irreversible actions (force-push to shared branches, deploys, deletions, closing someone else's PR), genuine product or preference calls no experiment settles, a standing order that contradicts observed reality, a program-level dead end that survived a replan. Park each as a `gates.md` entry before asking, and route work around it.
+Honor authorization already given. Batch open gates into the next message to the user rather than asking per item. Ask the user only for decisions, authorizations, and facts the user alone holds. When a check needs access you lack, ask for read-only access rather than the answer. Gates include unauthorized irreversible actions (force-push to shared branches, deploys, deletions, closing someone else's PR), genuine product or preference calls no experiment settles, a standing order that contradicts observed reality, a program-level dead end that survived a replan. Park each as a `gates.md` entry before asking, and route work around it.
 
-**Decision brief.** Present each open decision so it stands without earlier messages:
+**Decision request.** Write each open gate's request so it stands without earlier messages:
 
-- what is being decided and why it needs the user, in plain words;
-- what the gate blocks and what work continues meanwhile;
-- what the user must read and what they may skip;
-- each option with its consequence, and a recommendation with a one-line reason for each part of the decision;
-- every artifact the decision depends on, saved in the store and given as an absolute path or URL. Publish mocks, screenshots, and wide tables with [t3-preview](../t3-preview/SKILL.md) when it is available, because a path does not render them in chat;
-- the shortest sufficient reply, such as "approve all";
-- what happens next and who acts.
+- What is being decided and why it needs the user, in plain words.
+- What the gate blocks and what work continues meanwhile.
+- What the user must read and what they may skip.
+- Each option with its consequence.
+- A recommendation with a one-line reason, for each part of the decision.
+- Every artifact the decision depends on, saved in the store and given as an absolute path or URL. Publish mocks, screenshots, and wide tables with [t3-preview](../t3-preview/SKILL.md) when it is available, because a path does not render them in chat.
+- The shortest sufficient reply, such as "approve all".
+- What happens next and who acts.
 
-A drain message carries the full brief of each gate whose full brief the user has not yet received. When new evidence changes an open gate's brief, update the brief file and send only what changed. The message lists every other open gate, one line each: its plain question and the brief's absolute path. Send the full brief of every open gate under a "Decisions you owe" heading at the top of these messages:
+In a drain message:
 
-- A reply to the user's request for status.
-- The last reply before the session pauses, transfers, or ends.
+- Send a gate's full request in the first drain message after it opens.
+- When new evidence changes a request, update `open-decisions.md`. Re-park the gate under the same ID if its options or default changed. Send only what changed, in at most 300 words.
+- While gates are open, end with one line: the number of open gates and the absolute path of `open-decisions.md`.
+
+When the user answers a gate, resolve it with `orch gate resolve`. Move its request, with the answer, from `open-decisions.md` to `reports/gate-<id>.md`. Confirm the recorded answer in one line.
+
+Start these messages with every open request under a "Decisions you owe" heading:
+
+- Each Reply, below.
 - The first reply after a resume.
+- The first drain message after no worker is running and no unit can start without a gate answer.
 
-In every message to the user, name each unit, gate, and probe by what it is, with its ID in parentheses as a reply handle, such as "the checkout redesign (U2, PR #41)".
+In every message to the user, name each unit, gate, and other run handle by what it is, with its ID in parentheses as a reply handle, such as "the checkout redesign (U2, PR #41)".
 
 Handle routine frontier updates, restacks, retries, CI failures, review threads, and formatting within the authorized scope. Refuse work the brief excludes and continue the assigned work. Record these decisions without asking whether to keep going.
 
-Address mid-run discoveries that block the frontier. Record other findings in `followups.md` when you find them. A decision brief links them after the ask instead of listing them. Keep each worker within its assigned scope.
+Address mid-run discoveries that block the frontier. Record other findings in `followups.md` when you find them. A decision request links `followups.md` after its recommendation instead of listing the findings. Keep each worker within its assigned scope.
 
-**Reply.** When the user asks for status, when the session pauses or transfers, and at close, report the done predicate and progress counts from the tables. Include each track's delivered work, the frontier with PR links and SHAs, verification results, and abandoned work and reasons. Link the store, the decision trail, and `followups.md` when it exists. At handoff or close, append the Attention findings required by show-me-your-work.
+**Reply.** When the user asks for status, and in the last message before the session pauses, transfers, or ends, report the done predicate and progress counts from the tables. Include each track's delivered work, the frontier with PR links and SHAs, verification results, and abandoned work and reasons. Link the store, the decision trail, and `followups.md` when it exists. At handoff or close, append the Attention findings required by show-me-your-work.
