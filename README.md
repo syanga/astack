@@ -1,13 +1,13 @@
 # astack
 
 astack is Alan's agent setup. I use it in [T3 Code](https://t3.codes) with
-Claude Code and Codex. It adapts content from
+Claude Code and Codex. It is based on
 [pstack](https://github.com/cursor/plugins/tree/main/pstack),
 [Matt Pocock's skills](https://github.com/mattpocock/skills), and
 [gstack](https://github.com/garrytan/gstack). See [Credits](#credits).
 
-You can use it to keep your own coding agents' instructions, skills, and
-settings in one repository and install them across macOS and Linux machines.
+It keeps coding agents' instructions, skills, and settings in one repository
+and installs them across macOS and Linux machines.
 
 astack provides:
 
@@ -21,7 +21,7 @@ astack provides:
 
 ## Install
 
-You need Git, a POSIX shell, and Python 3.10 or newer. Install your coding agents
+Installation requires Git, a POSIX shell, and Python 3.10 or newer. Install coding agents
 separately.
 
 ```sh
@@ -38,9 +38,9 @@ Use the same targets for the preview and installation.
 
 ## Customize
 
-Edit the source files, then rerun `./install.sh` with your chosen targets.
+Edit the source files, then rerun `./install.sh` with the chosen targets.
 Installed instructions and skills are copies, so moving the checkout does not
-break them. Restart your agent or reload its instructions and skills after installation.
+break them. Restart the agent or reload its instructions and skills after installation.
 
 The repository defines what gets installed:
 
@@ -59,7 +59,7 @@ For contribution rules, see [AGENTS.md](AGENTS.md).
 
 ## Find a skill
 
-Ask [astack-help](skills/astack-help/SKILL.md) which skills fit your current task.
+Ask [astack-help](skills/astack-help/SKILL.md) which skills fit the current task.
 It reads the installed skills and recommends what to use next.
 
 ## Update or remove
@@ -84,12 +84,12 @@ Run the test suite, which uses temporary directories:
 python3 -m unittest discover -s tests -v
 ```
 
-To preview installation without using your agent configuration, run
+To preview installation without using the existing agent configuration, run
 `./install.sh --target all --home /tmp/astack-demo --dry-run`.
 
 ## Credits
 
-astack draws inspiration and adapts content from pstack, Matt Pocock's skills,
+astack is based on pstack, Matt Pocock's skills,
 and gstack, linked at the top of this page.
 astack is released under the [MIT License](LICENSE). Adapted skills retain
 their upstream licenses, kept in each skill's directory. The
