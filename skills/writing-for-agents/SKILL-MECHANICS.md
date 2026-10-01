@@ -7,7 +7,7 @@ The skill-specific branch of [`writing-for-agents`](SKILL.md). It covers what ch
 Two choices, trading the two loads:
 
 - A **model-invoked** skill keeps a `description`, so the agent can fire it autonomously, and other skills can reach it. You can still type its name. Model-invocation always _includes_ user reach; a description only ever adds agent discovery and never removes the human's. The description is the skill's top-level context pointer, forced to stay loaded at all times, so it trades permanent context load for discoverability. A model-invoked skill whose content is all reference is also one home for shared reference. Another skill can invoke it, so reference needed by several skills lives in one place. To make a skill model-invoked, omit `disable-model-invocation` and write a model-facing description carrying the trigger branches (the pointer-writing rules in `SKILL.md` apply in full).
-- A **user-invoked** skill strips the description from the agent's reach. Only the human typing its name can invoke it, and no other skill can. It costs zero context load but spends cognitive load, because you are the index that must remember it exists. To make a skill user-invoked, set `disable-model-invocation: true`; Codex and OpenCode handle this differently, see Harnesses below. The `description` then becomes human-facing, a one-line summary with trigger lists stripped.
+- A **user-invoked** skill strips the description from the agent's reach. Only the human typing its name can invoke it, and no other skill can. It costs zero context load but spends cognitive load, because you are the index that must remember it exists. To make a skill user-invoked, set `disable-model-invocation: true`; Codex and OpenCode handle this differently, see Harnesses below. The `description` then becomes human-facing, a one-line summary with trigger lists stripped (see Router skills for the one exception).
 
 Pick model-invocation only when the agent must reach the skill on its own, or another skill must. If it only ever fires by hand, make it user-invoked and pay no context load.
 
@@ -19,7 +19,7 @@ This is the invocation cut of splitting. The sequence cut lives in `SKILL.md`. S
 
 ## Router skills
 
-When user-invoked skills multiply past what you can remember, a **router skill** cures that piled-up cognitive load. It is one skill that names the others and when to reach for each, so the human has one skill to remember instead of many. Keep it user-invoked unless the agent must also know the suite exists. Then make it model-invoked, and its description becomes the suite's one always-loaded mention. It can only hint, never fire them through the skill tool, because user-invoked skills have no description in the catalog.
+When user-invoked skills multiply past what you can remember, a **router skill** cures that piled-up cognitive load. It is one skill that names the others and when to reach for each, so the human has one skill to remember instead of many. Keep it user-invoked unless the agent must also know the suite exists. Then make it model-invoked, and its description becomes the suite's one always-loaded mention. It can only hint, never fire them through the skill tool, because user-invoked skills have no description in the catalog. A router can read the installed skills' frontmatter instead of naming them. A user-invoked description such a router reads may keep one trigger clause when its summary alone does not tell the router when to recommend the skill.
 
 ## Harnesses
 
@@ -35,6 +35,6 @@ This has two consequences. Write every description as if the model will read it,
 
 ## Done when
 
-Before finishing, check that the frontmatter `name` matches its directory, the description reads as a trigger when the skill is model-invoked or as a one-line summary when it is user-invoked, every file it links to exists, and the prose has been through the unslop checklist. If the skill ships its own `agents/openai.yaml`, that file sets `allow_implicit_invocation: false` when the skill is user-invoked, and only then.
+Before finishing, check that the frontmatter `name` matches its directory, the description reads as a trigger when the skill is model-invoked or as a one-line summary when it is user-invoked (see Router skills for the one exception), every file it links to exists, and the prose has been through the unslop checklist. If the skill ships its own `agents/openai.yaml`, that file sets `allow_implicit_invocation: false` when the skill is user-invoked, and only then.
 
 When an edit changes decisions or stopping conditions, exercise representative cases for those branches. For new callers or supported uses, trace a representative case through existing eligibility filters and completion instructions. Check behavior as well as packaging, and report any branches that remain untested.

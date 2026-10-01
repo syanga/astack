@@ -1,6 +1,6 @@
 ---
 name: grilling
-description: Stress-test a plan, decision, or idea through rounds of questions.
+description: Stress-test a plan, decision, or idea through rounds of questions. Use before work that has open decisions the user owns.
 disable-model-invocation: true
 ---
 

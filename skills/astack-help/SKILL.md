@@ -27,6 +27,10 @@ entries, including skills absent from the automatic catalog. Read promising
 skill bodies only to assess fit.
 
 Recommend the smallest useful set for the task in the conversation, with a
-brief reason for each. If none fits, say so.
+brief reason for each. When the task has open decisions the user owns, include
+one skill that settles them, the most specific one that fits, with "run this
+first" in its reason. This rule does not apply to bug fixes, investigations, or
+tasks whose decisions are settled. Add a glossary or ADR skill when the task
+needs one. If no skill fits the task, say so.
 Stop after recommending. The approved update is the only skill workflow this
 skill runs.
