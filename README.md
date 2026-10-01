@@ -91,5 +91,6 @@ To preview installation without using your agent configuration, run
 
 astack draws inspiration and adapts content from pstack, Matt Pocock's skills,
 and gstack, linked at the top of this page.
-Adapted skills retain their upstream licenses. The
+astack is released under the [MIT License](LICENSE). Adapted skills retain
+their upstream licenses, kept in each skill's directory. The
 [upstream manifest](upstream/manifest.json) records sources and revisions.
