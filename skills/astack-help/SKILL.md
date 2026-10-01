@@ -28,10 +28,9 @@ skill bodies only to assess fit.
 
 Recommend the smallest useful set for the task in the conversation, with a
 brief reason for each. When the task has open decisions the user owns, include
-one skill that settles them, the most specific that fits, with "run this first"
-in its reason. A glossary or ADR skill can join it when the task needs one. Bug
-fixes, investigations, and tasks with settled decisions get no skill that
-settles decisions.
-If none fits, say so.
+one skill that settles them, the most specific one that fits, with "run this
+first" in its reason. This rule does not apply to bug fixes, investigations, or
+tasks whose decisions are settled. Add a glossary or ADR skill when the task
+needs one. If no skill fits the task, say so.
 Stop after recommending. The approved update is the only skill workflow this
 skill runs.
