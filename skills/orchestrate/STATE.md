@@ -11,7 +11,12 @@ track store, but sends rollups instead of writing the parent's files.
 
 Use the plan's directory, `<project repo>/.scratch/<program>/` by default. Resolve
 it from the project checkout hosting the plan. Workers use that same path.
-If an existing effort already has a store elsewhere, reuse it. Record the absolute
+If an existing effort already has a store elsewhere, reuse it.
+When the store is inside a Git checkout, keep it out of commits. From that checkout,
+run `git check-ignore -q <store>`. On exit 1, add the store's path relative to the
+checkout root, such as `/.scratch/<program>/`, to the file that
+`git rev-parse --git-path info/exclude` prints. If Git already tracks files in the
+store, leave them and report it. Record the absolute
 store and plan paths in the plan and every session handoff. Keep the store outside disposable worker
 worktrees and preserve it through worker cleanup. Whole-program teardown follows
 [program closeout](../worktree-cleanup/PROGRAM.md). For another machine or a
