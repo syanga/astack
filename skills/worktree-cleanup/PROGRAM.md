@@ -16,7 +16,7 @@ Use an existing retention location or a durable local directory outside every re
 
 On repeated cleanup, reuse an existing verified archive when its records still match the program's final state.
 
-Copy the final plan, overview and handoffs, unit and verification records, decision trail, and required evidence into one program archive. Include supporting briefs and completion records needed to understand those records. Follow evidence pointers outside the store too. Keep append-only records unchanged and add an index mapping original paths to archive paths.
+Copy the final plan, overview and handoffs, unit and verification records, decision trail, any `followups.md`, and required evidence into one program archive. Include supporting briefs and completion records needed to understand those records. Follow evidence pointers outside the store too. Keep append-only records unchanged and add an index mapping original paths to archive paths.
 
 Verify retained files against their originals and check that evidence references resolve in the archive or through its relocation index. Update editable local plan and handoff links to the archive. Preserve any old path still required by a live consumer. If a copy, evidence check, or required link update fails, keep the original and report the hold.
 

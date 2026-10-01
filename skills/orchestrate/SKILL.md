@@ -35,7 +35,10 @@ For a requested pause or transfer to another session, read [handoff](../handoff/
 - `units.tsv` tracks each unit. Update it through the CLI.
 - `frontier.json` is the computed merge frontier, per Stack safety.
 - `ledger.tsv` is the verification ledger, per Verification.
-- `inbox/` holds completion pointers. Use `orch gate park` to record human decisions in `gates.md`. Include the blocked action and work that can continue in the question. Silence is not approval.
+- `inbox/` holds completion pointers.
+- `gates.md` holds human decisions. Park each with `orch gate park`. The question states the decision and what the gate blocks, in one plain line. The default is the recommended answer to every part. Silence is not approval.
+- `open-decisions.md` holds the full [decision request](#messages-to-the-user) of each open gate.
+- `followups.md` holds findings outside the current scope, one heading each.
 - `decisions.tsv` is the trail maintained through [show-me-your-work](../show-me-your-work/SKILL.md).
 - `status.md` is derived from the unit and verification tables, gates, and latest overview handoff at each checkpoint, never hand-maintained. Regenerate it instead of narrating events into it.
 
@@ -61,9 +64,15 @@ REPORT       status, branch, head SHA, PRs, verdict, deviations, suggested follo
 STANDING     <preferences.md pasted verbatim>
 ```
 
+When a unit produces an artifact the user will decide on, add these to its ACCEPTANCE:
+
+- Save the artifact under the store's `reports/`. A remote worker returns it inline.
+- Start the artifact with the choice it supports and the recommended option.
+- Keep lines and tables under 100 columns. Put a wider table in a linked file.
+
 Size the brief to the unit. A one-command unit gets the template collapsed to a paragraph that still names goal, scope, the verify command, and the report shape. Local spawns may reference the standing-orders file by store path. Verbatim paste is for cloud spawns and every resume.
 
-A sub-coordinator brief adds its track boundary and unit list, its spawn budget and workspace requirements, the drain protocol, and the rollup format (per child: name, status, PR, head SHA, verdict, absolute receipt or failure-report path, one line, plus track status and frontier delta).
+A sub-coordinator brief adds its track boundary and unit list, its spawn budget and workspace requirements, the drain protocol, and the rollup format (per child: name, status, PR, head SHA, verdict, absolute receipt or failure-report path, one line, plus track status, each open gate's decision request, and frontier delta).
 
 Pass upstream findings to dependent workers before dispatch. Audit one sampled worker brief per sub-coordinator per wave, concurrently with the wave it samples, never as a gate in front of it. If a brief fails the audit, pause new dispatch for that track and correct the sub-coordinator's instructions. Start a fresh worker with consolidated scope when earlier briefs have become fragmented.
 
@@ -84,7 +93,7 @@ Pass upstream findings to dependent workers before dispatch. Audit one sampled w
 - Finish the current brief, stack operation, conflict decision, gate entry, or ledger or frontier update before draining completions.
 - Each drain classifies every pointer (landed, needs-verify, failed, zombie, noise), updates the unit rows and verification ledger, appends the acceptance handoff to `overview.md`, and regenerates `status.md` before spawning the next wave. The CLI retains each drained batch before returning it.
 - At each track rollup, record whether every spawned child returned, was respawned, or had its scope reassigned. Identify any missing findings before reassigning work.
-- A drain turn ends with three lines derived from the tables: counts against the states, what changed, gates open. Detail lives in `status.md`. The full reply contract applies at checkpoints and close.
+- A drain turn ends with a drain message, or with a Reply when one is due, per [Messages to the user](#messages-to-the-user).
 
 ## Stack safety
 
@@ -97,6 +106,8 @@ Pass upstream findings to dependent workers before dispatch. Audit one sampled w
 ## Verification
 
 Scale verification to the unit. When VERIFY is a single cheap command, the worker runs it. Use a dedicated verifier for expensive checks, judgments that need independent review, or changes with broad effects. Run dedicated verifiers as native agents on the session's model. For a judgment that needs independent review, also get a review from Codex when hosted in Claude or from Claude when hosted in Codex, following [provider execution](../arena/PROVIDERS.md). Treat its findings as evidence for acceptance, not as a ledger receipt.
+
+Before setting a pass threshold on nondeterministic output, such as model extractions, measure how much repeat runs on identical input disagree. Choose a threshold that this disagreement alone cannot fail.
 
 Save a remote worker's returned raw output and exit status to a file under `reports/`. Follow [STATE.md's verification procedure](STATE.md#accept-verification) to record and accept receipts. It defines verdicts, verifier precedence, evidence checks, and verification after a head change.
 
@@ -114,10 +125,45 @@ Publish each completed unit promptly. The worker pushes its branch, and the coor
 
 ## Escalation
 
-Honor authorization already given. Batch unresolved gates into the status page rather than asking per item. These include unauthorized irreversible actions (force-push to shared branches, deploys, deletions, closing someone else's PR), genuine product or preference calls no experiment settles, a standing order that contradicts observed reality, a program-level dead end that survived a replan. Park each as a `gates.md` entry before asking, and route work around it.
+Honor authorization already given. Send gates in the next drain message or Reply, not one message per gate. Ask the user only for decisions, authorizations, and facts the user alone holds. When a check needs access you lack, ask for read-only access and run the check yourself. Gates include unauthorized irreversible actions (force-push to shared branches, deploys, deletions, closing someone else's PR), genuine product or preference calls no experiment settles, a standing order that contradicts observed reality, a program-level dead end that survived a replan. Park each as a `gates.md` entry before asking, and route work around it.
+
+Write the gate's decision request to `open-decisions.md` when you park it. Park a gate that arrives in a track rollup in your own store. When new evidence changes the request, update it there. Re-park the gate under the same ID if its options or default changed. When the user answers, resolve the gate with `orch gate resolve`. Move its request, with the answer, to `reports/gate-<id>.md`.
 
 Handle routine frontier updates, restacks, retries, CI failures, review threads, and formatting within the authorized scope. Refuse work the brief excludes and continue the assigned work. Record these decisions without asking whether to keep going.
 
-Address mid-run discoveries that block the frontier. Record other findings as follow-ups. Keep each worker within its assigned scope.
+Address mid-run discoveries that block the frontier. Record findings outside the current scope in `followups.md`. Keep each worker within its assigned scope.
 
-**Reply.** Report the done predicate and progress counts from the tables. Include each track's delivered work, the frontier with PR links and SHAs, verification results, abandoned work and reasons, and unresolved human gates. Link the store and decision trail. At handoff or close, append the Attention findings required by show-me-your-work.
+## Messages to the user
+
+In every message, name each unit and gate by what it is, with its ID in parentheses, such as "the checkout redesign (U2, PR #41)".
+
+**Decision request.** Write each open gate's request so it stands without earlier messages:
+
+- What is being decided and why it needs the user, in plain words.
+- What the gate blocks and what work continues meanwhile.
+- What the user must read and what they may skip.
+- Each option with its consequence.
+- A recommendation with a one-line reason, for each part of the decision.
+- Every artifact the decision depends on, saved in the store and given as an absolute path or URL. Publish mocks, screenshots, and tables over 100 columns with [t3-preview](../t3-preview/SKILL.md) when it is available, because a path does not render them in chat.
+- The shortest sufficient reply, such as "approve all".
+- What happens next and who acts.
+
+**Drain message.** Report only what changed since the previous message to the user. The message has these parts and no others:
+
+- The full request of each gate that opened.
+- For a request that new evidence changed, only the change, in at most 300 words.
+- For an answered gate, one line that confirms the recorded answer.
+- One line per unit whose state changed, or one line that says no unit changed state.
+- Anything new that stops dispatch or puts the done predicate at risk.
+- While gates are open, a last line with the number of open gates and the absolute path of `open-decisions.md`.
+
+Without the first two parts, the message has at most 60 words. Running work and unchanged units live in `status.md`. Evidence detail lives in `reports/`.
+
+**Reply.** Send a Reply in these cases:
+
+- The user asks for status.
+- The session resumes.
+- No worker is running and no unit can start without a gate answer.
+- The session is about to pause, transfer, or end.
+
+Start a Reply with the decision request of every open gate, under a "Decisions you owe" heading. Then report the done predicate and progress counts from the tables. Include each track's delivered work, the frontier with PR links and SHAs, verification results, and abandoned work and reasons. Link the store and decision trail. At handoff or close, append the Attention findings required by show-me-your-work.
