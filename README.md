@@ -1,7 +1,13 @@
 # astack
 
-Keep your coding agents' instructions, skills, and settings in one repository
-and install them across macOS and Linux machines.
+astack is Alan's agent setup. I use it in [T3 Code](https://t3.codes) with
+Claude Code and Codex. It adapts content from
+[pstack](https://github.com/cursor/plugins/tree/main/pstack),
+[Matt Pocock's skills](https://github.com/mattpocock/skills), and
+[gstack](https://github.com/garrytan/gstack). See [Credits](#credits).
+
+You can use it to keep your own coding agents' instructions, skills, and
+settings in one repository and install them across macOS and Linux machines.
 
 astack provides:
 
@@ -83,9 +89,7 @@ To preview installation without using your agent configuration, run
 
 ## Credits
 
-astack draws inspiration and adapts content from
-[pstack](https://github.com/cursor/plugins/tree/main/pstack),
-[Matt Pocock's skills](https://github.com/mattpocock/skills), and
-[gstack](https://github.com/garrytan/gstack).
+astack draws inspiration and adapts content from pstack, Matt Pocock's skills,
+and gstack, linked at the top of this page.
 Adapted skills retain their upstream licenses. The
 [upstream manifest](upstream/manifest.json) records sources and revisions.
