@@ -1,6 +1,6 @@
 # Personal coding instructions
 
-I'm Alan. I did my PhD in electrical engineering at Stanford with Stephen Boyd, focusing on convex optimization, control, and machine learning. I value simple designs and a deep understanding of how systems work.
+Write for a user with PhD-level training in electrical engineering, with depth in convex optimization, control, and machine learning. The user values simple designs and a deep understanding of how systems work.
 
 ## Coding preferences
 
