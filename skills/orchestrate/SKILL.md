@@ -88,7 +88,7 @@ Pass upstream findings to dependent workers before dispatch. Audit one sampled w
 - Finish the current brief, stack operation, conflict decision, gate entry, or ledger or frontier update before draining completions.
 - Each drain classifies every pointer (landed, needs-verify, failed, zombie, noise), updates the unit rows and verification ledger, appends the acceptance handoff to `overview.md`, and regenerates `status.md` before spawning the next wave. The CLI retains each drained batch before returning it.
 - At each track rollup, record whether every spawned child returned, was respawned, or had its scope reassigned. Identify any missing findings before reassigning work.
-- A drain turn ends with three parts derived from the tables: counts against the states, what changed, and the open decisions as plain questions, per [Escalation](#escalation). Detail lives in `status.md`. The full reply contract applies at checkpoints and close.
+- A drain message to the user reports only what changed since the previous message to the user: one line per unit whose state changed, anything that stops dispatch or puts the done predicate at risk, then the gates, per [Escalation](#escalation). When no unit changed state, say so in one line. Detail lives in `status.md`.
 
 ## Stack safety
 
@@ -130,7 +130,11 @@ Honor authorization already given. Batch open decisions into the next report rat
 - the shortest sufficient reply, such as "approve all";
 - what happens next and who acts.
 
-Send full briefs under a "Decisions you owe" heading at the top of every checkpoint and close reply and of the first reply after a resume. Drain turns carry one plain question per open decision, with its recommendation. In a drain turn, resend a gate's full brief when it blocks all ready work or stays unanswered across two consecutive drain turns. Count each full brief sent, at a checkpoint or as a resend, and after two unanswered ones ask whether to defer or drop the gate.
+A drain message carries the full brief of each gate whose full brief the user has not yet received. When new evidence changes an open gate's brief, update the brief file and send only what changed. The message lists every other open gate, one line each: its plain question and the brief's absolute path. Send the full brief of every open gate under a "Decisions you owe" heading at the top of these messages:
+
+- A reply to the user's request for status.
+- The last reply before the session pauses, transfers, or ends.
+- The first reply after a resume.
 
 In every message to the user, name each unit, gate, and probe by what it is, with its ID in parentheses as a reply handle, such as "the checkout redesign (U2, PR #41)".
 
@@ -138,4 +142,4 @@ Handle routine frontier updates, restacks, retries, CI failures, review threads,
 
 Address mid-run discoveries that block the frontier. Record other findings in `followups.md` when you find them. A decision brief links them after the ask instead of listing them. Keep each worker within its assigned scope.
 
-**Reply.** Report the done predicate and progress counts from the tables. Include each track's delivered work, the frontier with PR links and SHAs, verification results, and abandoned work and reasons. Link the store, the decision trail, and `followups.md` when it exists. At handoff or close, append the Attention findings required by show-me-your-work.
+**Reply.** When the user asks for status, when the session pauses or transfers, and at close, report the done predicate and progress counts from the tables. Include each track's delivered work, the frontier with PR links and SHAs, verification results, and abandoned work and reasons. Link the store, the decision trail, and `followups.md` when it exists. At handoff or close, append the Attention findings required by show-me-your-work.
