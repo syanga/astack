@@ -4,7 +4,7 @@ T3's preview browser runs on the viewing device, so `localhost` there may not re
 
 1. Serve only the preview directory. Use task-specific logs and record each process in the [cleanup record](cleanup.md). For static files on macOS, use the firewall-approved `/usr/bin/python3`.
 2. Use an already reachable URL. Otherwise follow [Cloudflare fallback](#cloudflare-fallback).
-3. With T3 preview tools, verify loading and interactions in the viewing browser. Without those tools, report browser reachability as unverified. Hand off the URL and leave the preview processes running while the user inspects.
+3. Follow [browser checks](browser.md) to verify loading and interactions in the viewing browser. Hand off the URL and leave the preview processes running while the user inspects.
 
 ## Cloudflare fallback
 
