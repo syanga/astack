@@ -275,8 +275,6 @@ def build_review(model, review, commit, name):
 def check_review(review):
     if not isinstance(review, dict) or not isinstance(review.get("body"), str):
         fail("review file: it must be an object whose body is a string")
-    if review["body"].strip():
-        fail("review file: leave body empty and put actionable findings in comments")
     if not isinstance(review.get("comments", []), list):
         fail("review file: comments must be a list")
     for index, c in enumerate(review.get("comments", [])):
@@ -290,7 +288,7 @@ def check_review(review):
 def fold_comments(review):
     comments = review.get("comments", [])
     moved = "\n\n".join("{}:{} ({})\n{}".format(c["path"], c["line"], c["bucket"], c["body"]) for c in comments)
-    return {"body": moved, "comments": []}
+    return {"body": "\n\n".join(part for part in (review["body"].strip(), moved) if part), "comments": []}
 
 
 def take_snapshot(args):
@@ -385,7 +383,7 @@ def command_review(args):
     with open(args.review_file, encoding="utf-8") as handle:
         review = json.load(handle)
     check_review(review)
-    if not review.get("comments"):
+    if not review["body"].strip() and not review.get("comments"):
         json.dump({"url": None, "inline": 0, "folded": False}, sys.stdout)
         print()
         return

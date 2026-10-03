@@ -104,9 +104,7 @@ Follow [adversarial.md](sections/adversarial.md) for focused repair verification
 
 Save the review with its source snapshot, findings, dispositions, per-specialist coverage, outside-provider outcomes, and verification evidence in the temporary review directory. Record completion separately from convergence and unresolved findings. Link the local records in the conversation.
 
-If the review exits early before a real review completes, report why.
-
-For an existing PR, post actionable findings using [posting.md](posting.md). Report the assessment, coverage limits, and local changes in the conversation.
+After finalizing existing PRs below, or when the review exits early, follow [posting.md](posting.md) to publish the review record and remaining actionable findings, including clean or incomplete results. That guidance also covers publication restrictions and runs without a PR. Report the assessment, coverage limits, and local changes in the conversation.
 
 Keep optional ideas and out-of-scope work in one `Deferred follow-ups` section in the PR description. Preserve other authors' content and merge duplicate ideas. Give each item the problem, supporting evidence, and reason for deferral. Label speculative ideas as unverified. These items are outside this PR's acceptance criteria and do not authorize implementation or another hardening round. A defect that prevents required behavior remains a blocker. If PR publication is unavailable, retain the section in the review record and report the pending update. Without a PR, keep it in that record.
 

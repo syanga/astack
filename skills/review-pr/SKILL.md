@@ -109,7 +109,7 @@ Verify Correctness findings against the evidence requirements before presenting 
 
 End with a one-line summary: remaining findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent.
 
-When a PR exists and publication is within the task's authorized delivery scope, follow [posting.md](../harden-pr/posting.md) for findings and [test results](../open-pr/test-results.md) for verification. Otherwise report both in the conversation.
+At the end of the invocation, follow [posting.md](../harden-pr/posting.md) to publish the review record and remaining actionable findings on an existing PR, including clean or incomplete results. That guidance also covers publication restrictions and runs without a PR.
 
 ## Why three axes
 
