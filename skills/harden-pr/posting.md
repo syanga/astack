@@ -1,6 +1,12 @@
 # Post the review
 
-Post review comments only for findings that require a concrete change to the reviewed commit. Keep each comment to the problem, supporting evidence, and requested change. If there are no actionable findings, post no review. Report summaries, clean results, and review coverage in the conversation. Publish [test results](../open-pr/test-results.md) in the PR description.
+Invoking review-pr or harden-pr authorizes publication on an existing PR unless the user restricts it, such as "conversation only" or "do not post". Otherwise, report in the conversation.
+
+At the end of each invocation, post one informational GitHub review with event `COMMENT`, even when no findings remain. Combine internal repair passes in that record. A later invocation adds a new record.
+
+Include the reviewed commit, outcome, repairs, remaining findings, verification, and completed and missing coverage in the body. Preserve review-pr's separate axes. Keep full transcripts in local review records. Also publish [test results](../open-pr/test-results.md) in the PR description.
+
+If a run stops early after substantive review, mark its record incomplete. If no substantive review occurred, report the reason only in the conversation. Missing coverage is not a clean result.
 
 Use harden-pr's `scripts/pr.py review` to post against the commit actually reviewed. The helper signs the review and exposes actionable findings to harden-pr.
 
@@ -10,7 +16,7 @@ Write a JSON file with this shape:
 
 ```json
 {
-  "body": "",
+  "body": "Reviewed <sha>. Outcome, repairs, remaining findings, verification, and coverage.",
   "comments": [
     {
       "path": "src/example.py",
@@ -22,7 +28,7 @@ Write a JSON file with this shape:
 }
 ```
 
-Leave `body` empty and put each actionable finding in `comments` with bucket `act on`. Keep findings open on the PR until their fixes are pushed.
+Put findings requiring a concrete change in `comments` with bucket `act on`. Include the problem, evidence, and requested change. With no remaining findings, use an empty `comments` list. Keep findings open until their fixes are pushed.
 
 When screenshots or recordings demonstrate a finding, follow [open-pr's attachment guidance](../open-pr/SKILL.md).
 
@@ -36,4 +42,4 @@ python3 "<harden-pr directory>/scripts/pr.py" review --pr <n> --commit <reviewed
 
 The result reports `url`, `inline`, and `folded`. When `folded` is true, the findings went into the review body instead of threads. Report that limitation. Fix a malformed review file before retrying. If the reviewed commit is no longer in the PR, prepare a new snapshot and review it. For other posting failures, retry once, then return the verdict and explain that it could not be posted.
 
-Reply with the review URL, the actionable findings, and any posting or verification limitations.
+Reply with the review URL, outcome, and any posting or verification limitations.

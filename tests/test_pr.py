@@ -190,7 +190,7 @@ class StateTests(unittest.TestCase):
         folded = pr.fold_comments({"body": "Verdict.", "comments": [
             {"path": "a.py", "line": 7, "bucket": "act on", "body": "Race."},
             {"path": "a.py", "line": 9, "bucket": "consider", "body": "Name."}]})
-        self.assertEqual(folded, {"body": "a.py:7 (act on)\nRace.\n\na.py:9 (consider)\nName.", "comments": []})
+        self.assertEqual(folded, {"body": "Verdict.\n\na.py:7 (act on)\nRace.\n\na.py:9 (consider)\nName.", "comments": []})
         reviews = [our_review("abc123", folded["body"])]
         current = pr.summarize(green_pr(), [], reviews, [], SINCE, NOW)["our_reviews"]
         advanced = pr.summarize(green_pr(headRefOid="new"), [], reviews, [], SINCE, NOW)["our_reviews"]
@@ -282,7 +282,7 @@ class PostingTests(unittest.TestCase):
                                                 "body": "[m] on behalf of ALAN\n\nRace here.\n"}])
         self.assertNotIn("body", payload)
 
-    def test_review_posts_findings_but_skips_a_clean_result(self):
+    def test_review_posts_summaries_and_findings_but_skips_empty_input(self):
         posts = []
 
         def run(argv, **kwargs):
@@ -298,18 +298,35 @@ class PostingTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "review.json"
-            for comments in ([], [{"path": "a.py", "line": 7, "bucket": "act on", "body": "Act on: fix the race."}]):
-                path.write_text(json.dumps({"body": "", "comments": comments}))
-                output = io.StringIO()
-                with patch.object(pr.subprocess, "run", side_effect=run), patch("sys.stdout", output):
-                    pr.main(["review", "--pr", "12", "--commit", "abc123", "--review-file", str(path), "--model", "m"])
-                if comments:
-                    self.assertEqual(json.loads(output.getvalue()), {"url": "review-url", "inline": 1, "folded": False})
-                    self.assertEqual(posts, [{"event": "COMMENT", "commit_id": "abc123", "comments": [
-                        {"path": "a.py", "line": 7, "side": "RIGHT", "body": "[m] on behalf of Alan\n\nAct on: fix the race.\n"}]}])
-                else:
-                    self.assertEqual(json.loads(output.getvalue()), {"url": None, "inline": 0, "folded": False})
-                    self.assertEqual(posts, [])
+            for body, comments in (
+                ("", []),
+                ("No findings. Reviewed abc123.", []),
+                ("Incomplete. Outside coverage unavailable.", []),
+                ("One unresolved finding.", [{"path": "a.py", "line": 7, "bucket": "act on", "body": "Act on: fix the race."}]),
+            ):
+                with self.subTest(body=body):
+                    posts.clear()
+                    path.write_text(json.dumps({"body": body, "comments": comments}))
+                    output = io.StringIO()
+                    with patch.object(pr.subprocess, "run", side_effect=run), patch("sys.stdout", output):
+                        pr.main(["review", "--pr", "12", "--commit", "abc123", "--review-file", str(path), "--model", "m"])
+                    if body or comments:
+                        self.assertEqual(json.loads(output.getvalue()), {"url": "review-url", "inline": len(comments), "folded": False})
+                        expected = {"event": "COMMENT", "commit_id": "abc123", "comments": []}
+                        if body:
+                            expected["body"] = "[m] on behalf of Alan\n\n" + body + "\n"
+                        if comments:
+                            expected["comments"] = [{"path": "a.py", "line": 7, "side": "RIGHT", "body": "[m] on behalf of Alan\n\nAct on: fix the race.\n"}]
+                        self.assertEqual(posts, [expected])
+                    else:
+                        self.assertEqual(json.loads(output.getvalue()), {"url": None, "inline": 0, "folded": False})
+                        self.assertEqual(posts, [])
+
+    def test_folding_preserves_the_summary_and_findings(self):
+        review = {"body": "Incomplete. One finding.", "comments": [
+            {"path": "a.py", "line": 7, "bucket": "act on", "body": "Race."}]}
+        self.assertEqual(pr.fold_comments(review), {
+            "body": "Incomplete. One finding.\n\na.py:7 (act on)\nRace.", "comments": []})
 
     def test_a_malformed_findings_file_exits_2_before_any_post(self):
         good = {"path": "a.py", "line": 7, "bucket": "act on", "body": "Race."}
@@ -322,7 +339,7 @@ class PostingTests(unittest.TestCase):
     def test_a_findings_file_of_the_wrong_shape_exits_2(self):
         good = {"path": "a.py", "line": 7, "bucket": "act on", "body": "Race."}
         for bad in ([], {"body": "", "comments": None}, {"body": "", "comments": ["a.py:7 race"]},
-                    {"body": "", "comments": [dict(good, line=True)]}, {"body": "Verdict.", "comments": [good]}):
+                    {"body": "", "comments": [dict(good, line=True)]}, {"body": None, "comments": [good]}):
             with self.assertRaises(SystemExit) as raised:
                 pr.check_review(bad)
             self.assertEqual(raised.exception.code, 2)
