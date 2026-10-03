@@ -1,14 +1,13 @@
 # Post the review
 
-For an existing PR, invoking review-pr or harden-pr authorizes publication unless the user explicitly restricts it, such as "conversation only" or "do not post". Without a PR or when publication is restricted, report in the conversation.
+Invoking review-pr or harden-pr authorizes publication on an existing PR unless the user restricts it, such as "conversation only" or "do not post". Otherwise, report in the conversation.
 
-At the end of each invocation, post one informational GitHub review with event `COMMENT`, including clean results and results after all findings were repaired. Internal repair passes share this final record. A later invocation adds a new record.
+At the end of each invocation, post one informational GitHub review with event `COMMENT`, even when no findings remain. Combine internal repair passes in that record. A later invocation adds a new record.
 
-Include the reviewed commit, outcome, brief repair summary, remaining findings, verification, and completed and missing coverage in the review body. Preserve review-pr's separate axes. Keep full reviewer transcripts in the local review records. Publish [test results](../open-pr/test-results.md) in the PR description as well.
+Include the reviewed commit, outcome, repairs, remaining findings, verification, and completed and missing coverage in the body. Preserve review-pr's separate axes. Keep full transcripts in local review records. Also publish [test results](../open-pr/test-results.md) in the PR description.
 
-If substantive review occurred but the run stopped before completion, post an explicitly incomplete record with completed and missing coverage. If it stopped before substantive review, report the reason only in the conversation. Missing coverage is not a clean result.
+If a run stops early after substantive review, mark its record incomplete. If no substantive review occurred, report the reason only in the conversation. Missing coverage is not a clean result.
 
-Put findings that require a concrete change to the reviewed commit in inline comments. Keep each comment to the problem, supporting evidence, and requested change.
 Use harden-pr's `scripts/pr.py review` to post against the commit actually reviewed. The helper signs the review and exposes actionable findings to harden-pr.
 
 The helper prefixes reviews, inline comments, and thread replies with `[<model slug>] on behalf of <first name from git config user.name>`. Run it from the reviewed repository so repository-specific Git identity applies. An unset or invalid name stops posting; earlier signed reviews remain recognizable after a name change.
@@ -29,7 +28,7 @@ Write a JSON file with this shape:
 }
 ```
 
-Put each remaining actionable finding in `comments` with bucket `act on`. A clean result has an empty `comments` list and a nonempty review body. Keep findings open on the PR until their fixes are pushed.
+Put findings requiring a concrete change in `comments` with bucket `act on`. Include the problem, evidence, and requested change. With no remaining findings, use an empty `comments` list. Keep findings open until their fixes are pushed.
 
 When screenshots or recordings demonstrate a finding, follow [open-pr's attachment guidance](../open-pr/SKILL.md).
 
