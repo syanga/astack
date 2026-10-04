@@ -1,0 +1,47 @@
+{
+  "name": "weekly-expiry-72h",
+  "assumptions": {
+    "allowance": "Synthetic. A capacity-1 account has 500 units per five-hour window and 5000 per weekly window; capacity scales both linearly. Real allowances are not published.",
+    "windows": "Synthetic. Five-hour and weekly windows reset on a fixed schedule from the fixture start; real five-hour windows start at first use.",
+    "cost": "Synthetic. One unit is 1000 weighted tokens: uncached input 1, cache write 1.25, cache read 0.1, output 5. These are API price ratios, used only as a stand-in for allowance consumption.",
+    "cache": "Synthetic. A prompt prefix stays cached for 5 minutes after its last use, per account and conversation. A request on another account while the old cache is warm counts its prefix as a migration write.",
+    "observations": "Every response reports exact utilization and resets.",
+    "external_load": "acct-y loses 5% of its five-hour allowance per hour to clients outside this proxy, so its observations age quickly.",
+    "overage": "A settings read finds paid overflow disabled on every account every 15 minutes.",
+    "load": "About 70% of the pool's five-hour allowance. acct-w and acct-x hold most of their weekly allowance and reset within the run; acct-y and acct-z reset after it.",
+    "faults": "1% transient failures before output; no partial streams, cancellations, logouts, or restarts."
+  },
+  "start": "2026-10-05T09:00:00Z",
+  "hours": 72,
+  "five_hour_units": 500,
+  "weekly_units": 5000,
+  "overage_check_minutes": 15,
+  "accounts": [
+    {"id": "acct-w", "capacity": 5, "five_hour_used": 0.0, "five_hour_reset_hours": 1, "weekly_used": 0.3, "weekly_reset_hours": 24},
+    {"id": "acct-x", "capacity": 5, "five_hour_used": 0.2, "five_hour_reset_hours": 2.5, "weekly_used": 0.3, "weekly_reset_hours": 48},
+    {"id": "acct-y", "capacity": 5, "five_hour_used": 0.4, "five_hour_reset_hours": 4, "weekly_used": 0.2, "weekly_reset_hours": 150, "external_per_hour": 0.05},
+    {"id": "acct-z", "capacity": 5, "five_hour_used": 0.1, "five_hour_reset_hours": 3, "weekly_used": 0.2, "weekly_reset_hours": 160}
+  ],
+  "workload": {
+    "conversations": 150,
+    "arrival_mean_minutes": 28,
+    "turns_min": 5,
+    "turns_max": 30,
+    "gap_mean_minutes": 3,
+    "idle_probability": 0.1,
+    "idle_minutes": 90,
+    "initial_context": 20000,
+    "growth_per_turn": 3000,
+    "output_per_turn": 800,
+    "models": ["claude-sonnet-4-5"],
+    "model_change_probability": 0,
+    "subagent_probability": 0.2,
+    "subagent_context": 15000,
+    "nested_probability": 0.3,
+    "parallel_first_requests": 2,
+    "transient_rate": 0.01,
+    "partial_stream_rate": 0,
+    "cancel_rate": 0
+  },
+  "cache": {"ttl_minutes": 5, "input_weight": 1, "write_weight": 1.25, "read_weight": 0.1, "output_weight": 5}
+}

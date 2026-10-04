@@ -8,6 +8,24 @@ type accountView struct {
 	Account
 	needsLogin  bool
 	observation Observation
+	overage     Overage
+	overageAt   time.Time
+}
+
+// overageBar returns why the account may not receive dispatch under the
+// included-only rule, or "" when a fresh check found paid overflow disabled.
+func overageBar(cfg Config, now time.Time, a accountView) Reason {
+	switch {
+	case a.overage == OveragePaidUse:
+		return ReasonPaidUse
+	case a.overage == OverageEnabled:
+		return ReasonOverageEnabled
+	case a.overage != OverageDisabled:
+		return ReasonOverageUnknown
+	case now.Sub(a.overageAt) > cfg.OverageFreshFor:
+		return ReasonOverageStale
+	}
+	return ""
 }
 
 type view struct {
@@ -41,6 +59,9 @@ func decide(cfg Config, now time.Time, v view, req Request) Decision {
 		}
 		return d
 	}
+	if bar := overageBar(cfg, now, acct); bar != "" {
+		return Decision{Kind: Refuse, Account: current, Reason: bar}
+	}
 	switch req.LastFailure {
 	case ClassTransient, ClassThrottle:
 		if req.Attempt > cfg.MaxAttempts {
@@ -52,13 +73,13 @@ func decide(cfg Config, now time.Time, v view, req Request) Decision {
 }
 
 // place chooses an account for new work. It minimizes
-// (load+1)/(capacity*boost) over logged-in accounts that no known rejection
-// blocks for the model. boost is 1 under CapacityOnly and 1+ResetBias*slack
+// (load+1)/(capacity*boost) over logged-in, included-only accounts that no
+// known rejection blocks for the model. boost is 1 under CapacityOnly and 1+ResetBias*slack
 // under ResetAware. Ties go to the earlier enrolled account.
 func place(cfg Config, now time.Time, v view, model string) Decision {
 	best, bestCapacity := -1, -1
 	var bestScore, bestCapacityScore float64
-	loggedIn := false
+	loggedIn, barred := false, false
 	var earliest time.Time
 	earliestKnown := false
 	loads := v.loads()
@@ -67,6 +88,10 @@ func place(cfg Config, now time.Time, v view, model string) Decision {
 			continue
 		}
 		loggedIn = true
+		if overageBar(cfg, now, a) != "" {
+			barred = true
+			continue
+		}
 		if until, known, blocked := usableReset(cfg, now, a.observation, model); blocked {
 			earliest, earliestKnown = earlier(earliest, earliestKnown, until, known)
 			continue
@@ -84,8 +109,11 @@ func place(cfg Config, now time.Time, v view, model string) Decision {
 		}
 	}
 	if best < 0 {
-		if !loggedIn {
+		switch {
+		case !loggedIn:
 			return Decision{Kind: Unavailable, Reason: ReasonNoLogin}
+		case earliest.IsZero() && barred:
+			return Decision{Kind: Refuse, Reason: ReasonNoVerified}
 		}
 		return Decision{Kind: Wait, Reason: ReasonAllBlocked, Until: earliest, ResetKnown: earliestKnown}
 	}

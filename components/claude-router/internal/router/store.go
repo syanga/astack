@@ -16,6 +16,11 @@ import (
 // ErrLocked reports that another process holds the assignment store.
 var ErrLocked = errors.New("assignment store is held by another process")
 
+// ErrFailed reports that an earlier journal write or sync failed. The store
+// acknowledges nothing more until it is closed and reopened, because the
+// failed record may or may not be on disk.
+var ErrFailed = errors.New("assignment journal write failed; reopen to recover")
+
 // ErrUnassigned reports a migration of a conversation that has no assignment.
 var ErrUnassigned = errors.New("conversation has no assignment")
 
@@ -30,9 +35,17 @@ type Binding struct {
 // append-only JSON-lines file, and an fsync before a commit returns.
 type Store struct {
 	mu       sync.RWMutex
-	file     *os.File
+	file     journalFile
 	lock     *os.File
 	bindings map[ConversationID]Binding
+	failed   error
+}
+
+type journalFile interface {
+	io.ReadWriteSeeker
+	Sync() error
+	Truncate(size int64) error
+	Close() error
 }
 
 type op string
@@ -57,7 +70,7 @@ const journalName = "assignments.jsonl"
 // final record, left by a crash during append, is truncated. A corrupt
 // interior record fails the open rather than losing assignments.
 func OpenStore(dir string) (*Store, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := makeDurableDir(dir); err != nil {
 		return nil, err
 	}
 	lock, err := os.OpenFile(filepath.Join(dir, "lock"), os.O_RDWR|os.O_CREATE, 0o600)
@@ -90,6 +103,20 @@ func OpenStore(dir string) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+func makeDurableDir(dir string) error {
+	if _, err := os.Stat(dir); err == nil {
+		return nil
+	}
+	parent := filepath.Dir(filepath.Clean(dir))
+	if err := makeDurableDir(parent); err != nil {
+		return err
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	return syncDir(parent)
 }
 
 func syncDir(dir string) error {
@@ -133,7 +160,22 @@ func (s *Store) replay() error {
 	return err
 }
 
+func (rec record) validate() error {
+	switch {
+	case rec.Op != opAssign && rec.Op != opMigrate:
+		return fmt.Errorf("unknown op %q", rec.Op)
+	case rec.Conversation == "" || rec.Account == "" || rec.At.IsZero():
+		return errors.New("missing conversation, account, or time")
+	case rec.Op == opMigrate && rec.From == "":
+		return errors.New("migration without a source account")
+	}
+	return nil
+}
+
 func (s *Store) apply(rec record) error {
+	if err := rec.validate(); err != nil {
+		return err
+	}
 	current, assigned := s.bindings[rec.Conversation]
 	switch rec.Op {
 	case opAssign:
@@ -144,21 +186,30 @@ func (s *Store) apply(rec record) error {
 		if assigned && current.Account == rec.From {
 			s.bindings[rec.Conversation] = Binding{Account: rec.Account, Reason: rec.Reason, Since: rec.At}
 		}
-	default:
-		return fmt.Errorf("unknown op %q", rec.Op)
 	}
 	return nil
 }
 
 func (s *Store) append(rec record) error {
+	if s.failed != nil {
+		return fmt.Errorf("%w: %v", ErrFailed, s.failed)
+	}
+	if err := rec.validate(); err != nil {
+		return err
+	}
 	line, err := json.Marshal(rec)
 	if err != nil {
 		return err
 	}
 	if _, err := s.file.Write(append(line, '\n')); err != nil {
+		s.failed = err
 		return err
 	}
-	return s.file.Sync()
+	if err := s.file.Sync(); err != nil {
+		s.failed = err
+		return err
+	}
+	return nil
 }
 
 // Assign returns the conversation's binding, durably recording proposed as

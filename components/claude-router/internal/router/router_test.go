@@ -27,17 +27,19 @@ func cfgWith(rule Rule) Config {
 		FreshFor:            15 * time.Minute,
 		ActiveFor:           time.Hour,
 		UnknownResetRecheck: 5 * time.Minute,
+		OverageFreshFor:     time.Hour,
 		MaxAttempts:         3,
 	}
 }
 
 type harness struct {
-	t        *testing.T
-	dir      string
-	cfg      Config
-	accounts []Account
-	store    *Store
-	r        *Router
+	t             *testing.T
+	manualOverage bool
+	dir           string
+	cfg           Config
+	accounts      []Account
+	store         *Store
+	r             *Router
 }
 
 func newHarness(t *testing.T, cfg Config, accounts ...Account) *harness {
@@ -76,11 +78,23 @@ func (h *harness) restart() {
 
 func (h *harness) route(now time.Time, req Request) Decision {
 	h.t.Helper()
+	if !h.manualOverage {
+		for _, acct := range h.accounts {
+			h.r.ObserveOverage(acct.ID, OverageDisabled, now)
+		}
+	}
 	d, err := h.r.Route(now, req)
 	if err != nil {
 		h.t.Fatalf("route %s: %v", req.Conversation, err)
 	}
 	return d
+}
+
+// report records a failure whose quota evidence was observed during the
+// attempt, and returns the class the policy acts on.
+func (h *harness) report(at time.Time, acct AccountID, model string, class Class, ws ...Window) Class {
+	return h.r.Report(Failure{Account: acct, Model: model, Class: class, AttemptStart: at,
+		Observation: Observation{At: at, Windows: ws}})
 }
 
 func (h *harness) bound(conv ConversationID) AccountID {
@@ -321,7 +335,7 @@ func TestSubagentsInheritTheConversationAccountThroughMigration(t *testing.T) {
 		t.Fatalf("child %+v and nested %+v, want both dispatched on the parent's %s", childDecision, nestedDecision, a)
 	}
 
-	h.r.Report(t0, a, "claude-sonnet-4-5", ClassExhausted, Observation{Windows: []Window{rejected(FiveHour, t0.Add(2*time.Hour))}})
+	h.report(t0, a, "claude-sonnet-4-5", ClassExhausted, rejected(FiveHour, t0.Add(2*time.Hour)))
 	migrated := h.route(t0, req("session-1"))
 	childAfter := h.route(t0.Add(time.Minute), child)
 	nestedAfter := h.route(t0.Add(time.Minute), nested)
@@ -430,7 +444,7 @@ func TestOnlyExhaustionMigratesAndTheConversationDoesNotReturn(t *testing.T) {
 
 	var retries []Decision
 	for attempt, class := range []Class{ClassTransient, ClassThrottle, ClassTransient} {
-		h.r.Report(t0, a, "claude-sonnet-4-5", class, Observation{})
+		h.report(t0, a, "claude-sonnet-4-5", class)
 		r := req("conv")
 		r.Attempt, r.LastFailure = attempt+2, class
 		retries = append(retries, h.route(t0, r))
@@ -448,7 +462,7 @@ func TestOnlyExhaustionMigratesAndTheConversationDoesNotReturn(t *testing.T) {
 		t.Fatalf("after transient failures conv is bound to %s, want %s", h.bound("conv"), a)
 	}
 
-	h.r.Report(t0, a, "claude-sonnet-4-5", ClassExhausted, Observation{Windows: []Window{rejected(FiveHour, t0.Add(time.Hour))}})
+	h.report(t0, a, "claude-sonnet-4-5", ClassExhausted, rejected(FiveHour, t0.Add(time.Hour)))
 	r := req("conv")
 	r.Attempt, r.LastFailure = 2, ClassExhausted
 	moved := h.route(t0, r)
@@ -498,7 +512,7 @@ func TestAuthFailureExcludesNewPlacementButKeepsAssignments(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
 	h.route(t0, req("existing"))
 	h.route(t0, req("balance"))
-	h.r.Report(t0, a, "claude-sonnet-4-5", ClassAuth, Observation{})
+	h.report(t0, a, "claude-sonnet-4-5", ClassAuth)
 
 	newcomer := h.route(t0, req("newcomer"))
 	existing := h.route(t0, req("existing"))
@@ -510,7 +524,7 @@ func TestAuthFailureExcludesNewPlacementButKeepsAssignments(t *testing.T) {
 		t.Fatalf("existing got %+v bound to %s, want reauth on %s with the binding kept", existing, h.bound("existing"), a)
 	}
 
-	h.r.Report(t0, b, "claude-sonnet-4-5", ClassAuth, Observation{})
+	h.report(t0, b, "claude-sonnet-4-5", ClassAuth)
 	none := h.route(t0, req("stranded"))
 	h.r.Relogin(a)
 	resumed := h.route(t0, req("existing"))
@@ -529,7 +543,7 @@ func TestAuthFailureExcludesNewPlacementButKeepsAssignments(t *testing.T) {
 func TestExhaustionWithoutResetWaitsInexactlyThenRechecks(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0)...)
 	h.route(t0, req("conv"))
-	h.r.Report(t0, a, "claude-sonnet-4-5", ClassExhausted, Observation{})
+	h.report(t0, a, "claude-sonnet-4-5", ClassExhausted, Window{Kind: Unspecified, Rejected: true})
 
 	waiting := h.route(t0.Add(time.Minute), req("conv"))
 	recheck := h.route(t0.Add(5*time.Minute), req("conv"))
@@ -545,7 +559,7 @@ func TestExhaustionWithoutResetWaitsInexactlyThenRechecks(t *testing.T) {
 func TestModelLimitBlocksOnlyThatModel(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
 	h.route(t0, req("conv"))
-	h.r.Report(t0, a, "claude-opus-4-5", ClassModelLimit, Observation{})
+	h.report(t0, a, "claude-opus-4-5", ClassModelLimit, Window{Kind: Unspecified, Models: []string{"claude-opus-4-5"}, Rejected: true})
 	opus := req("conv")
 	opus.Model = "claude-opus-4-5"
 
@@ -592,7 +606,7 @@ func TestCrashBeforeCommitLeavesNoAssignmentAndAfterCommitKeepsIt(t *testing.T) 
 		t.Fatalf("after restart got %+v, want one placement on %s", replaced, b)
 	}
 
-	h.r.Report(t0, b, "claude-sonnet-4-5", ClassExhausted, Observation{Windows: []Window{rejected(FiveHour, t0.Add(time.Hour))}})
+	h.report(t0, b, "claude-sonnet-4-5", ClassExhausted, rejected(FiveHour, t0.Add(time.Hour)))
 	if _, err := h.r.CommitMigration(t0, "before", b, a, ReasonExhausted); err != nil {
 		t.Fatal(err)
 	}
@@ -660,5 +674,220 @@ func TestSecondOpenerIsRefused(t *testing.T) {
 	}
 	if h.bound("conv") != a {
 		t.Fatalf("after the refused open conv is bound to %q, want %s", h.bound("conv"), a)
+	}
+}
+
+func TestExhaustionNeedsEvidenceFromTheFailedAttempt(t *testing.T) {
+	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
+	h.route(t0, req("conv"))
+	attempt := t0.Add(10 * time.Minute)
+	staleSnapshot := Observation{At: t0, Windows: []Window{rejected(FiveHour, t0.Add(time.Hour))}}
+
+	class := h.r.Report(Failure{Account: a, Model: "claude-sonnet-4-5", Class: ClassExhausted, AttemptStart: attempt, Observation: staleSnapshot})
+	r := req("conv")
+	r.Attempt, r.LastFailure = 2, class
+	retried := h.route(attempt, r)
+
+	if class != ClassThrottle {
+		t.Fatalf("429 with a snapshot older than the attempt classified as %q, want %q", class, ClassThrottle)
+	}
+	if retried.Kind != Retry || retried.Account != a {
+		t.Fatalf("after an unconfirmed 429 got %+v, want retry on %s", retried, a)
+	}
+
+	class = h.report(attempt, a, "claude-sonnet-4-5", ClassExhausted, rejected(FiveHour, attempt.Add(time.Hour)))
+	r.Attempt, r.LastFailure = 3, class
+	moved := h.route(attempt, r)
+
+	if class != ClassExhausted || moved.Kind != Migrate || moved.Account != b {
+		t.Fatalf("with this attempt's rejected window: class %q, decision %+v; want exhausted and migration to %s", class, moved, b)
+	}
+}
+
+func TestUnverifiedOverageWithholdsDispatch(t *testing.T) {
+	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
+	h.manualOverage = true
+
+	unknown := h.route(t0, req("first"))
+	h.r.ObserveOverage(b, OverageDisabled, t0)
+	placed := h.route(t0, req("first"))
+
+	if unknown.Kind != Refuse || unknown.Reason != ReasonNoVerified {
+		t.Fatalf("with no account verified got %+v, want refuse", unknown)
+	}
+	if _, ok := h.r.Lookup("second"); ok {
+		t.Fatal("a refusal created an assignment")
+	}
+	if placed.Kind != Place || placed.Account != b {
+		t.Fatalf("with only b verified got %+v, want placement on %s", placed, b)
+	}
+
+	stale := h.route(t0.Add(61*time.Minute), req("first"))
+	h.r.ObserveOverage(b, OverageDisabled, t0.Add(62*time.Minute))
+	fresh := h.route(t0.Add(62*time.Minute), req("first"))
+
+	if stale.Kind != Refuse || stale.Account != b || stale.Reason != ReasonOverageStale || h.bound("first") != b {
+		t.Fatalf("with b's check 61 minutes old got %+v bound to %s, want refuse on %s with the binding kept", stale, h.bound("first"), b)
+	}
+	if fresh.Kind != Dispatch || fresh.Account != b {
+		t.Fatalf("after a fresh check got %+v, want dispatch on %s", fresh, b)
+	}
+}
+
+func TestPaidUseExcludesTheAccountUntilALaterCheckFindsOverflowDisabled(t *testing.T) {
+	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
+	h.manualOverage = true
+	h.r.ObserveOverage(a, OverageDisabled, t0)
+	h.r.ObserveOverage(b, OverageDisabled, t0)
+	h.route(t0, req("on-a"))
+	h.r.ObserveOverage(a, OveragePaidUse, t0.Add(time.Minute))
+
+	assigned := h.route(t0.Add(2*time.Minute), req("on-a"))
+	newcomer := h.route(t0.Add(2*time.Minute), req("newcomer"))
+	h.r.ObserveOverage(a, OverageDisabled, t0.Add(3*time.Minute))
+	resumed := h.route(t0.Add(3*time.Minute), req("on-a"))
+
+	if assigned.Kind != Refuse || assigned.Reason != ReasonPaidUse || h.bound("on-a") != a {
+		t.Fatalf("after paid use on a got %+v bound to %s, want refuse with the binding kept on %s", assigned, h.bound("on-a"), a)
+	}
+	if newcomer.Kind != Place || newcomer.Account != b {
+		t.Fatalf("newcomer got %+v, want placement on %s", newcomer, b)
+	}
+	if resumed.Kind != Dispatch || resumed.Account != a {
+		t.Fatalf("after a later disabled check got %+v, want dispatch on %s", resumed, a)
+	}
+}
+
+type faultyFile struct {
+	journalFile
+	failSync   bool
+	shortWrite bool
+}
+
+func (f *faultyFile) Write(p []byte) (int, error) {
+	if f.shortWrite {
+		n, _ := f.journalFile.Write(p[:len(p)/2])
+		return n, errors.New("injected short write")
+	}
+	return f.journalFile.Write(p)
+}
+
+func (f *faultyFile) Sync() error {
+	if f.failSync {
+		return errors.New("injected sync failure")
+	}
+	return f.journalFile.Sync()
+}
+
+func TestFailedSyncStopsAcknowledgmentsUntilReopen(t *testing.T) {
+	dir := t.TempDir()
+	s, err := OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Assign("c1", a, ReasonCapacity, t0); err != nil {
+		t.Fatal(err)
+	}
+	faulty := &faultyFile{journalFile: s.file, failSync: true}
+	s.file = faulty
+
+	_, errFirst := s.Assign("c2", a, ReasonCapacity, t0)
+	faulty.failSync = false
+	_, errSecond := s.Assign("c2", b, ReasonCapacity, t0)
+	s.Close()
+	s, err = OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	recovered, _ := s.Lookup("c2")
+	afterReopen, errAfter := s.Assign("c3", b, ReasonCapacity, t0)
+
+	if errFirst == nil || !errors.Is(errSecond, ErrFailed) {
+		t.Fatalf("failed sync returned %v, next assign returned %v; want an error, then ErrFailed", errFirst, errSecond)
+	}
+	if recovered.Account == b {
+		t.Fatal("replay returned the account that was never acknowledged")
+	}
+	if errAfter != nil || afterReopen.Account != b {
+		t.Fatalf("after reopen assign returned %+v, %v; want %s", afterReopen, errAfter, b)
+	}
+}
+
+func TestShortWriteLeavesATornTailNotInteriorCorruption(t *testing.T) {
+	dir := t.TempDir()
+	s, err := OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Assign("c1", a, ReasonCapacity, t0); err != nil {
+		t.Fatal(err)
+	}
+	faulty := &faultyFile{journalFile: s.file, shortWrite: true}
+	s.file = faulty
+
+	_, errShort := s.Assign("c2", a, ReasonCapacity, t0)
+	faulty.shortWrite = false
+	_, errNext := s.Assign("c3", b, ReasonCapacity, t0)
+	s.Close()
+	s, errOpen := OpenStore(dir)
+	if errOpen != nil {
+		t.Fatalf("reopen after a short write: %v", errOpen)
+	}
+	defer s.Close()
+	_, c2 := s.Lookup("c2")
+	c1, _ := s.Lookup("c1")
+	c3, errC3 := s.Assign("c3", b, ReasonCapacity, t0)
+
+	if errShort == nil || !errors.Is(errNext, ErrFailed) {
+		t.Fatalf("short write returned %v, next assign %v; want an error, then ErrFailed", errShort, errNext)
+	}
+	if c2 || c1.Account != a {
+		t.Fatalf("after recovery c2 present=%v and c1=%s, want c2 absent and c1 on %s", c2, c1.Account, a)
+	}
+	if errC3 != nil || c3.Account != b {
+		t.Fatalf("after recovery assign c3 = %+v, %v; want %s", c3, errC3, b)
+	}
+}
+
+func TestIncompleteRecordsAreRefusedOnReplay(t *testing.T) {
+	for name, line := range map[string]string{
+		"empty":                    `{}`,
+		"migration without source": `{"op":"migrate","c":"c1","a":"acct-b","why":"exhausted","t":"2026-10-05T09:00:00Z"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			valid := `{"op":"assign","c":"c1","a":"acct-a","why":"capacity","t":"2026-10-05T09:00:00Z"}`
+			if err := os.WriteFile(filepath.Join(dir, journalName), []byte(valid+"\n"+line+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := OpenStore(dir)
+
+			if err == nil || !strings.Contains(err.Error(), "journal record at byte 82") {
+				t.Fatalf("open = %v, want a refusal of the record at byte 82", err)
+			}
+		})
+	}
+}
+
+func TestOpenCreatesMissingStateDirectories(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state", "router")
+
+	s, err := OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, errAssign := s.Assign("c1", a, ReasonCapacity, t0)
+	s.Close()
+	s, err = OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	got, _ := s.Lookup("c1")
+
+	if errAssign != nil || got.Account != a {
+		t.Fatalf("after reopening a created directory c1 = %+v (assign error %v), want %s", got, errAssign, a)
 	}
 }

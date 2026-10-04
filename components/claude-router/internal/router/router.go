@@ -55,15 +55,21 @@ func (r *Router) Decide(now time.Time, req Request) Decision {
 		index:    r.index,
 		binding:  b,
 		bound:    bound,
-		loads:    func() []int { return r.loads(now) },
+		loads:    func() []int { return r.loads(now, req.Conversation) },
 	}
 	return decide(r.cfg, now, v, req)
 }
 
-func (r *Router) loads(now time.Time) []int {
+// loads counts each account's active conversations other than skip, the
+// conversation being decided, so a concurrent first request that commits
+// mid-decision does not count toward its own placement.
+func (r *Router) loads(now time.Time, skip ConversationID) []int {
 	loads := make([]int, len(r.accounts))
 	horizon := now.Add(-r.cfg.ActiveFor)
 	r.store.each(func(conv ConversationID, b Binding) {
+		if conv == skip {
+			return
+		}
 		last, ok := r.active[conv]
 		if !ok || b.Since.After(last) {
 			last = b.Since
@@ -167,36 +173,47 @@ func (r *Router) observe(account AccountID, obs Observation) {
 	r.accounts[idx].observation = obs
 }
 
-// Report records a classified failure before output on an account. An
-// exhaustion without a rejected window for the model is recorded as an
-// unspecified rejection with an unknown reset. An auth failure excludes the
-// account from new placement until Relogin.
-func (r *Router) Report(now time.Time, account AccountID, model string, class Class, obs Observation) {
+// Report records a failure before output and returns the class the policy
+// acts on. Exhaustion and model limits are confirmed only by this attempt's
+// own evidence: an observation taken at or after AttemptStart with a
+// rejected window that applies to the model. Without it the failure is
+// generic throttling, because the SDK keeps an older snapshot when a
+// response carries no quota headers. An auth failure excludes the account
+// from new placement until Relogin.
+func (r *Router) Report(f Failure) Class {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	idx, ok := r.index[f.Account]
+	if !ok {
+		return f.Class
+	}
+	switch f.Class {
+	case ClassAuth:
+		r.accounts[idx].needsLogin = true
+	case ClassExhausted, ClassModelLimit:
+		fresh := !f.AttemptStart.IsZero() && !f.Observation.At.Before(f.AttemptStart)
+		confirmed := fresh && slices.ContainsFunc(f.Observation.Windows, func(w Window) bool {
+			return w.Rejected && w.appliesTo(f.Model)
+		})
+		if !confirmed {
+			return ClassThrottle
+		}
+		r.observe(f.Account, f.Observation)
+	}
+	return f.Class
+}
+
+// ObserveOverage records an account's paid-overflow state as checked at at.
+// The latest check wins, so paid use stays recorded until a later check
+// finds overflow disabled.
+func (r *Router) ObserveOverage(account AccountID, state Overage, at time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	idx, ok := r.index[account]
-	if !ok {
+	if !ok || at.Before(r.accounts[idx].overageAt) {
 		return
 	}
-	if class == ClassAuth {
-		r.accounts[idx].needsLogin = true
-	}
-	if obs.At.IsZero() {
-		obs.At = now
-	}
-	if class == ClassExhausted || class == ClassModelLimit {
-		covered := slices.ContainsFunc(obs.Windows, func(w Window) bool { return w.Rejected && w.appliesTo(model) })
-		if !covered {
-			w := Window{Kind: Unspecified, Rejected: true}
-			if class == ClassModelLimit {
-				w.Models = []string{model}
-			}
-			obs.Windows = append(slices.Clone(obs.Windows), w)
-		}
-	}
-	if len(obs.Windows) > 0 {
-		r.observe(account, obs)
-	}
+	r.accounts[idx].overage, r.accounts[idx].overageAt = state, at
 }
 
 // Relogin marks an account as logged in again.

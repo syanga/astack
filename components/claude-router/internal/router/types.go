@@ -83,6 +83,28 @@ const (
 	ClassAuth       Class = "auth"
 )
 
+// Failure is a failure before output on one attempt. Observation is the
+// quota evidence captured for this attempt; evidence observed before
+// AttemptStart is not evidence about this attempt.
+type Failure struct {
+	Account      AccountID   `json:"account"`
+	Model        string      `json:"model"`
+	Class        Class       `json:"class"`
+	AttemptStart time.Time   `json:"attempt_start"`
+	Observation  Observation `json:"observation"`
+}
+
+// Overage is an account's paid-overflow state, from a settings read or a
+// response. Only OverageDisabled, checked within Config.OverageFreshFor,
+// lets the router dispatch to the account.
+type Overage string
+
+const (
+	OverageDisabled Overage = "disabled"
+	OverageEnabled  Overage = "enabled"
+	OveragePaidUse  Overage = "paid_use"
+)
+
 // Request is one inference attempt. Attempt counts from 1. LastFailure is the
 // class of the previous attempt of the same request, or ClassNone.
 type Request struct {
@@ -118,6 +140,10 @@ const (
 	Reject Kind = "reject"
 	// Unavailable reports that no enrolled account is logged in.
 	Unavailable Kind = "unavailable"
+	// Refuse withholds dispatch because the account's included-only state
+	// is not verified: overage unknown, stale, enabled, or paid use seen.
+	// An assignment is kept.
+	Refuse Kind = "refuse"
 )
 
 // Reason explains a Decision.
@@ -137,6 +163,11 @@ const (
 	ReasonMissingIdentity Reason = "missing_identity"
 	ReasonAllBlocked      Reason = "all_blocked"
 	ReasonNoLogin         Reason = "no_logged_in_account"
+	ReasonOverageUnknown  Reason = "overage_unknown"
+	ReasonOverageStale    Reason = "overage_stale"
+	ReasonOverageEnabled  Reason = "overage_enabled"
+	ReasonPaidUse         Reason = "paid_use_observed"
+	ReasonNoVerified      Reason = "no_included_only_account"
 )
 
 // Freshness describes the observation behind a placement.
@@ -188,6 +219,9 @@ type Config struct {
 	// UnknownResetRecheck is how long a rejection without a reported reset
 	// blocks its account before a request may probe it again.
 	UnknownResetRecheck time.Duration `json:"unknown_reset_recheck"`
+	// OverageFreshFor is how long a check that paid overflow is disabled
+	// lets the router dispatch to the account.
+	OverageFreshFor time.Duration `json:"overage_fresh_for"`
 	// MaxAttempts bounds attempts of one request on its account after
 	// transient failures and generic throttling.
 	MaxAttempts int `json:"max_attempts"`
@@ -197,10 +231,11 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Rule:                ResetAware,
-		ResetBias:           2,
+		ResetBias:           8,
 		FreshFor:            15 * time.Minute,
 		ActiveFor:           time.Hour,
 		UnknownResetRecheck: 5 * time.Minute,
+		OverageFreshFor:     time.Hour,
 		MaxAttempts:         3,
 	}
 }
