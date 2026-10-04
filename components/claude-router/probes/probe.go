@@ -32,11 +32,12 @@ import (
 )
 
 const (
-	Model         = "claude-sonnet-4-5-20250929"
-	routePath     = "/probe/v1/messages"
-	headerAccount = "X-Probe-Account"
-	headerCall    = "X-Probe-Call"
-	headerRawPin  = "X-Probe-Raw-Pin"
+	Model           = "claude-sonnet-4-5-20250929"
+	routePath       = "/probe/v1/messages"
+	headerAccount   = "X-Probe-Account"
+	headerCall      = "X-Probe-Call"
+	headerRawPin    = "X-Probe-Raw-Pin"
+	headerNonStream = "X-Probe-Non-Stream"
 )
 
 // Settings is the subset of SDK configuration the probes vary.
@@ -72,6 +73,8 @@ type Call struct {
 	// RawPin pins an SDK auth ID directly, bypassing the account name map.
 	RawPin string
 	Cancel time.Duration
+	// NonStream sends "stream": false through the SDK's non-streaming path.
+	NonStream bool
 }
 
 // Outcome is what the client observed for a Call.
@@ -178,6 +181,7 @@ func Start(dir string, opts Options) (*Probe, error) {
 	}
 	p.core.SetRoundTripperProvider(p)
 
+	watcherStarted := expectWatcherStart()
 	ctx, cancel := context.WithCancel(context.Background())
 	p.stop = cancel
 	go func() { p.runErr <- svc.Run(ctx) }()
@@ -189,9 +193,16 @@ func Start(dir string, opts Options) (*Probe, error) {
 		cancel()
 		return nil, errors.New("service did not start")
 	}
-	// Accounts are added after start, one registration at a time, because the
-	// pinned SDK races when startup model registration overlaps the auth
-	// update queue or a request (see CONTRACT.md, "SDK data races").
+	select {
+	case <-watcherStarted:
+	case <-time.After(15 * time.Second):
+		p.Close()
+		return nil, errors.New("service watcher did not start")
+	}
+	// Accounts are added after the watcher starts, one registration at a time,
+	// because the pinned SDK races when startup configuration apply or model
+	// registration overlaps the auth update queue or a request (see
+	// CONTRACT.md, "SDK data races").
 	for _, name := range opts.Accounts {
 		if err := p.WriteAccount(name, "sk-ant-oat01-probe-"+name+"-"+randomHex(8)); err != nil {
 			p.Close()
@@ -205,8 +216,9 @@ func Start(dir string, opts Options) (*Probe, error) {
 	return p, nil
 }
 
-// WaitQuiet blocks until no account has changed for quietFor, so SDK
-// background registration has finished before the next request.
+// WaitQuiet blocks until no account has changed for quietFor. It is a test
+// heuristic that lowers the odds of overlapping SDK background registration;
+// it does not synchronize with the SDK and is not a production control.
 func (p *Probe) WaitQuiet() error {
 	const quietFor = 250 * time.Millisecond
 	deadline := time.Now().Add(15 * time.Second)
@@ -321,6 +333,18 @@ func (p *Probe) waitAccount(name string, timeout time.Duration) error {
 	return fmt.Errorf("account %s not registered", name)
 }
 
+// RegisteredAuthIDs lists the SDK auth IDs currently registered from an
+// account's credential file.
+func (p *Probe) RegisteredAuthIDs(name string) []string {
+	var ids []string
+	for _, a := range p.core.List() {
+		if a != nil && filepath.Base(a.FileName) == p.fileName(name) {
+			ids = append(ids, a.ID)
+		}
+	}
+	return ids
+}
+
 // WaitAccount blocks until a newly written account is registered.
 func (p *Probe) WaitAccount(name string) error {
 	if err := p.waitAccount(name, 10*time.Second); err != nil {
@@ -401,11 +425,29 @@ func (p *Probe) route(base *handlers.BaseAPIHandler) gin.HandlerFunc {
 		if pinned != "" {
 			ctx = handlers.WithPinnedAuthID(ctx, pinned)
 		}
+		ctx = WithCall(ctx, call)
+		callStart := time.Now()
 		ctx = handlers.WithSelectedAuthIDCallback(ctx, func(id string) {
 			p.mu.Lock()
 			p.selected[call] = append(p.selected[call], p.names[id])
 			p.mu.Unlock()
 		})
+		if c.GetHeader(headerNonStream) != "" {
+			resp, _, errMsg := base.ExecuteWithAuthManager(ctx, "claude", Model, body, "")
+			if errMsg != nil {
+				status := http.StatusBadGateway
+				if errMsg.StatusCode > 0 {
+					status = errMsg.StatusCode
+				}
+				p.recordSignal(call, pinned, callStart, status, errMsg.Error)
+				c.Data(status, "application/json", []byte(anthropicError(errorType(status), http.StatusText(status))))
+				cancel(errMsg.Error)
+				return
+			}
+			c.Data(http.StatusOK, "application/json", resp)
+			cancel(nil)
+			return
+		}
 		data, _, errs := base.ExecuteStreamWithAuthManager(ctx, "claude", Model, body, "")
 		started := false
 		for data != nil || errs != nil {
@@ -425,7 +467,7 @@ func (p *Probe) route(base *handlers.BaseAPIHandler) gin.HandlerFunc {
 						status = msg.StatusCode
 					}
 					cause = msg.Error
-					p.recordSignal(call, pinned, status, msg.Error)
+					p.recordSignal(call, pinned, callStart, status, msg.Error)
 				}
 				payload := anthropicError(errorType(status), http.StatusText(status))
 				if started {
@@ -478,7 +520,7 @@ func (p *Probe) Send(ctx context.Context, call Call) Outcome {
 	p.mu.Unlock()
 	out := Outcome{Call: id, Pinned: call.Account}
 
-	body := fmt.Sprintf(`{"model":%q,"max_tokens":16,"stream":true,"messages":[{"role":"user","content":"probe"}]}`, Model)
+	body := fmt.Sprintf(`{"model":%q,"max_tokens":16,"stream":%t,"messages":[{"role":"user","content":"probe"}]}`, Model, !call.NonStream)
 	reqCtx := ctx
 	if call.Cancel > 0 {
 		var cancel context.CancelFunc
@@ -497,6 +539,9 @@ func (p *Probe) Send(ctx context.Context, call Call) Outcome {
 	}
 	if call.RawPin != "" {
 		req.Header.Set(headerRawPin, call.RawPin)
+	}
+	if call.NonStream {
+		req.Header.Set(headerNonStream, "1")
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -518,6 +563,20 @@ func (p *Probe) Send(ctx context.Context, call Call) Outcome {
 		out.ErrorType = e.Error.Type
 		out.Selected = p.selectedFor(id)
 		out.Signal = p.signalsFor(id)
+		return out
+	}
+	if call.NonStream {
+		var m struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		data, _ := io.ReadAll(resp.Body)
+		_ = json.Unmarshal(data, &m)
+		for _, block := range m.Content {
+			out.Text += block.Text
+		}
+		out.Selected = p.selectedFor(id)
 		return out
 	}
 	sc := bufio.NewScanner(resp.Body)
@@ -566,21 +625,37 @@ func (p *Probe) selectedFor(id string) []string {
 	return append([]string{}, p.selected[id]...)
 }
 
-// ErrorSignal is what a route can learn about a failed call: the status,
-// credential scope, and fuzzed retry hint on the SDK error, plus the pinned
-// account's passive rate-limit header snapshot read right after the failure.
+// ErrorSignal is what a route can learn about a failed call. Status, scope
+// flags, and the fuzzed retry hint come from the SDK error. Headers come from
+// the call's last upstream attempt, captured by the router-owned transport.
+// Snapshot is the pinned account's passive header snapshot, kept to show that
+// it can predate the call.
 type ErrorSignal struct {
-	Status           int               `json:"status"`
-	CredentialScoped bool              `json:"credential_scoped"`
-	RetryAfterMS     *int64            `json:"retry_after_ms"`
-	Headers          map[string]string `json:"snapshot_headers"`
+	Status             int               `json:"status"`
+	CredentialScoped   bool              `json:"credential_scoped"`
+	RequestScoped      bool              `json:"request_scoped"`
+	RetryAfterMS       *int64            `json:"retry_after_ms"`
+	Headers            map[string]string `json:"attempt_headers"`
+	Snapshot           map[string]string `json:"snapshot_headers"`
+	SnapshotObservedAt time.Time         `json:"snapshot_observed_at"`
+	CallStartedAt      time.Time         `json:"call_started_at"`
 }
 
-func (p *Probe) recordSignal(call, pinned string, status int, err error) {
-	sig := &ErrorSignal{Status: status, Headers: map[string]string{}}
+// SnapshotFresh reports whether the passive snapshot was observed during
+// this call. A stale snapshot describes an earlier response.
+func (s ErrorSignal) SnapshotFresh() bool {
+	return !s.SnapshotObservedAt.IsZero() && !s.SnapshotObservedAt.Before(s.CallStartedAt)
+}
+
+func (p *Probe) recordSignal(call, pinned string, started time.Time, status int, err error) {
+	sig := &ErrorSignal{Status: status, Headers: map[string]string{}, CallStartedAt: started}
 	var scoped interface{ IsCredentialScoped() bool }
 	if errors.As(err, &scoped) {
 		sig.CredentialScoped = scoped.IsCredentialScoped()
+	}
+	var requestScoped interface{ IsRequestScoped() bool }
+	if errors.As(err, &requestScoped) {
+		sig.RequestScoped = requestScoped.IsRequestScoped()
 	}
 	var retry interface{ RetryAfter() *time.Duration }
 	if errors.As(err, &retry) {
@@ -589,11 +664,15 @@ func (p *Probe) recordSignal(call, pinned string, status int, err error) {
 			sig.RetryAfterMS = &ms
 		}
 	}
+	if attempts := p.Upstream.AttemptsFor(call); len(attempts) > 0 {
+		for name, value := range attempts[len(attempts)-1].RateLimitHeaders {
+			sig.Headers[name] = value
+		}
+	}
 	if a, ok := p.core.GetByID(pinned); ok && a != nil {
 		if st := a.ModelStates[Model]; st != nil {
-			for name, value := range st.Quota.Signals {
-				sig.Headers[name] = value
-			}
+			sig.Snapshot = st.Quota.Signals
+			sig.SnapshotObservedAt = st.Quota.ObservedAt
 		}
 	}
 	p.mu.Lock()

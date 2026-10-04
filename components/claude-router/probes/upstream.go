@@ -1,8 +1,10 @@
 package probes
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -32,7 +34,10 @@ type Reply struct {
 
 // Attempt is one sanitized upstream inference attempt.
 type Attempt struct {
-	Seq        int       `json:"seq"`
+	Seq int `json:"seq"`
+	// Call is the router call ID read from the request context, which is how
+	// a router-owned transport ties each upstream attempt to its request.
+	Call       string    `json:"call"`
 	Account    string    `json:"account"`
 	TokenHash  string    `json:"token_sha256_prefix"`
 	Status     int       `json:"status"`
@@ -41,6 +46,27 @@ type Attempt struct {
 	StartedAt  time.Time `json:"started_at"`
 	EndedAt    time.Time `json:"ended_at"`
 	CanceledBy string    `json:"canceled_by,omitempty"`
+	// RateLimitHeaders are the rate-limit headers of this attempt's response.
+	RateLimitHeaders map[string]string `json:"rate_limit_headers,omitempty"`
+}
+
+type callKey struct{}
+
+// WithCall tags a context with a router call ID. Every upstream attempt made
+// under that context records the ID.
+func WithCall(ctx context.Context, call string) context.Context {
+	return context.WithValue(ctx, callKey{}, call)
+}
+
+// AttemptsFor returns the attempts made under one router call.
+func (u *Upstream) AttemptsFor(call string) []Attempt {
+	var out []Attempt
+	for _, a := range u.Attempts() {
+		if a.Call == call {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // Upstream is an in-process fake of the Anthropic Messages API. It serves
@@ -131,9 +157,16 @@ func (u *Upstream) WaitEnded(n int, timeout time.Duration) bool {
 }
 
 func (u *Upstream) RoundTrip(req *http.Request) (*http.Response, error) {
+	streaming := true
 	if req.Body != nil {
-		_, _ = io.Copy(io.Discard, req.Body)
+		data, _ := io.ReadAll(req.Body)
 		_ = req.Body.Close()
+		var shape struct {
+			Stream *bool `json:"stream"`
+		}
+		if json.Unmarshal(data, &shape) == nil && (shape.Stream == nil || !*shape.Stream) {
+			streaming = false
+		}
 	}
 	if !strings.EqualFold(req.URL.Hostname(), anthropicHost) || !strings.HasPrefix(req.URL.Path, "/v1/messages") {
 		u.mu.Lock()
@@ -157,7 +190,8 @@ func (u *Upstream) RoundTrip(req *http.Request) (*http.Response, error) {
 		reply = queue[0]
 		u.scripts[account] = queue[1:]
 	}
-	attempt := &Attempt{Seq: len(u.attempts) + 1, Account: account, TokenHash: hash, StartedAt: time.Now()}
+	call, _ := req.Context().Value(callKey{}).(string)
+	attempt := &Attempt{Seq: len(u.attempts) + 1, Call: call, Account: account, TokenHash: hash, StartedAt: time.Now(), RateLimitHeaders: rateLimitHeaders(reply.Header)}
 	u.attempts = append(u.attempts, attempt)
 	u.mu.Unlock()
 
@@ -168,7 +202,39 @@ func (u *Upstream) RoundTrip(req *http.Request) (*http.Response, error) {
 		u.finish(attempt, reply.Status, "status", 0, "")
 		return errorResponse(req, reply), nil
 	}
+	if !streaming {
+		u.finish(attempt, http.StatusOK, "completed", 0, "")
+		return messageResponse(req, attempt.Account), nil
+	}
 	return u.stream(req, attempt, reply), nil
+}
+
+func messageResponse(req *http.Request, account string) *http.Response {
+	body := `{"id":"msg_probe","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"served-by:` + account + `"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":2,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}`
+	return &http.Response{
+		StatusCode:    http.StatusOK,
+		Status:        "200 OK",
+		Header:        http.Header{"Content-Type": {"application/json"}},
+		Body:          io.NopCloser(strings.NewReader(body)),
+		ContentLength: int64(len(body)),
+		Request:       req,
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+	}
+}
+
+func rateLimitHeaders(h map[string]string) map[string]string {
+	out := map[string]string{}
+	for name, value := range h {
+		canonical := http.CanonicalHeaderKey(name)
+		if strings.HasPrefix(canonical, "Anthropic-Ratelimit-") || canonical == "Retry-After" {
+			out[canonical] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (u *Upstream) finish(a *Attempt, status int, outcome string, events int, canceledBy string) {

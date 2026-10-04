@@ -22,8 +22,19 @@ func TestNoAutomaticRetryAfterPartialOutput(t *testing.T) {
 				t.Fatalf("client text %q incomplete=%v, want the partial delta and an incomplete stream", out.Text, out.Incomplete)
 			}
 			time.Sleep(300 * time.Millisecond)
+			if fail == "overloaded" {
+				wantSDKSuccess(t, p)
+			}
 			wantAttempts(t, p, "acct-a")
 		})
+	}
+}
+
+func wantSDKSuccess(t *testing.T, p *Probe) {
+	t.Helper()
+	results := p.Results()
+	if len(results) != 1 || !results[0].Success {
+		t.Fatalf("SDK results %+v, want one result reporting success for the in-stream error", results)
 	}
 }
 
@@ -37,6 +48,7 @@ func TestInStreamOverloadBeforeOutputIsDeliveredNotRetried(t *testing.T) {
 		t.Fatalf("client events %v error %q, want one overloaded_error event", out.Events, out.ErrorType)
 	}
 	time.Sleep(300 * time.Millisecond)
+	wantSDKSuccess(t, p)
 	wantAttempts(t, p, "acct-a")
 }
 
@@ -44,7 +56,7 @@ func TestCancellationStopsUpstreamWork(t *testing.T) {
 	cases := []struct {
 		name   string
 		events int
-	}{{"before output", 0}, {"after output", 2}}
+	}{{"before the first event", 0}, {"inside the first content block", 2}, {"after a completed content block", 4}}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			p, tr := startProbe(t, twoAccounts, sdkDefaults)

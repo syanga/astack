@@ -1,6 +1,7 @@
 package probes
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
@@ -26,8 +27,8 @@ func TestRotatedCredentialKeepsAccount(t *testing.T) {
 	}
 	out := tr.send("pinned request after rotation", Call{Account: "acct-b"})
 
-	if p.AuthID("acct-b") != authID {
-		t.Fatalf("auth ID changed from %s to %s", authID, p.AuthID("acct-b"))
+	if ids := p.RegisteredAuthIDs("acct-b"); !reflect.DeepEqual(ids, []string{authID}) {
+		t.Fatalf("SDK now holds auth IDs %v for acct-b's credential file, want only %s", ids, authID)
 	}
 	if out.Status != 200 || out.Text != "served-by:acct-b" {
 		t.Fatalf("client saw status %d text %q, want 200 from acct-b", out.Status, out.Text)

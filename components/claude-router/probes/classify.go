@@ -9,24 +9,30 @@ import (
 type Class string
 
 const (
-	ClassTransient  Class = "transient"
-	ClassThrottle   Class = "throttle"
-	ClassExhausted  Class = "exhausted"
-	ClassModelLimit Class = "model_limit"
-	ClassAuth       Class = "auth"
-	ClassOther      Class = "other"
+	ClassTransient     Class = "transient"
+	ClassThrottle      Class = "throttle"
+	ClassExhausted     Class = "exhausted"
+	ClassModelLimit    Class = "model_limit"
+	ClassRequestScoped Class = "request_scoped"
+	ClassAuth          Class = "auth"
+	ClassOther         Class = "other"
 )
 
-// Classify maps a failed call's signal to a recovery class. A 429 counts as
-// subscription exhaustion only when the SDK marks it credential-scoped or the
-// snapshot shows a rejected five-hour or weekly window. A unified rejection
-// without either is model-scoped, such as an overage-only claim. Neither the
-// SDK error nor its headers distinguish that case without the snapshot.
+// Classify maps a failed call's signal to a recovery class. It reads only
+// per-call data: the SDK error and the headers of the call's own upstream
+// attempt. A request-scoped failure, such as the SDK's fast-mode credit
+// refusal, describes the request rather than the account and is never
+// retried. A 429 counts as subscription exhaustion when the SDK marks it
+// credential-scoped or the attempt's headers show a rejected five-hour or
+// weekly window. A unified rejection without either is model-scoped, such as
+// an overage-only claim.
 func Classify(sig ErrorSignal) Class {
 	get := func(name string) string {
 		return strings.ToLower(strings.TrimSpace(sig.Headers[http.CanonicalHeaderKey(name)]))
 	}
 	switch {
+	case sig.RequestScoped:
+		return ClassRequestScoped
 	case sig.Status == http.StatusUnauthorized || sig.Status == http.StatusForbidden:
 		return ClassAuth
 	case sig.Status == http.StatusTooManyRequests:
