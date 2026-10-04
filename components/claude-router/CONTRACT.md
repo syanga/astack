@@ -222,7 +222,7 @@ The initial component ships as a pinned source build.
 
 ## SDK data races
 
-The race detector reports data races inside the pinned SDK on two paths.
+The race detector reports data races inside the pinned SDK on three paths.
 
 - **Configuration hot reload.** `Service.applyConfigRuntime` reaches
   `Server.UpdateClientsContext`, which writes `BaseAPIHandler` fields that
@@ -242,12 +242,21 @@ The race detector reports data races inside the pinned SDK on two paths.
   credential (`sdk/cliproxy/service_auth.go:343-348`). The SDK's own token
   refresh also writes the auth while the service serves.
 
-The probes reduce both races by adding accounts after start and waiting until
-account state stops changing (`Probe.WaitQuiet`). `WaitQuiet` is a test
-heuristic, not synchronization. The default suite passes under `-race` with
-that order. The hot-reload probe sits behind the `sdkreload` build tag. A
-rotation or account change while requests are in flight is unestablished (row
-RP-16).
+- **Watcher startup.** The watcher's initial configuration apply
+  (`Service.commitConfigUpdate`) writes the service configuration while auth
+  registration reads it (`Service.oauthExcludedModels`). The probe at `6166c8c`
+  hit this race when it wrote an account between `OnAfterStart` and the end of
+  watcher startup (`evidence/PR1/unit-6166c8c/go.log`).
+
+A production router starts with enrolled accounts in the SDK auth directory,
+so the startup registration race and the watcher startup race are reachable there (row RP-20). The probes reduce the
+races by starting with an empty auth directory, waiting for the SDK's "file
+watcher started" log line, then adding accounts one at a time and waiting until
+account state stops changing (`Probe.WaitQuiet`). `WaitQuiet` and the log-line
+wait are test heuristics, not synchronization. The default suite passes under
+`-race` with that order. The hot-reload probe sits behind the `sdkreload` build
+tag. A rotation or account change while requests are in flight is unestablished
+(row RP-16).
 
 ## Client contract
 
@@ -382,6 +391,7 @@ stands for T3 until the PR6 cutover check.
 | RP-17 | The router's transport observes every upstream attempt and ties it to its call | passed | `Upstream.AttemptsFor` assertions in `TestPinnedRetriesStayOnSelectedAccount`, `TestPinnedExecutorPostureMakesOneAttemptPerCall`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover`, `TestFailureSignalsClassifyDistinctly` |
 | RP-18 | A router-supplied transport in place of the SDK's uTLS transport is accepted upstream | blocked | Needs the user's attended login for a live request |
 | RP-19 | The SDK's request-scoped failures classify separately and are not retried | pending | `TestRequestScopedFailureIsNotRetryable` covers the classifier only. The fake upstream does not reach the SDK's fast-mode path. PR3 adds the probe. |
+| RP-20 | Service startup with enrolled accounts is free of SDK data races | failed | `evidence/PR1/sdk/startup-race-before-mitigation.log`, `evidence/PR1/unit-6166c8c/go.log`. Missing control: an upstream SDK fix, or a router startup sequence that holds credentials out of the SDK auth directory until the watcher has started and adds them one at a time behind a barrier. |
 
 | ID | Client behavior | Terminal | Agent SDK (T3) | Evidence |
 | --- | --- | --- | --- | --- |

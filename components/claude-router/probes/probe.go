@@ -178,6 +178,7 @@ func Start(dir string, opts Options) (*Probe, error) {
 	}
 	p.core.SetRoundTripperProvider(p)
 
+	watcherStarted := expectWatcherStart()
 	ctx, cancel := context.WithCancel(context.Background())
 	p.stop = cancel
 	go func() { p.runErr <- svc.Run(ctx) }()
@@ -189,9 +190,16 @@ func Start(dir string, opts Options) (*Probe, error) {
 		cancel()
 		return nil, errors.New("service did not start")
 	}
-	// Accounts are added after start, one registration at a time, because the
-	// pinned SDK races when startup model registration overlaps the auth
-	// update queue or a request (see CONTRACT.md, "SDK data races").
+	select {
+	case <-watcherStarted:
+	case <-time.After(15 * time.Second):
+		p.Close()
+		return nil, errors.New("service watcher did not start")
+	}
+	// Accounts are added after the watcher starts, one registration at a time,
+	// because the pinned SDK races when startup configuration apply or model
+	// registration overlaps the auth update queue or a request (see
+	// CONTRACT.md, "SDK data races").
 	for _, name := range opts.Accounts {
 		if err := p.WriteAccount(name, "sk-ant-oat01-probe-"+name+"-"+randomHex(8)); err != nil {
 			p.Close()
