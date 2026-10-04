@@ -72,11 +72,23 @@ probes or read from the pinned source.
   (`conductor_execution.go:606-612`).
 - A refused pin and an upstream 503 both reach the client as HTTP 503. The
   transport tells them apart: the refused pin has no attempt.
-- When the provider returns a round tripper and the credential has no proxy
-  URL, the Claude executor uses it in place of its own uTLS transports for
-  `api.anthropic.com` (`internal/runtime/executor/helps/utls_client.go:398-417`).
-  The SDK does not export those transports. Whether a router-supplied transport
-  is acceptable upstream is unestablished (row RP-18).
+- The router's transport sees an attempt only when no proxy is in effect. The
+  executor resolves one proxy URL from, in order, the request-level proxy in
+  the execution options, the credential's `proxy_url`, and the global
+  `requests.proxy-url` (`internal/runtime/executor/helps/proxy_helpers.go:127-138`).
+  If any of them is set, the executor builds its own proxied transports and
+  never calls the provider's round tripper
+  (`internal/runtime/executor/helps/utls_client.go:399-416`). Attempts and
+  paid-use headers would then bypass the router, which RP-17 and IO-6 depend
+  on. PR3 enforces "no effective proxy at any level" (see the executor posture).
+- With no proxy in effect, the Claude executor uses the provider's round
+  tripper in place of its own uTLS transports for `api.anthropic.com`. The SDK
+  does not export those transports. Whether a router-supplied transport is
+  acceptable upstream is unestablished (row RP-18).
+- The router's transport records whatever response it relays. The probe's fake
+  transport records the scripted reply, so the header half of WC-7 compares the
+  fixture with itself; the snapshot half goes through the SDK. PR3's transport
+  wrapper reads `http.Response.Header` from the real response.
 
 ### Other integration facts
 
@@ -105,6 +117,7 @@ SDK allows, and owns every retry and migration decision.
 | `routing.strategy` | any | A pin overrides every strategy tested. |
 | `routing.retry.max-retry-credentials` | any | `0` means unlimited, but the scheduler filters candidates to the pinned ID. |
 | `requests.passthrough-headers` | `false` | It does not affect error values. The router reads headers at its transport. |
+| Proxy settings | none at any level | No global `requests.proxy-url`, no credential `proxy_url`, and no request-level proxy in execution options. Any of them bypasses the router's transport, so RP-17 attempt evidence and IO-6 paid-use detection would fail open. PR3 refuses to start or enroll when one is set. |
 
 Limits of this posture:
 
@@ -256,11 +269,17 @@ account state stops changing (`Probe.WaitQuiet`). `WaitQuiet` and the log-line
 wait are test heuristics, not synchronization. The default suite passes under
 `-race` with that order. The hot-reload probe sits behind the `sdkreload` build
 tag. A rotation or account change while requests are in flight is unestablished
-(row RP-16).
+(row RP-16). A router barrier on dispatch does not help with either race,
+because the racing accesses are between SDK goroutines. A router-owned restart
+to apply credential changes moves the rotation race into the startup race. An
+upstream SDK fix closes both.
 
 ## Client contract
 
-These decisions follow from the client evidence. PR3 and PR4 implement them.
+These decisions follow from the client evidence. PR3 implements binding,
+delivered-output handling, the local 429, and the included-only controls. PR4
+implements exhaustion waiting and migration, and starts only after PR1 lane 4
+passes with PR3's live lanes.
 
 ### Bind conversations on the session header
 
@@ -357,97 +376,102 @@ is saved as `evidence/PR1/contract-matrix.json`. Client rows give one status for
 terminal Claude and one for the Agent SDK run with T3's adapter options, which
 stands for T3 until the PR6 cutover check.
 
+The Owner column names the unit that closes each failed, blocked, or pending
+row and the check that closes it. PR1 owns every passed row. PR1 lane 4 covers
+the cache rows; it runs with PR3's live lanes after IO-6 is implemented and
+tested and after the user's attended login, and it must pass before PR4 starts.
+
 ### Conversation and parent identity
 
-| ID | Behavior | Terminal | Agent SDK (T3) | Evidence |
-| --- | --- | --- | --- | --- |
-| ID-1 | Stable identity on new, resume, continue, and process restart | passed | passed | `identity.json#rows[0]` |
-| ID-2 | Identity unchanged by a model change | passed | passed | `identity.json#rows[1]` |
-| ID-3 | Parent linkage for subagents and nested subagents | passed | passed | `identity.json#rows[2]` |
-| ID-4 | Binding key read before credential-specific rewriting | passed | passed | `identity.json#rows[3]` |
-| ID-5 | A request without identity fails explicitly and is not retried | passed | passed | Client analogue: `runs/recovery-terminal-api-key-w-401-noretry`; `identity.json`, `missing_identity_policy`. The router's 400 is tested in PR3. |
-| ID-6 | A fork links to its origin (informational; forks become new conversations) | failed | blocked | `identity.json#rows[4]`. Agent SDK: the `forkSession` path was not driven. |
+| ID | Behavior | Terminal | Agent SDK (T3) | Evidence | Owner |
+| --- | --- | --- | --- | --- | --- |
+| ID-1 | Stable identity on new, resume, continue, and process restart | passed | passed | `identity.json#rows[0]` | PR1 |
+| ID-2 | Identity unchanged by a model change | passed | passed | `identity.json#rows[1]` | PR1 |
+| ID-3 | Parent linkage for subagents and nested subagents | passed | passed | `identity.json#rows[2]` | PR1 |
+| ID-4 | Binding key read before credential-specific rewriting | passed | passed | `identity.json#rows[3]` | PR1 |
+| ID-5 | A request without identity fails explicitly and is not retried | passed | passed | Client analogue: `runs/recovery-terminal-api-key-w-401-noretry`; `identity.json`, `missing_identity_policy`. The router's 400 is tested in PR3. | PR1 |
+| ID-6 | A fork links to its origin (informational; forks become new conversations) | failed | blocked | `identity.json#rows[4]`. Agent SDK: the `forkSession` path was not driven. | PR3: route a fork as a new conversation; no linkage check needed |
 
 ### Retry ownership and pinning
 
-| ID | Behavior | Status | Evidence |
-| --- | --- | --- | --- |
-| RP-1 | SDK retries before output stay on the pinned account | passed | `TestPinnedRetriesStayOnSelectedAccount`, `TestPinnedConnectionDropBeforeOutputRetriesSameAccount`; transcripts in `evidence/PR1/sdk/transcripts/` |
-| RP-2 | Without a pin the SDK fails over, so the pin is load-bearing | passed | `TestUnpinnedRequestFailsOverToAnotherAccount` |
-| RP-3 | Bootstrap 401 and 403 do not fail over to another account | passed | `TestBootstrapAuthErrorsDoNotFailOver` |
-| RP-4 | A pin to an unknown or cooling-down auth fails with 503 and selects no account | passed | `TestPinToUnknownAuthSelectsNothing`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover` |
-| RP-5 | Single-attempt posture makes one upstream attempt per call, for credentials without a refresh token | passed | `TestPinnedExecutorPostureMakesOneAttemptPerCall` |
-| RP-5b | Single-attempt posture for credentials with a refresh token | blocked | A 401 triggers refresh and a same-auth redispatch (`conductor_stream.go:253-263`). The refresh dials `platform.claude.com`, so no offline probe can serve it. Blocked with RP-7. |
-| RP-6 | A rotated credential reloaded from the auth directory keeps its account and auth ID, after a quiet period | passed | `TestRotatedCredentialKeepsAccount` |
-| RP-7 | SDK-initiated OAuth refresh keeps the account | blocked | The Claude refresh client dials `platform.claude.com` directly. Needs the attended live lane or an SDK transport seam. Source: `conductor_refresh.go:561` updates the same auth ID. |
-| RP-8 | Configuration applied at startup does not change pinned selection | passed | `TestConfigApplyKeepsPinnedSelection`, six configurations |
-| RP-9 | An added account does not change pinned selection, after a quiet period | passed | `TestAccountReloadKeepsPinnedSelection` |
-| RP-10 | Configuration hot reload is safe while serving | failed | SDK data race. Pinned selection held in all 20 runs. `evidence/PR1/sdk/reload-race.log`, `reload-norace.log`. Contract: restart instead of hot reload. |
-| RP-11 | No SDK retry after partial stream output | passed | `TestNoAutomaticRetryAfterPartialOutput` (connection drop, in-stream overload) |
-| RP-12 | An in-stream error before output is delivered, not retried, and the SDK reports success | passed | `TestInStreamOverloadBeforeOutputIsDeliveredNotRetried` |
-| RP-14 | Transient, throttle, exhaustion, model-limit, and auth failures classify distinctly from per-call signals | passed | `TestFailureSignalsClassifyDistinctly`. Real header shapes are pending the live lanes. |
-| RP-15 | The passive quota snapshot describes the failed call | failed | `TestQuotaSnapshotOutlivesAHeaderlessFailure`. Contract: classify from per-attempt headers. |
-| RP-16 | Credential rotation or an account-set change while requests are in flight is free of SDK races | blocked | Same reconciliation path as the startup race. Missing control: an upstream SDK fix, or a router-side barrier that holds dispatch on an account until its auth update and SDK reconciliation have finished. |
-| RP-17 | The router's transport observes every upstream attempt and ties it to its call | passed | `Upstream.AttemptsFor` assertions in `TestPinnedRetriesStayOnSelectedAccount`, `TestPinnedExecutorPostureMakesOneAttemptPerCall`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover`, `TestFailureSignalsClassifyDistinctly` |
-| RP-18 | A router-supplied transport in place of the SDK's uTLS transport is accepted upstream | blocked | Needs the user's attended login for a live request |
-| RP-19 | The SDK's request-scoped failures classify separately and are not retried | pending | `TestRequestScopedFailureIsNotRetryable` covers the classifier only. The fake upstream does not reach the SDK's fast-mode path. PR3 adds the probe. |
-| RP-20 | Service startup with enrolled accounts is free of SDK data races | failed | `evidence/PR1/sdk/startup-race-before-mitigation.log`, `evidence/PR1/unit-6166c8c/go.log`. Missing control: an upstream SDK fix, or a router startup sequence that holds credentials out of the SDK auth directory until the watcher has started and adds them one at a time behind a barrier. |
-
-| ID | Client behavior | Terminal | Agent SDK (T3) | Evidence |
+| ID | Behavior | Status | Evidence | Owner |
 | --- | --- | --- | --- | --- |
-| RP-13a | Pre-output 5xx, 529, reset, and 429 are resent on the same session, adding no account choice | passed | passed | `recovery.json#rows[0]` to `#rows[7]` |
-| RP-13b | A cut before the first completed block is resent; after it, output is kept and nothing completed is replayed | passed | passed | `recovery.json#rows[9]` to `#rows[13]` |
-| RP-13c | 401 surfaces to the user without account movement | passed | passed | `recovery.json#rows[8]` |
+| RP-1 | SDK retries before output stay on the pinned account | passed | `TestPinnedRetriesStayOnSelectedAccount`, `TestNonStreamingPinnedRetriesStayOnSelectedAccount`, `TestPinnedConnectionDropBeforeOutputRetriesSameAccount`; transcripts in `evidence/PR1/sdk/transcripts/` | PR1 |
+| RP-2 | Without a pin the SDK fails over, so the pin is load-bearing | passed | `TestUnpinnedRequestFailsOverToAnotherAccount` | PR1 |
+| RP-3 | Bootstrap 401 and 403 do not fail over to another account | passed | `TestBootstrapAuthErrorsDoNotFailOver` | PR1 |
+| RP-4 | A pin to an unknown or cooling-down auth fails with 503 and selects no account | passed | `TestPinToUnknownAuthSelectsNothing`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover` | PR1 |
+| RP-5 | Single-attempt posture makes one upstream attempt per call, for credentials without a refresh token | passed | `TestPinnedExecutorPostureMakesOneAttemptPerCall` | PR1 |
+| RP-5b | Single-attempt posture for credentials with a refresh token | blocked | A 401 triggers refresh and a same-auth redispatch (`conductor_stream.go:253-263`). The refresh dials `platform.claude.com`, so no offline probe can serve it. Blocked with RP-7. | PR3: live lane with the attended login records the attempts on a forced 401 for a refresh-capable credential and accepts at most one same-account redispatch |
+| RP-6 | A rotated credential reloaded from the auth directory keeps its account and auth ID, after a quiet period | passed | `TestRotatedCredentialKeepsAccount` | PR1 |
+| RP-7 | SDK-initiated OAuth refresh keeps the account | blocked | The Claude refresh client dials `platform.claude.com` directly. Needs the attended live lane or an SDK transport seam. Source: `conductor_refresh.go:561` updates the same auth ID. | PR3: live lane with the attended login shows a refreshed credential keeps its auth ID and pinned account |
+| RP-8 | Configuration applied at startup does not change pinned selection | passed | `TestConfigApplyKeepsPinnedSelection`, six configurations | PR1 |
+| RP-9 | An added account does not change pinned selection, after a quiet period | passed | `TestAccountReloadKeepsPinnedSelection` | PR1 |
+| RP-10 | Configuration hot reload is safe while serving | failed | SDK data race. Pinned selection held in all 20 runs. `evidence/PR1/sdk/reload-race.log`, `reload-norace.log`. Contract: restart instead of hot reload. | PR3: the service applies configuration only by restart; a probe shows a changed configuration takes effect after restart with pinned selection unchanged |
+| RP-11 | No SDK retry after partial stream output | passed | `TestNoAutomaticRetryAfterPartialOutput` (connection drop, in-stream overload) | PR1 |
+| RP-12 | An in-stream error before output is delivered, not retried, and the SDK reports success | passed | `TestInStreamOverloadBeforeOutputIsDeliveredNotRetried` | PR1 |
+| RP-14 | Transient, throttle, exhaustion, model-limit, and auth failures classify distinctly from per-call signals | passed | `TestFailureSignalsClassifyDistinctly`. Real header shapes are pending the live lanes. | PR1 |
+| RP-15 | The passive quota snapshot describes the failed call | failed | `TestQuotaSnapshotOutlivesAHeaderlessFailure`. Contract: classify from per-attempt headers. | PR3: classification reads only per-attempt headers; a probe classifies a headerless 429 after an exhaustion as throttle |
+| RP-16 | Credential rotation or an account-set change while requests are in flight is free of SDK races | blocked | Same reconciliation path as the startup race. The race is between two SDK goroutines, the update queue and model reconciliation, so a router barrier on dispatch cannot serialize it. Missing control: an upstream SDK fix, or a router-owned restart of the SDK service to apply credential changes. A restart turns this row into RP-20. | PR3: an upstream SDK fix, or restart-to-apply for credential changes (then closed with RP-20), with a `-race` probe that rotates under load |
+| RP-17 | The router's transport observes every upstream attempt and ties it to its call, with no proxy in effect | passed | `Upstream.AttemptsFor` assertions in `TestPinnedRetriesStayOnSelectedAccount`, `TestNonStreamingPinnedRetriesStayOnSelectedAccount`, `TestPinnedExecutorPostureMakesOneAttemptPerCall`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover`, `TestFailureSignalsClassifyDistinctly`. Streaming and non-streaming paths; the refresh redispatch path is RP-5b. | PR1 |
+| RP-18 | A router-supplied transport in place of the SDK's uTLS transport is accepted upstream | blocked | Needs the user's attended login for a live request | PR3: live lane with the attended login serves requests through the router transport without upstream rejection |
+| RP-19 | The SDK's request-scoped failures classify separately and are not retried | pending | `TestRequestScopedFailureClassifiesSeparately` covers the classifier only. The fake upstream does not reach the SDK's fast-mode path. PR3 adds the probe. | PR3: a probe drives the SDK fast-mode refusal and sees `request_scoped` with no retry |
+| RP-20 | Service startup with enrolled accounts is free of SDK data races | failed | `evidence/PR1/sdk/startup-race-before-mitigation.log`, `evidence/PR1/unit-6166c8c/go.log`. The racing accesses are SDK-internal, so a router barrier cannot serialize them. Missing control: an upstream SDK fix. The probes' startup order (an empty SDK auth directory until the watcher starts, then one credential at a time) lowers the odds but does not serialize the SDK's goroutines. | PR3: carry an upstream SDK fix, then a `-race` probe that starts with enrolled accounts passes repeatedly |
+
+| ID | Client behavior | Terminal | Agent SDK (T3) | Evidence | Owner |
+| --- | --- | --- | --- | --- | --- |
+| RP-13a | Pre-output 5xx, 529, reset, and 429 are resent on the same session, adding no account choice | passed | passed | `recovery.json#rows[0]` to `#rows[7]` | PR1 |
+| RP-13b | A cut before the first completed block is resent; after it, output is kept and nothing completed is replayed | passed | passed | `recovery.json#rows[9]` to `#rows[13]` | PR1 |
+| RP-13c | 401 surfaces to the user without account movement | passed | passed | `recovery.json#rows[8]` | PR1 |
 
 ### Included-only enforcement
 
-| ID | Behavior | Terminal | Agent SDK (T3) | Evidence |
-| --- | --- | --- | --- | --- |
-| IO-1 | Supported pre-request check or enforcement of disabled paid overflow, including changes outside the proxy | blocked | blocked | `included-only.json#rows[0]`, `missing_control`. Limit accepted under G1. |
-| IO-2 | The client refuses to send after a response reports paid usage | failed | failed | `included-only.json#rows[1]` |
-| IO-3 | The client tells missing overage data from disabled | failed | failed | `included-only.json#rows[2]` |
-| IO-4 | The setting is readable without a real login | blocked | blocked | `included-only.json#rows[3]`. Needs the user's attended real login. |
+| ID | Behavior | Terminal | Agent SDK (T3) | Evidence | Owner |
+| --- | --- | --- | --- | --- | --- |
+| IO-1 | Supported pre-request check or enforcement of disabled paid overflow, including changes outside the proxy | blocked | blocked | `included-only.json#rows[0]`, `missing_control`. Limit accepted under G1. | PR3 via IO-6 (limit accepted under G1) |
+| IO-2 | The client refuses to send after a response reports paid usage | failed | failed | `included-only.json#rows[1]` | PR3 via IO-6: the router stops routing on observed paid use |
+| IO-3 | The client tells missing overage data from disabled | failed | failed | `included-only.json#rows[2]` | PR3 via IO-6: the router treats missing overage data as unknown and refuses |
+| IO-4 | The setting is readable without a real login | blocked | blocked | `included-only.json#rows[3]`. Needs the user's attended real login. | PR3: live lane with the attended login reads the overage state at enrollment (IO-6) |
 
-| ID | Contract behavior | Status | Evidence |
-| --- | --- | --- | --- |
-| IO-5 | The remaining guarantee limit is stated | passed | `included-only.json`, `guarantee_limit`; "Included-only: the documented limit is accepted" above |
-| IO-6 | The router refuses unknown or stale overage state and stops routing on observed paid use | pending | PR3 implements and tests both controls |
+| ID | Contract behavior | Status | Evidence | Owner |
+| --- | --- | --- | --- | --- |
+| IO-5 | The remaining guarantee limit is stated | passed | `included-only.json`, `guarantee_limit`; "Included-only: the documented limit is accepted" above | PR1 |
+| IO-6 | The router refuses unknown or stale overage state and stops routing on observed paid use | pending | PR3 implements and tests both controls | PR3: probes refuse unknown or stale overage state and quarantine an account on a paid-use response |
 
 ### Waiting and cancellation
 
-| ID | Behavior | Terminal | Agent SDK (T3) | Evidence |
-| --- | --- | --- | --- | --- |
-| WC-1 | Automatic waiting for a long reset with cancellation and resumption | passed with `CLAUDE_CODE_RETRY_WATCHDOG=1`; failed with defaults | passed with the watchdog; failed with defaults | `waiting.json#rows[4]` |
-| WC-2 | Bounded connection lifetime: client limits measured | passed | passed | `waiting.json#rows[0]` to `#rows[2]` |
-| WC-3 | Short reset resumes automatically | passed | passed | `waiting.json#rows[3]` |
-| WC-4 | Unknown reset has explicit behavior | passed | passed | `waiting.json#rows[5]` |
-| WC-5 | Client cancellation ends the turn and closes the upstream connection | passed | passed | `recovery.json#rows[14]`, `#rows[15]` |
-| WC-6 | A multi-hour wait completes | blocked | blocked | `waiting.json#rows[6]`. Needs a wait run to completion through laptop sleep and wake. |
+| ID | Behavior | Terminal | Agent SDK (T3) | Evidence | Owner |
+| --- | --- | --- | --- | --- | --- |
+| WC-1 | Automatic waiting for a long reset with cancellation and resumption | passed with `CLAUDE_CODE_RETRY_WATCHDOG=1`; failed with defaults | passed with the watchdog; failed with defaults | `waiting.json#rows[4]` | PR5: managed client wiring sets `CLAUDE_CODE_RETRY_WATCHDOG=1`; PR4 live lane checks the wait with it |
+| WC-2 | Bounded connection lifetime: client limits measured | passed | passed | `waiting.json#rows[0]` to `#rows[2]` | PR1 |
+| WC-3 | Short reset resumes automatically | passed | passed | `waiting.json#rows[3]` | PR1 |
+| WC-4 | Unknown reset has explicit behavior | passed | passed | `waiting.json#rows[5]` | PR1 |
+| WC-5 | Client cancellation ends the turn and closes the upstream connection | passed | passed | `recovery.json#rows[14]`, `#rows[15]` | PR1 |
+| WC-6 | A multi-hour wait completes | blocked | blocked | `waiting.json#rows[6]`. Needs a wait run to completion through laptop sleep and wake. | PR4 live lane: a multi-hour wait completes through sleep and wake; must pass before PR6 cutover |
 
-| ID | SDK behavior | Status | Evidence |
-| --- | --- | --- | --- |
-| WC-7 | Exact reset deadlines reach the router from the call's own attempt | passed | `TestFailureSignalsClassifyDistinctly` asserts the scripted 5h and 7d reset values |
-| WC-8 | Client cancellation stops SDK upstream work before the first event, inside the first block, and after a completed block | passed | `TestCancellationStopsUpstreamWork`, stop lag under 1 s asserted |
+| ID | SDK behavior | Status | Evidence | Owner |
+| --- | --- | --- | --- | --- |
+| WC-7 | Exact reset deadlines reach the router from the call's own attempt | passed | `TestFailureSignalsClassifyDistinctly` asserts the scripted 5h and 7d reset values in the fresh SDK snapshot. The attempt-header half reads the scripted reply. | PR1 |
+| WC-8 | Client cancellation stops SDK upstream work before the first event, inside the first block, and after a completed block | passed | `TestCancellationStopsUpstreamWork`, stop lag under 1 s asserted | PR1 |
 
 ### Cache and context continuity
 
-| ID | Behavior | Status | Evidence |
-| --- | --- | --- | --- |
-| CC-1 | Stable routing preserves cacheable prefixes | blocked | Needs live lane 4, which needs the user's attended login |
-| CC-2 | Migration preserves tools, thinking, and account-scoped artifacts | blocked | Same |
-| CC-3 | Cache creation and read counters are measured | blocked | Same |
+| ID | Behavior | Status | Evidence | Owner |
+| --- | --- | --- | --- | --- |
+| CC-1 | Stable routing preserves cacheable prefixes | blocked | Needs PR1 lane 4 with real accounts | PR1 lane 4, run with PR3 live lanes after IO-6 and the attended login; must pass before PR4 |
+| CC-2 | Migration preserves tools, thinking, and account-scoped artifacts | blocked | Same | PR1 lane 4, as CC-1 |
+| CC-3 | Cache creation and read counters are measured | blocked | Same | PR1 lane 4, as CC-1 |
 
 ### Persistence and distribution
 
-| ID | Behavior | Status | Evidence |
-| --- | --- | --- | --- |
-| PS-1 | Acknowledged assignments survive kill -9 | passed | `TestJournalKeepsAcknowledgedAssignmentsAcrossKill9`; `evidence/PR1/storage/storage-comparison.json` |
-| PS-2 | Concurrent first requests receive one account | passed | Same test and comparison |
-| PS-3 | A second writer process is refused | passed | Same test and comparison |
-| PS-4 | Torn tail truncates; corrupt or incomplete interior records fail closed | passed | `TestJournalTruncatesTornFinalRecord`, `TestJournalRefusesCorruptInteriorRecord` |
-| PS-7 | A write or sync error stops acknowledgments until recovery, and no acknowledgment disagrees with replay | passed | `TestJournalStopsAcknowledgingAfterFailedSync`, `TestJournalRecoversFromPartialWrite` |
-| PS-5 | Durability across OS crash or power loss | blocked | No power-cut rig. Relies on `F_FULLFSYNC` and `fsync`. |
-| PS-6 | Storage behavior on Linux | blocked | No Linux environment in PR1 |
-| DS-1 | Pinned source build with an explicit Go prerequisite | passed | `go.mod`, `go.sum`; `toolchain/go-toolchain.json` in the store |
-| DS-2 | SDK license and version requirement recorded | passed | Pinned SDK table above |
-| DS-3 | Offline build and test from the prepared module cache | passed | `evidence/PR1/unit-<head>/go.log` |
+| ID | Behavior | Status | Evidence | Owner |
+| --- | --- | --- | --- | --- |
+| PS-1 | Acknowledged assignments survive kill -9 | passed | `TestJournalKeepsAcknowledgedAssignmentsAcrossKill9`; `evidence/PR1/storage/storage-comparison.json` | PR1 |
+| PS-2 | Concurrent first requests receive one account | passed | Same test and comparison | PR1 |
+| PS-3 | A second writer process is refused | passed | Same test and comparison | PR1 |
+| PS-4 | Torn tail truncates; corrupt or incomplete interior records fail closed | passed | `TestJournalTruncatesTornFinalRecord`, `TestJournalRefusesCorruptInteriorRecord` | PR1 |
+| PS-7 | A write or sync error stops acknowledgments until recovery, and no acknowledgment disagrees with replay | passed | `TestJournalStopsAcknowledgingAfterFailedSync`, `TestJournalRecoversFromPartialWrite` | PR1 |
+| PS-5 | Durability across OS crash or power loss | blocked | No power-cut rig. Relies on `F_FULLFSYNC` and `fsync`. | PR5: supervision lane records the durability scope; a power-cut check stays out of scope unless a rig exists |
+| PS-6 | Storage behavior on Linux | blocked | No Linux environment in PR1 | PR5: Linux lane runs the journal probes under systemd-user |
+| DS-1 | Pinned source build with an explicit Go prerequisite | passed | `go.mod`, `go.sum`; `toolchain/go-toolchain.json` in the store | PR1 |
+| DS-2 | SDK license and version requirement recorded | passed | Pinned SDK table above | PR1 |
+| DS-3 | Offline build and test from the prepared module cache | passed | `evidence/PR1/unit-<head>/go.log` | PR1 |
