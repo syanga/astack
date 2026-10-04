@@ -165,3 +165,89 @@ func TestPaidUseWithoutAnotherAccountRefuses(t *testing.T) {
 		t.Fatalf("inference attempts %d, want 1: none after paid use", n)
 	}
 }
+
+func TestDisabledResponseFromAnAttemptStartedBeforePaidUseDoesNotClearIt(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	t0 := time.Now()
+	e.clock.set(t0)
+	e.start()
+	e.send(msg{Session: sessionID(1)})
+	entered, release := make(chan struct{}), make(chan struct{})
+	e.upstream.script("acct-a",
+		reply{Header: map[string]string{"anthropic-ratelimit-unified-overage-status": "rejected"}, Before: func() {
+			close(entered)
+			<-release
+			e.clock.set(t0.Add(3 * time.Minute))
+		}},
+		reply{Header: map[string]string{"anthropic-ratelimit-unified-overage-in-use": "true"}})
+
+	e.clock.set(t0.Add(time.Minute))
+	slow := make(chan result, 1)
+	go func() { slow <- e.send(msg{Session: sessionID(1)}) }()
+	<-entered
+	e.clock.set(t0.Add(2 * time.Minute))
+	paid := e.send(msg{Session: sessionID(1)})
+	close(release)
+	disabled := <-slow
+	e.clock.set(t0.Add(4 * time.Minute))
+	next := e.send(msg{Session: sessionID(1)})
+
+	if paid.Status != 200 || disabled.Status != 200 {
+		t.Fatalf("got %d and %d, want both responses delivered", paid.Status, disabled.Status)
+	}
+	if next.Status != http.StatusServiceUnavailable || !strings.Contains(next.ErrMsg, "paid use") {
+		t.Fatalf("next request got %d %q, want 503 naming paid use: the disabled response may describe the account before the paid use", next.Status, next.ErrMsg)
+	}
+}
+
+func TestEnabledSettingsReadInFlightOutranksAnEarlierDisabledResponse(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	e.cfg.OverageCheckEvery = Duration(50 * time.Millisecond)
+	t0 := time.Now()
+	e.clock.set(t0)
+	e.start()
+	e.send(msg{Session: sessionID(1)})
+	entered, release := make(chan struct{}), make(chan struct{})
+	e.clock.set(t0.Add(time.Minute))
+	e.upstream.setUsage("acct-a", usageReply{Enabled: boolPtr(true), Before: func() {
+		close(entered)
+		<-release
+		e.upstream.setUsage("acct-a", usageReply{Status: http.StatusInternalServerError})
+		e.clock.set(t0.Add(3 * time.Minute))
+	}})
+
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no settings read started")
+	}
+	e.clock.set(t0.Add(2 * time.Minute))
+	e.upstream.script("acct-a", reply{Header: map[string]string{"anthropic-ratelimit-unified-overage-status": "rejected"}})
+	during := e.send(msg{Session: sessionID(1)})
+	close(release)
+	deadline := time.Now().Add(5 * time.Second)
+	for !hasEnabledRead(e) {
+		if time.Now().After(deadline) {
+			t.Fatal("the settings read did not finish")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	e.clock.set(t0.Add(4 * time.Minute))
+	next := e.send(msg{Session: sessionID(1)})
+
+	if during.Status != 200 {
+		t.Fatalf("request during the read got %d, want 200", during.Status)
+	}
+	if next.Status != http.StatusServiceUnavailable || !strings.Contains(next.ErrMsg, "paid overflow enabled") {
+		t.Fatalf("next request got %d %q, want 503 naming enabled paid overflow: the read may have seen the setting after the response did", next.Status, next.ErrMsg)
+	}
+}
+
+func hasEnabledRead(e *env) bool {
+	for _, ev := range e.events() {
+		if ev.Kind == "overage_read" && ev.Overage == router.OverageEnabled {
+			return true
+		}
+	}
+	return false
+}

@@ -208,8 +208,9 @@ func (s *Service) observeHeaders(account router.AccountID, h http.Header, start,
 		s.router.Observe(account, start, obs)
 	}
 	if state, ok := overageFrom(h); ok {
-		s.router.ObserveOverage(account, state, at)
-		s.overage.note(account, state, at, "response")
+		stamp := readingStamp(state, start, at)
+		s.router.ObserveOverage(account, state, stamp)
+		s.overage.note(account, state, stamp, "response")
 		if state == router.OveragePaidUse {
 			s.events.emit(Event{At: at, Kind: "paid_use_observed", Account: account, Overage: state})
 		}

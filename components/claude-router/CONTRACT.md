@@ -414,7 +414,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | RP-16 | Credential rotation or an account-set change while requests are in flight is free of SDK races | blocked | Same reconciliation path as the startup race. PR3 removes that path while serving: without a file watcher, a credential or account change applies only by restart, which turns it into RP-20. `TestStartWithEnrolledAccountsUnderLoad` rotates a credential across restarts under concurrent load under `-race` (`evidence/PR3/rp20-e01433b/`). The SDK's own token refresh still writes the auth while serving. It dials `platform.claude.com`, so no offline probe drives it. | PR3 attended live lane (`reports/PR3-live-runbook.md`): a `-race` build refreshes a token at start and serves both accounts |
 | RP-17 | The router's transport observes every upstream attempt and ties it to its call, with no proxy in effect | passed | `Upstream.AttemptsFor` assertions in `TestPinnedRetriesStayOnSelectedAccount`, `TestNonStreamingPinnedRetriesStayOnSelectedAccount`, `TestPinnedExecutorPostureMakesOneAttemptPerCall`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover`, `TestFailureSignalsClassifyDistinctly`. Streaming and non-streaming paths; the refresh redispatch path is RP-5b. | PR1 |
 | RP-18 | A router-supplied transport in place of the SDK's uTLS transport is accepted upstream | blocked | Needs the user's attended login for a live request | PR3 attended live lane (`reports/PR3-live-runbook.md`): serves requests through the router transport without upstream rejection |
-| RP-19 | The SDK's request-scoped failures classify separately and are not retried | passed | `TestRequestScopedRefusalIsReportedWithoutRetry` sends `"speed":"fast"` through the SDK executor. The upstream refuses with the fast-mode credits 429, the SDK returns a request-scoped error, and the router classifies it `request_scoped`, answers once with `x-should-retry: false`, and keeps the account usable. | PR3 |
+| RP-19 | The SDK's request-scoped failures classify separately and are not retried | passed | `TestRequestScopedRefusalIsReportedWithoutRetry` sends `"speed":"fast"` through the SDK executor. The upstream refuses with the fast-mode credits 429, the SDK returns a request-scoped error, and the router classifies it `request_scoped`, answers once with `x-should-retry: false`, and keeps the account usable. `TestRequestScopedErrorAfterASuccessfulAttemptIsNotSentAgain`: after an upstream 200, a request-scoped SDK error is answered once, with one upstream attempt. | PR3 |
 | RP-20 | Service startup with enrolled accounts is free of SDK data races | failed | `evidence/PR1/sdk/startup-race-before-mitigation.log`, `evidence/PR1/unit-6166c8c/go.log`. The racing accesses are SDK-internal, so a router barrier cannot serialize them. PR3 mitigation: no file watcher, so the SDK's auth-update consumer runs but nothing feeds it, and the client listener opens only after every account is registered and SDK account state has been quiet for 250 ms. `TestStartWithEnrolledAccountsUnderLoad` passed 50 of 50 starts under `-race`, each followed at once by 16 requests from 4 concurrent clients, with a credential rotated before each restart and no race reported (`evidence/PR3/rp20-e01433b/`; earlier runs `rp20-923bed9/` and `rp20-845ae3f/`). Residual: the SDK's token auto-refresh starts before startup model registration, so an access token that expired while the service was down can race it. The quiet period is a heuristic. | Upstream SDK fix, then the same probe passes repeatedly |
 
 | ID | Client behavior | Terminal | Agent SDK (T3) | Evidence | Owner |
@@ -823,15 +823,22 @@ refresh redispatch (RP-5b).
 | `reject` | 400 `invalid_request_error`, `x-should-retry: false` |
 
 A failure before output goes to `Router.Report` with the class from
-`classify`. It reads the status of the call's last attempt at the transport,
-then the SDK error's scope, then that attempt's headers, in this order:
+`classify`. It reads the status and headers of the call's last attempt at
+the transport, and the SDK error's status and scope:
 
-1. 401 or 403 is `auth`, and 408 or 5xx is `transient`, whatever the SDK's
-   scope. In fast mode the SDK marks every failure request-scoped, so this
-   order keeps an upstream 401 from reaching the client as 401.
-2. An SDK request-scoped error is `request_scoped`. It is answered at once
-   with the upstream status and message and `x-should-retry: false`.
-3. A 429 is `exhausted`, `model_limit`, or `throttle` from the attempt's own
+1. When that attempt itself failed (status 400 or above), its status decides
+   first: 401 or 403 is `auth`, and 408 or 5xx is `transient`, whatever the
+   SDK's scope. In fast mode the SDK marks every failure request-scoped, so
+   this order keeps an upstream 401 from reaching the client as 401.
+2. Otherwise the upstream answered, and the failure is the SDK's own. A
+   request-scoped error is `request_scoped` before any status check, so a
+   generation the upstream already completed is never sent again. The SDK
+   gives such an error status 500 when it carries none
+   (`sdk/api/handlers/handlers_execution.go:358-361`).
+3. Otherwise a request-scoped error is `request_scoped`. Either way it is
+   answered at once with the upstream status and message and
+   `x-should-retry: false`.
+4. A 429 is `exhausted`, `model_limit`, or `throttle` from the attempt's own
    headers.
 
 Transient and throttle failures retry on the same account after 250 ms, then
@@ -843,9 +850,15 @@ at most 3 times, and the SDK can add one same-account redispatch after a 401
 sending it, and the service answers 503. It also refuses an attempt for any
 account but the one the call is pinned to. Before a response reaches the
 client, the service checks that the transport saw at least one attempt for
-the call, all on the pinned account, and otherwise answers 502. Because every
-router-made failure answer carries `x-should-retry: false`, a client does not
-resend it, so client retries do not multiply upstream attempts.
+the call, all on the pinned account, and otherwise answers 502.
+
+The cap is per client HTTP request. Every router-made HTTP failure answer
+carries `x-should-retry: false`, which a client honors. Two answers do not
+stop client retries: an SSE `error` event after the response committed,
+which Claude Code 2.1.285 retries for `overloaded_error`, and the local 429,
+which clients wait through and resend. Each resend is a new request with its
+own cap. A caller that needs a bound across requests sets
+`CLAUDE_CODE_MAX_RETRIES=0`, as the live runbook does.
 
 ### Streams
 
@@ -894,11 +907,28 @@ unknown state is refused. A usage-read 401 does not mark the account as
 needing login: right after a start the read can run before the SDK's startup
 refresh, and only a restart would clear the mark.
 
-Timestamp rule (PR2 item N11): a settings read is stamped with the time the
-read started, and a response's headers with the time the response arrived.
-A response that shows paid use therefore never carries an earlier stamp than
-a disabled reading the router already applied, and a read that started
-before a paid-use response arrived cannot clear it.
+Timestamp rule (PR2 item N11): the upstream makes a reading at an unknown
+time between the start of the read or attempt and its arrival. A `disabled`
+reading, which allows dispatch, is stamped with that start. An `enabled` or
+paid-use reading, which blocks dispatch, is stamped with its arrival. This
+applies to settings reads and to response headers alike. Under PR2's ordering
+rules (the latest check wins, and paid use clears only on a `disabled` check
+stamped strictly after it), a reading is then never ordered after another
+that the upstream may have made later:
+- A `disabled` response or read that started before a paid-use response
+  arrived does not clear the paid use, even when it arrives later
+  (`TestDisabledResponseFromAnAttemptStartedBeforePaidUseDoesNotClearIt`).
+- An `enabled` settings read in flight outranks a `disabled` response from
+  an attempt that started during the read
+  (`TestEnabledSettingsReadInFlightOutranksAnEarlierDisabledResponse`).
+- Paid use is never stamped before a `disabled` check the router already
+  applied, because it is stamped at arrival.
+
+Observed paid use does not expire (PR2 at `22d4342`): a later `enabled`
+check puts it back in force after a `disabled` check cleared it.
+
+A refusal for an unknown reading names each failed settings read and the
+login command, because a revoked login shows up only as a failed read.
 
 Every upstream response also reports the setting at the time it was served.
 The transport feeds it to `Router.ObserveOverage` before the SDK reads the

@@ -78,7 +78,8 @@ func (o *overageReader) readLocked(ctx context.Context, account router.AccountID
 	o.last[account] = start
 	o.mu.Unlock()
 	state, err := o.fetch(ctx, account)
-	dur := o.s.now().Sub(start).Milliseconds()
+	end := o.s.now()
+	dur := end.Sub(start).Milliseconds()
 	if err != nil {
 		o.mu.Lock()
 		st := o.state[account]
@@ -88,9 +89,22 @@ func (o *overageReader) readLocked(ctx context.Context, account router.AccountID
 		o.s.events.emit(Event{Kind: "overage_read", Account: account, Outcome: "unknown", Detail: err.Error(), DurationMS: &dur})
 		return
 	}
-	o.s.router.ObserveOverage(account, state, start)
-	o.note(account, state, start, "settings")
+	stamp := readingStamp(state, start, end)
+	o.s.router.ObserveOverage(account, state, stamp)
+	o.note(account, state, stamp, "settings")
 	o.s.events.emit(Event{Kind: "overage_read", Account: account, Outcome: "read", Overage: state, DurationMS: &dur})
+}
+
+// readingStamp dates a reading the upstream made at an unknown time between
+// the start of a read or attempt and its arrival. A disabled reading, which
+// allows dispatch, takes the earliest possible time, and a reading that
+// blocks dispatch, enabled or paid use, takes the latest. A reading is then
+// never ordered after another that the upstream may have made later.
+func readingStamp(state router.Overage, start, arrival time.Time) time.Time {
+	if state == router.OverageDisabled {
+		return start
+	}
+	return arrival
 }
 
 func (o *overageReader) note(account router.AccountID, state router.Overage, at time.Time, source string) {
@@ -100,6 +114,12 @@ func (o *overageReader) note(account router.AccountID, state router.Overage, at 
 		return
 	}
 	o.state[account] = overageState{State: state, At: at, Source: source}
+}
+
+func (o *overageReader) readFailure(account router.AccountID) string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.state[account].Failure
 }
 
 func (o *overageReader) snapshot() map[router.AccountID]overageState {

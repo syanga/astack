@@ -30,6 +30,7 @@ type reply struct {
 	NoUsage     bool
 	Hold        bool
 	CleanCut    bool
+	BodyCut     bool
 	Before      func()
 	Body        string
 }
@@ -37,6 +38,7 @@ type reply struct {
 type usageReply struct {
 	Status  int
 	Enabled *bool
+	Before  func()
 }
 
 type seenRequest struct {
@@ -140,6 +142,9 @@ func (u *fakeUpstream) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	switch req.URL.Path {
 	case "/api/oauth/usage":
+		if usage.Before != nil {
+			usage.Before()
+		}
 		if !usageSet {
 			f := false
 			usage = usageReply{Enabled: &f}
@@ -173,10 +178,20 @@ func (u *fakeUpstream) RoundTrip(req *http.Request) (*http.Response, error) {
 		for k, v := range r.Header {
 			h[k] = v
 		}
-		return respond(req, http.StatusOK, h, messageBody(account, r.NoUsage)), nil
+		resp := respond(req, http.StatusOK, h, messageBody(account, r.NoUsage))
+		if r.BodyCut {
+			whole := messageBody(account, r.NoUsage)
+			resp.Body = io.NopCloser(io.MultiReader(strings.NewReader(whole[:len(whole)/2]), errReader{io.ErrUnexpectedEOF}))
+			resp.ContentLength = -1
+		}
+		return resp, nil
 	}
 	return stream(req, account, r, u.ended), nil
 }
+
+type errReader struct{ err error }
+
+func (r errReader) Read([]byte) (int, error) { return 0, r.err }
 
 func errorBody(kind, msg string) string {
 	return fmt.Sprintf(`{"type":"error","error":{"type":%q,"message":%q}}`, kind, msg)

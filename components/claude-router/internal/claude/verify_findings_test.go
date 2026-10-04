@@ -49,6 +49,38 @@ func TestFastModeOverloadIsRetried(t *testing.T) {
 	}
 }
 
+func TestRequestScopedErrorAfterASuccessfulAttemptIsNotSentAgain(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	e.start()
+	e.send(msg{Session: sessionID(1)})
+	e.upstream.script("acct-a", reply{BodyCut: true})
+	b := e.body(msg{Session: sessionID(1), NonStream: true})
+	fast := append(bytes.TrimSuffix(b, []byte("}")), []byte(`,"speed":"fast"}`)...)
+
+	r := e.send(msg{Session: sessionID(1), Body: fast})
+	attempts := len(e.upstream.inference()) - 1
+	next := e.send(msg{Session: sessionID(1)})
+
+	if attempts != 1 {
+		t.Fatalf("the fast request made %d upstream attempts, want 1: an answered attempt is not sent again", attempts)
+	}
+	if r.Status == http.StatusOK || r.Header.Get("X-Should-Retry") != "false" {
+		t.Fatalf("got %d with x-should-retry %q, want a failure the client does not retry", r.Status, r.Header.Get("X-Should-Retry"))
+	}
+	var classes []router.Class
+	for _, ev := range e.events() {
+		if ev.Kind == "attempt_failed" {
+			classes = append(classes, ev.Class)
+		}
+	}
+	if !reflect.DeepEqual(classes, []router.Class{router.ClassRequestScoped}) {
+		t.Fatalf("failure classes %v, want [request_scoped]", classes)
+	}
+	if next.Status != http.StatusOK {
+		t.Fatalf("next request got %d, want 200: the failure says nothing about the account", next.Status)
+	}
+}
+
 func writeRawCredential(t *testing.T, e *env, account string, extra map[string]any) {
 	t.Helper()
 	meta := map[string]any{"type": "claude", "email": account + "@router.invalid", "access_token": "sk-ant-oat01-fake-" + randomHex(8), "expired": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}
@@ -98,6 +130,11 @@ func TestUsageReadAuthFailureIsUnknownNotLogin(t *testing.T) {
 
 	if refused.Status != http.StatusServiceUnavailable || !strings.Contains(refused.ErrMsg, "paid overflow") {
 		t.Fatalf("first request got %d %q, want a refusal for an unknown reading", refused.Status, refused.ErrMsg)
+	}
+	for _, want := range []string{"usage endpoint answered 401", "claude-router login -account acct-a"} {
+		if !strings.Contains(refused.ErrMsg, want) {
+			t.Fatalf("refusal %q does not name the failed read: want %q", refused.ErrMsg, want)
+		}
 	}
 	if after.Status != 200 || after.Text != served("acct-a") {
 		t.Fatalf("after a successful reading got %d %q, want 200 from acct-a", after.Status, after.Text)

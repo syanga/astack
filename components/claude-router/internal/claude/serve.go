@@ -165,7 +165,7 @@ func (s *Service) messages(c *gin.Context) {
 				continue
 			}
 			finish("request", d.Account, d, http.StatusServiceUnavailable, nil)
-			writeError(c, http.StatusServiceUnavailable, "api_error", refuseMessage(d))
+			writeError(c, http.StatusServiceUnavailable, "api_error", s.refuseMessage(d))
 			return
 		case router.Wait:
 			s.answerWait(c, now, d.Until, d.ResetKnown, "claude-router: no account can serve this model now")
@@ -287,16 +287,31 @@ func (s *Service) recheckOverage(ctx context.Context, account router.AccountID) 
 	}
 }
 
-func refuseMessage(d router.Decision) string {
+// refuseMessage names the account and the reason. For an unknown reading it
+// also names each failed settings read, because a revoked login shows up
+// only there: the read fails and the reading stays unknown.
+func (s *Service) refuseMessage(d router.Decision) string {
 	switch d.Reason {
 	case router.ReasonPaidUse:
 		return fmt.Sprintf("claude-router: account %s reported paid use, and no other account can take this conversation; the router does not send it more requests", d.Account)
 	case router.ReasonOverageEnabled:
 		return fmt.Sprintf("claude-router: account %s has paid overflow enabled; the router serves included allowance only", d.Account)
-	case router.ReasonNoVerified:
-		return "claude-router: no account has a fresh reading that paid overflow is disabled"
 	}
-	return fmt.Sprintf("claude-router: account %s has no fresh reading that paid overflow is disabled (%s)", d.Account, d.Reason)
+	msg := "claude-router: no account has a fresh reading that paid overflow is disabled"
+	accounts := make([]router.AccountID, 0, len(s.cfg.Accounts))
+	for _, a := range s.cfg.Accounts {
+		accounts = append(accounts, a.ID)
+	}
+	if d.Reason != router.ReasonNoVerified {
+		msg = fmt.Sprintf("claude-router: account %s has no fresh reading that paid overflow is disabled (%s)", d.Account, d.Reason)
+		accounts = []router.AccountID{d.Account}
+	}
+	for _, a := range accounts {
+		if f := s.overage.readFailure(a); f != "" {
+			msg += fmt.Sprintf("; the last settings read for %s failed (%s), and if its login was revoked, run claude-router login -account %s", a, f, a)
+		}
+	}
+	return msg
 }
 
 func loginMessage(d router.Decision) string {
@@ -359,12 +374,8 @@ func (s *Service) dispatch(c *gin.Context, call, authID string, account router.A
 		if out.Header == nil {
 			out.Header = last.Header
 		}
-		status := out.Status
-		if last.Status >= 400 {
-			status = last.Status
-		}
 		if out.Class == "" {
-			out.Class = classify(status, out.Err, last.Header)
+			out.Class = classify(last.Status, out.Status, out.Err, last.Header)
 		}
 	}
 	return out

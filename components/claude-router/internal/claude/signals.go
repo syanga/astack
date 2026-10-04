@@ -58,18 +58,31 @@ func overageFrom(h http.Header) (router.Overage, bool) {
 }
 
 // classify maps a failure before output to its recovery class from per-call
-// signals only: the SDK error's status and scope, and the headers of the
-// call's own last upstream attempt. It never reads the SDK's passive quota
-// snapshot (RP-15).
-func classify(status int, err error, attempt http.Header) router.Class {
+// signals only: the status and headers of the call's own last upstream
+// attempt, and the SDK error's status and scope. It never reads the SDK's
+// passive quota snapshot (RP-15).
+//
+// When that attempt itself failed, its status decides auth and transient
+// failures before the SDK's scope: in fast mode the SDK marks every failure
+// request-scoped, and an upstream 401 must not reach the client as 401. When
+// the attempt succeeded, the failure is the SDK's own, and a request-scoped
+// error is final, so a completed generation is never sent again.
+func classify(attemptStatus, sdkStatus int, err error, attempt http.Header) router.Class {
+	var scope interface{ IsRequestScoped() bool }
+	requestScoped := errors.As(err, &scope) && scope.IsRequestScoped()
+	status := sdkStatus
+	if attemptStatus >= 400 {
+		status = attemptStatus
+	} else if requestScoped {
+		return router.ClassRequestScoped
+	}
 	switch {
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		return router.ClassAuth
 	case status == http.StatusRequestTimeout || status >= 500:
 		return router.ClassTransient
 	}
-	var requestScoped interface{ IsRequestScoped() bool }
-	if errors.As(err, &requestScoped) && requestScoped.IsRequestScoped() {
+	if requestScoped {
 		return router.ClassRequestScoped
 	}
 	if status == http.StatusTooManyRequests {
