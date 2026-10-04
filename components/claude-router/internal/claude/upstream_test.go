@@ -38,6 +38,7 @@ type reply struct {
 
 type usageReply struct {
 	Status  int
+	Header  map[string]string
 	Enabled *bool
 	Before  func()
 }
@@ -154,7 +155,7 @@ func (u *fakeUpstream) RoundTrip(req *http.Request) (*http.Response, error) {
 			usage = usageReply{Enabled: &f}
 		}
 		if usage.Status != 0 && usage.Status != http.StatusOK {
-			return respond(req, usage.Status, nil, errorBody("not_found_error", "no usage")), nil
+			return respond(req, usage.Status, usage.Header, errorBody("not_found_error", "no usage")), nil
 		}
 		doc := map[string]any{"five_hour": map[string]any{"utilization": 10.0, "resets_at": "2026-10-04T05:00:00Z"}}
 		if usage.Enabled != nil {

@@ -37,6 +37,14 @@ type Options struct {
 	Upstream http.RoundTripper
 	// Now replaces the clock.
 	Now func() time.Time
+	// Refresh replaces the SDK's forced credential refresh,
+	// Manager.ForceRefreshAuth. Its token exchange posts to
+	// platform.claude.com through the SDK's own client, which no test can
+	// redirect.
+	Refresh func(ctx context.Context, core *coreauth.Manager, authID string) (*coreauth.Auth, error)
+	// ReadRetryBase replaces the delay before the first re-read after a
+	// failed settings read.
+	ReadRetryBase time.Duration
 }
 
 // Service is a running router: the embedded SDK, the routing policy, and the
@@ -53,6 +61,8 @@ type Service struct {
 	core      *coreauth.Manager
 	base      *handlers.BaseAPIHandler
 	authIDs   map[router.AccountID]string
+	refresh   func(context.Context, *coreauth.Manager, string) (*coreauth.Auth, error)
+	retryBase time.Duration
 
 	sdkStop context.CancelFunc
 	sdkDone chan error
@@ -100,7 +110,15 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 		now = time.Now
 	}
 
-	s := &Service{cfg: cfg, token: token, now: now, authIDs: map[router.AccountID]string{}}
+	s := &Service{cfg: cfg, token: token, now: now, authIDs: map[router.AccountID]string{}, refresh: opts.Refresh, retryBase: opts.ReadRetryBase}
+	if s.refresh == nil {
+		s.refresh = func(ctx context.Context, core *coreauth.Manager, id string) (*coreauth.Auth, error) {
+			return core.ForceRefreshAuth(ctx, id)
+		}
+	}
+	if s.retryBase <= 0 {
+		s.retryBase = defaultReadRetryBase
+	}
 	defer func() {
 		if err != nil {
 			s.Close()
@@ -127,21 +145,24 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	}
 
 	readCtx, cancelReads := context.WithTimeout(context.Background(), 15*time.Second)
+	failed := make([]error, len(cfg.Accounts))
 	var wg sync.WaitGroup
-	for _, a := range cfg.Accounts {
+	for i, a := range cfg.Accounts {
 		wg.Add(1)
-		go func(id router.AccountID) {
+		go func() {
 			defer wg.Done()
-			s.overage.read(readCtx, id)
-		}(a.ID)
+			failed[i] = s.overage.read(readCtx, a.ID)
+		}()
 	}
 	wg.Wait()
 	cancelReads()
 
 	bg, cancel := context.WithCancel(context.Background())
 	s.bgStop = cancel
-	s.bgDone.Add(1)
-	go s.readOverageEvery(bg, time.Duration(cfg.OverageCheckEvery))
+	for i, a := range cfg.Accounts {
+		s.bgDone.Add(1)
+		go s.readOverage(bg, a.ID, failed[i])
+	}
 
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
@@ -188,19 +209,27 @@ func (s *Service) Close() {
 	}
 }
 
-func (s *Service) readOverageEvery(ctx context.Context, every time.Duration) {
+// readOverage schedules one account's settings reads after the start read,
+// whose result is last: one read per OverageCheckEvery, and after a failed
+// read a re-read with backoff (nextRead).
+func (s *Service) readOverage(ctx context.Context, account router.AccountID, last error) {
 	defer s.bgDone.Done()
-	t := time.NewTicker(every)
-	defer t.Stop()
+	every := time.Duration(s.cfg.OverageCheckEvery)
+	failures := 0
 	for {
+		if last == nil {
+			failures = 0
+		} else {
+			failures++
+		}
+		t := time.NewTimer(nextRead(failures, last, every, s.retryBase))
 		select {
 		case <-ctx.Done():
+			t.Stop()
 			return
 		case <-t.C:
-			for _, a := range s.cfg.Accounts {
-				s.overage.read(ctx, a.ID)
-			}
 		}
+		last = s.overage.read(ctx, account)
 	}
 }
 

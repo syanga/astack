@@ -100,14 +100,23 @@ func newEnv(t *testing.T, accounts ...string) *env {
 
 func (e *env) writeCredential(account string) string {
 	e.t.Helper()
+	token := e.writeCredentialExpiring(account, time.Now().Add(24*time.Hour))
+	e.upstream.bind(token, account)
+	return token
+}
+
+// writeCredentialExpiring writes a credential whose access token the fake
+// upstream does not accept until a test binds it. It has no refresh token,
+// so the SDK's own refresh of it makes no request.
+func (e *env) writeCredentialExpiring(account string, expires time.Time) string {
+	e.t.Helper()
 	token := "sk-ant-oat01-fake-" + account + "-" + randomHex(8)
 	e.tokens[account] = token
-	e.upstream.bind(token, account)
 	payload, _ := json.Marshal(map[string]any{
 		"type":                 "claude",
 		"email":                account + "@router.invalid",
 		"access_token":         token,
-		"expired":              time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
+		"expired":              expires.UTC().Format(time.RFC3339),
 		"skip_account_profile": true,
 	})
 	if err := writePrivate(credentialFile(e.dir, router.AccountID(account)), payload); err != nil {
@@ -118,7 +127,13 @@ func (e *env) writeCredential(account string) string {
 
 func (e *env) start() *Service {
 	e.t.Helper()
-	svc, err := Start(e.cfg, Options{Upstream: e.upstream, Now: e.clock.now})
+	return e.startWith(Options{})
+}
+
+func (e *env) startWith(opts Options) *Service {
+	e.t.Helper()
+	opts.Upstream, opts.Now = e.upstream, e.clock.now
+	svc, err := Start(e.cfg, opts)
 	if err != nil {
 		e.t.Fatalf("start: %v", err)
 	}
