@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -67,7 +68,7 @@ type Service struct {
 // single-attempt executor posture, waits until every enrolled account is
 // registered, reads each account's paid-overflow setting, and only then
 // opens the client-facing listener.
-func Start(cfg Config, opts Options) (s *Service, err error) {
+func Start(cfg Config, opts Options) (_ *Service, err error) {
 	cfg = cfg.withDefaults()
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -98,11 +99,10 @@ func Start(cfg Config, opts Options) (s *Service, err error) {
 		now = time.Now
 	}
 
-	s = &Service{cfg: cfg, token: token, now: now, authIDs: map[router.AccountID]string{}}
+	s := &Service{cfg: cfg, token: token, now: now, authIDs: map[router.AccountID]string{}}
 	defer func() {
 		if err != nil {
 			s.Close()
-			s = nil
 		}
 	}()
 	if s.events, err = openEventLog(filepath.Join(cfg.StateDir, "events.jsonl")); err != nil {
@@ -284,6 +284,9 @@ var (
 func (s *Service) startSDK() error {
 	sdkStartMu.Lock()
 	defer sdkStartMu.Unlock()
+	if v, set := os.LookupEnv("MANAGEMENT_PASSWORD"); set && strings.TrimSpace(v) != "" {
+		return errors.New("MANAGEMENT_PASSWORD is set; it would open the SDK's management routes, which select accounts without the router")
+	}
 	if !log.IsLevelEnabled(log.InfoLevel) {
 		return errors.New("the SDK logger must enable Info entries: startup waits for one; send them to io.Discard instead")
 	}
@@ -362,7 +365,7 @@ func (s *Service) waitRegistered() error {
 	reg := cliproxy.GlobalModelRegistry()
 	last, stableSince := "", time.Now()
 	for time.Now().Before(deadline) {
-		var b strings.Builder
+		var parts []string
 		ids := map[router.AccountID]string{}
 		for _, a := range s.core.List() {
 			if a == nil {
@@ -376,9 +379,10 @@ func (s *Service) waitRegistered() error {
 				continue
 			}
 			ids[account] = a.ID
-			fmt.Fprintf(&b, "%s:%d:%d:%d;", a.ID, a.Generation, a.UpdatedAt.UnixNano(), reg.ClientRegistrationEpoch(a.ID))
+			parts = append(parts, fmt.Sprintf("%s:%d:%d:%d", a.ID, a.Generation, a.UpdatedAt.UnixNano(), reg.ClientRegistrationEpoch(a.ID)))
 		}
-		cur := b.String()
+		sort.Strings(parts)
+		cur := strings.Join(parts, ";")
 		switch {
 		case len(ids) < len(s.cfg.Accounts) || cur != last:
 			last, stableSince = cur, time.Now()

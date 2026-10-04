@@ -415,7 +415,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | RP-17 | The router's transport observes every upstream attempt and ties it to its call, with no proxy in effect | passed | `Upstream.AttemptsFor` assertions in `TestPinnedRetriesStayOnSelectedAccount`, `TestNonStreamingPinnedRetriesStayOnSelectedAccount`, `TestPinnedExecutorPostureMakesOneAttemptPerCall`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover`, `TestFailureSignalsClassifyDistinctly`. Streaming and non-streaming paths; the refresh redispatch path is RP-5b. | PR1 |
 | RP-18 | A router-supplied transport in place of the SDK's uTLS transport is accepted upstream | blocked | Needs the user's attended login for a live request | PR3 attended live lane (`reports/PR3-live-runbook.md`): serves requests through the router transport without upstream rejection |
 | RP-19 | The SDK's request-scoped failures classify separately and are not retried | passed | `TestRequestScopedRefusalIsReportedWithoutRetry` sends `"speed":"fast"` through the SDK executor. The upstream refuses with the fast-mode credits 429, the SDK returns a request-scoped error, and the router classifies it `request_scoped`, answers once with `x-should-retry: false`, and keeps the account usable. | PR3 |
-| RP-20 | Service startup with enrolled accounts is free of SDK data races | failed | `evidence/PR1/sdk/startup-race-before-mitigation.log`, `evidence/PR1/unit-6166c8c/go.log`. The racing accesses are SDK-internal, so a router barrier cannot serialize them. PR3 mitigation: no file watcher, so no auth-update queue, and the client listener opens only after every account is registered and SDK account state has been quiet for 250 ms. `TestStartWithEnrolledAccountsUnderLoad` passed 50 of 50 starts under `-race`, each followed at once by 16 requests from 4 concurrent clients, with a credential rotated before each restart and no race reported (`evidence/PR3/rp20-845ae3f/`). Residual: the SDK's token auto-refresh starts before startup model registration, so an access token that expired while the service was down can race it. The quiet period is a heuristic. | Upstream SDK fix, then the same probe passes repeatedly |
+| RP-20 | Service startup with enrolled accounts is free of SDK data races | failed | `evidence/PR1/sdk/startup-race-before-mitigation.log`, `evidence/PR1/unit-6166c8c/go.log`. The racing accesses are SDK-internal, so a router barrier cannot serialize them. PR3 mitigation: no file watcher, so the SDK's auth-update consumer runs but nothing feeds it, and the client listener opens only after every account is registered and SDK account state has been quiet for 250 ms. `TestStartWithEnrolledAccountsUnderLoad` passed 50 of 50 starts under `-race`, each followed at once by 16 requests from 4 concurrent clients, with a credential rotated before each restart and no race reported (`evidence/PR3/rp20-845ae3f/`). Residual: the SDK's token auto-refresh starts before startup model registration, so an access token that expired while the service was down can race it. The quiet period is a heuristic. | Upstream SDK fix, then the same probe passes repeatedly |
 
 | ID | Client behavior | Terminal | Agent SDK (T3) | Evidence | Owner |
 | --- | --- | --- | --- | --- | --- |
@@ -711,7 +711,7 @@ PR3 adds the client-facing service in `internal/claude` and the
 | Client | `POST /v1/messages` | The routed request. Every route first requires the client token as `x-api-key` or `Authorization: Bearer`, and removes both headers before the SDK sees the request. |
 | Client | `GET /claude-router/status` | Accounts, registration, the last paid-overflow reading and its source, and the number of bound conversations. |
 | Client | anything else, including `count_tokens` | 404 `not_found_error` |
-| SDK | every stock route | 401. The only SDK access provider is `claude-router-deny-all`, set as the exclusive provider. |
+| SDK | every stock route behind the access manager | 401. The only SDK access provider is `claude-router-deny-all`, set as the exclusive provider. The management routes, including `/v0/management/api-call`, which selects credentials itself, exist only with a management secret. The configuration sets none, and the service refuses to start when `MANAGEMENT_PASSWORD` is set. WebSocket authentication (`ws-auth`) stays at its default, on. |
 
 ### Identity
 
@@ -757,8 +757,11 @@ not multiply upstream attempts.
 
 The service holds the response until the first complete SSE event. An
 `error` event first is a failure before output: `overloaded_error` and
-`api_error` are transient, `rate_limit_error` is throttle. Any other first
-event commits the response. After that the service relays every chunk,
+`api_error` are transient, `rate_limit_error` is throttle. An event without
+an `event:` line takes its name from the `type` field of its data, so a
+data-only error counts too. Any other first event, including `ping`,
+commits the response. An error after a `ping` therefore reaches the client,
+which retries it itself (`recovery.json`). After that the service relays every chunk,
 writes an `error` event if the SDK fails, and returns, which ends the chunked
 response cleanly. A client that goes away cancels the SDK call. The stream
 `stop_reason` and `message_stop` are relayed as received. A `stream: false`
@@ -833,11 +836,24 @@ and `stream` are byte-identical. Two SDK changes are allowed:
 
 Two identical client requests reach the upstream with identical bytes.
 
-The SDK changes more in two cases the fixture avoids, because a real client
-does not send them. It drops a `thinking` block whose signature is not a
-structurally valid Claude signature (`internal/signature`), and it removes
-cache breakpoints beyond the API's limit of four. Whether real Claude
-signatures pass unchanged is checked in PR1 lane 4 (CC-1).
+The SDK can change more for request shapes the fixture does not cover. An
+outside review of the SDK source found these paths
+(`internal/runtime/executor/`):
+
+- It drops a `thinking` block whose signature is not a structurally valid
+  Claude signature (`internal/signature`).
+- It removes cache breakpoints beyond the API's limit of four, and removes a
+  `1h` TTL that follows a five-minute breakpoint. Helper and subagent
+  requests can lose TTLs (`claude_executor_execute.go:241`, `:247`).
+- It moves a body `betas` field into the beta header, and can add or drop
+  entries of the `anthropic-beta` header (`claude_executor_request.go:1152`).
+- It deletes empty web-search domain lists.
+- A forced `tool_choice` removes `thinking` and `output_config.effort`.
+- It prepends a billing block to `system` when the request has none
+  (`claude_signing.go:73`).
+
+Whether these paths keep a conversation's prefix stable across turns is not
+tested offline. PR1 lane 4 (CC-1) measures cache reads with real requests.
 
 ### Events and status
 

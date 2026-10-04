@@ -32,7 +32,7 @@ func (s *sseScanner) feed(chunk []byte) []sseEvent {
 			if s.name != "" || len(s.data) > 0 {
 				name := s.name
 				if name == "" {
-					name = "message"
+					name = dataType(bytes.Join(s.data, []byte("\n")))
 				}
 				out = append(out, sseEvent{Name: name, Data: bytes.Join(s.data, []byte("\n"))})
 			}
@@ -85,4 +85,14 @@ func streamErrorType(data []byte) string {
 	}
 	_ = json.Unmarshal(data, &e)
 	return e.Error.Type
+}
+
+func dataType(data []byte) string {
+	var shape struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(data, &shape) == nil && shape.Type != "" {
+		return shape.Type
+	}
+	return "message"
 }

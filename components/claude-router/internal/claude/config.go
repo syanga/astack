@@ -113,6 +113,9 @@ func (c Config) validate() error {
 			return fmt.Errorf("accounts: %q is not a valid account ID (letters, digits, '-', '_', '.')", a.ID)
 		}
 	}
+	if c.OverageFreshFor <= 0 || c.OverageCheckEvery <= 0 {
+		return errors.New("overage_fresh_for and overage_check_every must be positive")
+	}
 	if c.OverageCheckEvery >= c.OverageFreshFor {
 		return errors.New("overage_check_every must be shorter than overage_fresh_for")
 	}

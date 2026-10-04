@@ -26,6 +26,7 @@ type reply struct {
 	Header      map[string]string
 	Events      int
 	StreamError string
+	DataOnly    bool
 	NoUsage     bool
 	Hold        bool
 	Body        string
@@ -225,7 +226,11 @@ func stream(req *http.Request, account string, r reply, ended chan<- time.Time) 
 	events := streamEvents(account, r.NoUsage)
 	go func() {
 		if r.StreamError != "" {
-			_, _ = io.WriteString(pw, "event: error\ndata: "+errorBody(r.StreamError, "scripted")+"\n\n")
+			prefix := "event: error\n"
+			if r.DataOnly {
+				prefix = ""
+			}
+			_, _ = io.WriteString(pw, prefix+"data: "+errorBody(r.StreamError, "scripted")+"\n\n")
 			_ = pw.Close()
 			return
 		}
