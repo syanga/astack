@@ -21,12 +21,8 @@ import (
 )
 
 const (
-	maxRequestBody = 64 << 20
-	// maxRoutingSteps bounds one client request's routing loop: router-owned
-	// retries, one included-only recheck, and migrations together.
-	maxRoutingSteps = 8
-	// unknownResetRetryAfter is the retry-after sent with a local 429 whose
-	// reset is unknown.
+	maxRequestBody         = 64 << 20
+	maxRoutingSteps        = 8
 	unknownResetRetryAfter = 5 * time.Minute
 )
 
@@ -87,24 +83,18 @@ func errorType(status int) string {
 	return "invalid_request_error"
 }
 
-// outcome is how one dispatch on one account ended.
 type outcome struct {
-	// Delivered is true once the router wrote a response to the client.
-	Delivered bool
-	// ClientGone is true when the client went away first.
+	Delivered  bool
 	ClientGone bool
-	// Failure before output, when neither of the above.
-	Status  int
-	Err     error
-	Class   router.Class
-	Message string
-	// Header is the last upstream attempt's response header and AttemptAt its
-	// start, the per-attempt evidence classification reads.
-	Header    http.Header
-	AttemptAt time.Time
-	Attempts  int
-	Result    string
-	Usage     Usage
+	Status     int
+	Err        error
+	Class      router.Class
+	Message    string
+	Header     http.Header
+	AttemptAt  time.Time
+	Attempts   int
+	Result     string
+	Usage      Usage
 }
 
 func (s *Service) messages(c *gin.Context) {
@@ -242,8 +232,6 @@ func (s *Service) messages(c *gin.Context) {
 	writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: request could not be routed")
 }
 
-// upstreamMessage returns the error.message of an Anthropic error body, or
-// the text unchanged.
 func upstreamMessage(text string) string {
 	var e struct {
 		Error struct {
@@ -320,16 +308,11 @@ func (s *Service) answerWait(c *gin.Context, now, until time.Time, known bool, p
 	c.Data(http.StatusTooManyRequests, "application/json", body)
 }
 
-// answerExhausted answers a conversation whose account is exhausted. This
-// build does not migrate on exhaustion, so the conversation waits for its
-// own account's reset.
 func (s *Service) answerExhausted(c *gin.Context, now time.Time, account router.AccountID, model string) {
 	until, known, _ := s.router.BlockedUntil(now, account, model)
 	s.answerWait(c, now, until, known, fmt.Sprintf("claude-router: account %s is exhausted and this build does not move conversations", account))
 }
 
-// dispatch runs one router attempt pinned to authID and relays a success to
-// the client.
 func (s *Service) dispatch(c *gin.Context, call, authID string, account router.AccountID, id Identity, body []byte) outcome {
 	api := claudehandlers.NewClaudeCodeAPIHandler(s.base)
 	ctx, cancel := s.base.GetContextWithCancel(api, c, context.Background())

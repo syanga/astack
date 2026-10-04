@@ -25,8 +25,6 @@ type Identity struct {
 	Stream       bool
 }
 
-// errIdentity is a request the router refuses to place: it answers 400
-// invalid_request_error with x-should-retry: false.
 type errIdentity struct{ msg string }
 
 func (e errIdentity) Error() string { return e.msg }

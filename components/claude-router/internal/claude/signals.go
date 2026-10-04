@@ -16,9 +16,6 @@ func unified(h http.Header, name string) string {
 	return strings.ToLower(strings.TrimSpace(h.Get(unifiedPrefix + name)))
 }
 
-// observationFrom parses the unified rate-limit headers of one response. It
-// returns false when the response carries none, so the caller keeps its
-// previous observation instead of recording an empty one.
 func observationFrom(h http.Header, at time.Time) (router.Observation, bool) {
 	obs := router.Observation{At: at}
 	for _, w := range []struct {
@@ -88,8 +85,6 @@ func classify(status int, err error, attempt http.Header) router.Class {
 	return router.ClassRequestScoped
 }
 
-// classifyStreamError maps an SSE error event that arrived before any
-// output to a recovery class.
 func classifyStreamError(errorType string) router.Class {
 	switch errorType {
 	case "overloaded_error", "api_error":
@@ -102,9 +97,6 @@ func classifyStreamError(errorType string) router.Class {
 	return router.ClassRequestScoped
 }
 
-// exhaustionEvidence is the observation Report needs to confirm exhaustion:
-// the attempt's own windows, plus an unspecified rejected window when the
-// SDK marked the 429 credential-scoped without naming one.
 func exhaustionEvidence(attempt http.Header, at time.Time, class router.Class) router.Observation {
 	obs, _ := observationFrom(attempt, at)
 	obs.At = at

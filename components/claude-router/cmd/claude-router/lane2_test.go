@@ -393,16 +393,16 @@ func TestLane2(t *testing.T) {
 	check("cache_counters_recorded", cacheReads > 0)
 
 	result := map[string]any{
-		"probe":          "PR3.live.2",
-		"sandbox":        "sandbox-exec deny network-outbound except localhost",
-		"binary_sha256":  fileHash(bin),
-		"controls":       controls,
-		"secret_leaks":   leaks,
-		"steps":          l.steps,
-		"upstream_paths": upstreamHosts,
-		"upstream_log":   upLog,
+		"probe":                          "PR3.live.2",
+		"sandbox":                        "sandbox-exec deny network-outbound except localhost",
+		"binary_sha256":                  fileHash(bin),
+		"controls":                       controls,
+		"secret_leaks":                   leaks,
+		"steps":                          l.steps,
+		"upstream_paths":                 upstreamHosts,
+		"upstream_log":                   upLog,
 		"events_with_cache_read_counter": cacheReads,
-		"pass":           !t.Failed(),
+		"pass":                           !t.Failed(),
 	}
 	b, _ := json.MarshalIndent(result, "", "  ")
 	if err := os.WriteFile(out, append(b, '\n'), 0o644); err != nil {

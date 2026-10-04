@@ -2,7 +2,7 @@
 // accounts through the pinned CLIProxyAPI SDK.
 //
 //	claude-router serve -config FILE
-//	claude-router login -state DIR -account ID [-no-browser] [-callback-port N]
+//	claude-router login -state DIR -account ID [-no-browser]
 //	claude-router token -out FILE
 package main
 
@@ -53,7 +53,7 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
   claude-router serve -config FILE
-  claude-router login -state DIR -account ID [-no-browser] [-callback-port N]
+  claude-router login -state DIR -account ID [-no-browser]
   claude-router token -out FILE`)
 	os.Exit(2)
 }
@@ -110,7 +110,6 @@ func login(args []string) error {
 	state := fs.String("state", "", "router state directory")
 	account := fs.String("account", "", "account ID to enroll")
 	noBrowser := fs.Bool("no-browser", false, "print the login URL instead of opening a browser")
-	port := fs.Int("callback-port", 0, "local OAuth callback port (SDK default when 0)")
 	_ = fs.Parse(args)
 	if *state == "" || !filepath.IsAbs(*state) || *account == "" {
 		return errors.New("login: -state (absolute) and -account are required")
@@ -141,8 +140,7 @@ func login(args []string) error {
 	cfg.AuthDir = staging
 	reader := bufio.NewReader(os.Stdin)
 	opts := &sdkauth.LoginOptions{
-		NoBrowser:    *noBrowser,
-		CallbackPort: *port,
+		NoBrowser: *noBrowser,
 		Prompt: func(p string) (string, error) {
 			fmt.Fprint(os.Stderr, p)
 			line, err := reader.ReadString('\n')
@@ -170,7 +168,6 @@ func login(args []string) error {
 	return nil
 }
 
-// token writes a new random client token to a file only its owner can read.
 func token(args []string) error {
 	fs := flag.NewFlagSet("token", flag.ExitOnError)
 	out := fs.String("out", "", "token file to create")

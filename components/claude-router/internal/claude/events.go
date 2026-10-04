@@ -45,7 +45,10 @@ type Usage struct {
 }
 
 func (u *Usage) merge(other Usage) {
-	for _, p := range []struct{ dst **int64; src *int64 }{
+	for _, p := range []struct {
+		dst **int64
+		src *int64
+	}{
 		{&u.InputTokens, other.InputTokens},
 		{&u.OutputTokens, other.OutputTokens},
 		{&u.CacheCreationInputTokens, other.CacheCreationInputTokens},
@@ -62,7 +65,6 @@ func (u Usage) known() bool {
 	return u.InputTokens != nil || u.OutputTokens != nil || u.CacheCreationInputTokens != nil || u.CacheReadInputTokens != nil
 }
 
-// conversationHash is the sanitized form of a conversation key in events.
 func conversationHash(c router.ConversationID) string {
 	if c == "" {
 		return ""

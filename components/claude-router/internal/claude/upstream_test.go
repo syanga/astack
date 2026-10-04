@@ -12,10 +12,6 @@ import (
 	"time"
 )
 
-// fakeUpstream is an in-process Anthropic API for one test. It maps fake
-// access tokens to account names, scripts replies per account, answers the
-// usage endpoint, and records what each request carried. It never sees a
-// real credential.
 type fakeUpstream struct {
 	mu       sync.Mutex
 	accounts map[string]string
@@ -25,22 +21,14 @@ type fakeUpstream struct {
 	ended    chan time.Time
 }
 
-// reply scripts one inference response. The zero value streams a complete
-// message with usage counters.
 type reply struct {
-	Status int
-	Header map[string]string
-	// Events limits a 200 stream to its first Events events, then drops the
-	// connection. Zero streams every event.
-	Events int
-	// StreamError sends an SSE error event of this type as the first event.
+	Status      int
+	Header      map[string]string
+	Events      int
 	StreamError string
-	// NoUsage omits usage counters from the response.
-	NoUsage bool
-	// Hold blocks after Events events until the request context ends.
-	Hold bool
-	// Body replaces an error response body.
-	Body string
+	NoUsage     bool
+	Hold        bool
+	Body        string
 }
 
 type usageReply struct {
@@ -48,7 +36,6 @@ type usageReply struct {
 	Enabled *bool
 }
 
-// seenRequest is one request as the upstream received it.
 type seenRequest struct {
 	Account string
 	Path    string
@@ -85,7 +72,6 @@ func (u *fakeUpstream) setUsage(account string, r usageReply) {
 	u.usage[account] = r
 }
 
-// inference returns the inference requests seen so far.
 func (u *fakeUpstream) inference() []seenRequest {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -275,4 +261,3 @@ func stream(req *http.Request, account string, r reply, ended chan<- time.Time) 
 		Request: req, ProtoMajor: 1, ProtoMinor: 1,
 	}
 }
-

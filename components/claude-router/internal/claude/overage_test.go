@@ -88,8 +88,6 @@ func TestStaleReadingIsRecheckedBeforeDispatch(t *testing.T) {
 	}
 }
 
-// A response reports the overflow setting at the time it was served, so an
-// account in use stays fresh without settings reads.
 func TestResponseHeadersRefreshTheReading(t *testing.T) {
 	e := newEnv(t, "acct-a")
 	t0 := time.Now()

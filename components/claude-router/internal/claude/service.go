@@ -203,9 +203,6 @@ func (s *Service) readOverageEvery(ctx context.Context, every time.Duration) {
 	}
 }
 
-// observeHeaders feeds every upstream response's quota and paid-overflow
-// headers to the router as they arrive. Paid use stops new dispatch to the
-// account before the response that showed it finishes.
 func (s *Service) observeHeaders(account router.AccountID, h http.Header, at time.Time) {
 	if obs, ok := observationFrom(h, at); ok {
 		s.router.Observe(account, obs)
@@ -411,9 +408,6 @@ func writePrivate(path string, data []byte) error {
 	return os.Rename(tmp, path)
 }
 
-// sdkConfigYAML is the single-attempt executor posture from CONTRACT.md:
-// no SDK retries, no bootstrap retries, cooling and session affinity off,
-// and no proxy at any level.
 func sdkConfigYAML(port int, auths string) string {
 	return fmt.Sprintf(`config-version: 8
 server:

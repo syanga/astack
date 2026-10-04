@@ -19,11 +19,8 @@ import (
 // paid-overflow setting, and reading it makes no inference request.
 const usageURL = "https://" + anthropicHost + "/api/oauth/usage"
 
-// minRecheckInterval bounds on-demand settings reads per account.
 const minRecheckInterval = 30 * time.Second
 
-// overageState is the service's own record of an account's last settings
-// read, for status output.
 type overageState struct {
 	State   router.Overage `json:"state,omitempty"`
 	At      time.Time      `json:"at,omitzero"`
@@ -32,9 +29,8 @@ type overageState struct {
 }
 
 type overageReader struct {
-	s  *Service
-	mu sync.Mutex
-	// inFlight serializes reads per account; last bounds on-demand reads.
+	s        *Service
+	mu       sync.Mutex
 	inFlight map[router.AccountID]*sync.Mutex
 	last     map[router.AccountID]time.Time
 	state    map[router.AccountID]overageState
@@ -55,8 +51,6 @@ func (o *overageReader) lock(account router.AccountID) *sync.Mutex {
 	return m
 }
 
-// recheck reads the setting for an account unless a read ran within
-// minRecheckInterval. It reports whether it read.
 func (o *overageReader) recheck(ctx context.Context, account router.AccountID) bool {
 	m := o.lock(account)
 	m.Lock()
@@ -71,7 +65,6 @@ func (o *overageReader) recheck(ctx context.Context, account router.AccountID) b
 	return true
 }
 
-// read reads the setting for an account now.
 func (o *overageReader) read(ctx context.Context, account router.AccountID) {
 	m := o.lock(account)
 	m.Lock()
@@ -121,9 +114,6 @@ func (o *overageReader) snapshot() map[router.AccountID]overageState {
 
 var errNoExtraUsage = errors.New("usage response has no extra_usage")
 
-// fetch reads extra_usage.is_enabled through the router's transport with
-// the account's SDK credential. The error text never includes a token or a
-// response body.
 func (o *overageReader) fetch(ctx context.Context, account router.AccountID) (router.Overage, error) {
 	authID := o.s.authIDs[account]
 	auth, ok := o.s.core.GetByID(authID)

@@ -16,8 +16,6 @@ import (
 
 const anthropicHost = "api.anthropic.com"
 
-// attempt is one upstream request the SDK made for a router call, as seen at
-// the router's transport. It is the evidence of an attempt (RP-17).
 type attempt struct {
 	Account router.AccountID
 	Path    string
@@ -126,14 +124,12 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 	return resp, err
 }
 
-// attempts returns the attempts recorded so far for a call.
 func (t *transport) attempts(call string) []attempt {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return append([]attempt(nil), t.calls[call]...)
 }
 
-// forget drops a finished call's attempts.
 func (t *transport) forget(call string) {
 	t.mu.Lock()
 	delete(t.calls, call)

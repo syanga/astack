@@ -11,8 +11,6 @@ import (
 	"testing"
 )
 
-// claudeCodeHeaders are the headers terminal Claude 2.1.285 sent in the
-// PR1 client captures, minus credentials.
 var claudeCodeHeaders = map[string]string{
 	"Accept":                      "application/json",
 	"Content-Type":                "application/json",
@@ -54,9 +52,6 @@ func rawFields(t *testing.T, body []byte) map[string]json.RawMessage {
 	return m
 }
 
-// billingCCH is the billing attestation in the first system block. The SDK
-// recomputes it over the body it sends, because it rewrites
-// metadata.user_id for the credential.
 var billingCCH = regexp.MustCompile(`cch=[0-9a-f]{5};`)
 
 func metadataUserID(t *testing.T, raw json.RawMessage) map[string]string {
@@ -71,12 +66,6 @@ func metadataUserID(t *testing.T, raw json.RawMessage) map[string]string {
 	return fields
 }
 
-// TestUpstreamReceivesTheClientsCacheablePrefix sends a Claude Code tool
-// turn and compares, byte for byte, every top-level field the upstream
-// receives with what the client sent. The documented credential
-// transformations are the only differences allowed: metadata.user_id's
-// device_id and account_uuid, and the billing attestation over the
-// rewritten body.
 func TestUpstreamReceivesTheClientsCacheablePrefix(t *testing.T) {
 	body, err := os.ReadFile("../../testdata/requests/claude-code-tool-turn.json")
 	if err != nil {

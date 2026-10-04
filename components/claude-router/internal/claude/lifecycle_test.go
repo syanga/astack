@@ -6,11 +6,10 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+
+	"github.com/syanga/astack/components/claude-router/internal/router"
 )
 
-// startRounds is how many times TestStartWithEnrolledAccountsUnderLoad
-// restarts the service. CLAUDE_ROUTER_START_ROUNDS raises it for the RP-20
-// evidence run.
 func startRounds(t *testing.T) int {
 	if v, err := strconv.Atoi(os.Getenv("CLAUDE_ROUTER_START_ROUNDS")); err == nil && v > 0 {
 		return v
@@ -18,12 +17,6 @@ func startRounds(t *testing.T) int {
 	return 3
 }
 
-// TestStartWithEnrolledAccountsUnderLoad starts the service with enrolled
-// accounts already on disk, then sends concurrent requests the moment Start
-// returns, in each of several rounds on the same state. Under -race it is
-// the probe for the SDK's startup registration race (RP-20). Each round
-// also rewrites one credential before the restart, so a rotation applied by
-// restart runs under the same load (RP-16).
 func TestStartWithEnrolledAccountsUnderLoad(t *testing.T) {
 	e := newEnv(t, "acct-a", "acct-b", "acct-c")
 	rounds := startRounds(t)
@@ -74,18 +67,31 @@ func TestStartWithEnrolledAccountsUnderLoad(t *testing.T) {
 	}
 }
 
-// TestAccountFileAddedWhileServingIsNotLoaded shows the service has no file
-// watcher: a credential added under a running service is not registered,
-// so the account set changes only by restart (RP-10, RP-16).
 func TestAccountFileAddedWhileServingIsNotLoaded(t *testing.T) {
 	e := newEnv(t, "acct-a")
 	e.start()
 	e.writeCredential("acct-x")
 	e.send(msg{Session: sessionID(1)})
+	whileServing := e.svc.authIDs["acct-x"] != "" || loaded(e.svc, "acct-x.json")
 
-	for _, a := range e.svc.core.List() {
-		if a != nil && baseName(a.FileName) == "acct-x.json" {
-			t.Fatal("the SDK loaded a credential added while the service was running")
+	e.svc.Close()
+	e.cfg.Accounts = append(e.cfg.Accounts, router.Account{ID: "acct-x", Capacity: 1})
+	e.start()
+	afterRestart := loaded(e.svc, "acct-x.json")
+
+	if whileServing {
+		t.Fatal("the SDK loaded a credential added while the service was running")
+	}
+	if !afterRestart {
+		t.Fatal("the restarted service did not load the enrolled credential")
+	}
+}
+
+func loaded(s *Service, file string) bool {
+	for _, a := range s.core.List() {
+		if a != nil && baseName(a.FileName) == file {
+			return true
 		}
 	}
+	return false
 }

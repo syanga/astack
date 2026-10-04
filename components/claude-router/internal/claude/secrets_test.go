@@ -9,9 +9,6 @@ import (
 	"testing"
 )
 
-// TestNoSecretInStatusEventsOrLogs drives successes, failures, refusals, a
-// paid-use response, and settings reads, then searches every operator-facing
-// output for the client token and each account's access token.
 func TestNoSecretInStatusEventsOrLogs(t *testing.T) {
 	e := newEnv(t, "acct-a", "acct-b", "acct-c")
 	e.upstream.setUsage("acct-c", usageReply{Status: http.StatusNotFound})
@@ -54,10 +51,10 @@ func TestNoSecretInStatusEventsOrLogs(t *testing.T) {
 		secrets[account+" token suffix"] = token[len(token)-16:]
 	}
 	outputs := map[string]string{
-		"status":      string(statusJSON),
-		"events":      string(events),
-		"SDK logs":    sdkLogs.String(),
-		"SDK config":  string(sdkConfig),
+		"status":     string(statusJSON),
+		"events":     string(events),
+		"SDK logs":   sdkLogs.String(),
+		"SDK config": string(sdkConfig),
 	}
 	if !strings.Contains(outputs["SDK logs"], watcherStartedMessage) {
 		t.Fatal("the test captured no SDK log output, so the log check would be vacuous")

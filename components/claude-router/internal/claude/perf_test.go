@@ -216,14 +216,14 @@ func TestPerf(t *testing.T) {
 	}
 	added := hd.P95 - pd.P95
 	rule := map[string]any{
-		"added_p95_ms":               added,
-		"added_p95_budget_ms":        50,
-		"head_p95_ms":                hd.P95,
-		"head_p95_budget_ms":         200,
-		"healthy_migrations":         migrations,
-		"healthy_migrations_budget":  0,
-		"upstream_p95_within_10ms":   upstreamTimes(headUp).P95 <= 10 && upstreamTimes(parent.Upstream).P95 <= 10,
-		"pass":                       added <= 50 && hd.P95 <= 200 && migrations == 0 && pd.Failed == 0 && hd.Failed == 0,
+		"added_p95_ms":              added,
+		"added_p95_budget_ms":       50,
+		"head_p95_ms":               hd.P95,
+		"head_p95_budget_ms":        200,
+		"healthy_migrations":        migrations,
+		"healthy_migrations_budget": 0,
+		"upstream_p95_within_10ms":  upstreamTimes(headUp).P95 <= 10 && upstreamTimes(parent.Upstream).P95 <= 10,
+		"pass":                      added <= 50 && hd.P95 <= 200 && migrations == 0 && pd.Failed == 0 && hd.Failed == 0,
 	}
 	writeJSON(t, filepath.Join(outDir, "perf.json"), map[string]any{
 		"probe": "PR3.perf", "environment": env_(),

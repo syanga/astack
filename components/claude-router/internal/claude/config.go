@@ -141,8 +141,6 @@ func validAccountID(id string) bool {
 	return true
 }
 
-// readClientToken reads the client token and refuses a file that other
-// users can read or a token too short to resist guessing.
 func readClientToken(path string) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil {

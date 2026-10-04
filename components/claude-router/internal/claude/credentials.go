@@ -28,9 +28,6 @@ func credentialFile(stateDir string, id router.AccountID) string {
 
 func authDir(stateDir string) string { return filepath.Join(stateDir, "auths") }
 
-// checkCredentials refuses to start unless every enrolled account has a
-// Claude OAuth credential without overrides, and the SDK auth directory
-// holds no credential for an account that is not enrolled.
 func checkCredentials(stateDir string, accounts []router.Account) error {
 	enrolled := map[string]bool{}
 	for _, a := range accounts {

@@ -44,7 +44,6 @@ func (l *lockedBuffer) String() string {
 	return l.b.String()
 }
 
-// clock is a settable test clock.
 type clock struct {
 	mu sync.Mutex
 	t  time.Time
@@ -65,9 +64,6 @@ func (c *clock) set(t time.Time) {
 	c.mu.Unlock()
 }
 
-// env is one router state directory with its client token, fake
-// credentials, and fake upstream, so a test can restart the service on the
-// same state.
 type env struct {
 	t        *testing.T
 	dir      string
@@ -102,8 +98,6 @@ func newEnv(t *testing.T, accounts ...string) *env {
 	return e
 }
 
-// writeCredential writes a fake OAuth credential. Rewriting one models a
-// rotated access token.
 func (e *env) writeCredential(account string) string {
 	e.t.Helper()
 	token := "sk-ant-oat01-fake-" + account + "-" + randomHex(8)
@@ -139,8 +133,6 @@ func (e *env) restart() *Service {
 	return e.start()
 }
 
-// msg is one client request. Session is the x-claude-code-session-id
-// header; MetaSession, when set, is the session in metadata.user_id.
 type msg struct {
 	Session     string
 	MetaSession string
@@ -152,7 +144,6 @@ type msg struct {
 	Body        []byte
 }
 
-// result is the client's view of one response.
 type result struct {
 	Status  int
 	Header  http.Header

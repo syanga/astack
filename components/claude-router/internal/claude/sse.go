@@ -6,21 +6,17 @@ import (
 	"strings"
 )
 
-// sseEvent is one complete server-sent event.
 type sseEvent struct {
 	Name string
 	Data []byte
 }
 
-// sseScanner splits a byte stream into server-sent events across arbitrary
-// chunk boundaries.
 type sseScanner struct {
 	buf  []byte
 	name string
 	data [][]byte
 }
 
-// feed consumes a chunk and returns the events it completed.
 func (s *sseScanner) feed(chunk []byte) []sseEvent {
 	s.buf = append(s.buf, chunk...)
 	var out []sseEvent
@@ -49,8 +45,6 @@ func (s *sseScanner) feed(chunk []byte) []sseEvent {
 	}
 }
 
-// usageFrom reads the usage counters of a message_start, message_delta, or
-// non-streaming message body. Missing counters stay nil.
 func usageFrom(name string, data []byte) (Usage, bool) {
 	var shape struct {
 		Usage   *usageJSON `json:"usage"`

@@ -186,9 +186,6 @@ func TestRestartKeepsBindings(t *testing.T) {
 	}
 }
 
-// A credential changes only while the service is stopped: the SDK writes
-// its in-memory credential back to the file after requests, so a file
-// rewritten under a running service is overwritten.
 func TestRotatedCredentialAppliesAtRestartOnTheSameAccount(t *testing.T) {
 	e := newEnv(t, "acct-a", "acct-b")
 	e.start()
@@ -284,8 +281,6 @@ func TestExhaustionIsAnsweredLocallyWithoutMoving(t *testing.T) {
 	}
 }
 
-// A headerless 429 after an exhaustion is generic throttling: classification
-// reads the attempt's own headers, never the SDK's older snapshot (RP-15).
 func TestHeaderlessThrottleAfterExhaustionRetries(t *testing.T) {
 	e := newEnv(t, "acct-a")
 	e.start()
