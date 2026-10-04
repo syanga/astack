@@ -1430,3 +1430,148 @@ func TestCommitAfterFailStopRefusesEveryDecisionKind(t *testing.T) {
 		t.Fatalf("Commit of a saved dispatch after fail-stop returned %+v, %v; want ErrFailed and no account", got, errCommit)
 	}
 }
+
+func TestDelayedDisabledCheckDoesNotClearPaidUseAfterAnEnabledCheck(t *testing.T) {
+	cases := []struct {
+		name       string
+		paidUse    bool
+		wantReason Reason
+	}{
+		{"after paid use", true, ReasonPaidUse},
+		{"control without paid use", false, ReasonOverageEnabled},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, DefaultConfig(), accts(a, 1.0)...)
+			h.manualOverage = true
+			h.r.ObserveOverage(a, OverageDisabled, t0)
+			h.route(t0, req("conv"))
+			if tc.paidUse {
+				h.r.ObserveOverage(a, OveragePaidUse, t0.Add(time.Minute))
+			}
+			h.r.ObserveOverage(a, OverageEnabled, t0.Add(3*time.Minute))
+			h.r.ObserveOverage(a, OverageDisabled, t0.Add(2*time.Minute))
+
+			d := h.route(t0.Add(4*time.Minute), req("conv"))
+
+			if d.Kind != Refuse || d.Account != a || d.Reason != tc.wantReason {
+				t.Fatalf("with the latest check enabled at +3m and a delayed disabled check stamped +2m got %+v, want refuse on %s for %s", d, a, tc.wantReason)
+			}
+		})
+	}
+}
+
+func TestPaidUseClearsWhenTheLatestCheckIsALaterDisabledCheck(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0)...)
+	h.manualOverage = true
+	h.r.ObserveOverage(a, OverageDisabled, t0)
+	h.route(t0, req("conv"))
+	h.r.ObserveOverage(a, OveragePaidUse, t0.Add(time.Minute))
+	h.r.ObserveOverage(a, OverageEnabled, t0.Add(3*time.Minute))
+	h.r.ObserveOverage(a, OverageDisabled, t0.Add(2*time.Minute))
+
+	h.r.ObserveOverage(a, OverageDisabled, t0.Add(5*time.Minute))
+	resumed := h.route(t0.Add(5*time.Minute), req("conv"))
+
+	if resumed.Kind != Dispatch || resumed.Account != a {
+		t.Fatalf("after a disabled check at +5m, the latest check, got %+v, want dispatch on %s", resumed, a)
+	}
+}
+
+func TestEqualTimeRejectionsKeepTheLaterReset(t *testing.T) {
+	unknown := Window{Kind: FiveHour, Rejected: true}
+	known := rejected(FiveHour, t0.Add(2*time.Hour))
+	for name, order := range map[string][]Window{"unknown first": {unknown, known}, "known first": {known, unknown}} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+			h.route(t0, req("conv"))
+			for _, w := range order {
+				h.observe(a, Observation{At: t0, Windows: []Window{w}})
+			}
+
+			afterRecheck := h.route(t0.Add(6*time.Minute), req("conv"))
+
+			if afterRecheck.Kind != Migrate || afterRecheck.From != a || afterRecheck.Account != b {
+				t.Fatalf("at +6m, past the unknown-reset recheck but before the reported reset, got %+v, want migration %s to %s", afterRecheck, a, b)
+			}
+		})
+	}
+}
+
+func TestDelayedRejectionOlderThanAnExpiredNewerOneIsIgnored(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+	h.route(t0, req("conv"))
+	h.observe(a, Observation{At: t0.Add(time.Minute), Windows: []Window{rejected(FiveHour, t0.Add(2*time.Minute))}})
+	h.observe(a, Observation{At: t0.Add(3 * time.Minute), Windows: []Window{usage(Weekly, 0.2, t0.Add(48*time.Hour))}})
+
+	h.observe(a, Observation{At: t0, Windows: []Window{rejected(FiveHour, t0.Add(time.Hour))}})
+	d := h.route(t0.Add(4*time.Minute), req("conv"))
+
+	if d.Kind != Dispatch || d.Account != a {
+		t.Fatalf("a delayed rejection stamped before a newer, already reset rejection of the same window gave %+v, want dispatch on %s", d, a)
+	}
+}
+
+func TestPaidUseOutcomeDoesNotDependOnCheckArrivalOrder(t *testing.T) {
+	for name, order := range map[string][]Overage{"in time order": {OverageDisabled, OverageEnabled}, "disabled delayed": {OverageEnabled, OverageDisabled}} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+			h.manualOverage = true
+			h.r.ObserveOverage(a, OverageDisabled, t0)
+			h.r.ObserveOverage(b, OverageDisabled, t0)
+			h.route(t0, req("conv"))
+			h.r.ObserveOverage(a, OveragePaidUse, t0.Add(time.Minute))
+			stamp := map[Overage]time.Time{OverageDisabled: t0.Add(2 * time.Minute), OverageEnabled: t0.Add(3 * time.Minute)}
+			for _, state := range order {
+				h.r.ObserveOverage(a, state, stamp[state])
+			}
+			h.r.ObserveOverage(b, OverageDisabled, t0.Add(4*time.Minute))
+
+			d := h.route(t0.Add(4*time.Minute), req("conv"))
+
+			if d.Kind != Migrate || d.From != a || d.Account != b || d.Reason != ReasonOverageObserved {
+				t.Fatalf("after paid use at +1m, disabled at +2m, and enabled at +3m got %+v, want migration %s to %s for overage_observed", d, a, b)
+			}
+		})
+	}
+}
+
+func TestEqualTimeChecksKeepTheEnabledState(t *testing.T) {
+	for name, order := range map[string][]Overage{"enabled first": {OverageEnabled, OverageDisabled}, "disabled first": {OverageDisabled, OverageEnabled}} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, DefaultConfig(), accts(a, 1.0)...)
+			h.manualOverage = true
+			h.r.ObserveOverage(a, OverageDisabled, t0)
+			h.route(t0, req("conv"))
+			for _, state := range order {
+				h.r.ObserveOverage(a, state, t0.Add(time.Minute))
+			}
+
+			d := h.route(t0.Add(2*time.Minute), req("conv"))
+
+			if d.Kind != Refuse || d.Account != a || d.Reason != ReasonOverageEnabled {
+				t.Fatalf("with enabled and disabled checks both stamped +1m got %+v, want refuse on %s for overage_enabled", d, a)
+			}
+		})
+	}
+}
+
+func TestWindowRecordsOlderThanAWeeklyPeriodArePruned(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0)...)
+	for i := range 50 {
+		at := t0.Add(time.Duration(i) * time.Minute)
+		h.observe(a, Observation{At: at, Windows: []Window{
+			{Kind: Weekly, Models: []string{fmt.Sprintf("model-%d", i)}, Utilization: ptr(1), Rejected: i%2 == 1, ResetsAt: at.Add(time.Hour)},
+		}})
+	}
+
+	later := t0.Add(Weekly.Period() + time.Hour)
+	h.observe(a, Observation{At: later, Windows: []Window{usage(FiveHour, 0.1, later.Add(4*time.Hour))}})
+	h.r.mu.RLock()
+	kept := len(h.r.accounts[0].allowedAt) + len(h.r.accounts[0].rejections)
+	h.r.mu.RUnlock()
+
+	if kept != 1 {
+		t.Fatalf("a weekly period after 50 model windows were reported, %d window records remain, want 1 for the live five-hour window", kept)
+	}
+}
