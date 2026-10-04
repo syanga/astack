@@ -78,6 +78,52 @@ func TestClientTokenIsRequired(t *testing.T) {
 	}
 }
 
+func TestClaudeCodePreconnectIsAnsweredWithoutAuthentication(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	e.start()
+	eventsBefore := len(e.events())
+	usageBefore := len(e.upstream.usageReads())
+
+	probe, _ := http.NewRequest(http.MethodHead, "http://"+e.svc.Addr()+"/api/hello", nil)
+	if r := readResult(t, probe); r.Status != http.StatusOK {
+		t.Fatalf("HEAD /api/hello without credentials answered %d, want 200", r.Status)
+	}
+	if got := e.events()[eventsBefore:]; len(got) != 0 {
+		t.Fatalf("the preconnect recorded events %+v, want none", got)
+	}
+	if n := len(e.upstream.inference()); n != 0 || len(e.upstream.usageReads()) != usageBefore {
+		t.Fatalf("the preconnect reached the upstream (%d inference requests)", n)
+	}
+
+	for _, rt := range []struct{ method, path string }{{http.MethodGet, "/api/hello"}, {http.MethodHead, "/v1/messages"}, {http.MethodHead, "/api/hello/x"}} {
+		req, _ := http.NewRequest(rt.method, "http://"+e.svc.Addr()+rt.path, nil)
+		if r := readResult(t, req); r.Status != http.StatusUnauthorized {
+			t.Fatalf("%s %s without credentials answered %d, want 401", rt.method, rt.path, r.Status)
+		}
+	}
+}
+
+func TestModelAliasesTheAPIAcceptsAreServed(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	e.start()
+
+	sonnet := e.send(msg{Session: sessionID(1), Model: "claude-sonnet-4-5"})
+	haiku := e.send(msg{Session: sessionID(1), Model: "claude-haiku-4-5", NonStream: true})
+
+	for name, r := range map[string]result{"claude-sonnet-4-5": sonnet, "claude-haiku-4-5": haiku} {
+		if r.Status != 200 || r.Text != served("acct-a") {
+			t.Fatalf("%s got %d %q %q, want 200 from acct-a", name, r.Status, r.ErrType, r.ErrMsg)
+		}
+	}
+	var models []string
+	for _, r := range e.upstream.inference() {
+		models = append(models, rawString(rawFields(t, r.Body)["model"]))
+	}
+	if want := []string{"claude-sonnet-4-5-20250929", "claude-haiku-4-5-20251001"}; !reflect.DeepEqual(models, want) {
+		t.Fatalf("upstream models %v, want the dated IDs the aliases name %v", models, want)
+	}
+}
+
 func TestRequestsWithoutSessionIdentityAreRejected(t *testing.T) {
 	e := newEnv(t, "acct-a")
 	e.start()

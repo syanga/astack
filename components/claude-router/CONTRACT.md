@@ -786,6 +786,7 @@ PR3 adds the client-facing service in `internal/claude` and the
 | Listener | Route | Answer |
 | --- | --- | --- |
 | Client | `POST /v1/messages` | The routed request. Every route first requires the client token as `x-api-key` or `Authorization: Bearer`, and removes both headers before the SDK sees the request. |
+| Client | `HEAD /api/hello` | 200 with no body, before authentication, with no upstream call and no event. Claude Code sends this preconnect probe without credentials at every start (`TestClaudeCodePreconnectIsAnsweredWithoutAuthentication`). Any other method or path without the client token gets 401. |
 | Client | `GET /claude-router/status` | Accounts, registration, the last paid-overflow reading and its source, and the number of bound conversations. |
 | Client | anything else, including `count_tokens` | 404 `not_found_error` |
 | SDK | every stock route behind the access manager | 401. The only SDK access provider is `claude-router-deny-all`, set as the exclusive provider. The management routes, including `/v0/management/api-call`, which selects credentials itself, exist only with a management secret. The configuration sets none, and the service refuses to start when `MANAGEMENT_PASSWORD` is set. WebSocket authentication (`ws-auth`) stays at its default, on. |
@@ -797,6 +798,14 @@ PR3 adds the client-facing service in `internal/claude` and the
 `user_..._session_<id>` form. It answers 400 `invalid_request_error` with
 `x-should-retry: false` when the header is missing, when the body has no
 session to compare, or when the two disagree. Agent IDs are informational.
+
+The model is the body's `model`, except that an alias the Anthropic API
+accepts (`claude-sonnet-4-5`, `claude-haiku-4-5`, `claude-opus-4-5`,
+`claude-opus-4-1`, `claude-opus-4-0`, `claude-sonnet-4-0`) becomes the dated
+ID it names. The SDK's model registry lists only the dated IDs and refuses an
+alias without an upstream attempt. The upstream therefore receives the dated
+ID, and per-model state treats both names as one model
+(`TestModelAliasesTheAPIAcceptsAreServed`).
 
 ### Routing loop
 
@@ -860,8 +869,19 @@ carries `x-should-retry: false`, which a client honors. Two answers do not
 stop client retries: an SSE `error` event after the response committed,
 which Claude Code 2.1.285 retries for `overloaded_error`, and the local 429,
 which clients wait through and resend. Each resend is a new request with its
-own cap. A caller that needs a bound across requests sets
-`CLAUDE_CODE_MAX_RETRIES=0`, as the live runbook does.
+own cap. `CLAUDE_CODE_MAX_RETRIES=0` stops the client's HTTP retries but not
+its resend after an SSE `overloaded_error`: Claude Code 2.1.285 then sends the
+request 4 times in all (3 streaming, 1 non-streaming). A caller that needs a
+bound across requests counts requests in front of the client, as the live
+runbook's gate does.
+
+The router retries only a failure before output: an error status, an error
+event before any other event, or a connection that dropped before the first
+event. In the first two the upstream sent no output. A connection that drops,
+outside fast mode, may have dropped after the upstream began generating, and
+the retry can make it generate twice for one client request. Delivery of a
+dropped request is therefore at least once, not exactly once. A
+request-scoped SDK error after a 2xx attempt is final (rule 1 above).
 
 ### Streams
 
@@ -916,16 +936,21 @@ reading, which allows dispatch, is stamped with that start. An `enabled` or
 paid-use reading, which blocks dispatch, is stamped with its arrival. This
 applies to settings reads and to response headers alike. Under PR2's ordering
 rules (the latest check wins, and paid use clears only on a `disabled` check
-stamped strictly after it), a reading is then never ordered after another
-that the upstream may have made later:
+stamped strictly after it), a `disabled` reading supersedes blocking evidence
+only when its read or attempt started strictly after that evidence arrived.
+Overlapping readings resolve toward blocking: an `enabled` reading that
+overlaps a `disabled` one is ordered after it, even when the upstream made
+it first. Examples:
 - A `disabled` response or read that started before a paid-use response
   arrived does not clear the paid use, even when it arrives later
   (`TestDisabledResponseFromAnAttemptStartedBeforePaidUseDoesNotClearIt`).
 - An `enabled` settings read in flight outranks a `disabled` response from
   an attempt that started during the read
   (`TestEnabledSettingsReadInFlightOutranksAnEarlierDisabledResponse`).
-- Paid use is never stamped before a `disabled` check the router already
-  applied, because it is stamped at arrival.
+- Paid use is stamped at its arrival, so only a `disabled` read that started
+  after it arrived can clear it, whatever order the router applies the two
+  in. The router can apply a `disabled` reading first while the paid-use
+  response is still on its way to `ObserveOverage`.
 
 Every stamp the service passes to the router (`Observe`, `ObserveOverage`,
 and the attempt start in `Report`) comes from the service clock, read at the

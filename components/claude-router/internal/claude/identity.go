@@ -63,9 +63,29 @@ func ResolveIdentity(h http.Header, body []byte) (Identity, error) {
 		Conversation: router.ConversationID(session),
 		Agent:        strings.TrimSpace(h.Get(headerAgentID)),
 		ParentAgent:  strings.TrimSpace(h.Get(headerParentAgent)),
-		Model:        shape.Model,
+		Model:        canonicalModel(shape.Model),
 		Stream:       shape.Stream,
 	}, nil
+}
+
+// modelAliases maps each alias the Anthropic API accepts to the dated model
+// ID it serves. The SDK's model registry lists only the dated IDs, so the
+// router resolves an alias before dispatch, and the upstream receives the
+// dated ID. Per-model router state then sees one model under both names.
+var modelAliases = map[string]string{
+	"claude-haiku-4-5":  "claude-haiku-4-5-20251001",
+	"claude-sonnet-4-5": "claude-sonnet-4-5-20250929",
+	"claude-opus-4-5":   "claude-opus-4-5-20251101",
+	"claude-opus-4-1":   "claude-opus-4-1-20250805",
+	"claude-opus-4-0":   "claude-opus-4-20250514",
+	"claude-sonnet-4-0": "claude-sonnet-4-20250514",
+}
+
+func canonicalModel(model string) string {
+	if id, ok := modelAliases[model]; ok {
+		return id
+	}
+	return model
 }
 
 // metadataSession extracts session_id from metadata.user_id. Current clients

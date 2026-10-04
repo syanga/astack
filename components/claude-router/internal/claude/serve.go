@@ -32,13 +32,24 @@ func (s *Service) handler() http.Handler {
 	e.Use(gin.CustomRecoveryWithWriter(io.Discard, func(c *gin.Context, _ any) {
 		writeError(c, http.StatusInternalServerError, "api_error", "claude-router: internal error")
 	}))
-	e.Use(s.authenticate)
+	e.Use(preconnect, s.authenticate)
 	e.POST("/v1/messages", s.messages)
 	e.GET("/claude-router/status", s.status)
 	e.NoRoute(func(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "not_found_error", "claude-router serves POST /v1/messages only")
 	})
 	return e
+}
+
+// preconnect answers Claude Code's startup probe, a HEAD /api/hello sent to
+// ANTHROPIC_BASE_URL without credentials, before authentication. It makes no
+// upstream call and records no event. Any other request without the client
+// token is still rejected.
+func preconnect(c *gin.Context) {
+	if c.Request.Method == http.MethodHead && c.Request.URL.Path == "/api/hello" {
+		c.Status(http.StatusOK)
+		c.Abort()
+	}
 }
 
 // authenticate accepts the private client token as x-api-key or as a bearer
