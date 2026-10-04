@@ -28,8 +28,6 @@ type attempt struct {
 	Refused string
 }
 
-const maxUpstreamAttempts = 4
-
 type callInfo struct {
 	id      string
 	account router.AccountID
@@ -50,6 +48,7 @@ func withCall(ctx context.Context, id string, account router.AccountID, budget *
 type transport struct {
 	inner    http.RoundTripper
 	redirect *url.URL
+	limit    int32
 	accounts map[string]router.AccountID
 	onHeader func(account router.AccountID, h http.Header, start, at time.Time)
 	now      func() time.Time
@@ -58,8 +57,8 @@ type transport struct {
 	calls map[string][]attempt
 }
 
-func newTransport(inner http.RoundTripper, redirect *url.URL, accounts []router.Account, now func() time.Time, onHeader func(router.AccountID, http.Header, time.Time, time.Time)) *transport {
-	t := &transport{inner: inner, redirect: redirect, accounts: map[string]router.AccountID{}, now: now, onHeader: onHeader, calls: map[string][]attempt{}}
+func newTransport(inner http.RoundTripper, redirect *url.URL, limit int, accounts []router.Account, now func() time.Time, onHeader func(router.AccountID, http.Header, time.Time, time.Time)) *transport {
+	t := &transport{inner: inner, redirect: redirect, limit: int32(limit), accounts: map[string]router.AccountID{}, now: now, onHeader: onHeader, calls: map[string][]attempt{}}
 	for _, a := range accounts {
 		t.accounts[string(a.ID)+".json"] = a.ID
 	}
@@ -119,7 +118,7 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 	switch {
 	case info.account != "" && info.account != account:
 		a.Refused = "account"
-	case info.budget != nil && info.budget.Add(1) > maxUpstreamAttempts:
+	case info.budget != nil && info.budget.Add(1) > t.limit:
 		a.Refused = "budget"
 	}
 	if a.Refused != "" {

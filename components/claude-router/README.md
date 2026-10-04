@@ -82,7 +82,8 @@ default for any client. These steps run it by hand.
    `capacity` is the account's relative allowance, such as 1 for Pro and 5
    for Max 5x. `overage_fresh_for` (default `30m`) and `overage_check_every`
    (default `10m`) set how long a paid-overflow reading lasts and how often
-   the service reads it.
+   the service reads it. `max_upstream_attempts` (1 to 4, default 4) caps the
+   upstream attempts of one client request; 1 turns off router retries.
 
 5. Start the service:
 

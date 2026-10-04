@@ -202,7 +202,7 @@ func (c *countingRT) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func TestTransportCapsAttemptsAndRefusesAnotherAccount(t *testing.T) {
 	inner := &countingRT{}
-	tr := newTransport(inner, nil, []router.Account{{ID: "acct-a", Capacity: 1}, {ID: "acct-b", Capacity: 1}}, time.Now, nil)
+	tr := newTransport(inner, nil, defaultMaxAttempts, []router.Account{{ID: "acct-a", Capacity: 1}, {ID: "acct-b", Capacity: 1}}, time.Now, nil)
 	budget := &atomic.Int32{}
 	u, _ := url.Parse("https://api.anthropic.com/v1/messages")
 	send := func(account router.AccountID) error {
@@ -214,14 +214,14 @@ func TestTransportCapsAttemptsAndRefusesAnotherAccount(t *testing.T) {
 
 	other := send("acct-b")
 	var errs []bool
-	for i := 0; i < maxUpstreamAttempts+1; i++ {
+	for i := 0; i < defaultMaxAttempts+1; i++ {
 		errs = append(errs, send("acct-a") != nil)
 	}
 
 	if other == nil {
 		t.Fatal("transport sent an attempt for another account than the call's")
 	}
-	if !reflect.DeepEqual(errs, []bool{false, false, false, false, true}) || inner.n.Load() != maxUpstreamAttempts {
+	if !reflect.DeepEqual(errs, []bool{false, false, false, false, true}) || inner.n.Load() != defaultMaxAttempts {
 		t.Fatalf("refusals %v and %d upstream sends, want the fifth refused and 4 sent", errs, inner.n.Load())
 	}
 }

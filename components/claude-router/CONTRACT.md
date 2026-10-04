@@ -863,6 +863,9 @@ sending it, and the service answers 503. It also refuses an attempt for any
 account but the one the call is pinned to. Before a response reaches the
 client, the service checks that the transport saw at least one attempt for
 the call, all on the pinned account, and otherwise answers 502.
+`max_upstream_attempts` lowers the cap to 1, 2, or 3. With 1 the router
+never retries, so upstream attempts equal client requests; the live lane
+uses this (`TestASingleAttemptCapNeverRetries`).
 
 The cap is per client HTTP request. Every router-made HTTP failure answer
 carries `x-should-retry: false`, which a client honors. Two answers do not

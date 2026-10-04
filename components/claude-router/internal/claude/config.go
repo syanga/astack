@@ -39,6 +39,11 @@ type Config struct {
 	// OverageCheckEvery is the interval of the background settings read.
 	// Default 10 minutes. It must be shorter than OverageFreshFor.
 	OverageCheckEvery Duration `json:"overage_check_every,omitzero"`
+	// MaxUpstreamAttempts caps the upstream attempts of one client request,
+	// from 1 to 4. Default 4: three router dispatches and the SDK's
+	// redispatch after a 401. With 1 the router never retries, so the number
+	// of upstream attempts equals the number of client requests.
+	MaxUpstreamAttempts int `json:"max_upstream_attempts,omitempty"`
 	// TestUpstream redirects requests for api.anthropic.com to a loopback
 	// URL. It exists for controlled-upstream lanes and is reported as an
 	// event at start.
@@ -67,6 +72,7 @@ const (
 	defaultOverageFreshFor   = 30 * time.Minute
 	defaultOverageCheckEvery = 10 * time.Minute
 	minClientTokenLength     = 32
+	defaultMaxAttempts       = 4
 )
 
 // LoadConfig reads a JSON configuration file.
@@ -90,6 +96,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.OverageCheckEvery == 0 {
 		c.OverageCheckEvery = Duration(defaultOverageCheckEvery)
+	}
+	if c.MaxUpstreamAttempts == 0 {
+		c.MaxUpstreamAttempts = defaultMaxAttempts
 	}
 	return c
 }
@@ -118,6 +127,9 @@ func (c Config) validate() error {
 	}
 	if c.OverageCheckEvery >= c.OverageFreshFor {
 		return errors.New("overage_check_every must be shorter than overage_fresh_for")
+	}
+	if c.MaxUpstreamAttempts < 1 || c.MaxUpstreamAttempts > defaultMaxAttempts {
+		return fmt.Errorf("max_upstream_attempts: %d is outside 1 to %d", c.MaxUpstreamAttempts, defaultMaxAttempts)
 	}
 	if c.TestUpstream != "" {
 		u, err := url.Parse(c.TestUpstream)

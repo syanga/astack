@@ -196,7 +196,7 @@ func (s *Service) messages(c *gin.Context) {
 			return
 		}
 
-		if budget.Load() >= maxUpstreamAttempts {
+		if budget.Load() >= s.transport.limit {
 			finish("request", account, router.Decision{Kind: router.Fail, Reason: router.ReasonRetryBudget}, http.StatusServiceUnavailable, nil)
 			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: request reached the router's upstream attempt cap")
 			return
@@ -221,7 +221,7 @@ func (s *Service) messages(c *gin.Context) {
 			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: assignment journal unavailable; restart the router")
 			return
 		}
-		if budget.Load() > maxUpstreamAttempts {
+		if budget.Load() > s.transport.limit {
 			finish("request", account, router.Decision{Kind: router.Fail, Reason: router.ReasonRetryBudget}, http.StatusServiceUnavailable, &out)
 			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: request reached the router's upstream attempt cap")
 			return

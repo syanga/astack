@@ -118,7 +118,7 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 		return nil, err
 	}
 	s.overage = newOverageReader(s)
-	s.transport = newTransport(inner, redirect, cfg.Accounts, now, s.observeHeaders)
+	s.transport = newTransport(inner, redirect, cfg.MaxUpstreamAttempts, cfg.Accounts, now, s.observeHeaders)
 	if redirect != nil {
 		s.events.emit(Event{Kind: "test_upstream_in_use", Detail: redirect.Host})
 	}

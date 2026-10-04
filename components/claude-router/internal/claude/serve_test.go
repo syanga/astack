@@ -290,6 +290,37 @@ func TestRetryBudgetCapsUpstreamAttempts(t *testing.T) {
 	}
 }
 
+func TestASingleAttemptCapNeverRetries(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	e.cfg.MaxUpstreamAttempts = 1
+	e.start()
+	e.upstream.script("acct-a", reply{Status: 529}, reply{Status: 529})
+
+	failed := e.send(msg{Session: sessionID(1)})
+	next := e.send(msg{Session: sessionID(1)})
+
+	if failed.Status != http.StatusServiceUnavailable || failed.Header.Get("X-Should-Retry") != "false" {
+		t.Fatalf("got %d with x-should-retry %q, want 503 and false", failed.Status, failed.Header.Get("X-Should-Retry"))
+	}
+	if next.Status != http.StatusServiceUnavailable {
+		t.Fatalf("second request got %d, want 503 after its one failed attempt", next.Status)
+	}
+	if n := len(e.upstream.inference()); n != 2 {
+		t.Fatalf("2 client requests made %d upstream attempts, want 1 each", n)
+	}
+}
+
+func TestUpstreamAttemptCapOutsideOneToFourIsRefused(t *testing.T) {
+	for _, n := range []int{-1, 5} {
+		e := newEnv(t, "acct-a")
+		e.cfg.MaxUpstreamAttempts = n
+		if svc, err := Start(e.cfg, Options{Upstream: e.upstream}); err == nil {
+			svc.Close()
+			t.Fatalf("max_upstream_attempts %d started, want a configuration error", n)
+		}
+	}
+}
+
 func exhaustedHeaders(reset time.Time) map[string]string {
 	return map[string]string{
 		"anthropic-ratelimit-unified-status":    "rejected",
