@@ -576,18 +576,18 @@ capacity-only:
 
 | Fixture | Variant | Completed turns | Unused weekly share at reset | Wait minutes | Exhaustion migrations | Migration cache writes (tokens) |
 | --- | --- | --- | --- | --- | --- | --- |
-| `weekly-expiry-72h` | capacity-only | 2593 | 0.199 | 1149 | 55.0 | 646,400 |
-| `weekly-expiry-72h` | bias 8, 15 min | 2589 | 0.171 | 772 | 59.0 | 812,200 |
-| `mixed-48h` | capacity-only | 2974 | 0.189 | 110,937 | 339.6 | 1,090,200 |
-| `mixed-48h` | bias 8, 15 min | 3009 | 0.178 | 107,881 | 351.2 | 1,283,400 |
+| `weekly-expiry-72h` | capacity-only | 2593 | 0.197 | 1473 | 63.6 | 663,200 |
+| `weekly-expiry-72h` | bias 8, 15 min | 2590 | 0.169 | 834 | 61.6 | 846,800 |
+| `mixed-48h` | capacity-only | 2975 | 0.189 | 111,080 | 342.8 | 1,058,600 |
+| `mixed-48h` | bias 8, 15 min | 3008 | 0.178 | 108,054 | 353.2 | 1,284,200 |
 
 The effect is small. With bias 8, unused weekly allowance at reset was lower
 in each of the five seeds on both fixtures. Completed turns were level on
-`weekly-expiry-72h` and higher in each seed on `mixed-48h`. The cost was
-slightly more exhaustion migrations and more cold cache writes from
-migration. Every variant had 0 healthy automatic migrations on both fixtures.
-The comparison does not establish a percentage improvement, and none is
-required.
+`weekly-expiry-72h` and higher in four of five seeds on `mixed-48h`. The cost
+was more cold cache writes from migration, and on `mixed-48h` slightly more
+exhaustion migrations. No run of any variant had a healthy automatic
+migration, counting migrations returned to subagent requests. The comparison
+does not establish a percentage improvement, and none is required.
 
 ### Quota evidence must come from the attempt
 
