@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -205,16 +206,46 @@ func (s *Service) readOverageEvery(ctx context.Context, every time.Duration) {
 
 func (s *Service) observeHeaders(account router.AccountID, h http.Header, start, at time.Time) {
 	if obs, ok := observationFrom(h, at); ok {
-		s.router.Observe(account, start, obs)
+		blocking := slices.ContainsFunc(obs.Windows, func(w router.Window) bool { return w.Rejected })
+		begun, ok1 := s.bounded(start, blocking)
+		arrived, ok2 := s.bounded(at, blocking)
+		if ok1 && ok2 {
+			obs.At = arrived
+			s.router.Observe(account, begun, obs)
+		}
 	}
 	if state, ok := overageFrom(h); ok {
-		stamp := readingStamp(state, start, at)
+		stamp, ok := s.bounded(readingStamp(state, start, at), state != router.OverageDisabled)
+		if !ok {
+			return
+		}
 		s.router.ObserveOverage(account, state, stamp)
 		s.overage.note(account, state, stamp, "response")
 		if state == router.OveragePaidUse {
-			s.events.emit(Event{At: at, Kind: "paid_use_observed", Account: account, Overage: state})
+			s.events.emit(Event{At: stamp, Kind: "paid_use_observed", Account: account, Overage: state})
 		}
 	}
+}
+
+// bounded returns the stamp the router may use for a reading the upstream
+// made at t. Every stamp the service passes to the router comes from the
+// service clock at a read start or an arrival, so it is never zero and never
+// later than now. A stamp that breaks this, from a bug or a clock that
+// stepped back, would let the router misorder readings: a later stamp sweeps
+// live rejections, and a zero stamp drops paid use. Such a stamp becomes now,
+// which is no earlier than the reading. A zero stamp on a reading that only
+// permits dispatch is unusable, and ok is false. Either case is recorded.
+func (s *Service) bounded(t time.Time, blocking bool) (stamp time.Time, ok bool) {
+	now := s.now()
+	switch {
+	case t.IsZero() && !blocking:
+		s.events.emit(Event{Kind: "stamp_bounded", Outcome: "dropped", Detail: "zero stamp on a reading that permits dispatch"})
+		return time.Time{}, false
+	case t.IsZero(), t.After(now):
+		s.events.emit(Event{Kind: "stamp_bounded", Outcome: "now", Detail: "zero or future stamp"})
+		return now, true
+	}
+	return t, true
 }
 
 func randomHex(n int) string {

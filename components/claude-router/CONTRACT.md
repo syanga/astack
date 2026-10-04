@@ -924,6 +924,19 @@ that the upstream may have made later:
 - Paid use is never stamped before a `disabled` check the router already
   applied, because it is stamped at arrival.
 
+Every stamp the service passes to the router (`Observe`, `ObserveOverage`,
+and the attempt start in `Report`) comes from the service clock, read at the
+start of a read or attempt or at an arrival. It is never zero and never
+later than the clock at the time of the call. In-process comparisons use Go's
+monotonic clock reading, so a wall-clock step does not reorder them. The
+service enforces the rule at the boundary (`Service.bounded`), because PR2
+misorders readings otherwise: a future stamp sweeps a live rejection, and
+paid use stamped with the zero time is dropped. A stamp that breaks the rule
+becomes the current time, which is no earlier than the reading. A zero stamp
+on a reading that only permits dispatch (`disabled`, or windows without a
+rejection) is dropped. Both cases record a `stamp_bounded` event
+(`TestObservationsReachTheRouterStampedNoLaterThanNowAndNeverZero`).
+
 Observed paid use does not expire (PR2 at `22d4342`): a later `enabled`
 check puts it back in force after a `disabled` check cleared it.
 

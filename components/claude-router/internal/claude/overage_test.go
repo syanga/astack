@@ -251,3 +251,53 @@ func hasEnabledRead(e *env) bool {
 	}
 	return false
 }
+
+func TestObservationsReachTheRouterStampedNoLaterThanNowAndNeverZero(t *testing.T) {
+	header := func(m map[string]string) http.Header {
+		h := http.Header{}
+		for k, v := range m {
+			h.Set(k, v)
+		}
+		return h
+	}
+	t0 := time.Now().Truncate(time.Second)
+	cases := map[string]struct {
+		observe    func(s *Service)
+		wantStatus int
+		wantMsg    string
+	}{
+		"zero-stamped paid use": {
+			observe: func(s *Service) {
+				s.observeHeaders("acct-a", header(map[string]string{"anthropic-ratelimit-unified-overage-in-use": "true"}), time.Time{}, time.Time{})
+			},
+			wantStatus: http.StatusServiceUnavailable, wantMsg: "paid use",
+		},
+		"future-stamped report after a live rejection": {
+			observe: func(s *Service) {
+				s.observeHeaders("acct-a", header(exhaustedHeaders(t0.Add(2*time.Hour))), t0, t0)
+				later := t0.Add(8 * 24 * time.Hour)
+				s.observeHeaders("acct-a", header(map[string]string{
+					"anthropic-ratelimit-unified-5h-status":      "allowed",
+					"anthropic-ratelimit-unified-5h-utilization": "0.1",
+				}), later, later)
+			},
+			wantStatus: http.StatusTooManyRequests, wantMsg: "usable again at",
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, "acct-a")
+			e.clock.set(t0)
+			e.start()
+			e.send(msg{Session: sessionID(1)})
+
+			c.observe(e.svc)
+			e.clock.set(t0.Add(2 * time.Minute))
+			r := e.send(msg{Session: sessionID(1), NonStream: true})
+
+			if r.Status != c.wantStatus || !strings.Contains(r.ErrMsg, c.wantMsg) {
+				t.Fatalf("got %d %q, want %d naming %q", r.Status, r.ErrMsg, c.wantStatus, c.wantMsg)
+			}
+		})
+	}
+}
