@@ -343,3 +343,171 @@ client: terminal Claude, the Agent SDK, and a T3 thread.
 | DS-1 | Pinned source build with an explicit Go prerequisite | passed | `go.mod`, `go.sum`; `toolchain/go-toolchain.json` in the store |
 | DS-2 | SDK license and version requirement recorded | passed | Pinned SDK table above |
 | DS-3 | Offline build and test from the prepared module cache | passed | `evidence/PR1/unit-<head>/go.log` |
+
+## Routing policy and assignment store (PR2)
+
+PR2 adds the production policy and the durable assignment store in
+`internal/router`, and the simulator in `cmd/claude-router-sim`. The simulator
+calls the same `Router`; it has no second placement algorithm.
+
+### Policy boundary
+
+| Method | Effect |
+| --- | --- |
+| `Router.Decide(now, Request) Decision` | The policy. Reads assignments and account state, changes nothing. |
+| `Router.CommitAssignment(now, conv, account, reason)` | Appends and syncs a first assignment. The first committed record wins; a concurrent loser gets the winner's account. |
+| `Router.CommitMigration(now, conv, from, to, reason)` | Appends and syncs a move if the conversation is still on `from`. |
+| `Router.Route(now, Request)` | `Decide`, then the matching commit, before dispatch. PR3 calls this. |
+| `Router.Report(Failure) Class` | Records a failure before output and returns the class the policy acts on. |
+| `Router.Observe`, `ObserveOverage`, `Relogin`, `Move` | Quota observations, the paid-overflow check, relogin, and the manual override. |
+
+Every method takes the current time, so the simulator drives production code
+with a deterministic clock.
+
+`Decide` returns one of these outcomes. Every outcome except `migrate` keeps
+the assignment.
+
+| Kind | When |
+| --- | --- |
+| `place` | A new conversation. Commit before dispatch. |
+| `dispatch` | An existing assignment on a usable account. |
+| `migrate` | The assigned account has a known rejection that blocks the model. Commit before dispatch. |
+| `retry` | `transient` or `throttle` on the previous attempt, within `MaxAttempts`. |
+| `fail` | The retry budget is spent. |
+| `wait` | No eligible account. `Until` is the earliest usable reset; `ResetKnown` is false when `Until` is only a recheck time. |
+| `reauth` | The assigned account needs a browser login, or is no longer enrolled. |
+| `refuse` | The included-only check fails for the assigned account, or for every logged-in account when placing. |
+| `unavailable` | No enrolled account is logged in. |
+| `reject` | The request has no conversation identity. |
+
+### Placement rule
+
+Among logged-in accounts that pass the included-only check and have no known
+rejection that blocks the requested model, `Decide` picks the account with the
+smallest score:
+
+```text
+score = (active + 1) / (capacity * (1 + ResetBias * slack))
+```
+
+- `active` counts the account's conversations with a request or commit in the
+  last `ActiveFor`, excluding the conversation being decided.
+- `slack` is the largest `elapsed fraction - utilization` over the account's
+  five-hour, weekly, and model windows that apply to the model, from an
+  observation no older than `FreshFor`. A window counts only with a known
+  utilization and a future reset. `slack` is 0 under `capacity_only` and for a
+  stale or missing observation.
+- Ties go to the earlier enrolled account.
+- An account is blocked until the latest reset among its rejected windows that
+  apply to the model. A five-hour reset therefore never unblocks an account
+  whose weekly window is still rejected. A rejection with no reported reset
+  blocks until `UnknownResetRecheck` after it was observed.
+- Reset preference affects only `place` and the destination of `migrate`.
+  `Decide` never moves a healthy assignment, and a migrated conversation never
+  returns on its own.
+
+`Decision.Reason` is `reset_preference` when the reset-aware choice differs
+from the capacity-only choice for the same request, and `capacity` otherwise.
+`Decision.Observation` reports whether the chosen account's observation is
+`fresh`, `stale`, or `absent`.
+
+### Defaults
+
+| Field | Default | Basis |
+| --- | --- | --- |
+| `Rule` | `reset_aware` | Simulator comparison below |
+| `ResetBias` | 8 | Simulator comparison below |
+| `FreshFor` | 15 min | No measurable difference between 5, 15, and 60 min; middle value |
+| `ActiveFor` | 1 h | Not swept; the longest prompt-cache lifetime |
+| `UnknownResetRecheck` | 5 min | Not swept; bounds attempts on an account whose reset is unknown |
+| `OverageFreshFor` | 1 h | Not swept; the check mechanism is PR3 and PR4 work |
+| `MaxAttempts` | 3 | Not swept |
+
+The comparison ran 13 variants over two synthetic fixtures and five seeds:
+capacity-only, and reset-aware with bias 1, 2, 4, and 8 at freshness 5, 15,
+and 60 minutes. `evidence/PR2/comparison.json` holds every run and the labeled
+quota and cache assumptions. Means for the chosen default against
+capacity-only:
+
+| Fixture | Variant | Completed turns | Unused weekly share at reset | Wait minutes | Exhaustion migrations | Migration cache writes (tokens) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `weekly-expiry-72h` | capacity-only | 2593 | 0.199 | 1149 | 55.0 | 646,400 |
+| `weekly-expiry-72h` | bias 8, 15 min | 2589 | 0.171 | 772 | 59.0 | 812,200 |
+| `mixed-48h` | capacity-only | 3036 | 0.175 | 103,000 | 331.6 | 1,414,000 |
+| `mixed-48h` | bias 8, 15 min | 3024 | 0.168 | 105,500 | 356.2 | 1,324,000 |
+
+The effect is small. On the fixture built for it, bias 8 left less weekly
+allowance unused at reset in all five seeds and waited less, at equal useful
+work. On the overloaded mixed fixture the difference is within seed
+variation. Every variant had 0 healthy automatic migrations on both fixtures.
+Biases 1 and 2 did not reduce unused weekly allowance on either fixture. The
+comparison does not establish a percentage improvement, and none is required.
+
+### Exhaustion needs evidence from the failed attempt
+
+The SDK keeps its previous quota snapshot when a response carries no quota
+headers, so a snapshot can predate the failure. `Report` treats `exhausted` and
+`model_limit` as confirmed only when `Failure.Observation.At` is at or after
+`Failure.AttemptStart` and the observation has a rejected window that applies
+to the model. Otherwise `Report` returns `throttle`, records nothing, and the
+next `Decide` retries on the assigned account. PR3 supplies per-attempt
+evidence. For a credential-scoped 429 without a rejected window header, PR3
+records an `unspecified` rejected window observed during the attempt.
+
+### Included-only check
+
+Each account carries a paid-overflow state from `ObserveOverage`: `disabled`,
+`enabled`, or `paid_use`, with the time of the check. `Decide` dispatches to an
+account only when its latest check found overflow `disabled` within
+`OverageFreshFor`. Otherwise:
+
+- A new conversation is placed only on accounts that pass. When none pass and
+  no account is waiting on a reset, it is refused with
+  `no_included_only_account`.
+- An assigned conversation gets `refuse` with `overage_unknown`,
+  `overage_stale`, `overage_enabled`, or `paid_use_observed`, and keeps its
+  assignment. A later `disabled` check or a manual move resumes it.
+
+How the router checks the setting, and the remaining gap when usage credits are
+enabled outside the proxy while included windows are exhausted, are PR3 and
+PR4 work. The fixtures assume a settings read every 15 minutes.
+
+### Assignment journal
+
+The store is the single-writer JSON-lines journal from PR1,
+`assignments.jsonl` in the state directory, with these PR2 rules.
+
+- **Records.** `assign` and `migrate`, each with conversation, account, reason,
+  and time. `migrate` also names its source. Replay applies the first `assign`
+  per conversation, and a `migrate` only when the conversation is on its source.
+- **Fail stop.** After a failed write or sync, the store returns `ErrFailed`
+  for every later commit until it is closed and reopened. The failed record
+  may or may not be on disk, and replay decides which. No caller is told an
+  account that replay can contradict.
+- **Validation.** Replay refuses to open on an interior record that is not
+  JSON, has an unknown op, lacks a conversation, account, or time, or is a
+  migration without a source. A torn final line is truncated.
+- **Directory.** Creating the state directory syncs its parent directory.
+- **Sync.** Go's `File.Sync` issues `F_FULLFSYNC` on Darwin and falls back to
+  `fsync` when the file system does not support it.
+- **Not durable.** Quota observations, login state, paid-overflow checks, and
+  conversation activity live in memory. After a restart the router refuses
+  dispatch until the next overage check, and learns exhaustion and logouts
+  again from the next failed attempt.
+
+### Literal fixture expectations
+
+The scripts in `testdata/scripts/` record hand-derived outcomes. Both
+`claude-router-sim check` and `go test ./cmd/...` run them under both rules
+with the defaults above, for 116 checks.
+
+| Script | Expected outcome |
+| --- | --- |
+| `01-equal-quota-unequal-capacity` | Capacities 1:2:1, no observations: placements `b a b c b a b c` under both rules. |
+| `02-reset-preference` | One active conversation on each account, a fresh near-reset `acct-a` (slack 0.8), and an on-pace `acct-b`. Reset-aware places six new conversations `a a a a a a`; capacity-only places `a b a b a b`. The existing conversation on `acct-b` dispatches on `acct-b` under both. |
+| `03-weekly-blocks-near-reset` | `acct-a`, near a five-hour reset but weekly rejected, receives neither the new conversation nor the migration; both go to `acct-b`. With every account blocked, the wait ends at `acct-c`'s reset at minute 60, not `acct-a`'s at minute 20. At minute 61 the conversation moves to `acct-c`. |
+| `04-stale-observations` | A 30-minute-old near-reset observation is ignored: `a b a b` under both rules. A three-hour-old weekly rejection still excludes `acct-c` until its reset. |
+| `05-subagent-inheritance` | Child and nested-child requests dispatch on the parent's account, then on the migration destination. |
+| `06-restart-and-no-return` | The conversation stays on `acct-a` across a restart, 3 idle hours, and a model change. After exhaustion and another restart it stays on `acct-b` when `acct-a` recovers; a new conversation goes to `acct-a`. |
+| `07-auth-and-included-only` | An auth failure excludes `acct-a` from new placement, and its conversation gets `reauth` until a manual move. Paid use on `acct-b` refuses its conversation without moving it. With no verified account, a new conversation is refused. |
+| `08-exhaustion-evidence` | A 429 with 10-minute-old evidence retries on `acct-a` and fails at attempt 4 without moving. Fresh evidence migrates to `acct-b`. A rejection with no reset waits inexactly until minute 17, then dispatches. |
