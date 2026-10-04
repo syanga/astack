@@ -79,7 +79,7 @@ func cmdPerf(args []string, stdout io.Writer) error {
 		return err
 	}
 	defer st.Close()
-	if len(st.Bindings()) != 0 {
+	if existing, err := st.Bindings(); err != nil || len(existing) != 0 {
 		return errors.New("perf needs an empty state directory")
 	}
 	r, err := router.New(router.DefaultConfig(), accounts, st)
@@ -104,7 +104,7 @@ func cmdPerf(args []string, stdout io.Writer) error {
 			case 9:
 				obs.Windows[0].Rejected = true
 			}
-			r.Observe(a.ID, obs)
+			r.Observe(a.ID, obs.At, obs)
 		}
 	}
 	exhausted := map[router.AccountID]bool{}
@@ -117,29 +117,29 @@ func cmdPerf(args []string, stdout io.Writer) error {
 	var decide, commit []time.Duration
 	serve := func(now time.Time, req router.Request) error {
 		t := time.Now()
-		d := r.Decide(now, req)
+		d, err := r.Decide(now, req)
 		decide = append(decide, time.Since(t))
+		if err != nil {
+			return err
+		}
 		switch d.Kind {
 		case router.Place, router.Migrate:
 			t = time.Now()
-			var got router.AccountID
-			var err error
-			if d.Kind == router.Place {
-				got, err = r.CommitAssignment(now, req.Conversation, d.Account, d.Reason)
-				res.Placements++
-			} else {
-				got, err = r.CommitMigration(now, req.Conversation, d.From, d.Account, d.Reason)
-				res.ExhaustionMigrations++
-				if !exhausted[d.From] {
-					res.HealthyAutoMigrations++
-				}
-			}
+			got, err := r.Commit(now, req, d)
 			commit = append(commit, time.Since(t))
 			if err != nil {
 				return err
 			}
-			if got != d.Account {
-				return fmt.Errorf("%s committed to %s, decided %s", req.Conversation, got, d.Account)
+			if got != d {
+				return fmt.Errorf("%s: committed %+v, decided %+v", req.Conversation, got, d)
+			}
+			if d.Kind == router.Place {
+				res.Placements++
+			} else {
+				res.ExhaustionMigrations++
+				if !exhausted[d.From] {
+					res.HealthyAutoMigrations++
+				}
 			}
 			res.Served++
 		case router.Dispatch:
@@ -197,5 +197,9 @@ func cmdRecover(args []string, stdout io.Writer) error {
 		return err
 	}
 	open := time.Since(t)
-	return writeJSON(stdout, map[string]any{"bindings": len(st.Bindings()), "open_ms": float64(open.Microseconds()) / 1000})
+	bindings, err := st.Bindings()
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, map[string]any{"bindings": len(bindings), "open_ms": float64(open.Microseconds()) / 1000})
 }

@@ -29,6 +29,7 @@ type Metrics struct {
 	ExhaustionMigrations    int     `json:"exhaustion_migrations"`
 	OverageMigrations       int     `json:"overage_migrations"`
 	NeverServedMigrations   int     `json:"never_served_relogin_migrations"`
+	SubagentMigrations      int     `json:"migrations_on_subagent_requests"`
 	ManualMigrations        int     `json:"manual_migrations"`
 	HealthyAutoMigrations   int     `json:"healthy_automatic_migrations"`
 	// UnusedFiveHour and UnusedWeekly sum allowance left unused at each reset
@@ -107,6 +108,7 @@ type conversation struct {
 	agents      int
 	done        bool
 	cacheKey    map[string]cacheState
+	servedOn    router.AccountID
 }
 
 type cacheState struct {
@@ -400,7 +402,9 @@ func (s *sim) handle(e event) error {
 	case evRelogin:
 		f := s.fx.AuthFaults[e.arg]
 		s.quotas[f.Account].loggedOut = false
-		s.r.Relogin(f.Account)
+		if err := s.r.Relogin(f.Account); err != nil {
+			return err
+		}
 		s.trace = append(s.trace, Event{At: e.at, Event: "relogin", Account: f.Account})
 	case evPaidUse:
 		p := s.fx.PaidUse[e.arg]
@@ -424,6 +428,7 @@ func (s *sim) handle(e event) error {
 		if err := s.r.Move(e.at, c.id, to); err != nil {
 			return err
 		}
+		c.servedOn = ""
 		s.m.ManualMigrations++
 		s.trace = append(s.trace, Event{At: e.at, Event: "manual_move", Conversation: c.id, Account: to, Reason: router.ReasonManual})
 		return s.turn(c, e.at)
@@ -432,7 +437,10 @@ func (s *sim) handle(e event) error {
 }
 
 func (s *sim) crash(at time.Time) error {
-	before := s.store.Bindings()
+	before, err := s.store.Bindings()
+	if err != nil {
+		return err
+	}
 	if err := s.store.Close(); err != nil {
 		return err
 	}
@@ -440,7 +448,10 @@ func (s *sim) crash(at time.Time) error {
 	if err := s.open(); err != nil {
 		return err
 	}
-	after := s.store.Bindings()
+	after, err := s.store.Bindings()
+	if err != nil {
+		return err
+	}
 	s.m.Restarts++
 	s.m.RecoveredBindings += len(after)
 	for conv, b := range before {
@@ -478,7 +489,10 @@ func (s *sim) turn(c *conversation, at time.Time) error {
 	req := s.request(c)
 	var d router.Decision
 	var err error
-	_, bound := s.r.Lookup(c.id)
+	_, bound, err := s.r.Lookup(c.id)
+	if err != nil {
+		return err
+	}
 	if !bound && s.fx.Workload.ParallelFirst > 1 {
 		d, err = s.parallelFirst(at, req)
 	} else {
@@ -494,25 +508,7 @@ func (s *sim) turn(c *conversation, at time.Time) error {
 			Reason: d.Reason, Observation: d.Observation, Parallel: max(0, s.fx.Workload.ParallelFirst)})
 		return s.attempt(c, at, d.Account)
 	case router.Migrate:
-		q := s.quotas[d.From]
-		s.advance(q, at)
-		justified := false
-		switch d.Reason {
-		case router.ReasonExhausted:
-			justified = s.blocked(q, c.model)
-			s.m.ExhaustionMigrations++
-		case router.ReasonOverageObserved:
-			justified = s.paidUse[d.From]
-			s.m.OverageMigrations++
-		case router.ReasonNeverServed:
-			justified = q.loggedOut
-			s.m.NeverServedMigrations++
-		}
-		if !justified {
-			s.m.HealthyAutoMigrations++
-		}
-		s.trace = append(s.trace, Event{At: at, Event: "migrate", Conversation: c.id, Model: c.model, From: d.From,
-			Account: d.Account, Reason: d.Reason, Observation: d.Observation})
+		s.audit(c, at, d, "")
 		return s.attempt(c, at, d.Account)
 	case router.Dispatch:
 		return s.attempt(c, at, d.Account)
@@ -544,6 +540,32 @@ func (s *sim) turn(c *conversation, at time.Time) error {
 		return fmt.Errorf("unexpected decision %+v", d)
 	}
 	return nil
+}
+
+func (s *sim) audit(c *conversation, at time.Time, d router.Decision, agent string) {
+	q := s.quotas[d.From]
+	s.advance(q, at)
+	justified := false
+	switch d.Reason {
+	case router.ReasonExhausted:
+		justified = s.blocked(q, c.model)
+		s.m.ExhaustionMigrations++
+	case router.ReasonOverageObserved:
+		justified = s.paidUse[d.From]
+		s.m.OverageMigrations++
+	case router.ReasonNeverServed:
+		justified = q.loggedOut && c.servedOn != d.From
+		s.m.NeverServedMigrations++
+	}
+	if !justified {
+		s.m.HealthyAutoMigrations++
+	}
+	if agent != "" {
+		s.m.SubagentMigrations++
+	}
+	c.servedOn = ""
+	s.trace = append(s.trace, Event{At: at, Event: "migrate", Conversation: c.id, Agent: agent, Model: c.model, From: d.From,
+		Account: d.Account, Reason: d.Reason, Observation: d.Observation})
 }
 
 func (s *sim) resume(c *conversation, at time.Time) {
@@ -652,6 +674,7 @@ func (s *sim) attempt(c *conversation, at time.Time, account router.AccountID) e
 		if err := s.r.Served(at, c.id, account); err != nil {
 			return err
 		}
+		c.servedOn = account
 		if err := s.subagents(c, at, account); err != nil {
 			return err
 		}
@@ -682,7 +705,7 @@ func (s *sim) spend(q *quota, c *conversation, key string, at time.Time, account
 		}
 	}
 	if !q.hide {
-		s.r.Observe(account, s.observation(q, at))
+		s.r.Observe(account, at, s.observation(q, at))
 	}
 }
 
@@ -705,11 +728,14 @@ func (s *sim) subagents(c *conversation, at time.Time, account router.AccountID)
 			return err
 		}
 		s.m.SubagentRequests++
-		bnd, _ := s.r.Lookup(c.id)
+		bnd, _, _ := s.r.Lookup(c.id)
 		if d.Kind == router.Place || bnd.Account != account && d.Kind != router.Migrate {
 			s.m.SubagentNotInherited++
 		}
-		if d.Kind == router.Dispatch {
+		if d.Kind == router.Migrate {
+			s.audit(c, at, d, agent)
+		}
+		if d.Kind == router.Dispatch || d.Kind == router.Migrate {
 			q := s.quotas[d.Account]
 			if !q.loggedOut && !s.blocked(q, c.model) {
 				s.spend(q, c, agent, at, d.Account, w.SubagentContext, w.OutputPerTurn/2)

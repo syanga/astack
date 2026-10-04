@@ -1,6 +1,9 @@
 package router
 
 import (
+	"errors"
+	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -234,6 +237,21 @@ type Config struct {
 	// MaxAttempts bounds attempts of one request on its account after
 	// transient failures and generic throttling.
 	MaxAttempts int `json:"max_attempts"`
+}
+
+// Validate reports a parameter that would make the policy misbehave.
+func (c Config) Validate() error {
+	switch {
+	case c.Rule != CapacityOnly && c.Rule != ResetAware:
+		return fmt.Errorf("unknown rule %q", c.Rule)
+	case !(c.ResetBias >= 0) || math.IsInf(c.ResetBias, 0):
+		return fmt.Errorf("reset bias %v is not a finite non-negative number", c.ResetBias)
+	case c.FreshFor <= 0, c.ActiveFor <= 0, c.UnknownResetRecheck <= 0, c.OverageFreshFor <= 0:
+		return errors.New("every duration must be positive")
+	case c.MaxAttempts < 1:
+		return errors.New("max attempts must be at least 1")
+	}
+	return nil
 }
 
 // DefaultConfig returns the production policy defaults.

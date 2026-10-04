@@ -161,7 +161,10 @@ func RunScript(sc Script, cfg router.Config, dir string) (ScriptResult, error) {
 			if !ok {
 				continue
 			}
-			bnd, _ := r.Lookup(step.Route.Conversation)
+			bnd, _, err := r.Lookup(step.Route.Conversation)
+			if err != nil {
+				return res, fmt.Errorf("step %d: %w", i, err)
+			}
 			check := StepResult{Step: i, At: at, Request: step.Route, Expected: want, Got: d, BoundTo: bnd.Account}
 			check.Pass = matches(want, d, bnd.Account, sc.Start)
 			res.Pass = res.Pass && check.Pass
@@ -171,7 +174,8 @@ func RunScript(sc Script, cfg router.Config, dir string) (ScriptResult, error) {
 				return res, fmt.Errorf("step %d: %w", i, err)
 			}
 		case step.Observe != nil:
-			r.Observe(step.Observe.Account, router.Observation{
+			obsAt := at.Add(-minutes(step.Observe.AgeMinutes))
+			r.Observe(step.Observe.Account, obsAt, router.Observation{
 				At:      at.Add(-minutes(step.Observe.AgeMinutes)),
 				Windows: windows(at, step.Observe.Windows),
 			})
@@ -195,7 +199,9 @@ func RunScript(sc Script, cfg router.Config, dir string) (ScriptResult, error) {
 				return res, fmt.Errorf("step %d: %w", i, err)
 			}
 		case step.Relogin != "":
-			r.Relogin(step.Relogin)
+			if err := r.Relogin(step.Relogin); err != nil {
+				return res, fmt.Errorf("step %d: %w", i, err)
+			}
 		case step.Restart:
 			if err := st.Close(); err != nil {
 				return res, err
