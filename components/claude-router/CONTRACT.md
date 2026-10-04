@@ -475,3 +475,272 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | DS-1 | Pinned source build with an explicit Go prerequisite | passed | `go.mod`, `go.sum`; `toolchain/go-toolchain.json` in the store | PR1 |
 | DS-2 | SDK license and version requirement recorded | passed | Pinned SDK table above | PR1 |
 | DS-3 | Offline build and test from the prepared module cache | passed | `evidence/PR1/unit-<head>/go.log` | PR1 |
+
+## Routing policy and assignment store (PR2)
+
+PR2 adds the production policy and the durable assignment store in
+`internal/router`, and the simulator in `cmd/claude-router-sim`. The simulator
+calls the same `Router`; it has no second placement algorithm.
+
+### Policy boundary
+
+| Method | Effect |
+| --- | --- |
+| `Router.Decide(now, Request) (Decision, error)` | The policy. Reads assignments and account state, changes nothing. |
+| `Router.Commit(now, Request, Decision) (Decision, error)` | Makes a `place` or `migrate` durable. It decides again under the commit lock and commits that fresh decision, which it returns. |
+| `Router.Route(now, Request) (Decision, error)` | `Decide`, then `Commit`, before dispatch, in a loop of at most 3 attempts. PR3 calls this. |
+| `Router.Report(Failure) Class` | Records a failure before output and returns the class the policy acts on. |
+| `Router.Observe(account, attemptStart, Observation)` | Records the quota headers of one response. |
+| `Router.Served(now, conv, account)` | Appends and syncs a mark that the conversation's current assignment has served a successful response. Written once per assignment. |
+| `Router.ObserveOverage`, `Relogin`, `Move` | The paid-overflow check or observed paid use, relogin, and the manual override. |
+| `Router.CommitAssignment` | Records an assignment without consulting the policy. For setup and tests only. |
+
+Every method takes the current time, so the simulator drives production code
+with a deterministic clock.
+
+`Commit`, `Served`, `Relogin`, and `Move` share one lock. A `Served` or
+`Relogin` call that lands between `Decide` and `Commit` is therefore seen by
+the commit: a `never_served_relogin` migration decided before `Served` becomes
+`reauth`, and one decided before `Relogin` becomes `dispatch`.
+
+`Decide` returns one of these outcomes. Every outcome except `migrate` keeps
+the assignment.
+
+| Kind | When |
+| --- | --- |
+| `place` | A new conversation. Commit before dispatch. |
+| `dispatch` | An existing assignment on a usable account. |
+| `migrate` | Another account is eligible, and the assigned account has a known rejection that blocks the model (`exhausted`), showed paid use (`overage_observed`), or needs login before the assignment served any response (`never_served_relogin`). Commit before dispatch. |
+| `retry` | `transient` or `throttle` on the previous attempt, within `MaxAttempts`. |
+| `fail` | The retry budget is spent, or the previous attempt failed `request_scoped`. |
+| `wait` | No eligible account. `Until` is the earliest usable reset; `ResetKnown` is false when `Until` is only a recheck time. |
+| `reauth` | The assigned account needs a browser login and the assignment has served a response, or no other account is eligible; or the account is no longer enrolled. |
+| `refuse` | The included-only check fails for the assigned account and no migration applies, or it fails for every logged-in account when placing. `RecheckOverage` is set when a check is unknown or stale. |
+| `unavailable` | No enrolled account is logged in. |
+| `reject` | The request has no conversation identity. |
+
+### Placement rule
+
+Among logged-in accounts that pass the included-only check and have no known
+rejection that blocks the requested model, `Decide` picks the account with the
+smallest score:
+
+```text
+score = (active + 1) / (capacity * (1 + ResetBias * slack))
+```
+
+- `active` counts the account's conversations with a request or commit in the
+  last `ActiveFor`, excluding the conversation being decided.
+- `slack` is the largest `elapsed fraction - utilization` over the account's
+  five-hour, weekly, and model windows that apply to the model, from an
+  observation no older than `FreshFor`. A window counts only with a known
+  utilization and a future reset. `slack` is 0 under `capacity_only` and for a
+  stale or missing observation.
+- Ties go to the earlier enrolled account.
+- An account is blocked until the latest reset among its rejected windows that
+  apply to the model. A five-hour reset therefore never unblocks an account
+  whose weekly window is still rejected. A rejection with no reported reset
+  blocks until `UnknownResetRecheck` after it was observed.
+- Rejected windows accumulate across observations, in whatever order the
+  observations arrive. A rejection stays until its reset, or until an
+  observation stamped after it reports the same window, matched by kind and
+  model scope in any prefix order, as not rejected. An observation that omits
+  the window does not clear it. A rejection stamped before such an allowed
+  report is not recorded. Utilization and freshness come from the newest
+  observation only.
+- Per window, the router keeps the newest rejection after it resets, when it
+  no longer blocks, so that a delayed rejection stamped earlier is not
+  recorded. Of two rejections stamped at the same time, the one that ends
+  later is kept; a rejection with no reported reset ends
+  `UnknownResetRecheck` after it was stamped.
+- Merging an observation forgets the rejections that have reset by its stamp
+  and were stamped at least one weekly period before it, and the allowed
+  reports stamped at least one weekly period before it. Any evidence of the
+  same window stamped earlier belongs to a window that has ended.
+- The destination of every `migrate` is chosen by this rule.
+- Reset preference affects only `place` and the destination of `migrate`.
+  `Decide` never moves a healthy assignment, and a migrated conversation never
+  returns on its own.
+
+`Decision.Reason` is `reset_preference` when the reset-aware choice differs
+from the capacity-only choice for the same request, and `capacity` otherwise.
+`Decision.Observation` reports whether the chosen account's observation is
+`fresh`, `stale`, or `absent`.
+
+### Defaults
+
+| Field | Default | Basis |
+| --- | --- | --- |
+| `Rule` | `reset_aware` | Simulator comparison below |
+| `ResetBias` | 8 | Simulator comparison below |
+| `FreshFor` | 15 min | No measurable difference between 5, 15, and 60 min; middle value |
+| `ActiveFor` | 1 h | Not swept; the longest prompt-cache lifetime |
+| `UnknownResetRecheck` | 5 min | Not swept; bounds attempts on an account whose reset is unknown |
+| `OverageFreshFor` | 1 h | Not swept. PR3 sets the final freshness threshold with the check mechanism. |
+| `MaxAttempts` | 3 | Not swept |
+
+The comparison ran 13 variants over two synthetic fixtures and five seeds:
+capacity-only, and reset-aware with bias 1, 2, 4, and 8 at freshness 5, 15,
+and 60 minutes. `evidence/PR2/comparison.json` holds every run and the labeled
+quota and cache assumptions. Means for the chosen default against
+capacity-only:
+
+| Fixture | Variant | Completed turns | Unused weekly share at reset | Wait minutes | Exhaustion migrations | Migration cache writes (tokens) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `weekly-expiry-72h` | capacity-only | 2593 | 0.197 | 1473 | 63.6 | 663,200 |
+| `weekly-expiry-72h` | bias 8, 15 min | 2590 | 0.169 | 834 | 61.6 | 846,800 |
+| `mixed-48h` | capacity-only | 2975 | 0.189 | 111,080 | 342.8 | 1,058,600 |
+| `mixed-48h` | bias 8, 15 min | 3008 | 0.178 | 108,054 | 353.2 | 1,284,200 |
+
+The effect is small. With bias 8, unused weekly allowance at reset was lower
+in each of the five seeds on both fixtures. Completed turns were level on
+`weekly-expiry-72h` and higher in four of five seeds on `mixed-48h`. The cost
+was more cold cache writes from migration, and on `mixed-48h` slightly more
+exhaustion migrations. No run of any variant had a healthy automatic
+migration, counting migrations returned to subagent requests. The comparison
+does not establish a percentage improvement, and none is required.
+
+### Quota evidence must come from the attempt
+
+The SDK keeps its previous quota snapshot when a response carries no quota
+headers, so a snapshot can predate the failure. `Report` treats `exhausted` and
+`model_limit` as confirmed only when `Failure.Observation.At` is at or after
+`Failure.AttemptStart` and the observation has a rejected window that applies
+to the model. Otherwise `Report` returns `throttle`, records nothing, and the
+next `Decide` retries on the assigned account. This matches the
+classification above, which reads only the call's own attempt headers. PR3
+supplies that evidence from its transport. For a credential-scoped 429
+without a rejected window header, PR3 records an `unspecified` rejected
+window observed during the attempt. A `request_scoped` failure ends the
+request with `fail` and no retry, even if the account became exhausted in the
+meantime.
+
+`Observe` applies the same rule. It takes the start time of the attempt whose
+response carried the headers, and ignores an observation stamped before that
+time or with no time. PR3 passes the headers its transport captured for that
+attempt, stamped with the response time.
+
+### Included-only check
+
+This is the policy side of IO-6. Each account carries a paid-overflow state
+from `ObserveOverage`: `disabled`, `enabled`, or `paid_use`, with the time of
+the check or response.
+
+- **Observed paid use** counts as confirmed exhaustion of the account's
+  included allowance. A conversation on that account migrates with reason
+  `overage_observed` when another account is eligible. If none is, it waits
+  for the earliest usable reset elsewhere or is refused with
+  `paid_use_observed`, and keeps its assignment. New conversations skip the
+  account. A migrated conversation does not return.
+- **Ordering.** The router records the latest check (`disabled` or
+  `enabled`) and, separately, the latest paid use, each with its time. A
+  check stamped before the latest recorded check is ignored. Of two checks
+  stamped at the same time, `disabled` does not replace `enabled`. Paid use
+  is in force unless the latest check is `disabled` and stamped strictly
+  after the latest paid use. The outcome therefore depends on the stamps, not
+  on arrival order:
+  - A `disabled` check with the same time as the paid use does not clear it.
+  - A delayed `disabled` check stamped before a newer `enabled` check does
+    not clear it.
+  - A later `enabled` check puts earlier paid use back in force, even after
+    a `disabled` check had cleared it. Paid use at +1m, `disabled` at +2m,
+    and `enabled` at +3m migrate the conversation with `overage_observed` in
+    either arrival order of the two checks.
+- **Unknown or stale check**, older than `OverageFreshFor`: `Decide` refuses
+  dispatch with `overage_unknown` or `overage_stale`, sets `RecheckOverage`,
+  and does not migrate.
+- **Overflow enabled**: `Decide` refuses dispatch with `overage_enabled` and
+  does not migrate.
+- A new conversation is placed only on accounts that pass. When none pass and
+  no account is waiting on a reset, it is refused with
+  `no_included_only_account`. `RecheckOverage` is set if any account's check
+  is unknown or stale.
+- A `wait` also sets `RecheckOverage` when a logged-in account with no known
+  rejection is held back only by an unknown or stale check, because a recheck
+  could let it serve before the reset.
+
+Precedence: confirmed exhaustion of the assigned account comes before its
+overage state. A conversation whose account is exhausted migrates with reason
+`exhausted` even when that account's own check is unknown or stale, because
+the destination must pass the check: its latest check found overflow
+`disabled` within `OverageFreshFor`. With no such destination, the
+conversation keeps its assignment and gets `refuse` or `wait`. An unknown or
+stale check alone never causes a migration.
+
+PR3 owns the check mechanism and the documented remaining gap: usage credits
+enabled outside the proxy while included windows are exhausted.
+
+PR3 contract item (N11): paid use stamped before the latest check, when that
+check is `disabled`, counts as cleared by it. PR3 must state its timestamp
+rule for paid use, so that a paid-use response is never stamped earlier than
+a `disabled` check the router already applied. Stamping paid use with the
+response time, taken after the check completed, satisfies this. The
+simulator fixtures assume a settings read every 15 minutes.
+
+### Relogin before the first response
+
+`Served` marks an assignment once it has served a successful response. The
+mark is journaled, so it survives a restart, and a migration starts a new
+unmarked assignment. When the assigned account needs a browser login:
+
+- An unmarked assignment moves with reason `never_served_relogin` when another
+  account is eligible. Otherwise `Decide` returns `reauth`.
+- A marked assignment keeps the spec rule: `reauth` until relogin or a manual
+  `Move`.
+
+PR3 contract item (N13): PR3 calls `Served` for every successful response on
+a binding, including responses to subagent requests, which share the
+conversation's binding. The simulator does the same.
+
+PR3 contract item (N4): PR3 must call `Served` and let it return before the
+client sees the response complete. If PR3 cannot order it that way, it must
+state why and what a crash between the two does. Such a crash leaves the
+assignment unmarked, so a later relogin requirement could move a conversation
+that has already served. PR3 also chooses the trigger: the first completed
+content block or the end of the message.
+
+### Assignment journal
+
+The store is the single-writer JSON-lines journal from PR1,
+`assignments.jsonl` in the state directory, with these PR2 rules.
+
+- **Records.** `assign`, `migrate`, and `served`, each with conversation,
+  account, and time. `migrate` also names its source. Replay applies the first
+  `assign` per conversation, a `migrate` only when the conversation is on its
+  source, and a `served` only when the conversation is on that account.
+- **Fail stop.** As in the PR1 assignment storage rules above, after a failed
+  write or sync the store returns `ErrFailed` until it is closed and reopened.
+  That covers every path that could answer with an account: `Lookup`,
+  `Decide`, `Commit` for every decision kind, `Route`, `Served`, `Relogin`,
+  `Move`, and the shortcuts that return an existing binding without writing. The failed
+  record may or may not be on disk, and replay decides which. No caller is
+  told an account that replay can contradict.
+- **Validation.** A commit with an empty conversation or account, or a
+  migration without a source, fails with `ErrIncomplete` before anything is
+  written. Replay refuses to open on an interior record that is not JSON, has
+  an unknown op, or is incomplete in the same way. A torn final line is
+  truncated.
+- **Directory.** Creating the state directory syncs its parent directory.
+- **Sync.** Go's `File.Sync` issues `F_FULLFSYNC` on Darwin and falls back to
+  `fsync` when the file system does not support it.
+- **Not durable.** Quota observations, login state, paid-overflow checks, and
+  conversation activity live in memory. After a restart the router refuses
+  dispatch until the next overage check, and learns exhaustion and logouts
+  again from the next failed attempt.
+
+### Literal fixture expectations
+
+The scripts in `testdata/scripts/` record hand-derived outcomes. Both
+`claude-router-sim check` and `go test ./cmd/...` run them under both rules
+with the defaults above, for 124 checks.
+
+| Script | Expected outcome |
+| --- | --- |
+| `01-equal-quota-unequal-capacity` | Capacities 1:2:1, no observations: placements `b a b c b a b c` under both rules. |
+| `02-reset-preference` | One active conversation on each account, a fresh near-reset `acct-a` (slack 0.8), and an on-pace `acct-b`. Reset-aware places six new conversations `a a a a a a`; capacity-only places `a b a b a b`. The existing conversation on `acct-b` dispatches on `acct-b` under both. |
+| `03-weekly-blocks-near-reset` | `acct-a`, near a five-hour reset but weekly rejected, receives neither the new conversation nor the migration; both go to `acct-b`. With every account blocked, the wait ends at `acct-c`'s reset at minute 60, not `acct-a`'s at minute 20. At minute 61 the conversation moves to `acct-c`. |
+| `04-stale-observations` | A 30-minute-old near-reset observation is ignored: `a b a b` under both rules. A three-hour-old weekly rejection still excludes `acct-c` until its reset. |
+| `05-subagent-inheritance` | Child and nested-child requests dispatch on the parent's account, then on the migration destination. |
+| `06-restart-and-no-return` | The conversation stays on `acct-a` across a restart, 3 idle hours, and a model change. After exhaustion and another restart it stays on `acct-b` when `acct-a` recovers; a new conversation goes to `acct-a`. |
+| `07-auth-and-included-only` | With no verified account, a new conversation is refused with a recheck. An auth failure excludes `acct-a` from new placement. Its served conversation gets `reauth` and stays; its never-served conversation moves to `acct-b`. Paid use on `acct-b`, with `acct-a` logged out, refuses without moving; after relogin it moves to `acct-a` for `overage_observed`. A stale check on `acct-a` then refuses with a recheck and does not move, although `acct-b` is verified. |
+| `08-exhaustion-evidence` | A 429 with 10-minute-old evidence retries on `acct-a` and fails at attempt 4 without moving. Fresh evidence migrates to `acct-b`. A rejection with no reset waits inexactly until minute 17, then dispatches. |

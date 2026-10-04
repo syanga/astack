@@ -1,0 +1,29 @@
+{
+  "name": "weekly-blocks-near-reset",
+  "description": "acct-a has unused five-hour allowance 20 minutes from reset but a rejected weekly window until hour 48, so it is neither a placement nor a migration destination. acct-c is five-hour exhausted until minute 60. When acct-b is also weekly exhausted, the wait ends at c's reset (minute 60), not a's earlier five-hour reset (minute 20), because a stays weekly blocked. At minute 61 the conversation moves to c.",
+  "start": "2026-10-05T09:00:00Z",
+  "accounts": [{"id": "acct-a", "capacity": 1}, {"id": "acct-b", "capacity": 1}, {"id": "acct-c", "capacity": 1}],
+  "steps": [
+    {"at_minutes": 0, "overage": {"state": "disabled"}},
+    {"at_minutes": 0, "route": {"conversation": "x-a", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "place", "account": "acct-a"}}},
+    {"at_minutes": 0, "route": {"conversation": "x-b", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "place", "account": "acct-b"}}},
+    {"at_minutes": 0, "route": {"conversation": "x-c", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "place", "account": "acct-c"}}},
+    {"at_minutes": 0, "observe": {"account": "acct-a", "windows": [
+      {"kind": "five_hour", "utilization": 0.1, "reset_in_minutes": 20},
+      {"kind": "weekly", "rejected": true, "utilization": 1, "reset_in_minutes": 2880}]}},
+    {"at_minutes": 0, "observe": {"account": "acct-c", "windows": [
+      {"kind": "five_hour", "rejected": true, "utilization": 1, "reset_in_minutes": 60},
+      {"kind": "weekly", "utilization": 0.4, "reset_in_minutes": 6000}]}},
+    {"at_minutes": 0, "route": {"conversation": "n1", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "place", "account": "acct-b"}}},
+    {"at_minutes": 0, "route": {"conversation": "x-c", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "migrate", "from": "acct-c", "account": "acct-b", "reason": "exhausted"}}},
+    {"at_minutes": 0, "observe": {"account": "acct-b", "windows": [
+      {"kind": "weekly", "rejected": true, "utilization": 1, "reset_in_minutes": 4320}]}},
+    {"at_minutes": 0, "observe": {"account": "acct-a", "windows": [
+      {"kind": "five_hour", "rejected": true, "utilization": 1, "reset_in_minutes": 20},
+      {"kind": "weekly", "rejected": true, "utilization": 1, "reset_in_minutes": 2880}]}},
+    {"at_minutes": 0, "route": {"conversation": "x-c", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "wait", "until_minutes": 60, "reset_known": true, "bound_to": "acct-b"}}},
+    {"at_minutes": 30, "route": {"conversation": "x-c", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "wait", "until_minutes": 60, "bound_to": "acct-b"}}},
+    {"at_minutes": 61, "overage": {"state": "disabled"}},
+    {"at_minutes": 61, "route": {"conversation": "x-c", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "migrate", "from": "acct-b", "account": "acct-c"}}}
+  ]
+}

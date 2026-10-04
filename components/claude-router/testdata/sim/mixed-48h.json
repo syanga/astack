@@ -1,0 +1,51 @@
+{
+  "name": "mixed-48h",
+  "assumptions": {
+    "allowance": "Synthetic. A capacity-1 account has 500 units per five-hour window and 5000 per weekly window; capacity scales both linearly. Real allowances are not published.",
+    "windows": "Synthetic. Five-hour and weekly windows reset on a fixed schedule from the fixture start; real five-hour windows start at first use.",
+    "cost": "Synthetic. One unit is 1000 weighted tokens: uncached input 1, cache write 1.25, cache read 0.1, output 5. These are API price ratios, used only as a stand-in for allowance consumption.",
+    "cache": "Synthetic. A prompt prefix stays cached for 5 minutes after its last use, per account and conversation. A request on another account while the old cache is warm counts its prefix as a migration write.",
+    "observations": "Every response reports exact utilization and resets, except acct-e, whose responses carry no quota headers.",
+    "external_load": "acct-c loses 10% of its five-hour allowance per hour to clients outside this proxy.",
+    "overage": "A settings read finds paid overflow disabled on every account every 15 minutes, except acct-d between hours 4 and 8: a response shows paid use at hour 4, and a check at hour 8 finds overflow disabled again.",
+    "faults": "2% transient failures before output, 1% partial streams, 1% cancellations; acct-b logs out at hour 20 and logs in again at hour 26, and stalled conversations move manually after 30 minutes; the proxy restarts at hours 12, 21, and 30. The restart at hour 21 loses the logout, so new conversations placed on acct-b fail their first request."
+  },
+  "start": "2026-10-05T09:00:00Z",
+  "hours": 48,
+  "five_hour_units": 500,
+  "weekly_units": 5000,
+  "overage_check_minutes": 15,
+  "accounts": [
+    {"id": "acct-a", "capacity": 1, "five_hour_used": 0.2, "five_hour_reset_hours": 1.5, "weekly_used": 0.3, "weekly_reset_hours": 100},
+    {"id": "acct-b", "capacity": 5, "five_hour_used": 0.6, "five_hour_reset_hours": 0.5, "weekly_used": 0.4, "weekly_reset_hours": 70},
+    {"id": "acct-c", "capacity": 5, "five_hour_used": 0.1, "five_hour_reset_hours": 3, "weekly_used": 0.2, "weekly_reset_hours": 120, "external_per_hour": 0.1},
+    {"id": "acct-d", "capacity": 20, "five_hour_used": 0.3, "five_hour_reset_hours": 4, "weekly_used": 0.5, "weekly_reset_hours": 20,
+     "model_windows": [{"models": ["claude-opus"], "share": 0.3, "used": 0.6, "reset_hours": 40}]},
+    {"id": "acct-e", "capacity": 1, "five_hour_used": 0.0, "five_hour_reset_hours": 2, "weekly_used": 0.9, "weekly_reset_hours": 30, "hide_headers": true}
+  ],
+  "workload": {
+    "conversations": 250,
+    "arrival_mean_minutes": 11.5,
+    "turns_min": 5,
+    "turns_max": 30,
+    "gap_mean_minutes": 3,
+    "idle_probability": 0.1,
+    "idle_minutes": 90,
+    "initial_context": 20000,
+    "growth_per_turn": 3000,
+    "output_per_turn": 800,
+    "models": ["claude-sonnet-4-5", "claude-opus-4-5"],
+    "model_change_probability": 0.05,
+    "subagent_probability": 0.2,
+    "subagent_context": 15000,
+    "nested_probability": 0.3,
+    "parallel_first_requests": 3,
+    "transient_rate": 0.02,
+    "partial_stream_rate": 0.01,
+    "cancel_rate": 0.01
+  },
+  "cache": {"ttl_minutes": 5, "input_weight": 1, "write_weight": 1.25, "read_weight": 0.1, "output_weight": 5},
+  "crash_hours": [12, 21, 30],
+  "auth_faults": [{"account": "acct-b", "at_hours": 20, "relogin_hours": 26, "move_after_minutes": 30}],
+  "paid_use": [{"account": "acct-d", "at_hours": 4, "cleared_hours": 8}]
+}
