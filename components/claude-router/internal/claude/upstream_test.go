@@ -29,6 +29,8 @@ type reply struct {
 	DataOnly    bool
 	NoUsage     bool
 	Hold        bool
+	CleanCut    bool
+	Before      func()
 	Body        string
 }
 
@@ -129,6 +131,9 @@ func (u *fakeUpstream) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	usage, usageSet := u.usage[account]
 	u.mu.Unlock()
+	if r.Before != nil {
+		r.Before()
+	}
 
 	if !known {
 		return respond(req, http.StatusUnauthorized, nil, errorBody("authentication_error", "unknown token")), nil
@@ -255,7 +260,7 @@ func stream(req *http.Request, account string, r reply, ended chan<- time.Time) 
 			_ = pw.CloseWithError(req.Context().Err())
 			return
 		}
-		if limit < len(events) {
+		if limit < len(events) && !r.CleanCut {
 			_ = pw.CloseWithError(io.ErrUnexpectedEOF)
 			return
 		}

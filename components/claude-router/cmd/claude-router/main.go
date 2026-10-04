@@ -114,6 +114,9 @@ func login(args []string) error {
 	if *state == "" || !filepath.IsAbs(*state) || *account == "" {
 		return errors.New("login: -state (absolute) and -account are required")
 	}
+	if !claude.ValidAccountID(*account) {
+		return fmt.Errorf("login: %q is not a valid account ID (letters, digits, '-', '_', '.')", *account)
+	}
 	lock, err := router.OpenStore(filepath.Join(*state, "assignments"))
 	if errors.Is(err, router.ErrLocked) {
 		return errors.New("login: the router is running on this state directory; stop it first")

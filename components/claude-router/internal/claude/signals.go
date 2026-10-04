@@ -62,14 +62,17 @@ func overageFrom(h http.Header) (router.Overage, bool) {
 // call's own last upstream attempt. It never reads the SDK's passive quota
 // snapshot (RP-15).
 func classify(status int, err error, attempt http.Header) router.Class {
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return router.ClassAuth
+	case status == http.StatusRequestTimeout || status >= 500:
+		return router.ClassTransient
+	}
 	var requestScoped interface{ IsRequestScoped() bool }
 	if errors.As(err, &requestScoped) && requestScoped.IsRequestScoped() {
 		return router.ClassRequestScoped
 	}
-	switch {
-	case status == http.StatusUnauthorized || status == http.StatusForbidden:
-		return router.ClassAuth
-	case status == http.StatusTooManyRequests:
+	if status == http.StatusTooManyRequests {
 		var credScoped interface{ IsCredentialScoped() bool }
 		credential := errors.As(err, &credScoped) && credScoped.IsCredentialScoped()
 		if credential || unified(attempt, "5h-Status") == "rejected" || unified(attempt, "7d-Status") == "rejected" {
@@ -79,8 +82,6 @@ func classify(status int, err error, attempt http.Header) router.Class {
 			return router.ClassModelLimit
 		}
 		return router.ClassThrottle
-	case status == http.StatusRequestTimeout || status >= 500:
-		return router.ClassTransient
 	}
 	return router.ClassRequestScoped
 }

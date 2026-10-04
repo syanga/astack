@@ -134,9 +134,6 @@ func (o *overageReader) fetch(ctx context.Context, account router.AccountID) (ro
 		return "", errors.New("usage request failed before a response")
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		o.s.router.Report(router.Failure{Account: account, Class: router.ClassAuth})
-	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("usage endpoint answered %d", resp.StatusCode)
 	}

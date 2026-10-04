@@ -5,21 +5,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 
 	"github.com/syanga/astack/components/claude-router/internal/router"
 )
 
-// credentialOverrides are credential metadata keys that change how the SDK
-// dispatches or where it sends a request. A proxy bypasses the router's
-// transport, and retry or cooling overrides break the single-attempt posture
-// (CONTRACT.md, "Executor posture").
-var credentialOverrides = []string{
-	"proxy_url", "base_url",
-	"request_retry", "request-retry",
-	"disable_cooling", "disable-cooling",
-	"request_scoped_errors", "request-scoped-errors",
-	"disabled",
+// credentialKeys are the metadata keys the SDK's Claude login and its own
+// persistence write. Any other key can change where or how the SDK sends a
+// request: proxy_url and base_url bypass the router's transport, headers can
+// replace Authorization, and retry or cooling keys break the single-attempt
+// posture (CONTRACT.md, "Executor posture").
+var credentialKeys = map[string]bool{
+	"type": true, "email": true, "access_token": true, "refresh_token": true,
+	"id_token": true, "last_refresh": true, "expired": true, "refreshed": true,
+	"account_uuid": true, "organization_uuid": true, "organization_name": true,
+	"claude_device_ids": true, "claude_account_profile_checked_at": true,
+	"skip_account_profile": true, "disabled": true,
 }
 
 func credentialFile(stateDir string, id router.AccountID) string {
@@ -71,24 +75,19 @@ func CheckCredential(path string) error {
 	if tok, _ := meta["access_token"].(string); tok == "" {
 		return fmt.Errorf("%s: no access token", filepath.Base(path))
 	}
-	for _, key := range credentialOverrides {
-		if v, set := meta[key]; set && !zeroValue(v) {
+	coreauth.NormalizeCredentialMetadata(meta)
+	var keys []string
+	for key := range meta {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if !credentialKeys[key] {
 			return fmt.Errorf("%s: carries %q, which the router does not allow", filepath.Base(path), key)
 		}
 	}
-	return nil
-}
-
-func zeroValue(v any) bool {
-	switch t := v.(type) {
-	case nil:
-		return true
-	case string:
-		return strings.TrimSpace(t) == ""
-	case bool:
-		return !t
-	case float64:
-		return t == 0
+	if disabled, _ := meta["disabled"].(bool); disabled {
+		return fmt.Errorf("%s: the credential is disabled", filepath.Base(path))
 	}
-	return false
+	return nil
 }

@@ -131,6 +131,10 @@ func (c Config) validate() error {
 	return nil
 }
 
+// ValidAccountID reports whether id can name an account and its credential
+// file: letters, digits, '-', '_', and '.', and not "." or "..".
+func ValidAccountID(id string) bool { return validAccountID(id) }
+
 func validAccountID(id string) bool {
 	if id == "" || id == "." || id == ".." {
 		return false

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -84,17 +85,19 @@ func errorType(status int) string {
 }
 
 type outcome struct {
-	Delivered  bool
-	ClientGone bool
-	Status     int
-	Err        error
-	Class      router.Class
-	Message    string
-	Header     http.Header
-	AttemptAt  time.Time
-	Attempts   int
-	Result     string
-	Usage      Usage
+	Delivered    bool
+	ClientGone   bool
+	Violation    string
+	ServedFailed bool
+	Status       int
+	Err          error
+	Class        router.Class
+	Message      string
+	Header       http.Header
+	AttemptAt    time.Time
+	Attempts     int
+	Result       string
+	Usage        Usage
 }
 
 func (s *Service) messages(c *gin.Context) {
@@ -118,6 +121,7 @@ func (s *Service) messages(c *gin.Context) {
 	stream := id.Stream
 	req := router.Request{Conversation: id.Conversation, Agent: id.Agent, ParentAgent: id.ParentAgent, Model: id.Model, Attempt: 1}
 	call := fmt.Sprintf("r%d", s.seq.Add(1))
+	budget := &atomic.Int32{}
 	upstream := 0
 	rechecked := false
 	finish := func(kind string, account router.AccountID, d router.Decision, status int, out *outcome) {
@@ -181,8 +185,13 @@ func (s *Service) messages(c *gin.Context) {
 			return
 		}
 
+		if budget.Load() >= maxUpstreamAttempts {
+			finish("request", account, router.Decision{Kind: router.Fail, Reason: router.ReasonRetryBudget}, http.StatusServiceUnavailable, nil)
+			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: request reached the router's upstream attempt cap")
+			return
+		}
 		authID := s.authIDs[account]
-		out := s.dispatch(c, fmt.Sprintf("%s-%d", call, step), authID, account, id, body)
+		out := s.dispatch(c, fmt.Sprintf("%s-%d", call, step), authID, account, id, body, budget)
 		upstream += out.Attempts
 		switch {
 		case out.ClientGone:
@@ -190,6 +199,20 @@ func (s *Service) messages(c *gin.Context) {
 			return
 		case out.Delivered:
 			finish("request", account, d, http.StatusOK, &out)
+			return
+		case out.Violation != "":
+			s.events.emit(Event{Kind: "pin_violation", Conversation: conv, Account: account, Detail: out.Violation})
+			finish("request", account, d, http.StatusBadGateway, &out)
+			writeError(c, http.StatusBadGateway, "api_error", "claude-router: "+out.Violation)
+			return
+		case out.ServedFailed:
+			finish("request", account, d, http.StatusServiceUnavailable, &out)
+			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: assignment journal unavailable; restart the router")
+			return
+		}
+		if budget.Load() > maxUpstreamAttempts {
+			finish("request", account, router.Decision{Kind: router.Fail, Reason: router.ReasonRetryBudget}, http.StatusServiceUnavailable, &out)
+			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: request reached the router's upstream attempt cap")
 			return
 		}
 		if out.Attempts == 0 {
@@ -307,11 +330,11 @@ func (s *Service) answerExhausted(c *gin.Context, now time.Time, account router.
 	s.answerWait(c, now, until, known, fmt.Sprintf("claude-router: account %s is exhausted and this build does not move conversations", account))
 }
 
-func (s *Service) dispatch(c *gin.Context, call, authID string, account router.AccountID, id Identity, body []byte) outcome {
+func (s *Service) dispatch(c *gin.Context, call, authID string, account router.AccountID, id Identity, body []byte, budget *atomic.Int32) outcome {
 	api := claudehandlers.NewClaudeCodeAPIHandler(s.base)
 	ctx, cancel := s.base.GetContextWithCancel(api, c, context.Background())
 	ctx = handlers.WithPinnedAuthID(ctx, authID)
-	ctx = withCall(ctx, call)
+	ctx = withCall(ctx, call, account, budget)
 	defer s.transport.forget(call)
 	var out outcome
 	if id.Stream {
@@ -320,19 +343,51 @@ func (s *Service) dispatch(c *gin.Context, call, authID string, account router.A
 		out = s.relayMessage(c, ctx, call, account, id, body)
 	}
 	cancel(out.Err)
-	attempts := s.transport.attempts(call)
-	out.Attempts = len(attempts)
-	if n := len(attempts); n > 0 && !out.Delivered && !out.ClientGone {
-		last := attempts[n-1]
+	var sent []attempt
+	for _, a := range s.transport.attempts(call) {
+		if a.Refused == "account" && out.Violation == "" {
+			out.Violation = "the SDK attempted another account than the pinned one"
+		}
+		if a.Refused == "" {
+			sent = append(sent, a)
+		}
+	}
+	out.Attempts = len(sent)
+	if n := len(sent); n > 0 && !out.Delivered && !out.ClientGone {
+		last := sent[n-1]
 		out.AttemptAt = last.Start
 		if out.Header == nil {
 			out.Header = last.Header
 		}
+		status := out.Status
+		if last.Status >= 400 {
+			status = last.Status
+		}
 		if out.Class == "" {
-			out.Class = classify(out.Status, out.Err, last.Header)
+			out.Class = classify(status, out.Err, last.Header)
 		}
 	}
 	return out
+}
+
+// attemptsObserved reports why a response must not reach the client: the
+// router's transport saw no upstream attempt for the call, or saw one for
+// another account. Either means the SDK sent the request around the
+// router's attempt record and paid-use observation.
+func (s *Service) attemptsObserved(call string, account router.AccountID) string {
+	sent := 0
+	for _, a := range s.transport.attempts(call) {
+		if a.Account != account {
+			return "the SDK attempted another account than the pinned one"
+		}
+		if a.Refused == "" {
+			sent++
+		}
+	}
+	if sent == 0 {
+		return "the router's transport observed no upstream attempt for this response"
+	}
+	return ""
 }
 
 func failureOf(status int, err error) outcome {
@@ -350,7 +405,7 @@ func failureOf(status int, err error) outcome {
 	return outcome{Status: status, Err: err, Message: msg, Result: "failed_before_output"}
 }
 
-func (s *Service) relayMessage(c *gin.Context, ctx context.Context, _ string, account router.AccountID, id Identity, body []byte) outcome {
+func (s *Service) relayMessage(c *gin.Context, ctx context.Context, call string, account router.AccountID, id Identity, body []byte) outcome {
 	resp, _, errMsg := s.base.ExecuteWithAuthManager(ctx, "claude", id.Model, body, "")
 	if c.Request.Context().Err() != nil {
 		return outcome{ClientGone: true, Result: "client_canceled"}
@@ -358,15 +413,15 @@ func (s *Service) relayMessage(c *gin.Context, ctx context.Context, _ string, ac
 	if errMsg != nil {
 		return failureOf(errMsg.StatusCode, errMsg.Error)
 	}
+	if v := s.attemptsObserved(call, account); v != "" {
+		return outcome{Violation: v, Result: "pin_violation"}
+	}
+	if s.markServed(id.Conversation, account) != nil {
+		return outcome{ServedFailed: true, Result: "served_mark_failed"}
+	}
 	out := outcome{Delivered: true, Result: "completed"}
 	if u, ok := usageFrom("message", resp); ok {
 		out.Usage = u
-	}
-	var shape struct {
-		Content []json.RawMessage `json:"content"`
-	}
-	if json.Unmarshal(resp, &shape) == nil && len(shape.Content) > 0 {
-		s.markServed(id.Conversation, account)
 	}
 	c.Data(http.StatusOK, "application/json", resp)
 	return out
@@ -378,30 +433,37 @@ func (s *Service) relayMessage(c *gin.Context, ctx context.Context, _ string, ac
 // every chunk, marks the assignment served at the first completed content
 // block before the chunk that completes it reaches the client, and ends the
 // stream gracefully whatever happens upstream.
-func (s *Service) relayStream(c *gin.Context, ctx context.Context, _ string, account router.AccountID, id Identity, body []byte) outcome {
+func (s *Service) relayStream(c *gin.Context, ctx context.Context, call string, account router.AccountID, id Identity, body []byte) outcome {
 	data, _, errs := s.base.ExecuteStreamWithAuthManager(ctx, "claude", id.Model, body, "")
 	var scan sseScanner
 	var pending []byte
 	committed, served, stopped := false, false, false
 	out := outcome{}
-	handle := func(events []sseEvent) {
+	handle := func(events []sseEvent) error {
 		for _, ev := range events {
 			switch ev.Name {
 			case "message_start", "message_delta":
 				if u, ok := usageFrom(ev.Name, ev.Data); ok {
 					out.Usage.merge(u)
 				}
-			case "content_block_stop":
+			case "content_block_stop", "message_stop":
+				stopped = stopped || ev.Name == "message_stop"
 				if !served {
 					served = true
-					s.markServed(id.Conversation, account)
+					if err := s.markServed(id.Conversation, account); err != nil {
+						return err
+					}
 				}
-			case "message_stop":
-				stopped = true
 			case "error":
 				out.Result = "error_after_output"
 			}
 		}
+		return nil
+	}
+	streamError := func(kind, message string) {
+		payload, _ := json.Marshal(map[string]any{"type": "error", "error": map[string]string{"type": kind, "message": message}})
+		_, _ = fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", payload)
+		c.Writer.Flush()
 	}
 	commit := func() {
 		committed = true
@@ -427,9 +489,7 @@ func (s *Service) relayStream(c *gin.Context, ctx context.Context, _ string, acc
 				f := failureOf(msg.StatusCode, msg.Error)
 				return f
 			}
-			payload, _ := json.Marshal(map[string]any{"type": "error", "error": map[string]string{"type": errorType(msg.StatusCode), "message": "upstream stream failed"}})
-			_, _ = fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", payload)
-			c.Writer.Flush()
+			streamError(errorType(msg.StatusCode), "upstream stream failed")
 			out.Result = "error_after_output"
 			return out
 		case chunk, ok := <-data:
@@ -449,10 +509,19 @@ func (s *Service) relayStream(c *gin.Context, ctx context.Context, _ string, acc
 					f.Class = classifyStreamError(kind)
 					return f
 				}
-				handle(events)
+				if v := s.attemptsObserved(call, account); v != "" {
+					return outcome{Violation: v, Result: "pin_violation"}
+				}
+				if handle(events) != nil {
+					return outcome{ServedFailed: true, Result: "served_mark_failed"}
+				}
 				commit()
 			} else {
-				handle(events)
+				if handle(events) != nil {
+					streamError("api_error", "claude-router: assignment journal unavailable; restart the router")
+					out.Result = "served_mark_failed"
+					return out
+				}
 				_, _ = c.Writer.Write(chunk)
 				c.Writer.Flush()
 			}
@@ -467,17 +536,19 @@ func (s *Service) relayStream(c *gin.Context, ctx context.Context, _ string, acc
 		out.Result = "completed"
 		if !stopped {
 			out.Result = "incomplete"
+			streamError("api_error", "upstream stream ended before message_stop")
 		}
 	}
 	return out
 }
 
-func (s *Service) markServed(conv router.ConversationID, account router.AccountID) {
+func (s *Service) markServed(conv router.ConversationID, account router.AccountID) error {
 	if err := s.router.Served(s.now(), conv, account); err != nil {
 		s.events.emit(Event{Kind: "served_mark_failed", Conversation: conversationHash(conv), Account: account})
-		return
+		return err
 	}
 	s.events.emit(Event{Kind: "served", Conversation: conversationHash(conv), Account: account})
+	return nil
 }
 
 // AccountStatus is one enrolled account in the status output.

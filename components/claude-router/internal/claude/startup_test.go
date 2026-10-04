@@ -34,7 +34,7 @@ func TestStartRefusesUnsafeSettings(t *testing.T) {
 	e.cfg.OverageCheckEvery = Duration(-time.Minute)
 	_, negative := Start(e.cfg, Options{Upstream: e.upstream})
 	e.cfg.OverageCheckEvery = 0
-	t.Setenv("MANAGEMENT_PASSWORD", "x")
+	t.Setenv("MANAGEMENT_PASSWORD", " ")
 	_, management := Start(e.cfg, Options{Upstream: e.upstream})
 
 	if negative == nil || !strings.Contains(negative.Error(), "positive") {

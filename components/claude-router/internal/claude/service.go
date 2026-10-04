@@ -284,7 +284,7 @@ var (
 func (s *Service) startSDK() error {
 	sdkStartMu.Lock()
 	defer sdkStartMu.Unlock()
-	if v, set := os.LookupEnv("MANAGEMENT_PASSWORD"); set && strings.TrimSpace(v) != "" {
+	if v, set := os.LookupEnv("MANAGEMENT_PASSWORD"); set && v != "" {
 		return errors.New("MANAGEMENT_PASSWORD is set; it would open the SDK's management routes, which select accounts without the router")
 	}
 	if !log.IsLevelEnabled(log.InfoLevel) {

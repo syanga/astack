@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -24,12 +25,21 @@ type attempt struct {
 	Status  int
 	Header  http.Header
 	Err     error
+	Refused string
+}
+
+const maxUpstreamAttempts = 4
+
+type callInfo struct {
+	id      string
+	account router.AccountID
+	budget  *atomic.Int32
 }
 
 type callKey struct{}
 
-func withCall(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, callKey{}, id)
+func withCall(ctx context.Context, id string, account router.AccountID, budget *atomic.Int32) context.Context {
+	return context.WithValue(ctx, callKey{}, callInfo{id: id, account: account, budget: budget})
 }
 
 // transport is the round tripper the SDK uses for every upstream request.
@@ -103,8 +113,26 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 		out.URL.Scheme, out.URL.Host = t.redirect.Scheme, t.redirect.Host
 		out.Host = ""
 	}
-	call, _ := req.Context().Value(callKey{}).(string)
+	info, _ := req.Context().Value(callKey{}).(callInfo)
+	call := info.id
 	a := attempt{Account: account, Path: req.URL.Path, Start: t.now()}
+	switch {
+	case info.account != "" && info.account != account:
+		a.Refused = "account"
+	case info.budget != nil && info.budget.Add(1) > maxUpstreamAttempts:
+		a.Refused = "budget"
+	}
+	if a.Refused != "" {
+		if req.Body != nil {
+			_ = req.Body.Close()
+		}
+		a.End = a.Start
+		a.Err = fmt.Errorf("claude-router transport refused the attempt: %s", a.Refused)
+		t.mu.Lock()
+		t.calls[call] = append(t.calls[call], a)
+		t.mu.Unlock()
+		return nil, a.Err
+	}
 	resp, err := t.inner.RoundTrip(out)
 	a.End = t.now()
 	if err != nil {
