@@ -9,23 +9,14 @@ type accountView struct {
 	needsLogin  bool
 	observation Observation
 	rejections  []rejection
-	allowedAt   map[string]windowMark
-	rejectedAt  map[string]windowMark
+	allowedAt   map[string]time.Time
 	check       Overage
 	checkAt     time.Time
 	paidUseAt   time.Time
 }
 
-// windowMark is the newest report of one window: its time, when it ends, and
-// whether that end is a reported reset.
-type windowMark struct {
-	at    time.Time
-	until time.Time
-	known bool
-}
-
-// paidUse reports whether observed paid use still excludes the account: no
-// disabled check stamped after it has been recorded.
+// paidUse reports whether observed paid use excludes the account: it does
+// unless the latest check is disabled and stamped after the latest paid use.
 func (a accountView) paidUse() bool {
 	return !a.paidUseAt.IsZero() && !(a.check == OverageDisabled && a.checkAt.After(a.paidUseAt))
 }
