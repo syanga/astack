@@ -9,6 +9,7 @@ type accountView struct {
 	needsLogin  bool
 	observation Observation
 	rejections  []rejection
+	allowedAt   map[string]time.Time
 	overage     Overage
 	overageAt   time.Time
 }

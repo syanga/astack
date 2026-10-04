@@ -1324,3 +1324,109 @@ func TestNewRejectsInvalidCapacityAndConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestConfirmedReportOlderThanNewestObservationStillBlocks(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+	h.route(t0, req("conv"))
+	start := t0.Add(time.Minute)
+	h.observe(a, Observation{At: start.Add(2 * time.Second), Windows: []Window{usage(Weekly, 0.5, t0.Add(48*time.Hour))}})
+
+	class := h.r.Report(Failure{Account: a, Model: "claude-sonnet-4-5", Class: ClassExhausted, AttemptStart: start,
+		Observation: Observation{At: start.Add(time.Second), Windows: []Window{rejected(FiveHour, t0.Add(2*time.Hour))}}})
+	r := req("conv")
+	r.Attempt, r.LastFailure = 2, class
+	next := h.route(start.Add(3*time.Second), r)
+	newcomer := h.route(start.Add(3*time.Second), req("newcomer"))
+
+	if class != ClassExhausted {
+		t.Fatalf("Report classified the attempt's own rejected window as %q, want exhausted", class)
+	}
+	if next.Kind != Migrate || next.From != a || next.Account != b || next.Reason != ReasonExhausted {
+		t.Fatalf("after confirmed exhaustion with older evidence got %+v, want migration %s to %s", next, a, b)
+	}
+	if newcomer.Account != b {
+		t.Fatalf("a new conversation went to %s, want %s while a's five-hour window is rejected", newcomer.Account, b)
+	}
+}
+
+func TestRejectionOlderThanAnAllowedReportOfTheSameWindowIsNotRecorded(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+	h.observe(a, Observation{At: t0.Add(2 * time.Second), Windows: []Window{usage(FiveHour, 0.3, t0.Add(2*time.Hour))}})
+
+	h.observe(a, Observation{At: t0.Add(time.Second), Windows: []Window{rejected(FiveHour, t0.Add(2*time.Hour))}})
+	placed := h.route(t0.Add(3*time.Second), req("n1"))
+	h.observe(a, Observation{At: t0.Add(3 * time.Second), Windows: []Window{rejected(Weekly, t0.Add(48*time.Hour))}})
+	blocked := h.route(t0.Add(4*time.Second), req("n2"))
+
+	if placed.Account != a {
+		t.Fatalf("a five-hour rejection stamped before a newer allowed report of that window sent n1 to %s, want %s", placed.Account, a)
+	}
+	if blocked.Account != b {
+		t.Fatalf("a newer weekly rejection sent n2 to %s, want %s", blocked.Account, b)
+	}
+}
+
+func TestAllowedReportClearsARejectionWhateverTheModelOrder(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+	opus := func(conv string) Request {
+		return Request{Conversation: ConversationID(conv), Model: "claude-opus-4-5", Attempt: 1}
+	}
+	h.observe(a, Observation{At: t0, Windows: []Window{
+		{Kind: Weekly, Models: []string{"claude-opus", "claude-fable"}, Utilization: ptr(1), Rejected: true, ResetsAt: t0.Add(48 * time.Hour)},
+	}})
+
+	blocked := h.route(t0, opus("o1"))
+	h.observe(a, Observation{At: t0.Add(time.Minute), Windows: []Window{
+		{Kind: Weekly, Models: []string{"claude-fable", "claude-opus"}, Utilization: ptr(0.2), ResetsAt: t0.Add(48 * time.Hour)},
+	}})
+	cleared := h.route(t0.Add(time.Minute), opus("o2"))
+
+	if blocked.Account != b || cleared.Account != a {
+		t.Fatalf("opus placements %s then %s, want %s while rejected and %s after the allowed report with prefixes reordered", blocked.Account, cleared.Account, b, a)
+	}
+}
+
+func TestLaterEnabledCheckKeepsPaidUseRecorded(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+	h.manualOverage = true
+	h.r.ObserveOverage(a, OverageDisabled, t0)
+	h.r.ObserveOverage(b, OverageDisabled, t0)
+	h.route(t0, req("conv"))
+	h.r.ObserveOverage(a, OveragePaidUse, t0.Add(time.Minute))
+
+	h.r.ObserveOverage(a, OverageEnabled, t0.Add(2*time.Minute))
+	h.r.ObserveOverage(b, OverageDisabled, t0.Add(2*time.Minute))
+	moved := h.route(t0.Add(2*time.Minute), req("conv"))
+	h.r.ObserveOverage(a, OverageDisabled, t0.Add(3*time.Minute))
+	h.r.ObserveOverage(b, OverageDisabled, t0.Add(3*time.Minute))
+	newcomer := h.route(t0.Add(3*time.Minute), req("newcomer"))
+
+	if moved.Kind != Migrate || moved.From != a || moved.Account != b || moved.Reason != ReasonOverageObserved {
+		t.Fatalf("after paid use and a later enabled check got %+v, want migration %s to %s for overage_observed", moved, a, b)
+	}
+	if newcomer.Kind != Place || newcomer.Account != a {
+		t.Fatalf("after a later disabled check got %+v, want placement on %s", newcomer, a)
+	}
+}
+
+func TestCommitAfterFailStopRefusesEveryDecisionKind(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+	h.route(t0, req("conv"))
+	saved, err := h.r.Decide(t0, req("conv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.store.file = &faultyFile{journalFile: h.store.file, failSync: true}
+	if _, err := h.r.CommitAssignment(t0, "other", b, ReasonManual); err == nil {
+		t.Fatal("the commit with a failed sync returned no error")
+	}
+
+	got, errCommit := h.r.Commit(t0, req("conv"), saved)
+
+	if saved.Kind != Dispatch || saved.Account != a {
+		t.Fatalf("saved decision %+v, want dispatch on %s", saved, a)
+	}
+	if !errors.Is(errCommit, ErrFailed) || got.Account != "" {
+		t.Fatalf("Commit of a saved dispatch after fail-stop returned %+v, %v; want ErrFailed and no account", got, errCommit)
+	}
+}
