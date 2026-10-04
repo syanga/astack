@@ -57,8 +57,8 @@ probes or read from the pinned source.
 - Account files in the SDK auth directory carry no `base_url`, so inference
   always targets `https://api.anthropic.com`. The probe serves that host in
   process through the round tripper and refuses every other host. No probe
-  request left the process. Every transcript records an empty `refused_hosts`
-  list.
+  request left the process: every transcript records `refused_hosts: null`, and
+  the evidence run also ran under a sandbox that denies non-loopback network.
 
 ## Executor posture
 
