@@ -203,9 +203,24 @@ func (s *Store) apply(rec record) error {
 	return nil
 }
 
-func (s *Store) append(rec record) error {
+func (s *Store) err() error {
 	if s.failed != nil {
 		return fmt.Errorf("%w: %v", ErrFailed, s.failed)
+	}
+	return nil
+}
+
+// Err returns ErrFailed, wrapping the cause, once a journal write or sync has
+// failed, and nil before that.
+func (s *Store) Err() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.err()
+}
+
+func (s *Store) append(rec record) error {
+	if err := s.err(); err != nil {
+		return err
 	}
 	if err := rec.validate(); err != nil {
 		return err
@@ -231,6 +246,9 @@ func (s *Store) append(rec record) error {
 func (s *Store) Assign(conv ConversationID, proposed AccountID, reason Reason, at time.Time) (Binding, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.err(); err != nil {
+		return Binding{}, err
+	}
 	if b, ok := s.bindings[conv]; ok {
 		return b, nil
 	}
@@ -248,6 +266,9 @@ func (s *Store) Assign(conv ConversationID, proposed AccountID, reason Reason, a
 func (s *Store) Migrate(conv ConversationID, from, to AccountID, reason Reason, at time.Time) (Binding, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.err(); err != nil {
+		return Binding{}, err
+	}
 	b, ok := s.bindings[conv]
 	if !ok {
 		return Binding{}, ErrUnassigned
@@ -269,6 +290,9 @@ func (s *Store) Migrate(conv ConversationID, from, to AccountID, reason Reason, 
 func (s *Store) MarkServed(conv ConversationID, account AccountID, at time.Time) (Binding, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.err(); err != nil {
+		return Binding{}, err
+	}
 	b, ok := s.bindings[conv]
 	if !ok {
 		return Binding{}, ErrUnassigned
@@ -285,30 +309,40 @@ func (s *Store) MarkServed(conv ConversationID, account AccountID, at time.Time)
 }
 
 // Lookup returns the conversation's binding.
-func (s *Store) Lookup(conv ConversationID) (Binding, bool) {
+func (s *Store) Lookup(conv ConversationID) (Binding, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if err := s.err(); err != nil {
+		return Binding{}, false, err
+	}
 	b, ok := s.bindings[conv]
-	return b, ok
+	return b, ok, nil
 }
 
 // Bindings returns a copy of every binding.
-func (s *Store) Bindings() map[ConversationID]Binding {
+func (s *Store) Bindings() (map[ConversationID]Binding, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if err := s.err(); err != nil {
+		return nil, err
+	}
 	out := make(map[ConversationID]Binding, len(s.bindings))
 	for k, v := range s.bindings {
 		out[k] = v
 	}
-	return out
+	return out, nil
 }
 
-func (s *Store) each(f func(ConversationID, Binding)) {
+func (s *Store) each(f func(ConversationID, Binding)) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if err := s.err(); err != nil {
+		return err
+	}
 	for k, v := range s.bindings {
 		f(k, v)
 	}
+	return nil
 }
 
 // Close releases the journal and the process lock.

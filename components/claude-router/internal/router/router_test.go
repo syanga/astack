@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -96,9 +97,18 @@ func (h *harness) report(at time.Time, acct AccountID, model string, class Class
 		Observation: Observation{At: at, Windows: ws}})
 }
 
+// observe records response headers whose attempt started when they were
+// observed.
+func (h *harness) observe(acct AccountID, obs Observation) {
+	h.r.Observe(acct, obs.At, obs)
+}
+
 func (h *harness) bound(conv ConversationID) AccountID {
 	h.t.Helper()
-	bnd, ok := h.r.Lookup(conv)
+	bnd, ok, err := h.r.Lookup(conv)
+	if err != nil {
+		h.t.Fatalf("lookup %s: %v", conv, err)
+	}
 	if !ok {
 		return ""
 	}
@@ -177,11 +187,11 @@ func TestResetAwarePlacementFavorsUnusedAllowanceNearResetWithoutMovingHealthyWo
 			h := newHarness(t, cfgWith(tc.rule), accts(a, 1.0, b, 1.0)...)
 			h.route(t0.Add(-10*time.Minute), req("old-1"))
 			h.route(t0.Add(-10*time.Minute), req("old-2"))
-			h.r.Observe(a, Observation{At: t0, Windows: []Window{
+			h.observe(a, Observation{At: t0, Windows: []Window{
 				usage(FiveHour, 0.1, t0.Add(30*time.Minute)),
 				usage(Weekly, 0.3, t0.Add(84*time.Hour)),
 			}})
-			h.r.Observe(b, Observation{At: t0, Windows: []Window{
+			h.observe(b, Observation{At: t0, Windows: []Window{
 				usage(FiveHour, 0.5, t0.Add(150*time.Minute)),
 				usage(Weekly, 0.5, t0.Add(84*time.Hour)),
 			}})
@@ -204,7 +214,7 @@ func TestResetAwarePlacementFavorsUnusedAllowanceNearResetWithoutMovingHealthyWo
 
 func TestPlacementReportsWhenResetPreferenceChangedTheChoice(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
-	h.r.Observe(a, Observation{At: t0, Windows: []Window{usage(FiveHour, 0.1, t0.Add(30*time.Minute))}})
+	h.observe(a, Observation{At: t0, Windows: []Window{usage(FiveHour, 0.1, t0.Add(30*time.Minute))}})
 
 	first := h.route(t0, req("n1"))
 	second := h.route(t0, req("n2"))
@@ -222,11 +232,11 @@ func TestNearFiveHourResetDoesNotMakeWeeklyExhaustedAccountEligible(t *testing.T
 	h.route(t0, req("x-a"))
 	h.route(t0, req("x-b"))
 	h.route(t0, req("x-c"))
-	h.r.Observe(a, Observation{At: t0, Windows: []Window{
+	h.observe(a, Observation{At: t0, Windows: []Window{
 		usage(FiveHour, 0.1, t0.Add(20*time.Minute)),
 		rejected(Weekly, t0.Add(48*time.Hour)),
 	}})
-	h.r.Observe(c, Observation{At: t0, Windows: []Window{
+	h.observe(c, Observation{At: t0, Windows: []Window{
 		rejected(FiveHour, t0.Add(time.Hour)),
 		usage(Weekly, 0.4, t0.Add(100*time.Hour)),
 	}})
@@ -241,8 +251,8 @@ func TestNearFiveHourResetDoesNotMakeWeeklyExhaustedAccountEligible(t *testing.T
 		t.Fatalf("exhausted conversation got %+v, want migration %s to %s", moved, c, b)
 	}
 
-	h.r.Observe(b, Observation{At: t0, Windows: []Window{rejected(Weekly, t0.Add(72*time.Hour))}})
-	h.r.Observe(a, Observation{At: t0, Windows: []Window{
+	h.observe(b, Observation{At: t0, Windows: []Window{rejected(Weekly, t0.Add(72*time.Hour))}})
+	h.observe(a, Observation{At: t0, Windows: []Window{
 		rejected(FiveHour, t0.Add(20*time.Minute)),
 		rejected(Weekly, t0.Add(48*time.Hour)),
 	}})
@@ -271,8 +281,8 @@ func TestStaleOrMissingObservationsFallBackToCapacityWeights(t *testing.T) {
 		want      []AccountID
 		freshness Freshness
 	}{
-		{"fresh", func(r *Router) { r.Observe(a, nearReset(t0.Add(-5*time.Minute))) }, []AccountID{a, a, b, a}, Fresh},
-		{"stale", func(r *Router) { r.Observe(a, nearReset(t0.Add(-30*time.Minute))) }, []AccountID{a, b, a, b}, Stale},
+		{"fresh", func(r *Router) { r.Observe(a, t0.Add(-5*time.Minute), nearReset(t0.Add(-5*time.Minute))) }, []AccountID{a, a, b, a}, Fresh},
+		{"stale", func(r *Router) { r.Observe(a, t0.Add(-30*time.Minute), nearReset(t0.Add(-30*time.Minute))) }, []AccountID{a, b, a, b}, Stale},
 		{"missing", func(r *Router) {}, []AccountID{a, b, a, b}, Absent},
 	}
 	for _, tc := range cases {
@@ -302,7 +312,7 @@ func TestStaleOrMissingObservationsFallBackToCapacityWeights(t *testing.T) {
 
 func TestStaleRejectionStillBlocksUntilItsReset(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
-	h.r.Observe(a, Observation{At: t0.Add(-3 * time.Hour), Windows: []Window{rejected(Weekly, t0.Add(24*time.Hour))}})
+	h.observe(a, Observation{At: t0.Add(-3 * time.Hour), Windows: []Window{rejected(Weekly, t0.Add(24*time.Hour))}})
 
 	before := h.route(t0, req("n1"))
 	afterReset := h.route(t0.Add(24*time.Hour), req("n2"))
@@ -322,7 +332,7 @@ func TestSubagentsInheritTheConversationAccountThroughMigration(t *testing.T) {
 	child.Agent = "agent-1"
 	nested := req("session-1")
 	nested.Agent, nested.ParentAgent = "agent-2", "agent-1"
-	h.r.Observe(b, Observation{At: t0, Windows: []Window{usage(FiveHour, 0, t0.Add(10*time.Minute))}})
+	h.observe(b, Observation{At: t0, Windows: []Window{usage(FiveHour, 0, t0.Add(10*time.Minute))}})
 
 	childDecision := h.route(t0, child)
 	nestedDecision := h.route(t0, nested)
@@ -414,7 +424,7 @@ func TestAssignmentSurvivesIdleModelChangeAndRestart(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
 	first := h.route(t0, req("conv"))
 	later := t0.Add(3 * time.Hour)
-	h.r.Observe(b, Observation{At: later, Windows: []Window{usage(FiveHour, 0, later.Add(10*time.Minute))}})
+	h.observe(b, Observation{At: later, Windows: []Window{usage(FiveHour, 0, later.Add(10*time.Minute))}})
 	opus := req("conv")
 	opus.Model = "claude-opus-4-5"
 
@@ -466,7 +476,7 @@ func TestOnlyExhaustionMigratesAndTheConversationDoesNotReturn(t *testing.T) {
 	r.Attempt, r.LastFailure = 2, ClassExhausted
 	moved := h.route(t0, r)
 	later := t0.Add(2 * time.Hour)
-	h.r.Observe(a, Observation{At: later, Windows: []Window{usage(FiveHour, 0, later.Add(10*time.Minute))}})
+	h.observe(a, Observation{At: later, Windows: []Window{usage(FiveHour, 0, later.Add(10*time.Minute))}})
 	afterRecovery := h.route(later, req("conv"))
 	h.restart()
 	afterRestart := h.route(later, req("conv"))
@@ -491,7 +501,7 @@ func TestManualOverrideMovesAndPersists(t *testing.T) {
 	errMove := h.r.Move(t0, "conv", b)
 	h.restart()
 	after := h.route(t0.Add(time.Minute), req("conv"))
-	bnd, _ := h.r.Lookup("conv")
+	bnd, _, _ := h.r.Lookup("conv")
 
 	if errUnknown == nil || !strings.Contains(errUnknown.Error(), "not enrolled") {
 		t.Fatalf("move to an unenrolled account: %v, want a not-enrolled error", errUnknown)
@@ -528,13 +538,15 @@ func TestAuthFailureExcludesNewPlacementButKeepsAssignments(t *testing.T) {
 
 	h.report(t0, b, "claude-sonnet-4-5", ClassAuth)
 	none := h.route(t0, req("stranded"))
-	h.r.Relogin(a)
+	if err := h.r.Relogin(a); err != nil {
+		t.Fatal(err)
+	}
 	resumed := h.route(t0, req("existing"))
 
 	if none.Kind != Unavailable {
 		t.Fatalf("with every account logged out got %+v, want unavailable", none)
 	}
-	if _, ok := h.r.Lookup("stranded"); ok {
+	if h.bound("stranded") != "" {
 		t.Fatal("an unavailable decision created an assignment")
 	}
 	if resumed.Kind != Dispatch || resumed.Account != a {
@@ -585,17 +597,21 @@ func TestMissingIdentityIsRejectedWithoutAssignment(t *testing.T) {
 	if rejectedReq.Kind != Reject || rejectedReq.Reason != ReasonMissingIdentity {
 		t.Fatalf("request without identity got %+v, want reject", rejectedReq)
 	}
-	if len(h.store.Bindings()) != 1 || accepted.Account != a {
-		t.Fatalf("bindings %v and accepted %+v, want only conv on %s", h.store.Bindings(), accepted, a)
+	bindings, _ := h.store.Bindings()
+	if len(bindings) != 1 || accepted.Account != a {
+		t.Fatalf("bindings %v and accepted %+v, want only conv on %s", bindings, accepted, a)
 	}
 }
 
 func TestCrashBeforeCommitLeavesNoAssignmentAndAfterCommitKeepsIt(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
 	h.route(t0, req("other"))
-	decided := h.r.Decide(t0, req("before"))
+	decided, err := h.r.Decide(t0, req("before"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	h.restart()
-	_, survivedUncommitted := h.r.Lookup("before")
+	survivedUncommitted := h.bound("before") != ""
 	replaced := h.route(t0, req("before"))
 
 	if decided.Kind != Place || decided.Account != b {
@@ -609,7 +625,7 @@ func TestCrashBeforeCommitLeavesNoAssignmentAndAfterCommitKeepsIt(t *testing.T) 
 	}
 
 	h.report(t0, b, "claude-sonnet-4-5", ClassExhausted, rejected(FiveHour, t0.Add(time.Hour)))
-	if _, err := h.r.CommitMigration(t0, "before", b, a, ReasonExhausted); err != nil {
+	if _, err := h.r.Route(t0, req("before")); err != nil {
 		t.Fatal(err)
 	}
 	h.restart()
@@ -711,14 +727,15 @@ func TestUnverifiedOverageWithholdsDispatch(t *testing.T) {
 	h.manualOverage = true
 
 	unknown := h.route(t0, req("first"))
+	refusedBound := h.bound("first")
 	h.r.ObserveOverage(b, OverageDisabled, t0)
 	placed := h.route(t0, req("first"))
 
 	if unknown.Kind != Refuse || unknown.Reason != ReasonNoVerified || !unknown.RecheckOverage {
 		t.Fatalf("with no account verified got %+v, want refuse with a recheck", unknown)
 	}
-	if _, ok := h.r.Lookup("second"); ok {
-		t.Fatal("a refusal created an assignment")
+	if refusedBound != "" {
+		t.Fatalf("a refusal bound first to %s", refusedBound)
 	}
 	if placed.Kind != Place || placed.Account != b {
 		t.Fatalf("with only b verified got %+v, want placement on %s", placed, b)
@@ -907,7 +924,7 @@ func TestFailedSyncStopsAcknowledgmentsUntilReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	recovered, _ := s.Lookup("c2")
+	recovered, _, _ := s.Lookup("c2")
 	afterReopen, errAfter := s.Assign("c3", b, ReasonCapacity, t0)
 
 	if errFirst == nil || !errors.Is(errSecond, ErrFailed) {
@@ -942,8 +959,8 @@ func TestShortWriteLeavesATornTailNotInteriorCorruption(t *testing.T) {
 		t.Fatalf("reopen after a short write: %v", errOpen)
 	}
 	defer s.Close()
-	_, c2 := s.Lookup("c2")
-	c1, _ := s.Lookup("c1")
+	_, c2, _ := s.Lookup("c2")
+	c1, _, _ := s.Lookup("c1")
 	c3, errC3 := s.Assign("c3", b, ReasonCapacity, t0)
 
 	if errShort == nil || !errors.Is(errNext, ErrFailed) {
@@ -992,7 +1009,7 @@ func TestOpenCreatesMissingStateDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	got, _ := s.Lookup("c1")
+	got, _, _ := s.Lookup("c1")
 
 	if errAssign != nil || got.Account != a {
 		t.Fatalf("after reopening a created directory c1 = %+v (assign error %v), want %s", got, errAssign, a)
@@ -1021,8 +1038,8 @@ func TestEmptyFieldsAreRefusedBeforeAnyWrite(t *testing.T) {
 		t.Fatalf("reopen after refused records: %v", errOpen)
 	}
 	defer s.Close()
-	c3, _ := s.Lookup("c3")
-	_, c2 := s.Lookup("c2")
+	c3, _, _ := s.Lookup("c3")
+	_, c2, _ := s.Lookup("c2")
 
 	for name, err := range map[string]error{"empty conversation": errConv, "empty account": errAccount, "migration to an empty account": errMigrate} {
 		if !errors.Is(err, ErrIncomplete) {
@@ -1034,5 +1051,276 @@ func TestEmptyFieldsAreRefusedBeforeAnyWrite(t *testing.T) {
 	}
 	if errNext != nil || next.Account != b || c3.Account != b || c2 {
 		t.Fatalf("after refusals: assign c3 = %+v, %v; recovered c3 = %s, c2 present = %v; want c3 on %s and no c2", next, errNext, c3.Account, c2, b)
+	}
+}
+
+func TestFailedMigrationSyncStopsEveryAnswerUntilReopen(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+	h.route(t0, req("conv"))
+	h.route(t0, req("other"))
+	if err := h.r.Served(t0, "conv", a); err != nil {
+		t.Fatal(err)
+	}
+	h.report(t0.Add(time.Minute), a, "claude-sonnet-4-5", ClassExhausted, rejected(FiveHour, t0.Add(30*time.Minute)))
+	faulty := &faultyFile{journalFile: h.store.file, failSync: true}
+	h.store.file = faulty
+	for _, acct := range h.accounts {
+		h.r.ObserveOverage(acct.ID, OverageDisabled, t0.Add(2*time.Minute))
+	}
+
+	_, errMigrate := h.r.Route(t0.Add(2*time.Minute), req("conv"))
+	faulty.failSync = false
+	later := t0.Add(31 * time.Minute)
+	for _, acct := range h.accounts {
+		h.r.ObserveOverage(acct.ID, OverageDisabled, later)
+	}
+	afterReset, errRoute := h.r.Route(later, req("conv"))
+	_, errDecide := h.r.Decide(later, req("conv"))
+	_, _, errLookup := h.r.Lookup("conv")
+	_, errExisting := h.r.CommitAssignment(later, "other", b, ReasonManual)
+	errServed := h.r.Served(later, "other", b)
+	errMove := h.r.Move(later, "other", b)
+	errRelogin := h.r.Relogin(a)
+	h.restart()
+	recovered := h.bound("conv")
+	resumed := h.route(later, req("conv"))
+
+	if errMigrate == nil {
+		t.Fatal("the migration commit with a failed sync returned no error")
+	}
+	for name, err := range map[string]error{
+		"Route": errRoute, "Decide": errDecide, "Lookup": errLookup, "CommitAssignment on a bound conversation": errExisting,
+		"Served": errServed, "Move to the current account": errMove, "Relogin": errRelogin,
+	} {
+		if !errors.Is(err, ErrFailed) {
+			t.Errorf("%s after the failed sync: %v, want ErrFailed", name, err)
+		}
+	}
+	if afterReset.Account != "" {
+		t.Fatalf("after the failed sync Route answered %+v, want no account", afterReset)
+	}
+	if resumed.Kind != Dispatch || resumed.Account != recovered {
+		t.Fatalf("after reopen the conversation is bound to %s and Route answered %+v, want dispatch on the recovered account", recovered, resumed)
+	}
+}
+
+func TestNewerObservationWithoutARejectedWindowKeepsItBlocking(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+	h.observe(a, Observation{At: t0, Windows: []Window{
+		{Kind: Weekly, Models: []string{"claude-opus"}, Utilization: ptr(1), Rejected: true, ResetsAt: t0.Add(48 * time.Hour)},
+	}})
+	opus := func(conv string) Request {
+		return Request{Conversation: ConversationID(conv), Model: "claude-opus-4-5", Attempt: 1}
+	}
+
+	first := h.route(t0.Add(time.Minute), opus("opus-1"))
+	h.observe(a, Observation{At: t0.Add(2 * time.Minute), Windows: []Window{usage(FiveHour, 0.2, t0.Add(3*time.Hour))}})
+	second := h.route(t0.Add(3*time.Minute), opus("opus-2"))
+	sonnet := h.route(t0.Add(3*time.Minute), req("sonnet-1"))
+	afterReset := h.route(t0.Add(48*time.Hour), opus("opus-3"))
+
+	if first.Account != b || second.Account != b {
+		t.Fatalf("opus placements %s then %s, want both on %s while a's opus weekly window is rejected", first.Account, second.Account, b)
+	}
+	if sonnet.Account != a {
+		t.Fatalf("sonnet placement went to %s, want %s, which the opus window does not block", sonnet.Account, a)
+	}
+	if afterReset.Account != a {
+		t.Fatalf("after the opus weekly reset the placement went to %s, want %s", afterReset.Account, a)
+	}
+}
+
+func TestNewerObservationReportingTheWindowAllowedClearsTheRejection(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+	h.observe(a, Observation{At: t0, Windows: []Window{rejected(FiveHour, t0.Add(2*time.Hour))}})
+
+	blocked := h.route(t0, req("n1"))
+	h.observe(a, Observation{At: t0.Add(time.Minute), Windows: []Window{usage(FiveHour, 0.1, t0.Add(5*time.Hour))}})
+	cleared := h.route(t0.Add(time.Minute), req("n2"))
+
+	if blocked.Account != b || cleared.Account != a {
+		t.Fatalf("placements %s then %s, want %s while rejected and %s after a newer report of the same window", blocked.Account, cleared.Account, b, a)
+	}
+}
+
+func TestObservationFromBeforeTheAttemptIsIgnored(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+	snapshot := Observation{At: t0, Windows: []Window{rejected(FiveHour, t0.Add(2*time.Hour))}}
+
+	h.r.Observe(a, t0.Add(time.Minute), snapshot)
+	stale := h.route(t0.Add(time.Minute), req("n1"))
+	h.r.Observe(a, t0, snapshot)
+	fresh := h.route(t0.Add(time.Minute), req("n2"))
+
+	if stale.Account != a {
+		t.Fatalf("with only pre-attempt evidence of a rejection, n1 went to %s, want %s", stale.Account, a)
+	}
+	if fresh.Account != b {
+		t.Fatalf("with the attempt's own rejection, n2 went to %s, want %s", fresh.Account, b)
+	}
+}
+
+func TestPaidUseClearsOnlyOnAStrictlyLaterDisabledCheck(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+	h.manualOverage = true
+	h.r.ObserveOverage(a, OverageDisabled, t0)
+	h.r.ObserveOverage(b, OverageDisabled, t0)
+	h.route(t0, req("conv"))
+	at := t0.Add(time.Minute)
+
+	h.r.ObserveOverage(a, OveragePaidUse, at)
+	h.r.ObserveOverage(a, OverageDisabled, at)
+	sameInstant := h.route(at, req("conv"))
+	h.r.ObserveOverage(a, OverageDisabled, at.Add(time.Second))
+	h.r.ObserveOverage(b, OverageDisabled, at.Add(time.Second))
+	later := h.route(at.Add(time.Second), req("newcomer"))
+
+	if sameInstant.Kind != Migrate || sameInstant.From != a || sameInstant.Account != b || sameInstant.Reason != ReasonOverageObserved {
+		t.Fatalf("after paid use and a disabled check at the same instant got %+v, want migration %s to %s for overage_observed", sameInstant, a, b)
+	}
+	if later.Kind != Place || later.Account != a {
+		t.Fatalf("after a strictly later disabled check got %+v, want placement on %s", later, a)
+	}
+}
+
+func TestConfirmedExhaustionMigratesDespiteAStaleSourceCheck(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+	h.manualOverage = true
+	h.r.ObserveOverage(a, OverageDisabled, t0)
+	h.r.ObserveOverage(b, OverageDisabled, t0)
+	h.route(t0, req("conv"))
+	later := t0.Add(61 * time.Minute)
+	h.report(later, a, "claude-sonnet-4-5", ClassExhausted, rejected(Weekly, later.Add(24*time.Hour)))
+
+	unverified := h.route(later, req("conv"))
+	boundWhileUnverified := h.bound("conv")
+	h.r.ObserveOverage(b, OverageDisabled, later)
+	moved := h.route(later, req("conv"))
+
+	if unverified.Kind != Refuse || unverified.Reason != ReasonNoVerified || !unverified.RecheckOverage || boundWhileUnverified != a {
+		t.Fatalf("with both checks stale got %+v bound to %s, want refuse with a recheck and no move from %s", unverified, boundWhileUnverified, a)
+	}
+	if moved.Kind != Migrate || moved.From != a || moved.Account != b || moved.Reason != ReasonExhausted {
+		t.Fatalf("with a's check stale and b verified got %+v, want migration %s to %s for exhausted", moved, a, b)
+	}
+}
+
+func TestWaitRequestsARecheckWhenAnUncheckedAccountCouldServe(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+	h.manualOverage = true
+	h.r.ObserveOverage(a, OverageDisabled, t0)
+	h.observe(a, Observation{At: t0, Windows: []Window{rejected(FiveHour, t0.Add(2*time.Hour))}})
+
+	unchecked := h.route(t0.Add(time.Minute), req("n1"))
+	h.observe(b, Observation{At: t0, Windows: []Window{rejected(Weekly, t0.Add(48*time.Hour))}})
+	blockedAnyway := h.route(t0.Add(time.Minute), req("n2"))
+
+	if unchecked.Kind != Wait || !unchecked.Until.Equal(t0.Add(2*time.Hour)) || !unchecked.RecheckOverage {
+		t.Fatalf("with b never checked got %+v, want a wait until a's reset with a recheck", unchecked)
+	}
+	if blockedAnyway.Kind != Wait || blockedAnyway.RecheckOverage {
+		t.Fatalf("with b also rejected got %+v, want a wait without a recheck", blockedAnyway)
+	}
+}
+
+func TestRequestScopedFailureEndsTheRequestBeforeAnyMigration(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+	h.route(t0, req("conv"))
+	h.report(t0, a, "claude-sonnet-4-5", ClassExhausted, rejected(FiveHour, t0.Add(time.Hour)))
+	r := req("conv")
+	r.Attempt, r.LastFailure = 2, ClassRequestScoped
+
+	ended := h.route(t0, r)
+	next := h.route(t0, req("conv"))
+
+	if ended.Kind != Fail || ended.Account != a || ended.Reason != ReasonRequestScoped {
+		t.Fatalf("request-scoped failure on an exhausted account got %+v, want fail on %s", ended, a)
+	}
+	if next.Kind != Migrate || next.Account != b {
+		t.Fatalf("the next request got %+v, want migration to %s", next, b)
+	}
+}
+
+func TestCommitHonorsServedAndReloginThatLandAfterTheDecision(t *testing.T) {
+	setup := func(t *testing.T) (*harness, Decision) {
+		h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+		h.route(t0, req("conv"))
+		h.report(t0, a, "claude-sonnet-4-5", ClassAuth)
+		d, err := h.r.Decide(t0, req("conv"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Kind != Migrate || d.Reason != ReasonNeverServed {
+			t.Fatalf("setup decision %+v, want a never_served_relogin migration", d)
+		}
+		return h, d
+	}
+	t.Run("served", func(t *testing.T) {
+		h, d := setup(t)
+		if err := h.r.Served(t0, "conv", a); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := h.r.Commit(t0, req("conv"), d)
+
+		if err != nil || got.Kind != Reauth || got.Account != a || h.bound("conv") != a {
+			t.Fatalf("commit after Served got %+v, %v, bound to %s; want reauth with the binding kept on %s", got, err, h.bound("conv"), a)
+		}
+	})
+	t.Run("relogin", func(t *testing.T) {
+		h, d := setup(t)
+		if err := h.r.Relogin(a); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := h.r.Commit(t0, req("conv"), d)
+
+		if err != nil || got.Kind != Dispatch || got.Account != a || h.bound("conv") != a {
+			t.Fatalf("commit after Relogin got %+v, %v, bound to %s; want dispatch with the binding kept on %s", got, err, h.bound("conv"), a)
+		}
+	})
+}
+
+func TestUnconfirmedExhaustionOnAnUnenrolledAccountIsThrottling(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0)...)
+
+	unknown := h.report(t0, "acct-z", "claude-sonnet-4-5", ClassExhausted, rejected(FiveHour, t0.Add(time.Hour)))
+	known := h.report(t0, a, "claude-sonnet-4-5", ClassExhausted, rejected(FiveHour, t0.Add(time.Hour)))
+
+	if unknown != ClassThrottle || known != ClassExhausted {
+		t.Fatalf("classes %q for an unenrolled account and %q for an enrolled one, want throttle and exhausted", unknown, known)
+	}
+}
+
+func TestNewRejectsInvalidCapacityAndConfig(t *testing.T) {
+	st, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	badBias := DefaultConfig()
+	badBias.ResetBias = math.NaN()
+	noAttempts := DefaultConfig()
+	noAttempts.MaxAttempts = 0
+	cases := map[string]struct {
+		cfg      Config
+		accounts []Account
+	}{
+		"NaN capacity":      {DefaultConfig(), []Account{{ID: a, Capacity: math.NaN()}}},
+		"infinite capacity": {DefaultConfig(), []Account{{ID: a, Capacity: math.Inf(1)}}},
+		"NaN reset bias":    {badBias, []Account{{ID: a, Capacity: 1}}},
+		"zero max attempts": {noAttempts, []Account{{ID: a, Capacity: 1}}},
+		"unknown rule":      {Config{Rule: "fastest"}, []Account{{ID: a, Capacity: 1}}},
+	}
+
+	_, errValid := New(DefaultConfig(), []Account{{ID: a, Capacity: 1}}, st)
+
+	if errValid != nil {
+		t.Fatalf("a valid configuration was refused: %v", errValid)
+	}
+	for name, tc := range cases {
+		if _, err := New(tc.cfg, tc.accounts, st); err == nil {
+			t.Errorf("%s: New accepted it", name)
+		}
 	}
 }

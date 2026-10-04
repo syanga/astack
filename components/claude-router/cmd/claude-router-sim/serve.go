@@ -194,7 +194,7 @@ func (sv *server) handle(st *router.Store, accounts []router.Account, line strin
 			}
 			obs.Windows = append(obs.Windows, w)
 		}
-		sv.r.Observe(router.AccountID(f[2]), obs)
+		sv.r.Observe(router.AccountID(f[2]), now, obs)
 		sv.printf("OBSERVED %s", f[2])
 	case "overage":
 		if len(f) != 3 {
@@ -221,7 +221,10 @@ func (sv *server) handle(st *router.Store, accounts []router.Account, line strin
 		}
 		sv.printf("MOVED %s %s", f[2], f[3])
 	case "dump":
-		bindings := st.Bindings()
+		bindings, err := st.Bindings()
+		if err != nil {
+			return err
+		}
 		convs := make([]string, 0, len(bindings))
 		for c := range bindings {
 			convs = append(convs, string(c))
@@ -264,7 +267,11 @@ func cmdServe(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	sv := &server{r: r, out: stdout, killBefore: *killBefore, killAfter: *killAfter}
-	sv.printf("READY %d", len(st.Bindings()))
+	bindings, err := st.Bindings()
+	if err != nil {
+		return err
+	}
+	sv.printf("READY %d", len(bindings))
 	sc := bufio.NewScanner(stdin)
 	for sc.Scan() {
 		if err := sv.handle(st, accounts, sc.Text()); err != nil {

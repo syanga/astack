@@ -119,13 +119,19 @@ each request, call `Route(now, request)` and dispatch only on the returned
   request to. `Route` has already synced any new assignment to disk.
 - `wait` gives the earliest usable reset in `Until`.
 - `refuse`, `reauth`, `fail`, `unavailable`, and `reject` are answered
-  locally. `RecheckOverage` asks for a fresh read of the account's
-  paid-overflow setting.
+  locally. `RecheckOverage` asks for a fresh read of the paid-overflow
+  setting.
+
+If `Route` returns an error wrapping `router.ErrFailed`, a journal write
+failed. Every call that could name an account fails the same way until you
+close the store and open it again.
 
 Feed the router what it cannot see:
 
-- `Observe` for quota headers.
-- `Report` for a failure before output. Pass the class it returns as `LastFailure` on the next attempt.
+- `Observe` for the quota headers of one response, with the start time of
+  the attempt that produced it.
+- `Report` for a failure before output. Pass the class it returns as
+  `LastFailure` on the next attempt.
 - `ObserveOverage` for each paid-overflow check or observed paid use.
 - `Served` after the first successful response on an assignment.
 - `Relogin` after a browser login, and `Move` for a manual override.
