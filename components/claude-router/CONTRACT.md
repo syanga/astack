@@ -433,15 +433,16 @@ capacity-only:
 | --- | --- | --- | --- | --- | --- | --- |
 | `weekly-expiry-72h` | capacity-only | 2593 | 0.199 | 1149 | 55.0 | 646,400 |
 | `weekly-expiry-72h` | bias 8, 15 min | 2589 | 0.171 | 772 | 59.0 | 812,200 |
-| `mixed-48h` | capacity-only | 3036 | 0.175 | 103,000 | 331.6 | 1,414,000 |
-| `mixed-48h` | bias 8, 15 min | 3024 | 0.168 | 105,500 | 356.2 | 1,324,000 |
+| `mixed-48h` | capacity-only | 3036 | 0.175 | 103,006 | 331.6 | 1,413,800 |
+| `mixed-48h` | bias 8, 15 min | 3024 | 0.168 | 105,508 | 356.2 | 1,324,400 |
 
 The effect is small. On the fixture built for it, bias 8 left less weekly
-allowance unused at reset in all five seeds and waited less, at equal useful
-work. On the overloaded mixed fixture the difference is within seed
-variation. Every variant had 0 healthy automatic migrations on both fixtures.
-Biases 1 and 2 did not reduce unused weekly allowance on either fixture. The
-comparison does not establish a percentage improvement, and none is required.
+allowance unused at reset in each of the five seeds, and waited less on
+average, at equal useful work. It also migrated slightly more and wrote more
+cold cache on migration. On the overloaded mixed fixture the differences are
+within seed variation. Every variant had 0 healthy automatic migrations on
+both fixtures. The comparison does not establish a percentage improvement,
+and none is required.
 
 ### Exhaustion needs evidence from the failed attempt
 
@@ -484,9 +485,11 @@ The store is the single-writer JSON-lines journal from PR1,
   for every later commit until it is closed and reopened. The failed record
   may or may not be on disk, and replay decides which. No caller is told an
   account that replay can contradict.
-- **Validation.** Replay refuses to open on an interior record that is not
-  JSON, has an unknown op, lacks a conversation, account, or time, or is a
-  migration without a source. A torn final line is truncated.
+- **Validation.** A commit with an empty conversation or account, or a
+  migration without a source, fails with `ErrIncomplete` before anything is
+  written. Replay refuses to open on an interior record that is not JSON, has
+  an unknown op, or is incomplete in the same way. A torn final line is
+  truncated.
 - **Directory.** Creating the state directory syncs its parent directory.
 - **Sync.** Go's `File.Sync` issues `F_FULLFSYNC` on Darwin and falls back to
   `fsync` when the file system does not support it.

@@ -60,9 +60,6 @@ func (r *Router) Decide(now time.Time, req Request) Decision {
 	return decide(r.cfg, now, v, req)
 }
 
-// loads counts each account's active conversations other than skip, the
-// conversation being decided, so a concurrent first request that commits
-// mid-decision does not count toward its own placement.
 func (r *Router) loads(now time.Time, skip ConversationID) []int {
 	loads := make([]int, len(r.accounts))
 	horizon := now.Add(-r.cfg.ActiveFor)

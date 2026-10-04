@@ -12,8 +12,6 @@ type accountView struct {
 	overageAt   time.Time
 }
 
-// overageBar returns why the account may not receive dispatch under the
-// included-only rule, or "" when a fresh check found paid overflow disabled.
 func overageBar(cfg Config, now time.Time, a accountView) Reason {
 	switch {
 	case a.overage == OveragePaidUse:
@@ -72,10 +70,6 @@ func decide(cfg Config, now time.Time, v view, req Request) Decision {
 	return Decision{Kind: Dispatch, Account: current, Reason: ReasonAssigned}
 }
 
-// place chooses an account for new work. It minimizes
-// (load+1)/(capacity*boost) over logged-in, included-only accounts that no
-// known rejection blocks for the model. boost is 1 under CapacityOnly and 1+ResetBias*slack
-// under ResetAware. Ties go to the earlier enrolled account.
 func place(cfg Config, now time.Time, v view, model string) Decision {
 	best, bestCapacity := -1, -1
 	var bestScore, bestCapacityScore float64
@@ -139,10 +133,6 @@ func earlier(cur time.Time, curKnown bool, t time.Time, known bool) (time.Time, 
 	return cur, curKnown
 }
 
-// usableReset returns the time after which no known rejection blocks the
-// model: the latest end across all blocking windows, so an earlier five-hour
-// reset never hides a weekly rejection. A rejection without a reported reset
-// ends at its recheck time and makes the result inexact.
 func usableReset(cfg Config, now time.Time, obs Observation, model string) (until time.Time, known bool, blocked bool) {
 	known = true
 	for _, w := range obs.Windows {
@@ -178,9 +168,6 @@ func freshness(cfg Config, now time.Time, obs Observation) Freshness {
 	return Fresh
 }
 
-// slack is the largest share of a fresh window's allowance that is behind an
-// even pace: elapsed fraction of the window minus utilization. A window that
-// has already reset, or lacks a reset or utilization, contributes nothing.
 func slack(cfg Config, now time.Time, obs Observation, model string) float64 {
 	if freshness(cfg, now, obs) != Fresh {
 		return 0

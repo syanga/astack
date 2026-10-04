@@ -257,8 +257,6 @@ func (s *sim) open() error {
 	return nil
 }
 
-// checkOverage stands in for a settings read of every account's
-// paid-overflow state, repeated every OverageCheckMinutes.
 func (s *sim) checkOverage(at time.Time) {
 	if !s.overageChecked.IsZero() && at.Sub(s.overageChecked) < minutes(s.fx.OverageCheckMinutes) {
 		return
@@ -340,8 +338,6 @@ func (s *sim) push(at time.Time, kind evKind, conv, arg int) {
 	heap.Push(&s.q, event{at: at, seq: s.seq, kind: kind, conv: conv, arg: arg})
 }
 
-// roll returns a uniform draw in [0, 1) fixed by the seed and the draw's
-// coordinates.
 func (s *sim) roll(coords ...int) float64 {
 	x := s.seed ^ 0x9e3779b97f4a7c15
 	for _, c := range coords {

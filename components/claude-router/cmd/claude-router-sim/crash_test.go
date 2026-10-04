@@ -15,9 +15,6 @@ import (
 	"time"
 )
 
-// serveProc is a claude-router-sim serve process. With
-// CLAUDE_ROUTER_SIM_BIN set it runs that binary; otherwise it re-executes
-// this test binary as the simulator.
 type serveProc struct {
 	t      *testing.T
 	cmd    *exec.Cmd
@@ -114,8 +111,6 @@ func (p *serveProc) kill() {
 	<-p.exited
 }
 
-// awaitSelfKill waits for a process told to SIGKILL itself and reports
-// whether it died by SIGKILL.
 func (p *serveProc) awaitSelfKill() bool {
 	select {
 	case <-p.exited:
@@ -126,7 +121,6 @@ func (p *serveProc) awaitSelfKill() bool {
 	return ok && ws.Signaled() && ws.Signal() == syscall.SIGKILL
 }
 
-// ack is one acknowledged route: ACK conversation agent kind account from.
 type ack struct {
 	Conversation string `json:"conversation"`
 	Agent        string `json:"agent"`

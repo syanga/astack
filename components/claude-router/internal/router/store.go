@@ -21,6 +21,10 @@ var ErrLocked = errors.New("assignment store is held by another process")
 // failed record may or may not be on disk.
 var ErrFailed = errors.New("assignment journal write failed; reopen to recover")
 
+// ErrIncomplete reports a record without a conversation, account, time, or
+// migration source. The store refuses it before writing.
+var ErrIncomplete = errors.New("incomplete assignment record")
+
 // ErrUnassigned reports a migration of a conversation that has no assignment.
 var ErrUnassigned = errors.New("conversation has no assignment")
 
@@ -165,9 +169,9 @@ func (rec record) validate() error {
 	case rec.Op != opAssign && rec.Op != opMigrate:
 		return fmt.Errorf("unknown op %q", rec.Op)
 	case rec.Conversation == "" || rec.Account == "" || rec.At.IsZero():
-		return errors.New("missing conversation, account, or time")
+		return fmt.Errorf("%w: missing conversation, account, or time", ErrIncomplete)
 	case rec.Op == opMigrate && rec.From == "":
-		return errors.New("migration without a source account")
+		return fmt.Errorf("%w: migration without a source account", ErrIncomplete)
 	}
 	return nil
 }

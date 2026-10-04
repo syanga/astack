@@ -49,9 +49,6 @@ func undash(s string) string {
 	return s
 }
 
-// server answers one command per line. Each route waits for its durable
-// commit before printing ACK. kill-before and kill-after send SIGKILL to the
-// process before the Nth route starts or after it commits, before its ACK.
 type server struct {
 	r          *router.Router
 	out        io.Writer

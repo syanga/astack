@@ -1,6 +1,7 @@
 package router
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -90,8 +91,6 @@ func (h *harness) route(now time.Time, req Request) Decision {
 	return d
 }
 
-// report records a failure whose quota evidence was observed during the
-// attempt, and returns the class the policy acts on.
 func (h *harness) report(at time.Time, acct AccountID, model string, class Class, ws ...Window) Class {
 	return h.r.Report(Failure{Account: acct, Model: model, Class: class, AttemptStart: at,
 		Observation: Observation{At: at, Windows: ws}})
@@ -889,5 +888,43 @@ func TestOpenCreatesMissingStateDirectories(t *testing.T) {
 
 	if errAssign != nil || got.Account != a {
 		t.Fatalf("after reopening a created directory c1 = %+v (assign error %v), want %s", got, errAssign, a)
+	}
+}
+
+func TestEmptyFieldsAreRefusedBeforeAnyWrite(t *testing.T) {
+	dir := t.TempDir()
+	s, err := OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Assign("c1", a, ReasonCapacity, t0); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(filepath.Join(dir, journalName))
+
+	_, errConv := s.Assign("", a, ReasonCapacity, t0)
+	_, errAccount := s.Assign("c2", "", ReasonCapacity, t0)
+	_, errMigrate := s.Migrate("c1", a, "", ReasonManual, t0)
+	after, _ := os.ReadFile(filepath.Join(dir, journalName))
+	next, errNext := s.Assign("c3", b, ReasonCapacity, t0)
+	s.Close()
+	s, errOpen := OpenStore(dir)
+	if errOpen != nil {
+		t.Fatalf("reopen after refused records: %v", errOpen)
+	}
+	defer s.Close()
+	c3, _ := s.Lookup("c3")
+	_, c2 := s.Lookup("c2")
+
+	for name, err := range map[string]error{"empty conversation": errConv, "empty account": errAccount, "migration to an empty account": errMigrate} {
+		if !errors.Is(err, ErrIncomplete) {
+			t.Errorf("%s: %v, want ErrIncomplete", name, err)
+		}
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("refused records changed the journal from %q to %q", before, after)
+	}
+	if errNext != nil || next.Account != b || c3.Account != b || c2 {
+		t.Fatalf("after refusals: assign c3 = %+v, %v; recovered c3 = %s, c2 present = %v; want c3 on %s and no c2", next, errNext, c3.Account, c2, b)
 	}
 }
