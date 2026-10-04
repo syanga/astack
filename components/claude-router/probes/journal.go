@@ -16,6 +16,11 @@ import (
 // ErrJournalLocked reports that another process holds the journal.
 var ErrJournalLocked = errors.New("assignment journal is held by another process")
 
+// ErrJournalFailed reports that an earlier write or sync failed. The journal
+// acknowledges nothing more until it is closed and reopened, because the file
+// may hold a record the caller was never told about.
+var ErrJournalFailed = errors.New("assignment journal stopped after a write or sync error")
+
 // Journal is the storage design PR1 selects for durable assignments: one
 // writer process, an append-only JSON-lines file, and an fsync before an
 // assignment is acknowledged. This copy exists to encode the crash
@@ -25,6 +30,9 @@ type Journal struct {
 	file     *os.File
 	lock     *os.File
 	assigned map[string]string
+	failed   error
+	write    func([]byte) (int, error)
+	sync     func() error
 }
 
 type journalRecord struct {
@@ -35,8 +43,14 @@ type journalRecord struct {
 // OpenJournal takes an exclusive lock on dir, replays the journal, and
 // truncates a torn final record left by a crash during append.
 func OpenJournal(dir string) (*Journal, error) {
+	_, dirErr := os.Stat(dir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
+	}
+	if errors.Is(dirErr, os.ErrNotExist) {
+		if err := syncDir(filepath.Dir(dir)); err != nil {
+			return nil, err
+		}
 	}
 	lock, err := os.OpenFile(filepath.Join(dir, "lock"), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
@@ -56,7 +70,7 @@ func OpenJournal(dir string) (*Journal, error) {
 		lock.Close()
 		return nil, err
 	}
-	j := &Journal{file: file, lock: lock, assigned: map[string]string{}}
+	j := &Journal{file: file, lock: lock, assigned: map[string]string{}, write: file.Write, sync: file.Sync}
 	if errors.Is(statErr, os.ErrNotExist) {
 		if err := syncDir(dir); err != nil {
 			j.Close()
@@ -94,6 +108,9 @@ func (j *Journal) replay() error {
 		if err := json.Unmarshal(data[good:good+end], &rec); err != nil {
 			return fmt.Errorf("corrupt journal record at byte %d: %w", good, err)
 		}
+		if rec.Conversation == "" || rec.Account == "" {
+			return fmt.Errorf("corrupt journal record at byte %d: missing conversation or account", good)
+		}
 		if _, exists := j.assigned[rec.Conversation]; !exists {
 			j.assigned[rec.Conversation] = rec.Account
 		}
@@ -113,10 +130,14 @@ func (j *Journal) replay() error {
 
 // Assign returns the conversation's existing account, or durably records
 // proposed as its first assignment and returns it. Concurrent callers for one
-// conversation receive the same account.
+// conversation receive the same account. After any write or sync error it
+// returns ErrJournalFailed until the journal is reopened.
 func (j *Journal) Assign(conversation, proposed string) (string, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if j.failed != nil {
+		return "", fmt.Errorf("%w: %v", ErrJournalFailed, j.failed)
+	}
 	if account, ok := j.assigned[conversation]; ok {
 		return account, nil
 	}
@@ -124,10 +145,12 @@ func (j *Journal) Assign(conversation, proposed string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := j.file.Write(append(line, '\n')); err != nil {
+	if _, err := j.write(append(line, '\n')); err != nil {
+		j.failed = err
 		return "", err
 	}
-	if err := j.file.Sync(); err != nil {
+	if err := j.sync(); err != nil {
+		j.failed = err
 		return "", err
 	}
 	j.assigned[conversation] = proposed

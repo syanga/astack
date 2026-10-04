@@ -172,15 +172,97 @@ func TestJournalTruncatesTornFinalRecord(t *testing.T) {
 }
 
 func TestJournalRefusesCorruptInteriorRecord(t *testing.T) {
+	for name, interior := range map[string]string{"not json": "not json", "empty record": "{}"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			content := "{\"c\":\"conv-1\",\"a\":\"acct-a\"}\n" + interior + "\n{\"c\":\"conv-2\",\"a\":\"acct-b\"}\n"
+			if err := os.WriteFile(JournalPath(dir), []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := OpenJournal(dir)
+
+			if err == nil || !strings.Contains(err.Error(), "corrupt journal record") {
+				t.Fatalf("open = %v, want a corrupt-record error", err)
+			}
+		})
+	}
+}
+
+var errInjected = errors.New("injected I/O error")
+
+func TestJournalStopsAcknowledgingAfterFailedSync(t *testing.T) {
 	dir := t.TempDir()
-	content := "{\"c\":\"conv-1\",\"a\":\"acct-a\"}\nnot json\n{\"c\":\"conv-2\",\"a\":\"acct-b\"}\n"
-	if err := os.WriteFile(JournalPath(dir), []byte(content), 0o600); err != nil {
+	j, err := OpenJournal(dir)
+	if err != nil {
 		t.Fatal(err)
 	}
+	realSync := j.sync
+	j.sync = func() error { return errInjected }
+	_, firstErr := j.Assign("conv-1", "acct-a")
+	j.sync = realSync
+	_, retryErr := j.Assign("conv-1", "acct-b")
+	_, otherErr := j.Assign("conv-2", "acct-b")
+	j.Close()
 
-	_, err := OpenJournal(dir)
+	j, err = OpenJournal(dir)
+	if err != nil {
+		t.Fatalf("reopen after failed sync: %v", err)
+	}
+	defer j.Close()
+	recovered, _ := j.Lookup("conv-1")
+	again, againErr := j.Assign("conv-1", "acct-b")
 
-	if err == nil || !strings.Contains(err.Error(), "corrupt journal record") {
-		t.Fatalf("open = %v, want a corrupt-record error", err)
+	if !errors.Is(firstErr, errInjected) {
+		t.Fatalf("first Assign = %v, want the injected sync error", firstErr)
+	}
+	if !errors.Is(retryErr, ErrJournalFailed) || !errors.Is(otherErr, ErrJournalFailed) {
+		t.Fatalf("Assign after the failure = %v and %v, want ErrJournalFailed for both", retryErr, otherErr)
+	}
+	if recovered != "acct-a" || again != "acct-a" || againErr != nil {
+		t.Fatalf("after reopen conv-1 = %q and Assign gave %q (%v); want acct-a, the record on disk, never the unacknowledged acct-b", recovered, again, againErr)
+	}
+}
+
+func TestJournalRecoversFromPartialWrite(t *testing.T) {
+	dir := t.TempDir()
+	j, err := OpenJournal(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.Assign("conv-0", "acct-a"); err != nil {
+		t.Fatal(err)
+	}
+	j.write = func(b []byte) (int, error) {
+		n, _ := j.file.Write(b[:len(b)/2])
+		return n, errInjected
+	}
+	_, firstErr := j.Assign("conv-1", "acct-a")
+	_, retryErr := j.Assign("conv-1", "acct-b")
+	j.Close()
+
+	j, err = OpenJournal(dir)
+	if err != nil {
+		t.Fatalf("reopen after partial write: %v", err)
+	}
+	_, tornPresent := j.Lookup("conv-1")
+	assigned, assignErr := j.Assign("conv-1", "acct-b")
+	j.Close()
+	j, err = OpenJournal(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	kept0, _ := j.Lookup("conv-0")
+	kept1, _ := j.Lookup("conv-1")
+
+	if !errors.Is(firstErr, errInjected) || !errors.Is(retryErr, ErrJournalFailed) {
+		t.Fatalf("Assign errors %v and %v, want the injected error then ErrJournalFailed", firstErr, retryErr)
+	}
+	if tornPresent {
+		t.Fatal("the partial record was recovered as an assignment")
+	}
+	if assigned != "acct-b" || assignErr != nil || kept0 != "acct-a" || kept1 != "acct-b" {
+		t.Fatalf("after recovery conv-0=%q conv-1=%q (Assign %q, %v); want acct-a and acct-b", kept0, kept1, assigned, assignErr)
 	}
 }

@@ -1,6 +1,7 @@
 package probes
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -32,7 +33,10 @@ type Reply struct {
 
 // Attempt is one sanitized upstream inference attempt.
 type Attempt struct {
-	Seq        int       `json:"seq"`
+	Seq int `json:"seq"`
+	// Call is the router call ID read from the request context, which is how
+	// a router-owned transport ties each upstream attempt to its request.
+	Call       string    `json:"call"`
 	Account    string    `json:"account"`
 	TokenHash  string    `json:"token_sha256_prefix"`
 	Status     int       `json:"status"`
@@ -41,6 +45,27 @@ type Attempt struct {
 	StartedAt  time.Time `json:"started_at"`
 	EndedAt    time.Time `json:"ended_at"`
 	CanceledBy string    `json:"canceled_by,omitempty"`
+	// RateLimitHeaders are the rate-limit headers of this attempt's response.
+	RateLimitHeaders map[string]string `json:"rate_limit_headers,omitempty"`
+}
+
+type callKey struct{}
+
+// WithCall tags a context with a router call ID. Every upstream attempt made
+// under that context records the ID.
+func WithCall(ctx context.Context, call string) context.Context {
+	return context.WithValue(ctx, callKey{}, call)
+}
+
+// AttemptsFor returns the attempts made under one router call.
+func (u *Upstream) AttemptsFor(call string) []Attempt {
+	var out []Attempt
+	for _, a := range u.Attempts() {
+		if a.Call == call {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // Upstream is an in-process fake of the Anthropic Messages API. It serves
@@ -157,7 +182,8 @@ func (u *Upstream) RoundTrip(req *http.Request) (*http.Response, error) {
 		reply = queue[0]
 		u.scripts[account] = queue[1:]
 	}
-	attempt := &Attempt{Seq: len(u.attempts) + 1, Account: account, TokenHash: hash, StartedAt: time.Now()}
+	call, _ := req.Context().Value(callKey{}).(string)
+	attempt := &Attempt{Seq: len(u.attempts) + 1, Call: call, Account: account, TokenHash: hash, StartedAt: time.Now(), RateLimitHeaders: rateLimitHeaders(reply.Header)}
 	u.attempts = append(u.attempts, attempt)
 	u.mu.Unlock()
 
@@ -169,6 +195,20 @@ func (u *Upstream) RoundTrip(req *http.Request) (*http.Response, error) {
 		return errorResponse(req, reply), nil
 	}
 	return u.stream(req, attempt, reply), nil
+}
+
+func rateLimitHeaders(h map[string]string) map[string]string {
+	out := map[string]string{}
+	for name, value := range h {
+		canonical := http.CanonicalHeaderKey(name)
+		if strings.HasPrefix(canonical, "Anthropic-Ratelimit-") || canonical == "Retry-After" {
+			out[canonical] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (u *Upstream) finish(a *Attempt, status int, outcome string, events int, canceledBy string) {

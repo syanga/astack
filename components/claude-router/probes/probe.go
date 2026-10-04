@@ -205,8 +205,9 @@ func Start(dir string, opts Options) (*Probe, error) {
 	return p, nil
 }
 
-// WaitQuiet blocks until no account has changed for quietFor, so SDK
-// background registration has finished before the next request.
+// WaitQuiet blocks until no account has changed for quietFor. It is a test
+// heuristic that lowers the odds of overlapping SDK background registration;
+// it does not synchronize with the SDK and is not a production control.
 func (p *Probe) WaitQuiet() error {
 	const quietFor = 250 * time.Millisecond
 	deadline := time.Now().Add(15 * time.Second)
@@ -321,6 +322,18 @@ func (p *Probe) waitAccount(name string, timeout time.Duration) error {
 	return fmt.Errorf("account %s not registered", name)
 }
 
+// RegisteredAuthIDs lists the SDK auth IDs currently registered from an
+// account's credential file.
+func (p *Probe) RegisteredAuthIDs(name string) []string {
+	var ids []string
+	for _, a := range p.core.List() {
+		if a != nil && filepath.Base(a.FileName) == p.fileName(name) {
+			ids = append(ids, a.ID)
+		}
+	}
+	return ids
+}
+
 // WaitAccount blocks until a newly written account is registered.
 func (p *Probe) WaitAccount(name string) error {
 	if err := p.waitAccount(name, 10*time.Second); err != nil {
@@ -401,6 +414,8 @@ func (p *Probe) route(base *handlers.BaseAPIHandler) gin.HandlerFunc {
 		if pinned != "" {
 			ctx = handlers.WithPinnedAuthID(ctx, pinned)
 		}
+		ctx = WithCall(ctx, call)
+		callStart := time.Now()
 		ctx = handlers.WithSelectedAuthIDCallback(ctx, func(id string) {
 			p.mu.Lock()
 			p.selected[call] = append(p.selected[call], p.names[id])
@@ -425,7 +440,7 @@ func (p *Probe) route(base *handlers.BaseAPIHandler) gin.HandlerFunc {
 						status = msg.StatusCode
 					}
 					cause = msg.Error
-					p.recordSignal(call, pinned, status, msg.Error)
+					p.recordSignal(call, pinned, callStart, status, msg.Error)
 				}
 				payload := anthropicError(errorType(status), http.StatusText(status))
 				if started {
@@ -566,21 +581,37 @@ func (p *Probe) selectedFor(id string) []string {
 	return append([]string{}, p.selected[id]...)
 }
 
-// ErrorSignal is what a route can learn about a failed call: the status,
-// credential scope, and fuzzed retry hint on the SDK error, plus the pinned
-// account's passive rate-limit header snapshot read right after the failure.
+// ErrorSignal is what a route can learn about a failed call. Status, scope
+// flags, and the fuzzed retry hint come from the SDK error. Headers come from
+// the call's last upstream attempt, captured by the router-owned transport.
+// Snapshot is the pinned account's passive header snapshot, kept to show that
+// it can predate the call.
 type ErrorSignal struct {
-	Status           int               `json:"status"`
-	CredentialScoped bool              `json:"credential_scoped"`
-	RetryAfterMS     *int64            `json:"retry_after_ms"`
-	Headers          map[string]string `json:"snapshot_headers"`
+	Status             int               `json:"status"`
+	CredentialScoped   bool              `json:"credential_scoped"`
+	RequestScoped      bool              `json:"request_scoped"`
+	RetryAfterMS       *int64            `json:"retry_after_ms"`
+	Headers            map[string]string `json:"attempt_headers"`
+	Snapshot           map[string]string `json:"snapshot_headers"`
+	SnapshotObservedAt time.Time         `json:"snapshot_observed_at"`
+	CallStartedAt      time.Time         `json:"call_started_at"`
 }
 
-func (p *Probe) recordSignal(call, pinned string, status int, err error) {
-	sig := &ErrorSignal{Status: status, Headers: map[string]string{}}
+// SnapshotFresh reports whether the passive snapshot was observed during
+// this call. A stale snapshot describes an earlier response.
+func (s ErrorSignal) SnapshotFresh() bool {
+	return !s.SnapshotObservedAt.IsZero() && !s.SnapshotObservedAt.Before(s.CallStartedAt)
+}
+
+func (p *Probe) recordSignal(call, pinned string, started time.Time, status int, err error) {
+	sig := &ErrorSignal{Status: status, Headers: map[string]string{}, CallStartedAt: started}
 	var scoped interface{ IsCredentialScoped() bool }
 	if errors.As(err, &scoped) {
 		sig.CredentialScoped = scoped.IsCredentialScoped()
+	}
+	var requestScoped interface{ IsRequestScoped() bool }
+	if errors.As(err, &requestScoped) {
+		sig.RequestScoped = requestScoped.IsRequestScoped()
 	}
 	var retry interface{ RetryAfter() *time.Duration }
 	if errors.As(err, &retry) {
@@ -589,11 +620,15 @@ func (p *Probe) recordSignal(call, pinned string, status int, err error) {
 			sig.RetryAfterMS = &ms
 		}
 	}
+	if attempts := p.Upstream.AttemptsFor(call); len(attempts) > 0 {
+		for name, value := range attempts[len(attempts)-1].RateLimitHeaders {
+			sig.Headers[name] = value
+		}
+	}
 	if a, ok := p.core.GetByID(pinned); ok && a != nil {
 		if st := a.ModelStates[Model]; st != nil {
-			for name, value := range st.Quota.Signals {
-				sig.Headers[name] = value
-			}
+			sig.Snapshot = st.Quota.Signals
+			sig.SnapshotObservedAt = st.Quota.ObservedAt
 		}
 	}
 	p.mu.Lock()

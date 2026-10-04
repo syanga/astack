@@ -33,8 +33,11 @@ func TestPinnedRetriesStayOnSelectedAccount(t *testing.T) {
 	if out.Status != 200 || out.Text != "served-by:acct-a" {
 		t.Fatalf("client saw status %d text %q, want 200 from acct-a", out.Status, out.Text)
 	}
+	if n := len(p.Upstream.AttemptsFor(out.Call)); n != 3 {
+		t.Fatalf("transport tied %d attempts to %s, want 3", n, out.Call)
+	}
 	if !reflect.DeepEqual(out.Selected, []string{"acct-a", "acct-a", "acct-a"}) {
-		t.Fatalf("SDK selected %v, want acct-a three times", out.Selected)
+		t.Fatalf("SDK selected %v, want acct-a three times, matching the transport", out.Selected)
 	}
 	wantAttempts(t, p, "acct-a", "acct-a", "acct-a")
 }
@@ -84,8 +87,8 @@ func TestPinToUnknownAuthSelectsNothing(t *testing.T) {
 
 	out := tr.send("request pinned to an auth ID the SDK does not hold", Call{RawPin: "acct-missing.json"})
 
-	if out.Status == 200 {
-		t.Fatalf("client status 200 served by %q, want an explicit failure", out.Text)
+	if out.Status != 503 {
+		t.Fatalf("client status %d text %q, want 503", out.Status, out.Text)
 	}
 	if len(out.Selected) != 0 {
 		t.Fatalf("SDK selected %v for an unknown pin", out.Selected)
@@ -118,8 +121,11 @@ func TestPinnedExecutorPostureMakesOneAttemptPerCall(t *testing.T) {
 			failed := tr.send("first pinned call fails", Call{Account: "acct-a"})
 			next := tr.send("router retries the same account", Call{Account: "acct-a"})
 
-			if failed.Status == 200 && failed.Text != "" {
-				t.Fatalf("first call delivered %q, want a failure the router can act on", failed.Text)
+			if failed.Status == 200 {
+				t.Fatalf("first call returned 200 with text %q, want a failure status the router can act on", failed.Text)
+			}
+			if n := len(p.Upstream.AttemptsFor(failed.Call)); n != 1 {
+				t.Fatalf("transport tied %d attempts to the failed call, want 1", n)
 			}
 			if next.Status != 200 || next.Text != "served-by:acct-a" {
 				t.Fatalf("router retry saw status %d text %q, want 200 from acct-a", next.Status, next.Text)
@@ -133,11 +139,17 @@ func TestSDKCooldownBlocksPinnedAccountWithoutFailover(t *testing.T) {
 	p, tr := startProbe(t, twoAccounts, Settings{RequestRetry: 0, BootstrapRetries: 0, DisableCooling: false})
 	p.Upstream.Script("acct-a", Reply{Status: 503})
 
-	tr.send("pinned call fails and the SDK starts a cooldown", Call{Account: "acct-a"})
+	failed := tr.send("pinned call fails and the SDK starts a cooldown", Call{Account: "acct-a"})
 	blocked := tr.send("next pinned call during the SDK cooldown", Call{Account: "acct-a"})
 
-	if blocked.Status == 200 {
-		t.Fatalf("pinned call during cooldown served %q", blocked.Text)
+	if failed.Status != 503 || !reflect.DeepEqual(failed.Selected, []string{"acct-a"}) {
+		t.Fatalf("upstream failure: status %d selected %v, want 503 with one acct-a callback", failed.Status, failed.Selected)
+	}
+	if blocked.Status != 503 || len(blocked.Selected) != 0 {
+		t.Fatalf("call during cooldown: status %d selected %v, want 503 with no callback", blocked.Status, blocked.Selected)
+	}
+	if n := len(p.Upstream.AttemptsFor(blocked.Call)); n != 0 {
+		t.Fatalf("transport tied %d attempts to the blocked call, want 0", n)
 	}
 	wantAttempts(t, p, "acct-a")
 }
