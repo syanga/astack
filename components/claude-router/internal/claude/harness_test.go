@@ -273,7 +273,10 @@ func (e *env) events() []Event {
 
 func (e *env) binding(session string) router.Binding {
 	e.t.Helper()
-	b, ok := e.svc.router.Lookup(router.ConversationID(session))
+	b, ok, err := e.svc.router.Lookup(router.ConversationID(session))
+	if err != nil {
+		e.t.Fatal(err)
+	}
 	if !ok {
 		e.t.Fatalf("conversation %s has no binding", session)
 	}

@@ -325,7 +325,7 @@ func (r *Router) BlockedUntil(now time.Time, account AccountID, model string) (u
 	if !ok {
 		return time.Time{}, false, false
 	}
-	return usableReset(r.cfg, now, r.accounts[idx].observation, model)
+	return usableReset(r.cfg, now, r.accounts[idx].rejections, model)
 }
 
 // Relogin marks an account as logged in again.

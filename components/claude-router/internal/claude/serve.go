@@ -135,31 +135,25 @@ func (s *Service) messages(c *gin.Context) {
 
 	for step := 0; step < maxRoutingSteps; step++ {
 		now := s.now()
-		d := s.router.Decide(now, req)
-		var account router.AccountID
+		d, err := s.router.Decide(now, req)
+		if err == nil && d.Kind == router.Migrate && d.Reason == router.ReasonExhausted {
+			s.answerExhausted(c, now, d.From, id.Model)
+			finish("request", d.From, d, http.StatusTooManyRequests, nil)
+			return
+		}
+		if err == nil {
+			d, err = s.router.Route(now, req)
+		}
+		if err != nil {
+			finish("request", "", router.Decision{}, http.StatusServiceUnavailable, nil)
+			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: assignment journal unavailable; restart the router")
+			return
+		}
+		account := d.Account
 		switch d.Kind {
 		case router.Place, router.Dispatch, router.Retry:
-			got, err := s.router.CommitAssignment(now, id.Conversation, d.Account, d.Reason)
-			if err != nil {
-				finish("request", d.Account, d, http.StatusServiceUnavailable, nil)
-				writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: assignment journal unavailable; restart the router")
-				return
-			}
-			account = got
 		case router.Migrate:
-			if d.Reason == router.ReasonExhausted {
-				s.answerExhausted(c, now, d.From, id.Model)
-				finish("request", d.From, d, http.StatusTooManyRequests, nil)
-				return
-			}
-			got, err := s.router.CommitMigration(now, id.Conversation, d.From, d.Account, d.Reason)
-			if err != nil {
-				finish("request", d.From, d, http.StatusServiceUnavailable, nil)
-				writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: assignment journal unavailable; restart the router")
-				return
-			}
-			s.events.emit(Event{Kind: "migrated", Conversation: conv, Account: got, From: d.From, Reason: string(d.Reason)})
-			account = got
+			s.events.emit(Event{Kind: "migrated", Conversation: conv, Account: d.Account, From: d.From, Reason: string(d.Reason)})
 		case router.Refuse:
 			if d.RecheckOverage && !rechecked {
 				rechecked = true
@@ -382,7 +376,8 @@ func (s *Service) relayMessage(c *gin.Context, ctx context.Context, _ string, ac
 // error event before any output is a failure the router may retry; any
 // other first event commits the response. After that, the router relays
 // every chunk, marks the assignment served at the first completed content
-// block, and ends the stream gracefully whatever happens upstream.
+// block before the chunk that completes it reaches the client, and ends the
+// stream gracefully whatever happens upstream.
 func (s *Service) relayStream(c *gin.Context, ctx context.Context, _ string, account router.AccountID, id Identity, body []byte) outcome {
 	data, _, errs := s.base.ExecuteStreamWithAuthManager(ctx, "claude", id.Model, body, "")
 	var scan sseScanner
@@ -454,12 +449,13 @@ func (s *Service) relayStream(c *gin.Context, ctx context.Context, _ string, acc
 					f.Class = classifyStreamError(kind)
 					return f
 				}
+				handle(events)
 				commit()
 			} else {
+				handle(events)
 				_, _ = c.Writer.Write(chunk)
 				c.Writer.Flush()
 			}
-			handle(events)
 		}
 	}
 	if !committed {
@@ -501,7 +497,8 @@ type Status struct {
 // Status returns the service status.
 func (s *Service) Status() Status {
 	ov := s.overage.snapshot()
-	st := Status{Listen: s.addr, Conversations: len(s.store.Bindings())}
+	bindings, _ := s.store.Bindings()
+	st := Status{Listen: s.addr, Conversations: len(bindings)}
 	for _, a := range s.cfg.Accounts {
 		st.Accounts = append(st.Accounts, AccountStatus{ID: a.ID, Registered: s.authIDs[a.ID] != "", Overage: ov[a.ID]})
 	}

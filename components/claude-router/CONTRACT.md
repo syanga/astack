@@ -761,10 +761,12 @@ session to compare, or when the two disagree. Agent IDs are informational.
 
 ### Routing loop
 
-For each request the service calls `Decide`, then commits the result itself:
-`CommitAssignment` for `place`, `dispatch`, and `retry`, which records a
-first assignment or only touches an existing one, and `CommitMigration` for a
-`migrate` other than exhaustion. It pins the SDK call with
+For each request the service calls `Decide`. A `migrate` for `exhausted` is
+answered locally and nothing is committed. Any other decision goes to
+`Route`, which decides again and commits a placement or migration before it
+returns. A `Route` that decides an exhausted migration after the first
+`Decide` did not commits it, and the service then dispatches on the
+destination. A journal error answers 503. The service pins the SDK call with
 `handlers.WithPinnedAuthID` and tags the context with a call ID that the
 router's transport records. One routing step is one SDK call. With the
 executor posture, one SDK call is one upstream attempt, except the SDK's
@@ -812,6 +814,15 @@ stream, and for a non-streaming response with at least one content block.
 This is the boundary where clients keep output (`recovery.json#rows[9]` to
 `#rows[13]`). `TestServedMarkFollowsTheFirstCompletedBlock` shows a cut
 before the first completed block leaves the assignment unmarked.
+
+This answers the N4 item above. The service scans each chunk before writing
+it, and `Served` returns, with the record synced, before the chunk that holds
+the first `content_block_stop` reaches the client. A non-streaming response
+is written after `Served` returns. A crash therefore cannot leave a completed
+block on the client with an unmarked assignment.
+`TestServedMarkIsOnDiskBeforeTheClientSeesTheCompletedBlock` reads the
+journal at the moment the client sees the block. If `Served` fails, the
+journal has failed and stops answering, so the next request gets a 503.
 
 ### Paid-overflow reading
 

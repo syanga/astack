@@ -203,9 +203,9 @@ func (s *Service) readOverageEvery(ctx context.Context, every time.Duration) {
 	}
 }
 
-func (s *Service) observeHeaders(account router.AccountID, h http.Header, at time.Time) {
+func (s *Service) observeHeaders(account router.AccountID, h http.Header, start, at time.Time) {
 	if obs, ok := observationFrom(h, at); ok {
-		s.router.Observe(account, obs)
+		s.router.Observe(account, start, obs)
 	}
 	if state, ok := overageFrom(h); ok {
 		s.router.ObserveOverage(account, state, at)

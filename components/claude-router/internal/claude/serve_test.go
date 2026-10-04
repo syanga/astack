@@ -99,7 +99,8 @@ func TestRequestsWithoutSessionIdentityAreRejected(t *testing.T) {
 	if n := len(e.upstream.inference()); n != 0 {
 		t.Fatalf("rejected requests made %d upstream attempts", n)
 	}
-	if n := len(e.svc.store.Bindings()); n != 0 {
+	if bindings, _ := e.svc.store.Bindings(); len(bindings) != 0 {
+		n := len(bindings)
 		t.Fatalf("rejected requests created %d assignments", n)
 	}
 }

@@ -41,14 +41,14 @@ type transport struct {
 	inner    http.RoundTripper
 	redirect *url.URL
 	accounts map[string]router.AccountID
-	onHeader func(account router.AccountID, h http.Header, at time.Time)
+	onHeader func(account router.AccountID, h http.Header, start, at time.Time)
 	now      func() time.Time
 
 	mu    sync.Mutex
 	calls map[string][]attempt
 }
 
-func newTransport(inner http.RoundTripper, redirect *url.URL, accounts []router.Account, now func() time.Time, onHeader func(router.AccountID, http.Header, time.Time)) *transport {
+func newTransport(inner http.RoundTripper, redirect *url.URL, accounts []router.Account, now func() time.Time, onHeader func(router.AccountID, http.Header, time.Time, time.Time)) *transport {
 	t := &transport{inner: inner, redirect: redirect, accounts: map[string]router.AccountID{}, now: now, onHeader: onHeader, calls: map[string][]attempt{}}
 	for _, a := range accounts {
 		t.accounts[string(a.ID)+".json"] = a.ID
@@ -113,7 +113,7 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 		a.Status = resp.StatusCode
 		a.Header = resp.Header.Clone()
 		if t.onHeader != nil {
-			t.onHeader(account, resp.Header, a.End)
+			t.onHeader(account, resp.Header, a.Start, a.End)
 		}
 	}
 	if call != "" {
