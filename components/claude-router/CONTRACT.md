@@ -548,11 +548,15 @@ score = (active + 1) / (capacity * (1 + ResetBias * slack))
   the window does not clear it. A rejection stamped before such an allowed
   report is not recorded. Utilization and freshness come from the newest
   observation only.
-- Per window, the router remembers the time of the newest rejection even
-  after that rejection resets, for one weekly period past its end. A delayed
-  rejection stamped earlier is ignored. Of two rejections stamped at the same
-  time, a reported reset beats an unknown one, and otherwise the later reset
-  wins. An allowed report is forgotten once its window has ended.
+- Per window, the router keeps the newest rejection after it resets, when it
+  no longer blocks, so that a delayed rejection stamped earlier is not
+  recorded. Of two rejections stamped at the same time, the one that ends
+  later is kept; a rejection with no reported reset ends
+  `UnknownResetRecheck` after it was stamped.
+- Merging an observation forgets the rejections that have reset by its stamp
+  and were stamped at least one weekly period before it, and the allowed
+  reports stamped at least one weekly period before it. Any evidence of the
+  same window stamped earlier belongs to a window that has ended.
 - The destination of every `migrate` is chosen by this rule.
 - Reset preference affects only `place` and the destination of `migrate`.
   `Decide` never moves a healthy assignment, and a migrated conversation never
@@ -627,13 +631,21 @@ the check or response.
   `overage_observed` when another account is eligible. If none is, it waits
   for the earliest usable reset elsewhere or is refused with
   `paid_use_observed`, and keeps its assignment. New conversations skip the
-  account. Checks (`disabled` or `enabled`) are kept in time order, and a
-  check stamped before the latest recorded check is ignored. Paid use is
-  recorded separately and stays in force until the latest check is
-  `disabled` and stamped strictly after the latest paid use. A check with
-  the same time, a later `enabled` check, or a delayed `disabled` check
-  stamped before a newer `enabled` check does not clear it. A migrated
-  conversation does not return.
+  account. A migrated conversation does not return.
+- **Ordering.** The router records the latest check (`disabled` or
+  `enabled`) and, separately, the latest paid use, each with its time. A
+  check stamped before the latest recorded check is ignored. Of two checks
+  stamped at the same time, `disabled` does not replace `enabled`. Paid use
+  is in force unless the latest check is `disabled` and stamped strictly
+  after the latest paid use. The outcome therefore depends on the stamps, not
+  on arrival order:
+  - A `disabled` check with the same time as the paid use does not clear it.
+  - A delayed `disabled` check stamped before a newer `enabled` check does
+    not clear it.
+  - A later `enabled` check puts earlier paid use back in force, even after
+    a `disabled` check had cleared it. Paid use at +1m, `disabled` at +2m,
+    and `enabled` at +3m migrate the conversation with `overage_observed` in
+    either arrival order of the two checks.
 - **Unknown or stale check**, older than `OverageFreshFor`: `Decide` refuses
   dispatch with `overage_unknown` or `overage_stale`, sets `RecheckOverage`,
   and does not migrate.
@@ -658,11 +670,11 @@ stale check alone never causes a migration.
 PR3 owns the check mechanism and the documented remaining gap: usage credits
 enabled outside the proxy while included windows are exhausted.
 
-PR3 contract item (N11): paid use stamped before a `disabled` check that is
-already the latest check counts as cleared by that check. PR3 must state its
-timestamp rule for paid use, so that a paid-use response is never stamped
-earlier than a disabled check the router already applied. Stamping paid use with the response time,
-taken after the check completed, satisfies this. The
+PR3 contract item (N11): paid use stamped before the latest check, when that
+check is `disabled`, counts as cleared by it. PR3 must state its timestamp
+rule for paid use, so that a paid-use response is never stamped earlier than
+a `disabled` check the router already applied. Stamping paid use with the
+response time, taken after the check completed, satisfies this. The
 simulator fixtures assume a settings read every 15 minutes.
 
 ### Relogin before the first response
