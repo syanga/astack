@@ -548,6 +548,11 @@ score = (active + 1) / (capacity * (1 + ResetBias * slack))
   the window does not clear it. A rejection stamped before such an allowed
   report is not recorded. Utilization and freshness come from the newest
   observation only.
+- Per window, the router remembers the time of the newest rejection even
+  after that rejection resets, for one weekly period past its end. A delayed
+  rejection stamped earlier is ignored. Of two rejections stamped at the same
+  time, a reported reset beats an unknown one, and otherwise the later reset
+  wins. An allowed report is forgotten once its window has ended.
 - The destination of every `migrate` is chosen by this rule.
 - Reset preference affects only `place` and the destination of `migrate`.
   `Decide` never moves a healthy assignment, and a migrated conversation never
@@ -622,10 +627,13 @@ the check or response.
   `overage_observed` when another account is eligible. If none is, it waits
   for the earliest usable reset elsewhere or is refused with
   `paid_use_observed`, and keeps its assignment. New conversations skip the
-  account. Paid use stays recorded until a check stamped strictly after the
-  paid-use observation finds overflow `disabled`. A check with the same time,
-  or a later check that finds overflow `enabled`, does not clear it. A
-  migrated conversation does not return.
+  account. Checks (`disabled` or `enabled`) are kept in time order, and a
+  check stamped before the latest recorded check is ignored. Paid use is
+  recorded separately and stays in force until the latest check is
+  `disabled` and stamped strictly after the latest paid use. A check with
+  the same time, a later `enabled` check, or a delayed `disabled` check
+  stamped before a newer `enabled` check does not clear it. A migrated
+  conversation does not return.
 - **Unknown or stale check**, older than `OverageFreshFor`: `Decide` refuses
   dispatch with `overage_unknown` or `overage_stale`, sets `RecheckOverage`,
   and does not migrate.
@@ -650,10 +658,10 @@ stale check alone never causes a migration.
 PR3 owns the check mechanism and the documented remaining gap: usage credits
 enabled outside the proxy while included windows are exhausted.
 
-PR3 contract item (N11): `ObserveOverage` ignores a state stamped before the
-account's latest recorded check. PR3 must state its timestamp rule for paid
-use, so that a paid-use response is never stamped earlier than a disabled
-check the router already applied. Stamping paid use with the response time,
+PR3 contract item (N11): paid use stamped before a `disabled` check that is
+already the latest check counts as cleared by that check. PR3 must state its
+timestamp rule for paid use, so that a paid-use response is never stamped
+earlier than a disabled check the router already applied. Stamping paid use with the response time,
 taken after the check completed, satisfies this. The
 simulator fixtures assume a settings read every 15 minutes.
 
