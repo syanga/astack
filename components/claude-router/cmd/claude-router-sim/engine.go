@@ -714,7 +714,7 @@ func (s *sim) subagents(c *conversation, at time.Time, account router.AccountID)
 	if s.roll(drawSubagents, c.idx, c.turn) >= w.SubagentProbability {
 		return nil
 	}
-	parent := ""
+	parent, current := "", account
 	for depth := range 2 {
 		if depth == 1 && s.roll(drawNested, c.idx, c.turn) >= w.NestedProbability {
 			break
@@ -728,17 +728,21 @@ func (s *sim) subagents(c *conversation, at time.Time, account router.AccountID)
 			return err
 		}
 		s.m.SubagentRequests++
-		bnd, _, _ := s.r.Lookup(c.id)
-		if d.Kind == router.Place || bnd.Account != account && d.Kind != router.Migrate {
+		if d.Kind == router.Place || d.Kind == router.Dispatch && d.Account != current {
 			s.m.SubagentNotInherited++
 		}
 		if d.Kind == router.Migrate {
 			s.audit(c, at, d, agent)
+			current = d.Account
 		}
 		if d.Kind == router.Dispatch || d.Kind == router.Migrate {
 			q := s.quotas[d.Account]
 			if !q.loggedOut && !s.blocked(q, c.model) {
 				s.spend(q, c, agent, at, d.Account, w.SubagentContext, w.OutputPerTurn/2)
+				if err := s.r.Served(at, c.id, d.Account); err != nil {
+					return err
+				}
+				c.servedOn = d.Account
 			}
 		}
 		parent = agent

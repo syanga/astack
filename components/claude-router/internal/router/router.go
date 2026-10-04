@@ -114,6 +114,9 @@ func (r *Router) loads(now time.Time, skip ConversationID) ([]int, error) {
 // call that landed after d was made is honored. It returns the fresh
 // decision, which may differ from d. Any other kind is returned unchanged.
 func (r *Router) Commit(now time.Time, req Request, d Decision) (Decision, error) {
+	if err := r.store.Err(); err != nil {
+		return Decision{}, err
+	}
 	if d.Kind != Place && d.Kind != Migrate {
 		return d, nil
 	}
@@ -247,24 +250,49 @@ func (r *Router) Observe(account AccountID, attemptStart time.Time, obs Observat
 }
 
 func windowKey(w Window) string {
-	return string(w.Kind) + "|" + strings.Join(w.Models, ",")
+	models := slices.Clone(w.Models)
+	slices.Sort(models)
+	return string(w.Kind) + "|" + strings.Join(models, ",")
 }
 
+// observe merges an observation that passed the attempt-start rule, in any
+// order relative to earlier ones. Only the utilization snapshot is gated on
+// recency. Per window, the newest report wins: a rejection is cleared only by
+// a report of the same window, not rejected, stamped after it, and a
+// rejection stamped before such a report is not recorded.
 func (r *Router) observe(account AccountID, obs Observation) {
 	idx, ok := r.index[account]
-	if !ok || obs.At.Before(r.accounts[idx].observation.At) {
+	if !ok {
 		return
 	}
 	a := &r.accounts[idx]
-	a.observation = obs
+	if !obs.At.Before(a.observation.At) {
+		a.observation = obs
+	}
+	if a.allowedAt == nil {
+		a.allowedAt = map[string]time.Time{}
+	}
 	for _, w := range obs.Windows {
 		key := windowKey(w)
-		a.rejections = slices.DeleteFunc(a.rejections, func(rj rejection) bool {
-			return windowKey(rj.Window) == key && rj.at.Before(obs.At)
-		})
-		if w.Rejected {
-			a.rejections = append(a.rejections, rejection{Window: w, at: obs.At})
+		if !w.Rejected {
+			if obs.At.After(a.allowedAt[key]) {
+				a.allowedAt[key] = obs.At
+			}
+			a.rejections = slices.DeleteFunc(a.rejections, func(rj rejection) bool {
+				return windowKey(rj.Window) == key && rj.at.Before(obs.At)
+			})
+			continue
 		}
+		newer := slices.ContainsFunc(a.rejections, func(rj rejection) bool {
+			return windowKey(rj.Window) == key && !rj.at.Before(obs.At)
+		})
+		if newer || a.allowedAt[key].After(obs.At) {
+			continue
+		}
+		a.rejections = slices.DeleteFunc(a.rejections, func(rj rejection) bool {
+			return windowKey(rj.Window) == key
+		})
+		a.rejections = append(a.rejections, rejection{Window: w, at: obs.At})
 	}
 	a.rejections = slices.DeleteFunc(a.rejections, func(rj rejection) bool {
 		return !rj.end(r.cfg).After(obs.At)
@@ -299,8 +327,9 @@ func (r *Router) Report(f Failure) Class {
 }
 
 // ObserveOverage records an account's paid-overflow state as checked at at.
-// The latest check wins, except that paid use is cleared only by a check
-// strictly after the paid-use observation.
+// The latest check wins, except that paid use is cleared only by a
+// disabled check strictly after the paid-use observation. A later enabled
+// check leaves paid use recorded.
 func (r *Router) ObserveOverage(account AccountID, state Overage, at time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -309,7 +338,10 @@ func (r *Router) ObserveOverage(account AccountID, state Overage, at time.Time) 
 		return
 	}
 	a := &r.accounts[idx]
-	if at.Before(a.overageAt) || a.overage == OveragePaidUse && state != OveragePaidUse && !at.After(a.overageAt) {
+	if at.Before(a.overageAt) {
+		return
+	}
+	if a.overage == OveragePaidUse && state != OveragePaidUse && (state != OverageDisabled || !at.After(a.overageAt)) {
 		return
 	}
 	a.overage, a.overageAt = state, at
