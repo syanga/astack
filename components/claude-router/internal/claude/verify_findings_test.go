@@ -49,6 +49,18 @@ func TestFastModeOverloadIsRetried(t *testing.T) {
 	}
 }
 
+func TestFastModeConnectionFailureIsRetried(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	e.start()
+	e.upstream.script("acct-a", reply{Drop: true})
+
+	r := e.send(msg{Session: sessionID(1), Body: fastBody(e, sessionID(1))})
+
+	if r.Status != 200 || len(e.upstream.inference()) != 2 {
+		t.Fatalf("fast-mode connection failure got %d after %d attempts, want 200 after a retry", r.Status, len(e.upstream.inference()))
+	}
+}
+
 func TestRequestScopedErrorAfterASuccessfulAttemptIsNotSentAgain(t *testing.T) {
 	e := newEnv(t, "acct-a")
 	e.start()

@@ -31,6 +31,7 @@ type reply struct {
 	Hold        bool
 	CleanCut    bool
 	BodyCut     bool
+	Drop        bool
 	Before      func()
 	Body        string
 }
@@ -135,6 +136,9 @@ func (u *fakeUpstream) RoundTrip(req *http.Request) (*http.Response, error) {
 	u.mu.Unlock()
 	if r.Before != nil {
 		r.Before()
+	}
+	if r.Drop {
+		return nil, io.ErrUnexpectedEOF
 	}
 
 	if !known {

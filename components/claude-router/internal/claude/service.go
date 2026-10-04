@@ -207,18 +207,17 @@ func (s *Service) readOverageEvery(ctx context.Context, every time.Duration) {
 func (s *Service) observeHeaders(account router.AccountID, h http.Header, start, at time.Time) {
 	if obs, ok := observationFrom(h, at); ok {
 		blocking := slices.ContainsFunc(obs.Windows, func(w router.Window) bool { return w.Rejected })
-		begun, ok1 := s.bounded(start, blocking)
-		arrived, ok2 := s.bounded(at, blocking)
-		if ok1 && ok2 {
+		if begun, arrived, ok := s.bounded(start, at, blocking); ok {
 			obs.At = arrived
 			s.router.Observe(account, begun, obs)
 		}
 	}
 	if state, ok := overageFrom(h); ok {
-		stamp, ok := s.bounded(readingStamp(state, start, at), state != router.OverageDisabled)
+		begun, arrived, ok := s.bounded(start, at, state != router.OverageDisabled)
 		if !ok {
 			return
 		}
+		stamp := readingStamp(state, begun, arrived)
 		s.router.ObserveOverage(account, state, stamp)
 		s.overage.note(account, state, stamp, "response")
 		if state == router.OveragePaidUse {
@@ -227,25 +226,26 @@ func (s *Service) observeHeaders(account router.AccountID, h http.Header, start,
 	}
 }
 
-// bounded returns the stamp the router may use for a reading the upstream
-// made at t. Every stamp the service passes to the router comes from the
-// service clock at a read start or an arrival, so it is never zero and never
-// later than now. A stamp that breaks this, from a bug or a clock that
-// stepped back, would let the router misorder readings: a later stamp sweeps
-// live rejections, and a zero stamp drops paid use. Such a stamp becomes now,
-// which is no earlier than the reading. A zero stamp on a reading that only
-// permits dispatch is unusable, and ok is false. Either case is recorded.
-func (s *Service) bounded(t time.Time, blocking bool) (stamp time.Time, ok bool) {
+// bounded returns the start and arrival stamps the router may use for a
+// reading the upstream made between them. Every stamp the service passes to
+// the router comes from the service clock, so both are nonzero and no later
+// than now. A pair that breaks this, from a bug or a clock that stepped back,
+// would let the router misorder readings: a future stamp sweeps live
+// rejections or clears paid use, and a zero stamp drops paid use. A blocking
+// reading (paid use, enabled, a rejection, a failure) is kept and stamped now
+// at both ends, which is no earlier than the reading. A reading that only
+// permits dispatch is dropped, and ok is false. Either case is recorded.
+func (s *Service) bounded(start, arrival time.Time, blocking bool) (time.Time, time.Time, bool) {
 	now := s.now()
-	switch {
-	case t.IsZero() && !blocking:
-		s.events.emit(Event{Kind: "stamp_bounded", Outcome: "dropped", Detail: "zero stamp on a reading that permits dispatch"})
-		return time.Time{}, false
-	case t.IsZero(), t.After(now):
-		s.events.emit(Event{Kind: "stamp_bounded", Outcome: "now", Detail: "zero or future stamp"})
-		return now, true
+	if !start.IsZero() && !arrival.IsZero() && !start.After(now) && !arrival.After(now) {
+		return start, arrival, true
 	}
-	return t, true
+	if !blocking {
+		s.events.emit(Event{Kind: "stamp_bounded", Outcome: "dropped", Detail: "zero or future stamp on a reading that permits dispatch"})
+		return time.Time{}, time.Time{}, false
+	}
+	s.events.emit(Event{Kind: "stamp_bounded", Outcome: "now", Detail: "zero or future stamp on a blocking reading"})
+	return now, now, true
 }
 
 func randomHex(n int) string {

@@ -220,7 +220,7 @@ func (s *Service) messages(c *gin.Context) {
 			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: the SDK refused the pinned account without an upstream attempt")
 			return
 		}
-		attemptAt, _ := s.bounded(out.AttemptAt, true)
+		attemptAt, _, _ := s.bounded(out.AttemptAt, out.AttemptAt, true)
 		class := s.router.Report(router.Failure{
 			Account:      account,
 			Model:        id.Model,

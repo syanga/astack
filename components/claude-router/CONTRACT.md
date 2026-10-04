@@ -826,15 +826,18 @@ A failure before output goes to `Router.Report` with the class from
 `classify`. It reads the status and headers of the call's last attempt at
 the transport, and the SDK error's status and scope:
 
-1. When that attempt itself failed (status 400 or above), its status decides
-   first: 401 or 403 is `auth`, and 408 or 5xx is `transient`, whatever the
-   SDK's scope. In fast mode the SDK marks every failure request-scoped, so
-   this order keeps an upstream 401 from reaching the client as 401.
-2. Otherwise the upstream answered, and the failure is the SDK's own. A
-   request-scoped error is `request_scoped` before any status check, so a
-   generation the upstream already completed is never sent again. The SDK
-   gives such an error status 500 when it carries none
+1. When the upstream answered that attempt with a 2xx status, the failure is
+   the SDK's own. A request-scoped error is then `request_scoped` before any
+   status check, so a generation the upstream already completed is never sent
+   again. The SDK gives such an error status 500 when it carries none
    (`sdk/api/handlers/handlers_execution.go:358-361`).
+2. Otherwise the attempt failed, with an error status or with no response,
+   and the status decides first: 401 or 403 is `auth`, and 408 or 5xx is
+   `transient`, whatever the SDK's scope. The attempt's own status wins when
+   it is 400 or above; with no response, the SDK's status counts. In fast mode
+   the SDK marks every failure request-scoped, so this order keeps an upstream
+   401 from reaching the client as 401, and retries a dropped connection
+   (`TestFastModeConnectionFailureIsRetried`).
 3. Otherwise a request-scoped error is `request_scoped`. Either way it is
    answered at once with the upstream status and message and
    `x-should-retry: false`.
@@ -930,11 +933,14 @@ start of a read or attempt or at an arrival. It is never zero and never
 later than the clock at the time of the call. In-process comparisons use Go's
 monotonic clock reading, so a wall-clock step does not reorder them. The
 service enforces the rule at the boundary (`Service.bounded`), because PR2
-misorders readings otherwise: a future stamp sweeps a live rejection, and
-paid use stamped with the zero time is dropped. A stamp that breaks the rule
-becomes the current time, which is no earlier than the reading. A zero stamp
-on a reading that only permits dispatch (`disabled`, or windows without a
-rejection) is dropped. Both cases record a `stamp_bounded` event
+misorders readings otherwise: a future stamp sweeps a live rejection or
+clears paid use, and paid use stamped with the zero time is dropped. The
+service checks a reading's start and arrival stamps together. When either
+breaks the rule, a blocking reading (paid use, `enabled`, a rejection, or a
+failure report) is kept and stamped with the current time at both ends,
+which is no earlier than the reading. A reading that only permits dispatch
+(`disabled`, or windows without a rejection) is dropped. Both cases record a
+`stamp_bounded` event
 (`TestObservationsReachTheRouterStampedNoLaterThanNowAndNeverZero`).
 
 Observed paid use does not expire (PR2 at `22d4342`): a later `enabled`

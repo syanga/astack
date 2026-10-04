@@ -262,24 +262,40 @@ func TestObservationsReachTheRouterStampedNoLaterThanNowAndNeverZero(t *testing.
 	}
 	t0 := time.Now().Truncate(time.Second)
 	cases := map[string]struct {
-		observe    func(s *Service)
+		observe    func(e *env)
 		wantStatus int
 		wantMsg    string
 	}{
 		"zero-stamped paid use": {
-			observe: func(s *Service) {
-				s.observeHeaders("acct-a", header(map[string]string{"anthropic-ratelimit-unified-overage-in-use": "true"}), time.Time{}, time.Time{})
+			observe: func(e *env) {
+				e.svc.observeHeaders("acct-a", header(map[string]string{"anthropic-ratelimit-unified-overage-in-use": "true"}), time.Time{}, time.Time{})
 			},
 			wantStatus: http.StatusServiceUnavailable, wantMsg: "paid use",
 		},
 		"future-stamped report after a live rejection": {
-			observe: func(s *Service) {
-				s.observeHeaders("acct-a", header(exhaustedHeaders(t0.Add(2*time.Hour))), t0, t0)
+			observe: func(e *env) {
+				e.svc.observeHeaders("acct-a", header(exhaustedHeaders(t0.Add(2*time.Hour))), t0, t0)
 				later := t0.Add(8 * 24 * time.Hour)
-				s.observeHeaders("acct-a", header(map[string]string{
+				e.svc.observeHeaders("acct-a", header(map[string]string{
 					"anthropic-ratelimit-unified-5h-status":      "allowed",
 					"anthropic-ratelimit-unified-5h-utilization": "0.1",
 				}), later, later)
+			},
+			wantStatus: http.StatusTooManyRequests, wantMsg: "usable again at",
+		},
+		"future-stamped disabled response after paid use": {
+			observe: func(e *env) {
+				e.svc.observeHeaders("acct-a", header(map[string]string{"anthropic-ratelimit-unified-overage-in-use": "true"}), t0, t0)
+				e.clock.set(t0.Add(time.Minute))
+				later := t0.Add(time.Hour)
+				e.svc.observeHeaders("acct-a", header(map[string]string{"anthropic-ratelimit-unified-overage-status": "rejected"}), later, later)
+			},
+			wantStatus: http.StatusServiceUnavailable, wantMsg: "paid use",
+		},
+		"rejection with a zero attempt start": {
+			observe: func(e *env) {
+				e.clock.set(t0.Add(time.Minute))
+				e.svc.observeHeaders("acct-a", header(exhaustedHeaders(t0.Add(2*time.Hour))), time.Time{}, t0)
 			},
 			wantStatus: http.StatusTooManyRequests, wantMsg: "usable again at",
 		},
@@ -291,7 +307,7 @@ func TestObservationsReachTheRouterStampedNoLaterThanNowAndNeverZero(t *testing.
 			e.start()
 			e.send(msg{Session: sessionID(1)})
 
-			c.observe(e.svc)
+			c.observe(e)
 			e.clock.set(t0.Add(2 * time.Minute))
 			r := e.send(msg{Session: sessionID(1), NonStream: true})
 

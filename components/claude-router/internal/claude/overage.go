@@ -89,10 +89,11 @@ func (o *overageReader) readLocked(ctx context.Context, account router.AccountID
 		o.s.events.emit(Event{Kind: "overage_read", Account: account, Outcome: "unknown", Detail: err.Error(), DurationMS: &dur})
 		return
 	}
-	stamp, ok := o.s.bounded(readingStamp(state, start, end), state != router.OverageDisabled)
+	begun, arrived, ok := o.s.bounded(start, end, state != router.OverageDisabled)
 	if !ok {
 		return
 	}
+	stamp := readingStamp(state, begun, arrived)
 	o.s.router.ObserveOverage(account, state, stamp)
 	o.note(account, state, stamp, "settings")
 	o.s.events.emit(Event{Kind: "overage_read", Account: account, Outcome: "read", Overage: state, DurationMS: &dur})
