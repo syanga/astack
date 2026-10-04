@@ -541,10 +541,12 @@ score = (active + 1) / (capacity * (1 + ResetBias * slack))
   apply to the model. A five-hour reset therefore never unblocks an account
   whose weekly window is still rejected. A rejection with no reported reset
   blocks until `UnknownResetRecheck` after it was observed.
-- Rejected windows accumulate across observations. A rejection stays until its
-  reset, or until a newer observation reports the same window, matched by kind
-  and model scope, as not rejected. A newer observation that omits the window
-  does not clear it. Utilization and freshness come from the newest
+- Rejected windows accumulate across observations, in whatever order the
+  observations arrive. A rejection stays until its reset, or until an
+  observation stamped after it reports the same window, matched by kind and
+  model scope in any prefix order, as not rejected. An observation that omits
+  the window does not clear it. A rejection stamped before such an allowed
+  report is not recorded. Utilization and freshness come from the newest
   observation only.
 - The destination of every `migrate` is chosen by this rule.
 - Reset preference affects only `place` and the destination of `migrate`.
@@ -621,8 +623,9 @@ the check or response.
   for the earliest usable reset elsewhere or is refused with
   `paid_use_observed`, and keeps its assignment. New conversations skip the
   account. Paid use stays recorded until a check stamped strictly after the
-  paid-use observation finds overflow `disabled`; a check with the same time
-  does not clear it. A migrated conversation does not return.
+  paid-use observation finds overflow `disabled`. A check with the same time,
+  or a later check that finds overflow `enabled`, does not clear it. A
+  migrated conversation does not return.
 - **Unknown or stale check**, older than `OverageFreshFor`: `Decide` refuses
   dispatch with `overage_unknown` or `overage_stale`, sets `RecheckOverage`,
   and does not migrate.
@@ -645,7 +648,13 @@ conversation keeps its assignment and gets `refuse` or `wait`. An unknown or
 stale check alone never causes a migration.
 
 PR3 owns the check mechanism and the documented remaining gap: usage credits
-enabled outside the proxy while included windows are exhausted. The
+enabled outside the proxy while included windows are exhausted.
+
+PR3 contract item (N11): `ObserveOverage` ignores a state stamped before the
+account's latest recorded check. PR3 must state its timestamp rule for paid
+use, so that a paid-use response is never stamped earlier than a disabled
+check the router already applied. Stamping paid use with the response time,
+taken after the check completed, satisfies this. The
 simulator fixtures assume a settings read every 15 minutes.
 
 ### Relogin before the first response
@@ -658,6 +667,10 @@ unmarked assignment. When the assigned account needs a browser login:
   account is eligible. Otherwise `Decide` returns `reauth`.
 - A marked assignment keeps the spec rule: `reauth` until relogin or a manual
   `Move`.
+
+PR3 contract item (N13): PR3 calls `Served` for every successful response on
+a binding, including responses to subagent requests, which share the
+conversation's binding. The simulator does the same.
 
 PR3 contract item (N4): PR3 must call `Served` and let it return before the
 client sees the response complete. If PR3 cannot order it that way, it must
@@ -678,8 +691,8 @@ The store is the single-writer JSON-lines journal from PR1,
 - **Fail stop.** As in the PR1 assignment storage rules above, after a failed
   write or sync the store returns `ErrFailed` until it is closed and reopened.
   That covers every path that could answer with an account: `Lookup`,
-  `Decide`, `Commit`, `Route`, `Served`, `Relogin`, `Move`, and the
-  shortcuts that return an existing binding without writing. The failed
+  `Decide`, `Commit` for every decision kind, `Route`, `Served`, `Relogin`,
+  `Move`, and the shortcuts that return an existing binding without writing. The failed
   record may or may not be on disk, and replay decides which. No caller is
   told an account that replay can contradict.
 - **Validation.** A commit with an empty conversation or account, or a
