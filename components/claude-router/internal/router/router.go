@@ -3,6 +3,7 @@ package router
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -270,33 +271,49 @@ func (r *Router) observe(account AccountID, obs Observation) {
 		a.observation = obs
 	}
 	if a.allowedAt == nil {
-		a.allowedAt = map[string]time.Time{}
+		a.allowedAt, a.rejectedAt = map[string]windowMark{}, map[string]windowMark{}
 	}
 	for _, w := range obs.Windows {
 		key := windowKey(w)
+		rj := rejection{Window: w, at: obs.At}
+		mark := windowMark{at: obs.At, until: rj.end(r.cfg), known: !w.ResetsAt.IsZero()}
 		if !w.Rejected {
-			if obs.At.After(a.allowedAt[key]) {
-				a.allowedAt[key] = obs.At
+			if obs.At.After(a.allowedAt[key].at) {
+				a.allowedAt[key] = mark
 			}
-			a.rejections = slices.DeleteFunc(a.rejections, func(rj rejection) bool {
-				return windowKey(rj.Window) == key && rj.at.Before(obs.At)
+			a.rejections = slices.DeleteFunc(a.rejections, func(x rejection) bool {
+				return windowKey(x.Window) == key && x.at.Before(obs.At)
 			})
 			continue
 		}
-		newer := slices.ContainsFunc(a.rejections, func(rj rejection) bool {
-			return windowKey(rj.Window) == key && !rj.at.Before(obs.At)
-		})
-		if newer || a.allowedAt[key].After(obs.At) {
+		prev, seen := a.rejectedAt[key]
+		switch {
+		case a.allowedAt[key].at.After(obs.At), seen && prev.at.After(obs.At):
+			continue
+		case seen && prev.at.Equal(obs.At) && !mark.beats(prev):
 			continue
 		}
-		a.rejections = slices.DeleteFunc(a.rejections, func(rj rejection) bool {
-			return windowKey(rj.Window) == key
-		})
-		a.rejections = append(a.rejections, rejection{Window: w, at: obs.At})
+		a.rejectedAt[key] = mark
+		a.rejections = slices.DeleteFunc(a.rejections, func(x rejection) bool { return windowKey(x.Window) == key })
+		a.rejections = append(a.rejections, rj)
 	}
-	a.rejections = slices.DeleteFunc(a.rejections, func(rj rejection) bool {
-		return !rj.end(r.cfg).After(obs.At)
+	a.rejections = slices.DeleteFunc(a.rejections, func(x rejection) bool {
+		return !x.end(r.cfg).After(obs.At)
 	})
+	maps.DeleteFunc(a.allowedAt, func(_ string, m windowMark) bool { return !m.until.After(obs.At) })
+	maps.DeleteFunc(a.rejectedAt, func(_ string, m windowMark) bool {
+		return !m.until.Add(Weekly.Period()).After(obs.At)
+	})
+}
+
+// beats decides between two rejections of one window stamped at the same
+// time: a reported reset beats an unknown one, and otherwise the later end
+// wins.
+func (m windowMark) beats(prev windowMark) bool {
+	if m.known != prev.known {
+		return m.known
+	}
+	return m.until.After(prev.until)
 }
 
 // Report records a failure before output and returns the class the policy
@@ -326,10 +343,11 @@ func (r *Router) Report(f Failure) Class {
 	return f.Class
 }
 
-// ObserveOverage records an account's paid-overflow state as checked at at.
-// The latest check wins, except that paid use is cleared only by a
-// disabled check strictly after the paid-use observation. A later enabled
-// check leaves paid use recorded.
+// ObserveOverage records a paid-overflow check (disabled or enabled) or an
+// observation of paid use, stamped at. Checks are kept in time order: a check
+// stamped before the latest recorded check is ignored. Paid use excludes the
+// account until the latest check is disabled and stamped strictly after the
+// latest paid use.
 func (r *Router) ObserveOverage(account AccountID, state Overage, at time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -338,13 +356,14 @@ func (r *Router) ObserveOverage(account AccountID, state Overage, at time.Time) 
 		return
 	}
 	a := &r.accounts[idx]
-	if at.Before(a.overageAt) {
-		return
+	switch {
+	case state == OveragePaidUse:
+		if at.After(a.paidUseAt) {
+			a.paidUseAt = at
+		}
+	case !at.Before(a.checkAt):
+		a.check, a.checkAt = state, at
 	}
-	if a.overage == OveragePaidUse && state != OveragePaidUse && (state != OverageDisabled || !at.After(a.overageAt)) {
-		return
-	}
-	a.overage, a.overageAt = state, at
 }
 
 // Relogin marks an account as logged in again.

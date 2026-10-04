@@ -9,9 +9,25 @@ type accountView struct {
 	needsLogin  bool
 	observation Observation
 	rejections  []rejection
-	allowedAt   map[string]time.Time
-	overage     Overage
-	overageAt   time.Time
+	allowedAt   map[string]windowMark
+	rejectedAt  map[string]windowMark
+	check       Overage
+	checkAt     time.Time
+	paidUseAt   time.Time
+}
+
+// windowMark is the newest report of one window: its time, when it ends, and
+// whether that end is a reported reset.
+type windowMark struct {
+	at    time.Time
+	until time.Time
+	known bool
+}
+
+// paidUse reports whether observed paid use still excludes the account: no
+// disabled check stamped after it has been recorded.
+func (a accountView) paidUse() bool {
+	return !a.paidUseAt.IsZero() && !(a.check == OverageDisabled && a.checkAt.After(a.paidUseAt))
 }
 
 type rejection struct {
@@ -28,13 +44,13 @@ func (rj rejection) end(cfg Config) time.Time {
 
 func overageBar(cfg Config, now time.Time, a accountView) Reason {
 	switch {
-	case a.overage == OveragePaidUse:
+	case a.paidUse():
 		return ReasonPaidUse
-	case a.overage == OverageEnabled:
+	case a.check == OverageEnabled:
 		return ReasonOverageEnabled
-	case a.overage != OverageDisabled:
+	case a.check != OverageDisabled:
 		return ReasonOverageUnknown
-	case now.Sub(a.overageAt) > cfg.OverageFreshFor:
+	case now.Sub(a.checkAt) > cfg.OverageFreshFor:
 		return ReasonOverageStale
 	}
 	return ""
@@ -77,7 +93,7 @@ func decide(cfg Config, now time.Time, v view, req Request) Decision {
 		}
 		return Decision{Kind: Reauth, Account: current, Reason: ReasonNeedsLogin}
 	}
-	if acct.overage == OveragePaidUse {
+	if acct.paidUse() {
 		d := place(cfg, now, v, req.Model)
 		switch d.Kind {
 		case Place:
