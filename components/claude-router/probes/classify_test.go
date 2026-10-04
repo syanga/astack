@@ -113,7 +113,7 @@ func TestQuotaSnapshotOutlivesAHeaderlessFailure(t *testing.T) {
 	}
 }
 
-func TestRequestScopedFailureIsNotRetryable(t *testing.T) {
+func TestRequestScopedFailureClassifiesSeparately(t *testing.T) {
 	sig := ErrorSignal{Status: 429, RequestScoped: true}
 
 	got := Classify(sig)

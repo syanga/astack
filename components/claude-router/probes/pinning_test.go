@@ -42,6 +42,21 @@ func TestPinnedRetriesStayOnSelectedAccount(t *testing.T) {
 	wantAttempts(t, p, "acct-a", "acct-a", "acct-a")
 }
 
+func TestNonStreamingPinnedRetriesStayOnSelectedAccount(t *testing.T) {
+	p, tr := startProbe(t, twoAccounts, Settings{RequestRetry: 2, BootstrapRetries: 1, DisableCooling: true})
+	p.Upstream.Script("acct-a", Reply{Status: 503}, Reply{Status: 503})
+
+	out := tr.send("non-streaming pinned request after two transient failures", Call{Account: "acct-a", NonStream: true})
+
+	if out.Status != 200 || out.Text != "served-by:acct-a" {
+		t.Fatalf("client saw status %d text %q, want 200 from acct-a", out.Status, out.Text)
+	}
+	if n := len(p.Upstream.AttemptsFor(out.Call)); n != 3 {
+		t.Fatalf("transport tied %d attempts to %s, want 3", n, out.Call)
+	}
+	wantAttempts(t, p, "acct-a", "acct-a", "acct-a")
+}
+
 func TestPinnedConnectionDropBeforeOutputRetriesSameAccount(t *testing.T) {
 	p, tr := startProbe(t, twoAccounts, Settings{RequestRetry: 2, BootstrapRetries: 1, DisableCooling: true})
 	p.Upstream.Script("acct-a", Reply{Fail: "drop"})

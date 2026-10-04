@@ -32,11 +32,12 @@ import (
 )
 
 const (
-	Model         = "claude-sonnet-4-5-20250929"
-	routePath     = "/probe/v1/messages"
-	headerAccount = "X-Probe-Account"
-	headerCall    = "X-Probe-Call"
-	headerRawPin  = "X-Probe-Raw-Pin"
+	Model           = "claude-sonnet-4-5-20250929"
+	routePath       = "/probe/v1/messages"
+	headerAccount   = "X-Probe-Account"
+	headerCall      = "X-Probe-Call"
+	headerRawPin    = "X-Probe-Raw-Pin"
+	headerNonStream = "X-Probe-Non-Stream"
 )
 
 // Settings is the subset of SDK configuration the probes vary.
@@ -72,6 +73,8 @@ type Call struct {
 	// RawPin pins an SDK auth ID directly, bypassing the account name map.
 	RawPin string
 	Cancel time.Duration
+	// NonStream sends "stream": false through the SDK's non-streaming path.
+	NonStream bool
 }
 
 // Outcome is what the client observed for a Call.
@@ -429,6 +432,22 @@ func (p *Probe) route(base *handlers.BaseAPIHandler) gin.HandlerFunc {
 			p.selected[call] = append(p.selected[call], p.names[id])
 			p.mu.Unlock()
 		})
+		if c.GetHeader(headerNonStream) != "" {
+			resp, _, errMsg := base.ExecuteWithAuthManager(ctx, "claude", Model, body, "")
+			if errMsg != nil {
+				status := http.StatusBadGateway
+				if errMsg.StatusCode > 0 {
+					status = errMsg.StatusCode
+				}
+				p.recordSignal(call, pinned, callStart, status, errMsg.Error)
+				c.Data(status, "application/json", []byte(anthropicError(errorType(status), http.StatusText(status))))
+				cancel(errMsg.Error)
+				return
+			}
+			c.Data(http.StatusOK, "application/json", resp)
+			cancel(nil)
+			return
+		}
 		data, _, errs := base.ExecuteStreamWithAuthManager(ctx, "claude", Model, body, "")
 		started := false
 		for data != nil || errs != nil {
@@ -501,7 +520,7 @@ func (p *Probe) Send(ctx context.Context, call Call) Outcome {
 	p.mu.Unlock()
 	out := Outcome{Call: id, Pinned: call.Account}
 
-	body := fmt.Sprintf(`{"model":%q,"max_tokens":16,"stream":true,"messages":[{"role":"user","content":"probe"}]}`, Model)
+	body := fmt.Sprintf(`{"model":%q,"max_tokens":16,"stream":%t,"messages":[{"role":"user","content":"probe"}]}`, Model, !call.NonStream)
 	reqCtx := ctx
 	if call.Cancel > 0 {
 		var cancel context.CancelFunc
@@ -520,6 +539,9 @@ func (p *Probe) Send(ctx context.Context, call Call) Outcome {
 	}
 	if call.RawPin != "" {
 		req.Header.Set(headerRawPin, call.RawPin)
+	}
+	if call.NonStream {
+		req.Header.Set(headerNonStream, "1")
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -541,6 +563,20 @@ func (p *Probe) Send(ctx context.Context, call Call) Outcome {
 		out.ErrorType = e.Error.Type
 		out.Selected = p.selectedFor(id)
 		out.Signal = p.signalsFor(id)
+		return out
+	}
+	if call.NonStream {
+		var m struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		data, _ := io.ReadAll(resp.Body)
+		_ = json.Unmarshal(data, &m)
+		for _, block := range m.Content {
+			out.Text += block.Text
+		}
+		out.Selected = p.selectedFor(id)
 		return out
 	}
 	sc := bufio.NewScanner(resp.Body)

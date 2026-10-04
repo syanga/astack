@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -156,9 +157,16 @@ func (u *Upstream) WaitEnded(n int, timeout time.Duration) bool {
 }
 
 func (u *Upstream) RoundTrip(req *http.Request) (*http.Response, error) {
+	streaming := true
 	if req.Body != nil {
-		_, _ = io.Copy(io.Discard, req.Body)
+		data, _ := io.ReadAll(req.Body)
 		_ = req.Body.Close()
+		var shape struct {
+			Stream *bool `json:"stream"`
+		}
+		if json.Unmarshal(data, &shape) == nil && (shape.Stream == nil || !*shape.Stream) {
+			streaming = false
+		}
 	}
 	if !strings.EqualFold(req.URL.Hostname(), anthropicHost) || !strings.HasPrefix(req.URL.Path, "/v1/messages") {
 		u.mu.Lock()
@@ -194,7 +202,25 @@ func (u *Upstream) RoundTrip(req *http.Request) (*http.Response, error) {
 		u.finish(attempt, reply.Status, "status", 0, "")
 		return errorResponse(req, reply), nil
 	}
+	if !streaming {
+		u.finish(attempt, http.StatusOK, "completed", 0, "")
+		return messageResponse(req, attempt.Account), nil
+	}
 	return u.stream(req, attempt, reply), nil
+}
+
+func messageResponse(req *http.Request, account string) *http.Response {
+	body := `{"id":"msg_probe","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"served-by:` + account + `"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":2,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}`
+	return &http.Response{
+		StatusCode:    http.StatusOK,
+		Status:        "200 OK",
+		Header:        http.Header{"Content-Type": {"application/json"}},
+		Body:          io.NopCloser(strings.NewReader(body)),
+		ContentLength: int64(len(body)),
+		Request:       req,
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+	}
 }
 
 func rateLimitHeaders(h map[string]string) map[string]string {
