@@ -27,6 +27,8 @@ type Metrics struct {
 	ExhaustedAttempts       int     `json:"upstream_attempts_rejected_for_quota"`
 	Placements              []Count `json:"placements"`
 	ExhaustionMigrations    int     `json:"exhaustion_migrations"`
+	OverageMigrations       int     `json:"overage_migrations"`
+	NeverServedMigrations   int     `json:"never_served_relogin_migrations"`
 	ManualMigrations        int     `json:"manual_migrations"`
 	HealthyAutoMigrations   int     `json:"healthy_automatic_migrations"`
 	// UnusedFiveHour and UnusedWeekly sum allowance left unused at each reset
@@ -408,6 +410,7 @@ func (s *sim) handle(e event) error {
 	case evPaidUseCleared:
 		p := s.fx.PaidUse[e.arg]
 		s.paidUse[p.Account] = false
+		s.r.ObserveOverage(p.Account, router.OverageDisabled, e.at)
 		s.trace = append(s.trace, Event{At: e.at, Event: "overflow_disabled_again", Account: p.Account})
 	case evMove:
 		c := s.convs[e.conv]
@@ -493,10 +496,21 @@ func (s *sim) turn(c *conversation, at time.Time) error {
 	case router.Migrate:
 		q := s.quotas[d.From]
 		s.advance(q, at)
-		if !s.blocked(q, c.model) {
+		justified := false
+		switch d.Reason {
+		case router.ReasonExhausted:
+			justified = s.blocked(q, c.model)
+			s.m.ExhaustionMigrations++
+		case router.ReasonOverageObserved:
+			justified = s.paidUse[d.From]
+			s.m.OverageMigrations++
+		case router.ReasonNeverServed:
+			justified = q.loggedOut
+			s.m.NeverServedMigrations++
+		}
+		if !justified {
 			s.m.HealthyAutoMigrations++
 		}
-		s.m.ExhaustionMigrations++
 		s.trace = append(s.trace, Event{At: at, Event: "migrate", Conversation: c.id, Model: c.model, From: d.From,
 			Account: d.Account, Reason: d.Reason, Observation: d.Observation})
 		return s.attempt(c, at, d.Account)
@@ -635,6 +649,9 @@ func (s *sim) attempt(c *conversation, at time.Time, account router.AccountID) e
 	default:
 		s.m.CompletedTurns++
 		s.m.UsefulOutputTokens += int64(output)
+		if err := s.r.Served(at, c.id, account); err != nil {
+			return err
+		}
 		if err := s.subagents(c, at, account); err != nil {
 			return err
 		}

@@ -151,6 +151,14 @@ func (r *Router) Move(now time.Time, conv ConversationID, to AccountID) error {
 	}
 }
 
+// Served durably marks the conversation's binding on account as having
+// served a successful response. Until then, a relogin requirement on the
+// account lets Decide place the conversation again.
+func (r *Router) Served(now time.Time, conv ConversationID, account AccountID) error {
+	_, err := r.store.MarkServed(conv, account, now)
+	return err
+}
+
 // Lookup returns a conversation's durable binding.
 func (r *Router) Lookup(conv ConversationID) (Binding, bool) { return r.store.Lookup(conv) }
 

@@ -27,6 +27,7 @@ type Step struct {
 	Report    *ScriptReport      `json:"report,omitempty"`
 	Move      *ScriptMove        `json:"move,omitempty"`
 	Relogin   router.AccountID   `json:"relogin,omitempty"`
+	Served    *ScriptCommit      `json:"served,omitempty"`
 	Overage   *ScriptOverage     `json:"overage,omitempty"`
 	Restart   bool               `json:"restart,omitempty"`
 	// Expect maps a rule name, or "any", to the literal outcome of Route.
@@ -88,6 +89,7 @@ type Expected struct {
 	Reason       router.Reason    `json:"reason,omitempty"`
 	UntilMinutes *float64         `json:"until_minutes,omitempty"`
 	ResetKnown   *bool            `json:"reset_known,omitempty"`
+	Recheck      *bool            `json:"recheck_overage,omitempty"`
 	BoundTo      router.AccountID `json:"bound_to,omitempty"`
 }
 
@@ -188,6 +190,10 @@ func RunScript(sc Script, cfg router.Config, dir string) (ScriptResult, error) {
 					r.ObserveOverage(a.ID, step.Overage.State, at)
 				}
 			}
+		case step.Served != nil:
+			if err := r.Served(at, step.Served.Conversation, step.Served.Account); err != nil {
+				return res, fmt.Errorf("step %d: %w", i, err)
+			}
 		case step.Relogin != "":
 			r.Relogin(step.Relogin)
 		case step.Restart:
@@ -211,6 +217,7 @@ func matches(want Expected, got router.Decision, bound router.AccountID, start t
 		want.From != "" && want.From != got.From,
 		want.Reason != "" && want.Reason != got.Reason,
 		want.ResetKnown != nil && *want.ResetKnown != got.ResetKnown,
+		want.Recheck != nil && *want.Recheck != got.RecheckOverage,
 		want.BoundTo != "" && want.BoundTo != bound:
 		return false
 	case want.UntilMinutes != nil:

@@ -81,6 +81,9 @@ const (
 	ClassExhausted  Class = "exhausted"
 	ClassModelLimit Class = "model_limit"
 	ClassAuth       Class = "auth"
+	// ClassRequestScoped is a refusal of this request only, such as the
+	// SDK's fast-mode credit refusal. It is reported, never retried.
+	ClassRequestScoped Class = "request_scoped"
 )
 
 // Failure is a failure before output on one attempt. Observation is the
@@ -155,6 +158,9 @@ const (
 	ReasonResetPreference Reason = "reset_preference"
 	ReasonConcurrentFirst Reason = "concurrent_first_request"
 	ReasonExhausted       Reason = "exhausted"
+	ReasonOverageObserved Reason = "overage_observed"
+	ReasonNeverServed     Reason = "never_served_relogin"
+	ReasonRequestScoped   Reason = "request_scoped"
 	ReasonManual          Reason = "manual"
 	ReasonTransient       Reason = "transient_retry"
 	ReasonRetryBudget     Reason = "retry_budget_spent"
@@ -181,15 +187,18 @@ const (
 
 // Decision is the policy outcome for one request. For Wait, Until is the
 // earliest usable reset and ResetKnown is false when Until is only a recheck
-// time for a rejection without a reported reset.
+// time for a rejection without a reported reset. RecheckOverage asks the
+// caller to read the paid-overflow setting again because a check that
+// Decide relied on is unknown or stale.
 type Decision struct {
-	Kind        Kind      `json:"kind"`
-	Account     AccountID `json:"account,omitempty"`
-	From        AccountID `json:"from,omitempty"`
-	Reason      Reason    `json:"reason"`
-	Observation Freshness `json:"observation,omitempty"`
-	Until       time.Time `json:"until,omitzero"`
-	ResetKnown  bool      `json:"reset_known,omitempty"`
+	Kind           Kind      `json:"kind"`
+	Account        AccountID `json:"account,omitempty"`
+	From           AccountID `json:"from,omitempty"`
+	Reason         Reason    `json:"reason"`
+	Observation    Freshness `json:"observation,omitempty"`
+	Until          time.Time `json:"until,omitzero"`
+	ResetKnown     bool      `json:"reset_known,omitempty"`
+	RecheckOverage bool      `json:"recheck_overage,omitempty"`
 }
 
 // Rule selects the placement rule.

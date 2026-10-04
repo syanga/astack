@@ -7,7 +7,7 @@
     "cache": "Synthetic. A prompt prefix stays cached for 5 minutes after its last use, per account and conversation. A request on another account while the old cache is warm counts its prefix as a migration write.",
     "observations": "Every response reports exact utilization and resets, except acct-e, whose responses carry no quota headers.",
     "external_load": "acct-c loses 10% of its five-hour allowance per hour to clients outside this proxy.",
-    "overage": "A settings read finds paid overflow disabled on every account every 15 minutes, except acct-a between hours 36 and 40, when a response shows paid use.",
+    "overage": "A settings read finds paid overflow disabled on every account every 15 minutes, except acct-d between hours 4 and 8: a response shows paid use at hour 4, and a check at hour 8 finds overflow disabled again.",
     "faults": "2% transient failures before output, 1% partial streams, 1% cancellations; acct-b logs out at hour 20 and logs in again at hour 26, and stalled conversations move manually after 30 minutes; the proxy restarts at hours 12 and 30."
   },
   "start": "2026-10-05T09:00:00Z",
@@ -47,5 +47,5 @@
   "cache": {"ttl_minutes": 5, "input_weight": 1, "write_weight": 1.25, "read_weight": 0.1, "output_weight": 5},
   "crash_hours": [12, 30],
   "auth_faults": [{"account": "acct-b", "at_hours": 20, "relogin_hours": 26, "move_after_minutes": 30}],
-  "paid_use": [{"account": "acct-a", "at_hours": 36, "cleared_hours": 40}]
+  "paid_use": [{"account": "acct-d", "at_hours": 4, "cleared_hours": 8}]
 }

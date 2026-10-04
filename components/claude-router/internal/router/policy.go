@@ -26,6 +26,10 @@ func overageBar(cfg Config, now time.Time, a accountView) Reason {
 	return ""
 }
 
+func recheck(bar Reason) bool {
+	return bar == ReasonOverageUnknown || bar == ReasonOverageStale
+}
+
 type view struct {
 	accounts []accountView
 	index    map[AccountID]int
@@ -48,7 +52,24 @@ func decide(cfg Config, now time.Time, v view, req Request) Decision {
 	}
 	acct := v.accounts[idx]
 	if acct.needsLogin {
+		if !v.binding.Served {
+			if d := place(cfg, now, v, req.Model); d.Kind == Place {
+				d.Kind, d.From, d.Reason = Migrate, current, ReasonNeverServed
+				return d
+			}
+		}
 		return Decision{Kind: Reauth, Account: current, Reason: ReasonNeedsLogin}
+	}
+	if acct.overage == OveragePaidUse {
+		d := place(cfg, now, v, req.Model)
+		switch d.Kind {
+		case Place:
+			d.Kind, d.From, d.Reason = Migrate, current, ReasonOverageObserved
+			return d
+		case Wait:
+			return d
+		}
+		return Decision{Kind: Refuse, Account: current, Reason: ReasonPaidUse}
 	}
 	if _, _, blocked := usableReset(cfg, now, acct.observation, req.Model); blocked {
 		d := place(cfg, now, v, req.Model)
@@ -58,9 +79,11 @@ func decide(cfg Config, now time.Time, v view, req Request) Decision {
 		return d
 	}
 	if bar := overageBar(cfg, now, acct); bar != "" {
-		return Decision{Kind: Refuse, Account: current, Reason: bar}
+		return Decision{Kind: Refuse, Account: current, Reason: bar, RecheckOverage: recheck(bar)}
 	}
 	switch req.LastFailure {
+	case ClassRequestScoped:
+		return Decision{Kind: Fail, Account: current, Reason: ReasonRequestScoped}
 	case ClassTransient, ClassThrottle:
 		if req.Attempt > cfg.MaxAttempts {
 			return Decision{Kind: Fail, Account: current, Reason: ReasonRetryBudget}
@@ -73,7 +96,7 @@ func decide(cfg Config, now time.Time, v view, req Request) Decision {
 func place(cfg Config, now time.Time, v view, model string) Decision {
 	best, bestCapacity := -1, -1
 	var bestScore, bestCapacityScore float64
-	loggedIn, barred := false, false
+	loggedIn, barred, stale := false, false, false
 	var earliest time.Time
 	earliestKnown := false
 	loads := v.loads()
@@ -82,8 +105,9 @@ func place(cfg Config, now time.Time, v view, model string) Decision {
 			continue
 		}
 		loggedIn = true
-		if overageBar(cfg, now, a) != "" {
+		if bar := overageBar(cfg, now, a); bar != "" {
 			barred = true
+			stale = stale || recheck(bar)
 			continue
 		}
 		if until, known, blocked := usableReset(cfg, now, a.observation, model); blocked {
@@ -107,7 +131,7 @@ func place(cfg Config, now time.Time, v view, model string) Decision {
 		case !loggedIn:
 			return Decision{Kind: Unavailable, Reason: ReasonNoLogin}
 		case earliest.IsZero() && barred:
-			return Decision{Kind: Refuse, Reason: ReasonNoVerified}
+			return Decision{Kind: Refuse, Reason: ReasonNoVerified, RecheckOverage: stale}
 		}
 		return Decision{Kind: Wait, Reason: ReasonAllBlocked, Until: earliest, ResetKnown: earliestKnown}
 	}

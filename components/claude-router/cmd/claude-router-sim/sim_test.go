@@ -31,8 +31,8 @@ func TestScriptedFixturesMatchTheirLiteralExpectations(t *testing.T) {
 			}
 		}
 	}
-	if checks != 116 {
-		t.Fatalf("ran %d checks across the scripts, want 116", checks)
+	if checks != 124 {
+		t.Fatalf("ran %d checks across the scripts, want 124", checks)
 	}
 }
 

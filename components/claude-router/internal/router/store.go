@@ -29,10 +29,13 @@ var ErrIncomplete = errors.New("incomplete assignment record")
 var ErrUnassigned = errors.New("conversation has no assignment")
 
 // Binding is a conversation's durable assignment.
+// Served is true once the binding has served a successful response. A
+// migration starts a new binding with Served false.
 type Binding struct {
 	Account AccountID `json:"account"`
 	Reason  Reason    `json:"reason"`
 	Since   time.Time `json:"since"`
+	Served  bool      `json:"served,omitempty"`
 }
 
 // Store is the durable assignment journal: one writer process, an
@@ -57,6 +60,7 @@ type op string
 const (
 	opAssign  op = "assign"
 	opMigrate op = "migrate"
+	opServed  op = "served"
 )
 
 type record struct {
@@ -166,7 +170,7 @@ func (s *Store) replay() error {
 
 func (rec record) validate() error {
 	switch {
-	case rec.Op != opAssign && rec.Op != opMigrate:
+	case rec.Op != opAssign && rec.Op != opMigrate && rec.Op != opServed:
 		return fmt.Errorf("unknown op %q", rec.Op)
 	case rec.Conversation == "" || rec.Account == "" || rec.At.IsZero():
 		return fmt.Errorf("%w: missing conversation, account, or time", ErrIncomplete)
@@ -189,6 +193,11 @@ func (s *Store) apply(rec record) error {
 	case opMigrate:
 		if assigned && current.Account == rec.From {
 			s.bindings[rec.Conversation] = Binding{Account: rec.Account, Reason: rec.Reason, Since: rec.At}
+		}
+	case opServed:
+		if assigned && current.Account == rec.Account {
+			current.Served = true
+			s.bindings[rec.Conversation] = current
 		}
 	}
 	return nil
@@ -247,6 +256,27 @@ func (s *Store) Migrate(conv ConversationID, from, to AccountID, reason Reason, 
 		return b, nil
 	}
 	rec := record{Op: opMigrate, Conversation: conv, Account: to, From: from, Reason: reason, At: at}
+	if err := s.append(rec); err != nil {
+		return Binding{}, err
+	}
+	_ = s.apply(rec)
+	return s.bindings[conv], nil
+}
+
+// MarkServed durably records that the conversation's binding on account has
+// served a successful response. It writes once per binding and does nothing
+// when the conversation is no longer on account.
+func (s *Store) MarkServed(conv ConversationID, account AccountID, at time.Time) (Binding, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, ok := s.bindings[conv]
+	if !ok {
+		return Binding{}, ErrUnassigned
+	}
+	if b.Account != account || b.Served {
+		return b, nil
+	}
+	rec := record{Op: opServed, Conversation: conv, Account: account, At: at}
 	if err := s.append(rec); err != nil {
 		return Binding{}, err
 	}

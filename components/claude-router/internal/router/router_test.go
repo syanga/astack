@@ -511,6 +511,9 @@ func TestAuthFailureExcludesNewPlacementButKeepsAssignments(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
 	h.route(t0, req("existing"))
 	h.route(t0, req("balance"))
+	if err := h.r.Served(t0, "existing", a); err != nil {
+		t.Fatal(err)
+	}
 	h.report(t0, a, "claude-sonnet-4-5", ClassAuth)
 
 	newcomer := h.route(t0, req("newcomer"))
@@ -711,8 +714,8 @@ func TestUnverifiedOverageWithholdsDispatch(t *testing.T) {
 	h.r.ObserveOverage(b, OverageDisabled, t0)
 	placed := h.route(t0, req("first"))
 
-	if unknown.Kind != Refuse || unknown.Reason != ReasonNoVerified {
-		t.Fatalf("with no account verified got %+v, want refuse", unknown)
+	if unknown.Kind != Refuse || unknown.Reason != ReasonNoVerified || !unknown.RecheckOverage {
+		t.Fatalf("with no account verified got %+v, want refuse with a recheck", unknown)
 	}
 	if _, ok := h.r.Lookup("second"); ok {
 		t.Fatal("a refusal created an assignment")
@@ -725,15 +728,35 @@ func TestUnverifiedOverageWithholdsDispatch(t *testing.T) {
 	h.r.ObserveOverage(b, OverageDisabled, t0.Add(62*time.Minute))
 	fresh := h.route(t0.Add(62*time.Minute), req("first"))
 
-	if stale.Kind != Refuse || stale.Account != b || stale.Reason != ReasonOverageStale || h.bound("first") != b {
-		t.Fatalf("with b's check 61 minutes old got %+v bound to %s, want refuse on %s with the binding kept", stale, h.bound("first"), b)
+	if stale.Kind != Refuse || stale.Account != b || stale.Reason != ReasonOverageStale || !stale.RecheckOverage || h.bound("first") != b {
+		t.Fatalf("with b's check 61 minutes old got %+v bound to %s, want refuse on %s with a recheck and the binding kept", stale, h.bound("first"), b)
 	}
-	if fresh.Kind != Dispatch || fresh.Account != b {
+	if fresh.Kind != Dispatch || fresh.Account != b || fresh.RecheckOverage {
 		t.Fatalf("after a fresh check got %+v, want dispatch on %s", fresh, b)
 	}
 }
 
-func TestPaidUseExcludesTheAccountUntilALaterCheckFindsOverflowDisabled(t *testing.T) {
+func TestStaleOverageCheckRefusesWithoutMigrating(t *testing.T) {
+	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
+	h.manualOverage = true
+	h.r.ObserveOverage(a, OverageDisabled, t0)
+	h.r.ObserveOverage(b, OverageDisabled, t0)
+	h.route(t0, req("on-a"))
+	later := t0.Add(61 * time.Minute)
+	h.r.ObserveOverage(b, OverageDisabled, later)
+
+	refused := h.route(later, req("on-a"))
+	newcomer := h.route(later, req("newcomer"))
+
+	if refused.Kind != Refuse || refused.Reason != ReasonOverageStale || !refused.RecheckOverage || h.bound("on-a") != a {
+		t.Fatalf("with a's check stale and b verified got %+v bound to %s, want refuse with a recheck and the binding kept on %s", refused, h.bound("on-a"), a)
+	}
+	if newcomer.Kind != Place || newcomer.Account != b {
+		t.Fatalf("newcomer got %+v, want placement on %s", newcomer, b)
+	}
+}
+
+func TestObservedPaidUseMigratesAndDoesNotReturn(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
 	h.manualOverage = true
 	h.r.ObserveOverage(a, OverageDisabled, t0)
@@ -741,19 +764,104 @@ func TestPaidUseExcludesTheAccountUntilALaterCheckFindsOverflowDisabled(t *testi
 	h.route(t0, req("on-a"))
 	h.r.ObserveOverage(a, OveragePaidUse, t0.Add(time.Minute))
 
-	assigned := h.route(t0.Add(2*time.Minute), req("on-a"))
+	moved := h.route(t0.Add(2*time.Minute), req("on-a"))
 	newcomer := h.route(t0.Add(2*time.Minute), req("newcomer"))
 	h.r.ObserveOverage(a, OverageDisabled, t0.Add(3*time.Minute))
-	resumed := h.route(t0.Add(3*time.Minute), req("on-a"))
+	h.r.ObserveOverage(b, OverageDisabled, t0.Add(3*time.Minute))
+	afterClear := h.route(t0.Add(3*time.Minute), req("on-a"))
 
-	if assigned.Kind != Refuse || assigned.Reason != ReasonPaidUse || h.bound("on-a") != a {
-		t.Fatalf("after paid use on a got %+v bound to %s, want refuse with the binding kept on %s", assigned, h.bound("on-a"), a)
+	if moved.Kind != Migrate || moved.From != a || moved.Account != b || moved.Reason != ReasonOverageObserved {
+		t.Fatalf("after paid use on a got %+v, want migration %s to %s for overage_observed", moved, a, b)
 	}
 	if newcomer.Kind != Place || newcomer.Account != b {
 		t.Fatalf("newcomer got %+v, want placement on %s", newcomer, b)
 	}
+	if afterClear.Kind != Dispatch || afterClear.Account != b {
+		t.Fatalf("after a's overflow is disabled again got %+v, want dispatch on %s", afterClear, b)
+	}
+}
+
+func TestObservedPaidUseWithoutADestinationRefusesAndKeepsTheBinding(t *testing.T) {
+	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0)...)
+	h.manualOverage = true
+	h.r.ObserveOverage(a, OverageDisabled, t0)
+	h.route(t0, req("on-a"))
+	h.r.ObserveOverage(a, OveragePaidUse, t0.Add(time.Minute))
+
+	refused := h.route(t0.Add(2*time.Minute), req("on-a"))
+	h.r.ObserveOverage(a, OverageDisabled, t0.Add(3*time.Minute))
+	resumed := h.route(t0.Add(3*time.Minute), req("on-a"))
+
+	if refused.Kind != Refuse || refused.Account != a || refused.Reason != ReasonPaidUse || h.bound("on-a") != a {
+		t.Fatalf("with no other account got %+v bound to %s, want refuse on %s for paid use", refused, h.bound("on-a"), a)
+	}
 	if resumed.Kind != Dispatch || resumed.Account != a {
 		t.Fatalf("after a later disabled check got %+v, want dispatch on %s", resumed, a)
+	}
+}
+
+func TestNeverServedConversationIsPlacedAgainWhenItsAccountNeedsLogin(t *testing.T) {
+	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
+	h.route(t0, req("unserved"))
+	h.route(t0, req("other"))
+	h.route(t0, req("served"))
+	if err := h.r.Served(t0, "served", a); err != nil {
+		t.Fatal(err)
+	}
+	h.restart()
+	h.report(t0.Add(time.Minute), a, "claude-sonnet-4-5", ClassAuth)
+
+	replaced := h.route(t0.Add(time.Minute), req("unserved"))
+	kept := h.route(t0.Add(time.Minute), req("served"))
+
+	if replaced.Kind != Migrate || replaced.From != a || replaced.Account != b || replaced.Reason != ReasonNeverServed {
+		t.Fatalf("never-served conversation got %+v, want migration %s to %s for never_served_relogin", replaced, a, b)
+	}
+	if kept.Kind != Reauth || kept.Account != a || h.bound("served") != a {
+		t.Fatalf("served conversation got %+v bound to %s, want reauth with the binding kept on %s across the restart", kept, h.bound("served"), a)
+	}
+
+	h.report(t0.Add(2*time.Minute), b, "claude-sonnet-4-5", ClassAuth)
+	stranded := h.route(t0.Add(2*time.Minute), req("unserved"))
+
+	if stranded.Kind != Reauth || stranded.Account != b || h.bound("unserved") != b {
+		t.Fatalf("with every account logged out got %+v bound to %s, want reauth on %s", stranded, h.bound("unserved"), b)
+	}
+}
+
+func TestServedMarkBelongsToOneBinding(t *testing.T) {
+	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
+	h.route(t0, req("conv"))
+	if err := h.r.Served(t0, "conv", a); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.r.Move(t0, "conv", b); err != nil {
+		t.Fatal(err)
+	}
+	staleMark := h.r.Served(t0, "conv", a)
+	h.restart()
+	h.report(t0.Add(time.Minute), b, "claude-sonnet-4-5", ClassAuth)
+
+	moved := h.route(t0.Add(time.Minute), req("conv"))
+
+	if staleMark != nil {
+		t.Fatal(staleMark)
+	}
+	if moved.Kind != Migrate || moved.From != b || moved.Account != a || moved.Reason != ReasonNeverServed {
+		t.Fatalf("a binding that never served on b got %+v, want migration %s to %s for never_served_relogin", moved, b, a)
+	}
+}
+
+func TestRequestScopedFailureIsReportedNotRetried(t *testing.T) {
+	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
+	h.route(t0, req("conv"))
+	r := req("conv")
+	r.Attempt, r.LastFailure = 2, ClassRequestScoped
+
+	d := h.route(t0, r)
+
+	if d.Kind != Fail || d.Account != a || d.Reason != ReasonRequestScoped || h.bound("conv") != a {
+		t.Fatalf("request-scoped failure got %+v bound to %s, want fail on %s without moving", d, h.bound("conv"), a)
 	}
 }
 
