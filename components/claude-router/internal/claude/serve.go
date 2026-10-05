@@ -136,6 +136,7 @@ func (s *Service) messages(c *gin.Context) {
 	budget := &atomic.Int32{}
 	upstream := 0
 	rechecked := map[router.AccountID]bool{}
+	var tried router.AccountID
 	finish := func(kind string, account router.AccountID, d router.Decision, status int, out *outcome) {
 		dur := s.now().Sub(start).Milliseconds()
 		e := Event{Kind: kind, Conversation: conv, Account: account, Decision: d.Kind, Reason: string(d.Reason), Status: status, Attempt: req.Attempt, Attempts: upstream, Stream: &stream, DurationMS: &dur}
@@ -163,11 +164,6 @@ func (s *Service) messages(c *gin.Context) {
 		case router.Place, router.Dispatch, router.Retry:
 		case router.Migrate:
 			s.events.emit(Event{Kind: "migrated", Conversation: conv, Account: d.Account, From: d.From, Reason: string(d.Reason)})
-			if budget.Load() >= s.transport.limit {
-				s.answerWait(c, now, now.Add(time.Second), true, fmt.Sprintf("claude-router: this conversation moved from %s to %s; send the request again", d.From, d.Account))
-				finish("request", d.Account, d, http.StatusTooManyRequests, nil)
-				return
-			}
 		case router.Refuse:
 			if d.RecheckOverage && s.recheckOverage(c.Request.Context(), d.Account, rechecked) {
 				continue
@@ -197,10 +193,19 @@ func (s *Service) messages(c *gin.Context) {
 		}
 
 		if budget.Load() >= s.transport.limit {
+			// The conversation moved since this request's last attempt, by
+			// this request's migration or a concurrent one: the client sends
+			// again, and its resend goes to the new account.
+			if account != tried {
+				s.answerWait(c, now, now.Add(time.Second), true, fmt.Sprintf("claude-router: this conversation moved from %s to %s; send the request again", tried, account))
+				finish("request", account, d, http.StatusTooManyRequests, nil)
+				return
+			}
 			finish("request", account, router.Decision{Kind: router.Fail, Reason: router.ReasonRetryBudget}, http.StatusServiceUnavailable, nil)
 			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: request reached the router's upstream attempt cap")
 			return
 		}
+		tried = account
 		authID := s.authIDs[account]
 		out := s.dispatch(c, fmt.Sprintf("%s-%d", call, step), authID, account, id, body, budget)
 		upstream += out.Attempts
@@ -623,13 +628,7 @@ func (s *Service) move(c *gin.Context) {
 		return
 	}
 	conv, to := router.ConversationID(m.Conversation), router.AccountID(m.To)
-	b, ok, err := s.router.Lookup(conv)
-	if err == nil && !ok {
-		err = router.ErrUnassigned
-	}
-	if err == nil {
-		err = s.router.Move(s.now(), conv, to)
-	}
+	from, err := s.router.MoveFrom(s.now(), conv, to)
 	switch {
 	case errors.Is(err, router.ErrUnassigned):
 		writeError(c, http.StatusNotFound, "not_found_error", "claude-router: the conversation has no assignment")
@@ -642,10 +641,10 @@ func (s *Service) move(c *gin.Context) {
 		return
 	}
 	hash := conversationHash(conv)
-	if b.Account != to {
-		s.events.emit(Event{Kind: "migrated", Conversation: hash, Account: to, From: b.Account, Reason: string(router.ReasonManual)})
+	if from != to {
+		s.events.emit(Event{Kind: "migrated", Conversation: hash, Account: to, From: from, Reason: string(router.ReasonManual)})
 	}
-	c.JSON(http.StatusOK, map[string]string{"conversation": hash, "from": string(b.Account), "account": string(to)})
+	c.JSON(http.StatusOK, map[string]string{"conversation": hash, "from": string(from), "account": string(to)})
 }
 
 func (s *Service) status(c *gin.Context) {

@@ -85,6 +85,7 @@ func Open(cfg Config, accounts []Account, store *Store, now time.Time) (*Router,
 	for _, st := range states {
 		idx, ok := r.index[st.ID]
 		if !ok {
+			r.unenrolled = append(r.unenrolled, st)
 			continue
 		}
 		a := &r.accounts[idx]
@@ -115,14 +116,15 @@ func clamp(t, now time.Time) time.Time {
 	return t
 }
 
-// persist writes the account state when it changed since the last write.
+// persist writes the account state when it changed since the last write,
+// with the saved records of accounts that are not enrolled, unchanged.
 // Callers hold r.mu. A failed write stops the store, as a failed journal
 // write does, so no later decision relies on state a restart would lose.
 func (r *Router) persist() {
 	if r.saved == nil {
 		return
 	}
-	states := make([]AccountState, len(r.accounts))
+	states := make([]AccountState, len(r.accounts), len(r.accounts)+len(r.unenrolled))
 	dirty := false
 	for i, a := range r.accounts {
 		states[i] = a.state()
@@ -131,7 +133,7 @@ func (r *Router) persist() {
 	if !dirty {
 		return
 	}
-	if r.store.saveAccounts(states) != nil {
+	if r.store.saveAccounts(append(states, r.unenrolled...)) != nil {
 		return
 	}
 	for _, st := range states {

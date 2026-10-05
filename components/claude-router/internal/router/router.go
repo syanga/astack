@@ -29,8 +29,8 @@ type Router struct {
 	cfg   Config
 	store *Store
 
-	// commitMu serializes commits with Served, Relogin, and Move, so a
-	// commit re-decides against their effects.
+	// commitMu serializes commits with Served, Relogin, LoginConfirmed, and
+	// Move, so a commit re-decides against their effects.
 	commitMu sync.Mutex
 
 	mu       sync.RWMutex
@@ -40,6 +40,11 @@ type Router struct {
 	// saved is the account state last written by persist, or nil for a
 	// router whose account state lives in memory only (New).
 	saved map[AccountID]AccountState
+	// unenrolled holds the loaded records of accounts that are not in the
+	// configuration. persist writes them back unchanged, so an account
+	// removed for a while keeps its rejections and login state when it
+	// returns.
+	unenrolled []AccountState
 }
 
 // New returns a router over the enrolled accounts, in tie-break order, and an
@@ -193,33 +198,42 @@ func (r *Router) Route(now time.Time, req Request) (Decision, error) {
 // Move is the manual override: it binds an assigned conversation to an
 // enrolled account, whatever its quota or login state.
 func (r *Router) Move(now time.Time, conv ConversationID, to AccountID) error {
+	_, err := r.MoveFrom(now, conv, to)
+	return err
+}
+
+// MoveFrom is Move that also returns the account the conversation was bound
+// to when the move took effect, under the commit lock. It returns to when
+// the conversation was already there.
+func (r *Router) MoveFrom(now time.Time, conv ConversationID, to AccountID) (from AccountID, err error) {
 	r.mu.RLock()
 	_, enrolled := r.index[to]
 	r.mu.RUnlock()
 	if !enrolled {
-		return fmt.Errorf("account %s is not enrolled", to)
+		return "", fmt.Errorf("account %s is not enrolled", to)
 	}
 	r.commitMu.Lock()
 	defer r.commitMu.Unlock()
 	b, ok, err := r.store.Lookup(conv)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !ok {
-		return ErrUnassigned
+		return "", ErrUnassigned
 	}
 	if b.Account == to {
-		return nil
+		return to, nil
 	}
-	b, err = r.store.Migrate(conv, b.Account, to, ReasonManual, now)
+	from = b.Account
+	b, err = r.store.Migrate(conv, from, to, ReasonManual, now)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if b.Account != to {
-		return ErrUnsettled
+		return "", ErrUnsettled
 	}
 	r.touch(conv, now)
-	return nil
+	return from, nil
 }
 
 // Served durably marks the conversation's binding on account as having
@@ -394,6 +408,8 @@ func (r *Router) Relogin(account AccountID) error {
 // it: the credential works, so the account needs no browser login. It
 // reports whether it cleared the requirement.
 func (r *Router) LoginConfirmed(account AccountID, start time.Time) bool {
+	r.commitMu.Lock()
+	defer r.commitMu.Unlock()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	idx, ok := r.index[account]

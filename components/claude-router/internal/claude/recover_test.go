@@ -195,6 +195,42 @@ func TestMigrationWithTheAttemptCapSpentAsksTheClientToSendAgain(t *testing.T) {
 	}
 }
 
+func TestWithTheAttemptCapSpentTheLoserOfAConcurrentMigrationIsAskedToSendAgain(t *testing.T) {
+	e := newEnv(t, "acct-a", "acct-b")
+	e.cfg.MaxUpstreamAttempts = 1
+	e.start()
+	e.send(msg{Session: sessionID(1)})
+	var arrived sync.WaitGroup
+	arrived.Add(2)
+	release := make(chan struct{})
+	hold := func() { arrived.Done(); <-release }
+	h := exhaustedHeaders(time.Now().Add(time.Hour))
+	e.upstream.script("acct-a", reply{Status: 429, Header: h, Before: hold}, reply{Status: 429, Header: h, Before: hold})
+
+	results := make([]result, 2)
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i] = e.send(msg{Session: sessionID(1)})
+		}()
+	}
+	arrived.Wait()
+	close(release)
+	wg.Wait()
+	resent := e.send(msg{Session: sessionID(1)})
+
+	for i, r := range results {
+		if r.Status != http.StatusTooManyRequests || r.Header.Get("Retry-After") != "1" || r.Header.Get("X-Should-Retry") == "false" || !strings.Contains(r.ErrMsg, "acct-b") {
+			t.Fatalf("request %d got %d retry-after %q should-retry %q %q, want a 429 asking to send again in 1 s and naming acct-b", i, r.Status, r.Header.Get("Retry-After"), r.Header.Get("X-Should-Retry"), r.ErrMsg)
+		}
+	}
+	if resent.Status != 200 || resent.Text != served("acct-b") {
+		t.Fatalf("the resend got %d %q, want 200 from acct-b", resent.Status, resent.Text)
+	}
+}
+
 func TestConcurrentExhaustedRequestsCommitOneMigration(t *testing.T) {
 	e := newEnv(t, "acct-a", "acct-b", "acct-c")
 	e.start()
@@ -277,11 +313,11 @@ func TestClientCancellationDuringTheMovedResponseKeepsTheMigration(t *testing.T)
 		t.Fatalf("after the cancellation the conversation is on %s, want the committed acct-b", b.Account)
 	}
 	if after := e.send(msg{Session: sessionID(1)}); after.Text != served("acct-b") {
-		t.Fatalf("the explicit retry served %q, want acct-b", after.Text)
+		t.Fatalf("the next request served %q, want acct-b", after.Text)
 	}
 }
 
-func TestInterruptionAfterOutputIsReportedAndWaitsForAnExplicitRetry(t *testing.T) {
+func TestInterruptionAfterOutputIsReportedAndNeverResent(t *testing.T) {
 	e := newEnv(t, "acct-a", "acct-b")
 	e.start()
 	e.send(msg{Session: sessionID(1)})
@@ -289,7 +325,7 @@ func TestInterruptionAfterOutputIsReportedAndWaitsForAnExplicitRetry(t *testing.
 
 	cut := e.send(msg{Session: sessionID(1)})
 	attempts := len(e.upstream.inference())
-	retry := e.send(msg{Session: sessionID(1)})
+	next := e.send(msg{Session: sessionID(1)})
 
 	if want := []string{"message_start", "content_block_start", "content_block_delta", "content_block_stop", "error"}; !reflect.DeepEqual(cut.Events, want) {
 		t.Fatalf("client saw %v, want the completed block and then an error event", cut.Events)
@@ -297,8 +333,8 @@ func TestInterruptionAfterOutputIsReportedAndWaitsForAnExplicitRetry(t *testing.
 	if attempts != 2 {
 		t.Fatalf("%d upstream attempts after the cut, want 2: the router does not resend after output", attempts)
 	}
-	if retry.Status != 200 || retry.Text != served("acct-a") {
-		t.Fatalf("explicit retry got %d %q, want 200 from the unchanged acct-a", retry.Status, retry.Text)
+	if next.Status != 200 || next.Text != served("acct-a") {
+		t.Fatalf("the next request got %d %q, want 200 from the unchanged acct-a", next.Status, next.Text)
 	}
 	var outcomes []string
 	for _, ev := range e.events() {

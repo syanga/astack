@@ -217,3 +217,25 @@ func TestUnknownResetRecheckBeyondAWeekIsRefused(t *testing.T) {
 		t.Fatalf("a one-week recheck: %v", err)
 	}
 }
+
+func TestAnAccountLeftOutOfTheConfigurationKeepsItsStateUntilItReturns(t *testing.T) {
+	h := newDurable(t, accts(a, 1.0, b, 1.0)...)
+	h.r.ObserveOverage(a, OverageDisabled, t0)
+	h.r.ObserveOverage(b, OverageDisabled, t0)
+	reset := t0.Add(3 * time.Hour)
+	h.report(t0, a, "claude-sonnet-4-5", ClassExhausted, rejected(FiveHour, reset))
+	both := h.accounts
+
+	h.accounts = accts(b, 1.0)
+	h.restartDurable(t0.Add(time.Minute))
+	h.r.ObserveOverage(b, OverageEnabled, t0.Add(2*time.Minute))
+	h.accounts = both
+	later := t0.Add(10 * time.Minute)
+	h.restartDurable(later)
+	h.r.ObserveOverage(a, OverageDisabled, later)
+	d := h.decide(later, "new")
+
+	if d.Kind != Wait || !d.Until.Equal(reset) {
+		t.Fatalf("a new conversation after acct-a returned got %+v, want a wait until acct-a's reset %v", d, reset)
+	}
+}
