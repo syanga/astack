@@ -446,7 +446,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | WC-3 | Short reset resumes automatically | passed | passed | `waiting.json#rows[3]` | PR1 |
 | WC-4 | Unknown reset has explicit behavior | passed | passed | `waiting.json#rows[5]` | PR1 |
 | WC-5 | Client cancellation ends the turn and closes the upstream connection | passed | passed | `recovery.json#rows[14]`, `#rows[15]` | PR1 |
-| WC-6 | A multi-hour wait completes | blocked | blocked | `waiting.json#rows[6]`. Needs a wait run to completion through laptop sleep and wake. The PR4 fake session ran step W6 with a 150 s reset, a router restart during the wait, and no sleep. | Step W6 of `reports/PR4-live-runbook.md` (3 h reset, a sleep of at least 30 min, a router restart during the wait, a terminal and an Agent SDK waiter), attended; must pass before PR6 cutover |
+| WC-6 | A multi-hour wait completes | blocked | blocked | `waiting.json#rows[6]`. Needs a wait run to completion through laptop sleep and wake. The PR4 fake session ran step W6 with a 150 s reset, a router restart during the wait, and no sleep. | Step W6 of `reports/PR4-live-runbook.md` (3 h reset, at least 30 min asleep in total and at most 6 h, a router restart during the wait, a terminal and an Agent SDK waiter), attended; must pass before PR6 cutover |
 
 | ID | SDK behavior | Status | Evidence | Owner |
 | --- | --- | --- | --- | --- |
@@ -1245,15 +1245,43 @@ was stale by wall time.
   until the wall clock catches up, so a later reading is never stamped
   before an earlier one (`TestThePolicyComparesStampsWithoutAMonotonicReading`,
   `TestTheServiceClockNeverStepsBack`).
+- **The hold has a bounded cost.** After the wall clock steps back by D, the
+  clock holds for up to D, and every time it returns is up to D ahead of the
+  wall clock. Two effects follow, and each lasts at most D:
+  - A reading counts as up to D younger than it is. A `disabled` reading can
+    then permit dispatch until its true age reaches `overage_fresh_for` plus
+    D. That happens only when every settings read in that time fails,
+    because a successful read replaces the reading.
+  - A rejection whose absolute reset falls inside the hold counts as past.
+    The router can send attempts to the exhausted account until the hold
+    ends. The upstream refuses each one, so they spend no allowance or
+    credit, but the request can end in 503 at its attempt cap instead of
+    moving.
+
+  A raw wall clock avoids both effects and is worse. It can stamp an
+  `enabled` reading taken after the step before a `disabled` check taken
+  before it. `ObserveOverage` then ignores the `enabled` reading, and the
+  router dispatches while paid overflow is on. On macOS, `timed` slews small
+  offsets, so D is usually under a second. It is large only after a manual
+  clock change or a large correction. The verifier's probes S2b, S7, and S8
+  measured both effects and the raw-clock failure
+  (`reports/PR4-verify/38c01d4/probes/`).
 - **Overdue reads come first.** The scheduler's timers also run on the
   monotonic clock, so after a wake the next scheduled settings read can be
   up to `overage_check_every` of awake time away. The scheduler records the
   wall time of each account's next read. Before routing a client request,
   the service reads, in parallel, every account whose scheduled read is more
   than 1 s overdue by wall time, and the request waits for those reads. A
-  read of either kind resets the schedule. After a wake, the first request
-  therefore decides on readings taken after the wake
-  (`TestAfterTheWallClockJumpsTheAccountIsReadBeforeDispatch`).
+  read of either kind resets the schedule, as soon as it starts. A request
+  that arrives while another request's overdue read is in flight therefore
+  does not wait for that read and decides on the account's current reading.
+  Every request judges that reading by its wall-time age, and a stale
+  reading sends the request through the on-demand reread, which waits for
+  the read in flight and decides again. After a wake, the first request
+  decides on readings taken after the wake unless a read fails. A failed
+  read leaves the old reading, which is stale after a sleep longer than
+  `overage_fresh_for`. No request dispatches on a reading that is stale by
+  wall time (`TestAfterTheWallClockJumpsTheAccountIsReadBeforeDispatch`).
 
 No offline test can put the machine to sleep. The tests move the injected
 wall clock while no scheduler timer fires, which is what a sleep looks like
@@ -1284,7 +1312,9 @@ destination receives the same session identity the source did
   (`TestMigrationWithTheAttemptCapSpentAsksTheClientToSendAgain`). The same
   answer goes to a concurrent request whose conversation another request
   moved after this one's last attempt
-  (`TestWithTheAttemptCapSpentTheLoserOfAConcurrentMigrationIsAskedToSendAgain`).
+  (`TestWithTheAttemptCapSpentTheLoserOfAConcurrentMigrationIsAskedToSendAgain`),
+  unless the policy fails that request first. For example, a request whose
+  transient failures passed the policy's retry limit gets the policy's 503.
 - **Concurrency.** Concurrent requests of one conversation commit one
   migration: `Commit` decides again under its lock, so a request that loses
   the race dispatches on the destination
@@ -1320,8 +1350,10 @@ after one reread.
 The waiting is the client's: with
 `CLAUDE_CODE_RETRY_WATCHDOG=1`, both clients sleep until the reset with no
 connection open and send again, and cancel at once on SIGINT or
-`interrupt()`. Nothing in the router waits, so cancellation needs nothing
-from it.
+`interrupt()`. The router never holds a request until a reset. A request
+waits in the router only for settings reads (overdue reads and rereads) and
+for the backoff between upstream attempts. A client that goes away ends
+the request, and a settings read it cancels counts as a failed read.
 
 PR4 changes two things:
 
@@ -1402,7 +1434,9 @@ account's state (`TestRevokedLoginKeepsAssignmentsAcrossRestartUntilMovedOrConfi
 its `migrated` event name the account the conversation left, read under the
 commit lock, so concurrent moves report each transition once
 (`Router.MoveFrom`, `TestManualOverrideMovesAndPersists`). `LoginConfirmed`
-takes the commit lock too, so a commit in progress decides again after it.
+takes the commit lock before the router lock, in the same order as
+`Relogin` and `Commit`. It waits for a commit in progress to finish, and a
+commit that starts after it decides with the login requirement cleared.
 
 ### Durable account state
 
