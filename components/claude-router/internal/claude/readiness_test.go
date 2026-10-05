@@ -134,9 +134,9 @@ func (e *env) writeCredentialDueIn(account string, d time.Duration) string {
 	return token
 }
 
-// recheckNow makes the next send read the account's setting on demand:
-// the reading is stale and the last read is older than the recheck
-// interval.
+// recheckNow advances the service clock by step. A step past the recheck
+// interval makes the next send read an unknown setting on demand; a step
+// past overage_fresh_for does the same for a disabled reading.
 func (e *env) recheckNow(step time.Duration) {
 	e.clock.set(e.clock.now().Add(step))
 }
