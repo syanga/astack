@@ -41,6 +41,9 @@ type overageReader struct {
 	failedToken map[router.AccountID]string
 	streak      map[router.AccountID]readStreak
 	settled     map[router.AccountID]chan struct{}
+	// due is the wall time the scheduler set for the account's next read,
+	// or zero while a read runs or before the first one is scheduled.
+	due map[router.AccountID]time.Time
 }
 
 // readStreak is an account's run of failed reads, scheduled or on demand:
@@ -55,6 +58,7 @@ func newOverageReader(s *Service) *overageReader {
 		s: s, inFlight: map[router.AccountID]*sync.Mutex{}, last: map[router.AccountID]time.Time{},
 		state: map[router.AccountID]overageState{}, failedToken: map[router.AccountID]string{},
 		streak: map[router.AccountID]readStreak{}, settled: map[router.AccountID]chan struct{}{},
+		due: map[router.AccountID]time.Time{},
 	}
 }
 
@@ -122,6 +126,51 @@ func (o *overageReader) recheck(ctx context.Context, account router.AccountID) b
 	return true
 }
 
+// overdueAfter is how far the wall clock may pass a scheduled read's time
+// before a request reads the account itself. The scheduler's timers run on
+// the monotonic clock, which stops while the machine sleeps, so after a wake
+// the scheduled read can be up to overage_check_every of awake time away.
+const overdueAfter = time.Second
+
+// schedule records the wall time of the account's next scheduled read.
+func (o *overageReader) schedule(account router.AccountID, at time.Time) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.due[account] = at
+}
+
+func (o *overageReader) overdue(account router.AccountID) bool {
+	now := o.s.now()
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	due := o.due[account]
+	return !due.IsZero() && now.Sub(due) > overdueAfter
+}
+
+// catchUp reads, in parallel, every account whose scheduled read is overdue
+// by wall time, and returns when those reads end. The service calls it
+// before it routes a client request, so the first request after a sleep
+// decides on readings taken after the wake.
+func (o *overageReader) catchUp(ctx context.Context) {
+	var wg sync.WaitGroup
+	for _, a := range o.s.cfg.Accounts {
+		if !o.overdue(a.ID) {
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			m := o.lock(a.ID)
+			m.Lock()
+			defer m.Unlock()
+			if o.overdue(a.ID) {
+				o.readLocked(ctx, a.ID)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
 func (o *overageReader) read(ctx context.Context, account router.AccountID) {
 	m := o.lock(account)
 	m.Lock()
@@ -135,6 +184,7 @@ func (o *overageReader) readLocked(ctx context.Context, account router.AccountID
 	start := o.s.now()
 	o.mu.Lock()
 	o.last[account] = start
+	delete(o.due, account)
 	o.mu.Unlock()
 	state, err := o.fetch(ctx, account)
 	end := o.s.now()

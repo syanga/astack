@@ -149,6 +149,7 @@ func (s *Service) messages(c *gin.Context) {
 		s.events.emit(e)
 	}
 
+	s.overage.catchUp(c.Request.Context())
 	for step := 0; step < maxRoutingSteps; step++ {
 		now := s.now()
 		d, err := s.router.Route(now, req)

@@ -440,3 +440,54 @@ func TestAWaitRereadsAStaleAccountThatCouldServeBeforeTheReset(t *testing.T) {
 		t.Fatalf("%d settings reads, want 2: acct-a before dispatch and acct-b before the move", n)
 	}
 }
+
+func TestAWaitThatOutlivesTheCheckReadsItAgainAtTheResetBeforeDispatch(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		usage  usageReply
+		status int
+	}{
+		{"enabled", usageReply{Enabled: boolPtr(true)}, http.StatusServiceUnavailable},
+		{"read fails", usageReply{Status: http.StatusInternalServerError}, http.StatusServiceUnavailable},
+		{"disabled", usageReply{Enabled: boolPtr(false)}, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, "acct-a")
+			t0 := time.Now()
+			e.clock.set(t0)
+			e.start()
+			e.send(msg{Session: sessionID(1)})
+			reset := t0.Add(time.Hour).Truncate(time.Second)
+			e.upstream.script("acct-a", reply{Status: 429, Header: exhaustedHeaders(reset)})
+			e.send(msg{Session: sessionID(1)})
+			e.upstream.setUsage("acct-a", usageReply{Status: http.StatusInternalServerError})
+			e.clock.set(t0.Add(45 * time.Minute))
+			during := e.send(msg{Session: sessionID(1)})
+			e.upstream.setUsage("acct-a", tc.usage)
+			reads, inference := len(e.upstream.usageReads()), len(e.upstream.inference())
+
+			e.clock.set(reset.Add(time.Second))
+			r := e.send(msg{Session: sessionID(1)})
+
+			if during.Status != http.StatusTooManyRequests || during.Header.Get("X-Should-Retry") == "false" || resetHeader(during) != strconv.FormatInt(reset.Unix(), 10) {
+				t.Fatalf("during the wait with a stale check: %d should-retry %q reset %q, want the wait until the reset", during.Status, during.Header.Get("X-Should-Retry"), resetHeader(during))
+			}
+			if r.Status != tc.status {
+				t.Fatalf("the resend at the reset got %d %q, want %d", r.Status, r.ErrMsg, tc.status)
+			}
+			if n := len(e.upstream.usageReads()) - reads; n < 1 {
+				t.Fatalf("%d settings reads at the resend, want the stale check read again", n)
+			}
+			want := 0
+			if tc.status == http.StatusOK {
+				want = 1
+			}
+			if n := len(e.upstream.inference()) - inference; n != want {
+				t.Fatalf("%d inference attempts at the resend, want %d", n, want)
+			}
+			if want == 1 && e.upstream.inference()[inference].At.Before(e.upstream.usageReads()[reads].At) {
+				t.Fatal("the dispatch did not follow the read")
+			}
+		})
+	}
+}

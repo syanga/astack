@@ -105,8 +105,14 @@ func TestResponseHeadersRefreshTheReading(t *testing.T) {
 	if r.Status != 200 {
 		t.Fatalf("got %d, want 200 on a reading refreshed by the previous response", r.Status)
 	}
-	if n := len(e.upstream.usageReads()); n != 1 {
-		t.Fatalf("settings reads %d, want only the start read", n)
+	succeeded := 0
+	for _, ev := range e.events() {
+		if ev.Kind == "overage_read" && ev.Outcome == "read" {
+			succeeded++
+		}
+	}
+	if succeeded != 1 {
+		t.Fatalf("%d successful settings reads, want only the start read: every later read fails, so the fresh reading came from the response", succeeded)
 	}
 }
 
