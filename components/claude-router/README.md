@@ -36,9 +36,9 @@ To save a sanitized JSON transcript per probe test, set
 token hash prefixes, statuses, event names, and timing. They hold no tokens and
 no prompts.
 
-Two lanes run behind build tags. `-tags lane2` runs PR3.live.2 against the
-compiled command, and `-tags perf` runs PR3.perf; each file's header gives
-its command.
+Three harnesses run behind build tags. `-tags lane2` runs PR3.live.2 against
+the compiled command, `-tags perf` runs PR3.perf, and `-tags perfrecover`
+runs one PR4.perf run; each file's header gives its command.
 
 The configuration hot-reload probe is excluded by default because the pinned SDK
 races on that path. Run it with `-tags sdkreload`.
@@ -92,7 +92,9 @@ default for any client. These steps run it by hand.
    ```
 
 6. Point a client at it with `ANTHROPIC_BASE_URL=http://127.0.0.1:8787` and
-   the client token as `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`.
+   the client token as `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`. Set
+   `CLAUDE_CODE_RETRY_WATCHDOG=1` in the client's environment so that it
+   waits out a long reset instead of stopping.
 
 To change the configuration or a credential, stop the service, make the
 change, and start it again. The service never reloads either while it runs.
@@ -104,15 +106,29 @@ if usage credits are turned on outside the router after the last reading,
 while the account's included windows are exhausted, one paid response can
 happen before the router sees it.
 
+When an account's included allowance runs out before a response starts,
+the router moves the conversation to another eligible account and answers
+the same request from there. When no account can serve, it answers with a
+429 that carries the earliest reset at which an account can serve again,
+and the client sleeps until then and sends again. A conversation never
+returns to its first account on its own. When an account needs a new
+login, its conversations get an error that names `claude-router login`,
+and new conversations go elsewhere. To move one by hand, send
+`POST /claude-router/move` with the client token and
+`{"conversation": "<session id>", "to": "<account>"}`. Exhaustion, login,
+and paid-overflow state survive a restart.
+
 `GET /claude-router/status` with the client token reports each account's
-registration and last reading. `events.jsonl` in the state directory records
+registration, last reading, login requirement, and known rejections. `events.jsonl` in the state directory records
 requests, failures, readings, and token counters, without tokens or prompts.
 CONTRACT.md's PR3 section lists every local answer and event.
 
 ## Use the routing policy
 
 `router.OpenStore(dir)` locks the state directory and replays its journal.
-`router.New(router.DefaultConfig(), accounts, store)` returns a `Router`. For
+`router.New(router.DefaultConfig(), accounts, store)` returns a `Router`
+that keeps account state in memory. `router.Open(cfg, accounts, store, now)`
+also loads and saves it in the state directory, as the service does. For
 each request, call `Route(now, request)` and dispatch only on the returned
 `Decision`:
 
@@ -123,8 +139,8 @@ each request, call `Route(now, request)` and dispatch only on the returned
   locally. `RecheckOverage` asks for a fresh read of the paid-overflow
   setting.
 
-If `Route` returns an error wrapping `router.ErrFailed`, a journal write
-failed. Every call that could name an account fails the same way until you
+If `Route` returns an error wrapping `router.ErrFailed`, a journal write, or
+a write of the account state of a router made by `Open`, failed. Every call that could name an account fails the same way until you
 close the store and open it again.
 
 Feed the router what it cannot see:
@@ -135,7 +151,8 @@ Feed the router what it cannot see:
   `LastFailure` on the next attempt.
 - `ObserveOverage` for each paid-overflow check or observed paid use.
 - `Served` after the first successful response on an assignment.
-- `Relogin` after a browser login, and `Move` for a manual override.
+- `Relogin` after a browser login, `LoginConfirmed` after a request that
+  began after an auth failure succeeded, and `Move` for a manual override.
 
 CONTRACT.md's PR2 section gives the placement rule, the defaults, and the
 journal rules.

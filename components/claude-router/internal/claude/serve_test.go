@@ -330,35 +330,6 @@ func exhaustedHeaders(reset time.Time) map[string]string {
 	}
 }
 
-func TestExhaustionIsAnsweredLocallyWithoutMoving(t *testing.T) {
-	e := newEnv(t, "acct-a", "acct-b")
-	e.start()
-	e.send(msg{Session: sessionID(1)})
-	reset := time.Now().Add(2 * time.Hour).Truncate(time.Second)
-	e.upstream.script("acct-a", reply{Status: 429, Header: exhaustedHeaders(reset)})
-
-	r := e.send(msg{Session: sessionID(1)})
-	again := e.send(msg{Session: sessionID(1)})
-
-	for name, got := range map[string]result{"exhausting request": r, "next request": again} {
-		if got.Status != http.StatusTooManyRequests || got.ErrType != "rate_limit_error" {
-			t.Fatalf("%s: got %d %q, want 429 rate_limit_error", name, got.Status, got.ErrType)
-		}
-		if got.Header.Get("Anthropic-Ratelimit-Unified-Reset") != strconv.FormatInt(reset.Unix(), 10) {
-			t.Fatalf("%s: unified reset %q, want %d", name, got.Header.Get("Anthropic-Ratelimit-Unified-Reset"), reset.Unix())
-		}
-		if ra, _ := strconv.Atoi(got.Header.Get("Retry-After")); ra < 7000 || ra > 7200 {
-			t.Fatalf("%s: retry-after %q, want about 7200", name, got.Header.Get("Retry-After"))
-		}
-	}
-	if n := len(e.upstream.inference()); n != 2 {
-		t.Fatalf("upstream attempts %d, want 2: no attempt on the known exhausted account", n)
-	}
-	if b := e.binding(sessionID(1)); b.Account != "acct-a" {
-		t.Fatalf("conversation moved to %s, want it kept on acct-a", b.Account)
-	}
-}
-
 func TestHeaderlessThrottleAfterExhaustionRetries(t *testing.T) {
 	e := newEnv(t, "acct-a")
 	e.start()

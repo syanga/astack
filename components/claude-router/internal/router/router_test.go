@@ -498,7 +498,8 @@ func TestManualOverrideMovesAndPersists(t *testing.T) {
 
 	errUnknown := h.r.Move(t0, "conv", "acct-z")
 	errUnassigned := h.r.Move(t0, "nobody", b)
-	errMove := h.r.Move(t0, "conv", b)
+	from, errMove := h.r.MoveFrom(t0, "conv", b)
+	again, errAgain := h.r.MoveFrom(t0, "conv", b)
 	h.restart()
 	after := h.route(t0.Add(time.Minute), req("conv"))
 	bnd, _, _ := h.r.Lookup("conv")
@@ -509,8 +510,11 @@ func TestManualOverrideMovesAndPersists(t *testing.T) {
 	if !errors.Is(errUnassigned, ErrUnassigned) {
 		t.Fatalf("move of an unassigned conversation: %v, want ErrUnassigned", errUnassigned)
 	}
-	if errMove != nil {
-		t.Fatal(errMove)
+	if errMove != nil || errAgain != nil {
+		t.Fatal(errMove, errAgain)
+	}
+	if from != a || again != b {
+		t.Fatalf("moves reported from %s then %s, want %s and then %s, where it already was", from, again, a, b)
 	}
 	if after.Kind != Dispatch || after.Account != b || bnd.Reason != ReasonManual {
 		t.Fatalf("after manual move and restart got %+v with binding %+v, want dispatch on %s by manual", after, bnd, b)
@@ -1197,8 +1201,8 @@ func TestConfirmedExhaustionMigratesDespiteAStaleSourceCheck(t *testing.T) {
 	h.r.ObserveOverage(b, OverageDisabled, later)
 	moved := h.route(later, req("conv"))
 
-	if unverified.Kind != Refuse || unverified.Reason != ReasonNoVerified || !unverified.RecheckOverage || boundWhileUnverified != a {
-		t.Fatalf("with both checks stale got %+v bound to %s, want refuse with a recheck and no move from %s", unverified, boundWhileUnverified, a)
+	if unverified.Kind != Wait || !unverified.Until.Equal(later.Add(24*time.Hour)) || !unverified.RecheckOverage || boundWhileUnverified != a {
+		t.Fatalf("with both checks stale got %+v bound to %s, want a wait for %s's reset with a recheck and no move from %s", unverified, boundWhileUnverified, a, a)
 	}
 	if moved.Kind != Migrate || moved.From != a || moved.Account != b || moved.Reason != ReasonExhausted {
 		t.Fatalf("with a's check stale and b verified got %+v, want migration %s to %s for exhausted", moved, a, b)

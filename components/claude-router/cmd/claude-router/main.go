@@ -167,6 +167,9 @@ func login(args []string) error {
 	if err := os.Rename(entries[0], dest); err != nil {
 		return err
 	}
+	if err := lock.ClearNeedsLogin(router.AccountID(*account)); err != nil {
+		return fmt.Errorf("login: enrolled %s, but could not clear its login requirement: %w", *account, err)
+	}
 	fmt.Fprintf(os.Stderr, "claude-router: enrolled %s; restart the router to apply\n", *account)
 	return nil
 }

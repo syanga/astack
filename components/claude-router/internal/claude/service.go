@@ -36,11 +36,35 @@ import (
 type Options struct {
 	// Upstream replaces the transport that reaches api.anthropic.com.
 	Upstream http.RoundTripper
-	// Now replaces the clock.
+	// Now replaces the clock. The service drops its monotonic reading, as
+	// it does the production clock's, but lets it move backward.
 	Now func() time.Time
 	// ReadRetryBase replaces the delay before the first re-read after a
 	// failed settings read.
 	ReadRetryBase time.Duration
+}
+
+// wallClock is the service clock. It returns wall time without Go's
+// monotonic reading, which stops while the machine sleeps: a reading taken
+// before a sleep must age by the sleep's length. It never returns a time
+// before one it already returned, so a backward step of the wall clock
+// cannot order a later reading before an earlier one; the clock stands still
+// until the wall clock catches up.
+type wallClock struct {
+	read func() time.Time
+	mu   sync.Mutex
+	last time.Time
+}
+
+func (c *wallClock) now() time.Time {
+	t := c.read().Round(0)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if t.Before(c.last) {
+		return c.last
+	}
+	c.last = t
+	return t
 }
 
 // Service is a running router: the embedded SDK, the routing policy, and the
@@ -103,9 +127,9 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 			TLSHandshakeTimeout: 10 * time.Second,
 		}
 	}
-	now := opts.Now
-	if now == nil {
-		now = time.Now
+	now := (&wallClock{read: time.Now}).now
+	if opts.Now != nil {
+		now = func() time.Time { return opts.Now().Round(0) }
 	}
 
 	s := &Service{cfg: cfg, token: token, now: now, authIDs: map[router.AccountID]string{}, retryBase: opts.ReadRetryBase}
@@ -125,7 +149,7 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	}
 	policy := router.DefaultConfig()
 	policy.OverageFreshFor = time.Duration(cfg.OverageFreshFor)
-	if s.router, err = router.New(policy, cfg.Accounts, s.store); err != nil {
+	if s.router, err = router.Open(policy, cfg.Accounts, s.store, now()); err != nil {
 		return nil, err
 	}
 	s.overage = newOverageReader(s)
@@ -222,7 +246,8 @@ func (s *Service) Close() {
 // one read per OverageCheckEvery, and after failed reads a re-read with
 // backoff (nextRead). Every read, scheduled or on demand, counts toward the
 // run of failed reads, and the next scheduled read is timed from the last
-// read of either kind.
+// read of either kind. It records the wall time of each scheduled read for
+// catchUp.
 func (s *Service) readOverage(ctx context.Context, account router.AccountID) {
 	defer s.bgDone.Done()
 	every := time.Duration(s.cfg.OverageCheckEvery)
@@ -233,7 +258,9 @@ func (s *Service) readOverage(ctx context.Context, account router.AccountID) {
 		default:
 		}
 		streak := s.overage.failedReads(account)
-		t := time.NewTimer(nextRead(streak.failures, streak.last, every, s.retryBase))
+		delay := nextRead(streak.failures, streak.last, every, s.retryBase)
+		s.overage.schedule(account, s.now().Add(delay))
+		t := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			t.Stop()
