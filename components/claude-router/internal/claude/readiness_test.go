@@ -14,73 +14,81 @@ import (
 	"github.com/syanga/astack/components/claude-router/internal/router"
 )
 
-// tokenExchange replaces the token exchange in the Claude executor's
-// Refresh, the one step of an SDK refresh that dials platform.claude.com.
-// Registered after Start, it delegates everything else to the real
-// executor, so a refresh still runs through the SDK's refresh lock, auth
-// state, and file store. A successful exchange revokes the old access token
-// at the fake upstream, as the token endpoint does, and rotates the refresh
-// token. The new access token is accepted only with accept set.
+// tokenExchange stands in for the token exchange inside the Claude
+// executor's Refresh, the one step of an SDK refresh that dials
+// platform.claude.com. It sits behind the router's refresh guard, so every
+// refresh, the SDK's and the router's, still runs through the SDK's refresh
+// lock, auth state, and file store, and through the guard. A successful
+// exchange revokes the old access token at the fake upstream, as the token
+// endpoint does, and rotates the refresh token. The new access token is
+// accepted only with accept set.
 type tokenExchange struct {
-	coreauth.ProviderExecutor
 	up      *fakeUpstream
 	account string
 	delay   time.Duration
 	accept  bool
 	fail    bool
 
-	mu     sync.Mutex
-	calls  int
-	reused int
-	lastRT string
+	mu       sync.Mutex
+	calls    int
+	reused   int
+	resent   int
+	lastRT   string
+	failedRT map[string]bool
 }
 
-func (x *tokenExchange) PrepareRequest(req *http.Request, a *coreauth.Auth) error {
-	return x.ProviderExecutor.(coreauth.RequestPreparer).PrepareRequest(req, a)
+func (x *tokenExchange) set(f func(x *tokenExchange)) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	f(x)
 }
 
-func (x *tokenExchange) ShouldPrepareRequestAuth(a *coreauth.Auth) bool {
-	p, ok := x.ProviderExecutor.(coreauth.RequestAuthPreparer)
-	return ok && p.ShouldPrepareRequestAuth(a)
-}
-
-func (x *tokenExchange) PrepareRequestAuth(ctx context.Context, a *coreauth.Auth) (*coreauth.Auth, error) {
-	return x.ProviderExecutor.(coreauth.RequestAuthPreparer).PrepareRequestAuth(ctx, a)
-}
-
-func (x *tokenExchange) Refresh(_ context.Context, a *coreauth.Auth) (*coreauth.Auth, error) {
+func (x *tokenExchange) Refresh(ctx context.Context, a *coreauth.Auth) (*coreauth.Auth, error) {
+	rt := refreshToken(a)
+	_, byRouter := routerRefreshOf(ctx)
 	x.mu.Lock()
 	x.calls++
-	if rt, _ := a.Metadata["refresh_token"].(string); rt != x.lastRT {
+	if rt != x.lastRT {
 		x.reused++
 	}
+	if byRouter && x.failedRT[rt] {
+		x.resent++
+	}
+	delay, fail, accept := x.delay, x.fail, x.accept
 	x.mu.Unlock()
-	time.Sleep(x.delay)
-	if x.fail {
+	time.Sleep(delay)
+	if fail {
+		x.mu.Lock()
+		if x.failedRT == nil {
+			x.failedRT = map[string]bool{}
+		}
+		x.failedRT[rt] = true
+		x.mu.Unlock()
 		return nil, errors.New("token exchange failed")
 	}
 	old := accessToken(a)
 	b := a.Clone()
 	at := "sk-ant-oat01-fake-" + x.account + "-refreshed-" + randomHex(8)
-	rt := "rt-" + randomHex(8)
+	next := "rt-" + randomHex(8)
 	x.up.mu.Lock()
 	delete(x.up.accounts, hashToken(old))
 	x.up.mu.Unlock()
-	if x.accept {
+	if accept {
 		x.up.bind(at, x.account)
 	}
 	b.Metadata["access_token"] = at
-	b.Metadata["refresh_token"] = rt
+	b.Metadata["refresh_token"] = next
 	b.Metadata["expired"] = time.Now().Add(8 * time.Hour).UTC().Format(time.RFC3339)
 	b.Metadata["last_refresh"] = time.Now().UTC().Format(time.RFC3339)
 	x.mu.Lock()
-	x.lastRT = rt
+	x.lastRT = next
 	x.mu.Unlock()
 	return b, nil
 }
 
 // exchanges counts the token exchanges. It fails the test if one sent a
-// refresh token that an earlier exchange had replaced.
+// refresh token that an earlier exchange had replaced, or if a refresh the
+// router started sent a refresh token whose exchange had failed.
 func (x *tokenExchange) exchanges(t *testing.T) int {
 	t.Helper()
 	x.mu.Lock()
@@ -88,21 +96,21 @@ func (x *tokenExchange) exchanges(t *testing.T) int {
 	if x.reused != 0 {
 		t.Fatalf("%d token exchanges sent a replaced refresh token", x.reused)
 	}
+	if x.resent != 0 {
+		t.Fatalf("%d refreshes the router started resent a refresh token whose exchange failed", x.resent)
+	}
 	return x.calls
 }
 
-// replaceTokenExchange puts x in front of the SDK's Claude executor. The
-// SDK registers its executor while it starts, so this runs after Start.
-// Test credentials carry no refresh token, so a refresh by the real
-// executor before this point makes no request.
+// replaceTokenExchange puts x behind the router's refresh guard. Test
+// credentials carry no refresh token, so a refresh by the real executor
+// before this point makes no request.
 func (e *env) replaceTokenExchange(x *tokenExchange) {
 	e.t.Helper()
-	orig, ok := e.svc.core.Executor("claude")
-	if !ok {
-		e.t.Fatal("the SDK has no claude executor")
-	}
-	x.ProviderExecutor = orig
-	e.svc.core.RegisterExecutor(x)
+	g := e.svc.guard
+	g.mu.Lock()
+	g.exchange = x.Refresh
+	g.mu.Unlock()
 }
 
 func (e *env) sdkAuth(account string) *coreauth.Auth {
@@ -490,5 +498,224 @@ func TestSuccessfulRecheckEndsTheRunOfFailedReads(t *testing.T) {
 	reads := e.upstream.usageReads()
 	if gap := reads[2].At.Sub(reads[1].At); gap < 4*time.Second {
 		t.Fatalf("scheduled read %s after the successful recheck, want the regular interval of 4 s", gap)
+	}
+}
+
+// waitPending waits until the SDK's refresh loop marks a refresh of the
+// account's credential pending.
+func (e *env) waitPending(account string) time.Time {
+	e.t.Helper()
+	var until time.Time
+	e.waitFor("the SDK has a refresh pending", 10*time.Second, func() bool {
+		until = e.sdkAuth(account).NextRefreshAfter
+		return until.After(time.Now())
+	})
+	return until
+}
+
+// sdkRefreshWithoutMarker starts a refresh the way the SDK's request-time
+// 401 path does: under the credential's refresh lock and with no pending
+// marker. It returns once the refresh holds the lock.
+func (e *env) sdkRefreshWithoutMarker(x *tokenExchange, account string) <-chan struct{} {
+	e.t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = e.svc.core.ForceRefreshAuth(context.Background(), e.svc.authIDs[router.AccountID(account)])
+	}()
+	e.waitFor("the SDK's refresh is exchanging", 5*time.Second, func() bool {
+		x.mu.Lock()
+		defer x.mu.Unlock()
+		return x.calls == 1
+	})
+	return done
+}
+
+func TestRouterRefreshQueuedBehindAFailingSDKRefreshSendsNoExchange(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	x := &tokenExchange{up: e.upstream, account: "acct-a", delay: 1500 * time.Millisecond, fail: true}
+	e.startWithoutSDKRefresh(x)
+	sdk := e.sdkRefreshWithoutMarker(x, "acct-a")
+
+	e.recheckNow(31 * time.Minute)
+	r := e.send(msg{Session: sessionID(1)})
+	<-sdk
+
+	if r.Status != http.StatusServiceUnavailable || len(e.upstream.inference()) != 0 {
+		t.Fatalf("got %d with %d inference attempts, want 503 and none", r.Status, len(e.upstream.inference()))
+	}
+	if n := x.exchanges(t); n != 1 {
+		t.Fatalf("token exchanges %d, want 1: the SDK's", n)
+	}
+	if n := e.refreshEvents("failed"); n != 1 {
+		t.Fatalf("failed credential_refresh events %d, want 1", n)
+	}
+}
+
+func TestDueReadUsesTheTokenTheSDKInstalledWhileItWaitedForTheLock(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	x := &tokenExchange{up: e.upstream, account: "acct-a", delay: 1500 * time.Millisecond, accept: true}
+	e.startWithoutSDKRefresh(x)
+	sdk := e.sdkRefreshWithoutMarker(x, "acct-a")
+
+	e.recheckNow(31 * time.Minute)
+	r := e.send(msg{Session: sessionID(1)})
+	<-sdk
+
+	if r.Status != 200 || r.Text != served("acct-a") {
+		t.Fatalf("got %d %q, want 200 from acct-a on the SDK's token", r.Status, r.Text)
+	}
+	if n := x.exchanges(t); n != 1 {
+		t.Fatalf("token exchanges %d, want 1: the router does not rotate the SDK's new token", n)
+	}
+	if n, m := e.refreshEvents("sdk_refreshed"), e.refreshEvents("refreshed"); n != 1 || m != 0 {
+		t.Fatalf("sdk_refreshed %d and refreshed %d events, want 1 and 0", n, m)
+	}
+}
+
+// The SDK's refresh job outlives its 60 s pending marker, so a read after
+// the marker finds no refresh pending and refreshes through the SDK, behind
+// the job.
+func TestRouterRefreshAfterTheSDKMarkerExpiresSendsNoExchange(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	e.writeCredentialDueIn("acct-a", 3*time.Second)
+	e.clock.set(time.Now())
+	e.startWith(Options{ReadRetryBase: time.Hour})
+	x := &tokenExchange{up: e.upstream, account: "acct-a", delay: 65 * time.Second, fail: true}
+	e.replaceTokenExchange(x)
+	marker := e.waitPending("acct-a")
+	time.Sleep(time.Until(marker) + time.Second)
+
+	e.recheckNow(31 * time.Minute)
+	r := e.send(msg{Session: sessionID(1)})
+
+	if r.Status != http.StatusServiceUnavailable || len(e.upstream.inference()) != 0 {
+		t.Fatalf("got %d with %d inference attempts, want 503 and none", r.Status, len(e.upstream.inference()))
+	}
+	if n := x.exchanges(t); n != 1 {
+		t.Fatalf("token exchanges %d, want 1: the SDK's", n)
+	}
+	if n := e.refreshEvents("failed"); n != 1 {
+		t.Fatalf("failed credential_refresh events %d, want 1", n)
+	}
+}
+
+func TestSDKRefreshThatFailsDuringTheWaitFailsTheReadAtOnce(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	e.writeCredentialDueIn("acct-a", 3*time.Second)
+	e.clock.set(time.Now())
+	e.startWith(Options{ReadRetryBase: time.Hour})
+	x := &tokenExchange{up: e.upstream, account: "acct-a", delay: time.Second, fail: true}
+	e.replaceTokenExchange(x)
+	e.waitPending("acct-a")
+
+	e.recheckNow(31 * time.Minute)
+	begun := time.Now()
+	r := e.send(msg{Session: sessionID(1)})
+	took := time.Since(begun)
+	for i := 0; i < 3; i++ {
+		e.recheckNow(31 * time.Second)
+		if r := e.send(msg{Session: sessionID(1)}); r.Status != http.StatusServiceUnavailable {
+			t.Fatalf("send %d after the failure got %d, want 503", i, r.Status)
+		}
+	}
+
+	if r.Status != http.StatusServiceUnavailable || took >= sdkRefreshWait {
+		t.Fatalf("got %d after %s, want 503 before the %s wait ends", r.Status, took, sdkRefreshWait)
+	}
+	if n := x.exchanges(t); n != 1 {
+		t.Fatalf("token exchanges %d, want 1: the SDK's", n)
+	}
+	if n := len(e.upstream.inference()); n != 0 {
+		t.Fatalf("inference attempts %d, want 0", n)
+	}
+	var details []string
+	for _, ev := range e.events() {
+		if ev.Kind == "credential_refresh" && ev.Outcome == "failed" {
+			details = append(details, ev.Detail)
+		}
+	}
+	if len(details) != 1 || details[0] != "sdk refresh" {
+		t.Fatalf("failed credential_refresh details %q, want one \"sdk refresh\"", details)
+	}
+}
+
+func TestInferenceErrorDuringAPendingSDKRefreshDoesNotFailTheRead(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	e.writeCredentialDueIn("acct-a", 3*time.Second)
+	e.clock.set(time.Now())
+	e.startWith(Options{ReadRetryBase: time.Hour})
+	x := &tokenExchange{up: e.upstream, account: "acct-a", delay: time.Second, accept: true}
+	e.replaceTokenExchange(x)
+	e.waitPending("acct-a")
+	id := e.svc.authIDs["acct-a"]
+	e.svc.core.MarkResult(context.Background(), coreauth.Result{AuthID: id, Provider: "claude", Model: "claude-sonnet-4-5",
+		Error: &coreauth.Error{Code: "rate_limited", Message: "inference 429", HTTPStatus: http.StatusTooManyRequests}})
+	if e.sdkAuth("acct-a").LastError == nil {
+		t.Fatal("the SDK did not record the inference error on the credential")
+	}
+
+	e.recheckNow(31 * time.Minute)
+	r := e.send(msg{Session: sessionID(1)})
+
+	if r.Status != 200 || r.Text != served("acct-a") {
+		t.Fatalf("got %d %q, want 200 from acct-a once the SDK's refresh landed", r.Status, r.Text)
+	}
+	if n := x.exchanges(t); n != 1 {
+		t.Fatalf("token exchanges %d, want 1", n)
+	}
+	if n, m := e.refreshEvents("sdk_refreshed"), e.refreshEvents("failed"); n != 1 || m != 0 {
+		t.Fatalf("sdk_refreshed %d and failed %d events, want 1 and 0", n, m)
+	}
+}
+
+func TestFailureRunEndsWhenTheAccessTokenChanges(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	e.clock.set(time.Now())
+	e.startWith(Options{ReadRetryBase: time.Hour})
+	e.svc.core.StopAutoRefresh()
+	x := &tokenExchange{up: e.upstream, account: "acct-a", fail: true}
+	e.replaceTokenExchange(x)
+	e.upstream.mu.Lock()
+	delete(e.upstream.accounts, hashToken(e.tokens["acct-a"]))
+	e.upstream.mu.Unlock()
+	e.recheckNow(31 * time.Minute)
+	if r := e.send(msg{Session: sessionID(1)}); r.Status != http.StatusServiceUnavailable {
+		t.Fatalf("after the failed refresh got %d, want 503", r.Status)
+	}
+	x.set(func(x *tokenExchange) { x.fail = false })
+	if _, err := e.svc.core.ForceRefreshAuth(context.Background(), e.svc.authIDs["acct-a"]); err != nil {
+		t.Fatalf("SDK refresh: %v", err)
+	}
+	x.set(func(x *tokenExchange) { x.accept = true })
+
+	e.recheckNow(31 * time.Second)
+	r := e.send(msg{Session: sessionID(1)})
+
+	if r.Status != 200 || r.Text != served("acct-a") {
+		t.Fatalf("got %d %q, want 200 from acct-a: the SDK's new token ended the failure run", r.Status, r.Text)
+	}
+	if n, m := x.exchanges(t), e.refreshEvents("refreshed"); n != 3 || m != 1 {
+		t.Fatalf("token exchanges %d and router refreshes %d, want 3 and 1", n, m)
+	}
+}
+
+func TestFailedRecheckBringsTheReRead(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	e.cfg.OverageCheckEvery = Duration(time.Minute)
+	e.clock.set(time.Now())
+	e.startWith(Options{ReadRetryBase: 300 * time.Millisecond})
+	e.upstream.setUsage("acct-a", usageReply{Status: http.StatusServiceUnavailable})
+
+	e.recheckNow(31 * time.Minute)
+	r := e.send(msg{Session: sessionID(1)})
+	e.waitFor("the re-read", 5*time.Second, func() bool { return len(e.upstream.usageReads()) >= 3 })
+
+	if r.Status != http.StatusServiceUnavailable {
+		t.Fatalf("got %d, want 503 after the recheck failed", r.Status)
+	}
+	reads := e.upstream.usageReads()
+	if gap := reads[2].At.Sub(reads[1].At); gap < 300*time.Millisecond || gap > 2*time.Second {
+		t.Fatalf("re-read %s after the failed recheck, want about 300 ms", gap)
 	}
 }

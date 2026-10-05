@@ -40,7 +40,7 @@ type overageReader struct {
 	state       map[router.AccountID]overageState
 	failedToken map[router.AccountID]string
 	streak      map[router.AccountID]readStreak
-	succeeded   map[router.AccountID]chan struct{}
+	settled     map[router.AccountID]chan struct{}
 }
 
 // readStreak is an account's run of failed reads, scheduled or on demand:
@@ -54,7 +54,7 @@ func newOverageReader(s *Service) *overageReader {
 	return &overageReader{
 		s: s, inFlight: map[router.AccountID]*sync.Mutex{}, last: map[router.AccountID]time.Time{},
 		state: map[router.AccountID]overageState{}, failedToken: map[router.AccountID]string{},
-		streak: map[router.AccountID]readStreak{}, succeeded: map[router.AccountID]chan struct{}{},
+		streak: map[router.AccountID]readStreak{}, settled: map[router.AccountID]chan struct{}{},
 	}
 }
 
@@ -65,18 +65,19 @@ func (o *overageReader) failedReads(account router.AccountID) readStreak {
 	return o.streak[account]
 }
 
-// successes receives after each successful read of the account.
-func (o *overageReader) successes(account router.AccountID) <-chan struct{} {
+// settlements receives after each read of the account, scheduled or on
+// demand, has updated its streak.
+func (o *overageReader) settlements(account router.AccountID) <-chan struct{} {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return o.successChan(account)
+	return o.settledChan(account)
 }
 
-func (o *overageReader) successChan(account router.AccountID) chan struct{} {
-	ch := o.succeeded[account]
+func (o *overageReader) settledChan(account router.AccountID) chan struct{} {
+	ch := o.settled[account]
 	if ch == nil {
 		ch = make(chan struct{}, 1)
-		o.succeeded[account] = ch
+		o.settled[account] = ch
 	}
 	return ch
 }
@@ -87,11 +88,11 @@ func (o *overageReader) settle(account router.AccountID, err error) {
 	if err != nil {
 		st := o.streak[account]
 		o.streak[account] = readStreak{failures: st.failures + 1, last: err}
-		return
+	} else {
+		delete(o.streak, account)
 	}
-	delete(o.streak, account)
 	select {
-	case o.successChan(account) <- struct{}{}:
+	case o.settledChan(account) <- struct{}{}:
 	default:
 	}
 }
@@ -228,7 +229,7 @@ func (o *overageReader) fetch(ctx context.Context, account router.AccountID) (ro
 	refreshed := false
 	if refreshDue(auth, time.Now()) {
 		var err error
-		if auth, refreshed, err = o.renew(ctx, account, authID, "", "expiring"); err != nil {
+		if auth, refreshed, err = o.renew(ctx, account, authID, accessToken(auth), "expiring"); err != nil {
 			return "", err
 		}
 	}
@@ -254,39 +255,36 @@ var (
 )
 
 // renew returns a credential to use in place of the account's current one,
-// whose access token is due for refresh or, if failed is set, was refused.
-// It reports whether the router refreshed it.
+// whose access token observed is due for refresh or was refused. It reports
+// whether the router refreshed it.
 //
 // The router prefers the SDK's refresh: a newer credential the SDK already
 // installed, or one the SDK installs within sdkRefreshWait of a pending
-// refresh. It refreshes through the SDK itself only when the SDK has no
-// refresh pending and no refresh of the current access token has failed. A
-// failed refresh, the router's or the SDK's, starts a failure run that
-// lasts until the access token changes. During it a read fails at once and
-// the SDK's own retry backoff paces the next attempt. So the router starts
-// at most one refresh per failure run, and never resends a refresh token
-// whose exchange failed.
-func (o *overageReader) renew(ctx context.Context, account router.AccountID, authID, failed, reason string) (*coreauth.Auth, bool, error) {
+// refresh. Otherwise it refreshes through the SDK, and the refresh guard
+// declines that refresh, with no exchange, when the credential changed since
+// observed or its refresh token was spent by an earlier exchange. A failed
+// refresh, the router's or the SDK's, starts a failure run that lasts until
+// the access token changes; during it a read fails at once.
+func (o *overageReader) renew(ctx context.Context, account router.AccountID, authID, observed, reason string) (*coreauth.Auth, bool, error) {
 	cur, ok := o.s.core.GetByID(authID)
 	if !ok || cur == nil {
 		return nil, false, errors.New("account is not registered in the SDK")
 	}
-	if failed != "" && accessToken(cur) != failed {
+	if accessToken(cur) != observed {
 		o.s.events.emit(Event{Kind: "credential_refresh", Account: account, Reason: reason, Outcome: "sdk_refreshed"})
 		return cur, false, nil
 	}
-	now := time.Now()
-	if o.refreshFailed(account, cur, reason, now) {
+	if o.refreshFailed(account, cur, reason) {
 		return nil, false, errRefreshFailed
 	}
-	if cur.NextRefreshAfter.After(now) {
-		landed, finished := o.awaitSDKRefresh(ctx, authID, cur)
+	if cur.NextRefreshAfter.After(time.Now()) {
+		landed, failed := o.awaitSDKRefresh(ctx, authID, cur)
 		switch {
 		case landed != nil:
 			o.s.events.emit(Event{Kind: "credential_refresh", Account: account, Reason: reason, Outcome: "sdk_refreshed"})
 			return landed, false, nil
-		case finished:
-			o.failRun(account, accessToken(cur), Event{Reason: reason, Detail: "sdk refresh"})
+		case failed:
+			o.failRun(account, observed, Event{Reason: reason, Detail: "sdk refresh"})
 			return nil, false, errRefreshFailed
 		default:
 			return nil, false, errRefreshPending
@@ -295,15 +293,26 @@ func (o *overageReader) renew(ctx context.Context, account router.AccountID, aut
 	if ctx.Err() != nil {
 		return nil, false, errors.New("the read was canceled before the refresh")
 	}
+	if ex, _ := o.s.core.Executor("claude"); ex != coreauth.ProviderExecutor(o.s.guard) {
+		return nil, false, errors.New("the refresh guard is not the SDK's Claude executor")
+	}
 	start := o.s.now()
 	// A refresh runs to completion once begun: a refresh canceled after the
 	// token endpoint rotated the refresh token would lose the new one.
-	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	rctx, cancel := context.WithTimeout(withRouterRefresh(context.WithoutCancel(ctx), observed), 30*time.Second)
 	auth, err := o.s.core.ForceRefreshAuth(rctx, authID)
 	cancel()
 	dur := o.s.now().Sub(start).Milliseconds()
+	if errors.Is(err, errRefreshDeclined) {
+		if cur, ok := o.s.core.GetByID(authID); ok && cur != nil && accessToken(cur) != observed {
+			o.s.events.emit(Event{Kind: "credential_refresh", Account: account, Reason: reason, Outcome: "sdk_refreshed"})
+			return cur, false, nil
+		}
+		o.failRun(account, observed, Event{Reason: reason, Detail: "sdk refresh"})
+		return nil, false, errRefreshFailed
+	}
 	if err != nil || auth == nil {
-		o.failRun(account, accessToken(cur), Event{Reason: reason, DurationMS: &dur})
+		o.failRun(account, observed, Event{Reason: reason, DurationMS: &dur})
 		return nil, false, errors.New("the SDK could not refresh the credential")
 	}
 	o.s.events.emit(Event{Kind: "credential_refresh", Account: account, Reason: reason, Outcome: "refreshed", DurationMS: &dur})
@@ -312,11 +321,7 @@ func (o *overageReader) renew(ctx context.Context, account router.AccountID, aut
 
 // refreshFailed reports whether the account is in a failure run for auth's
 // access token: a refresh of that token failed and none has replaced it.
-// The SDK marks a failed refresh with LastError and a retry backoff in
-// NextRefreshAfter. A pending SDK retry of a failed refresh keeps both, and
-// so does an inference error the SDK recorded while a refresh is pending; a
-// read then also fails at once, and the next read finds the new token.
-func (o *overageReader) refreshFailed(account router.AccountID, auth *coreauth.Auth, reason string, now time.Time) bool {
+func (o *overageReader) refreshFailed(account router.AccountID, auth *coreauth.Auth, reason string) bool {
 	token := accessToken(auth)
 	o.mu.Lock()
 	failedToken, known := o.failedToken[account]
@@ -324,7 +329,7 @@ func (o *overageReader) refreshFailed(account router.AccountID, auth *coreauth.A
 	if known && failedToken == token {
 		return true
 	}
-	if auth.LastError == nil || !auth.NextRefreshAfter.After(now) {
+	if !o.s.guard.failed(auth) {
 		return false
 	}
 	o.failRun(account, token, Event{Reason: reason, Detail: "sdk refresh"})
@@ -345,10 +350,9 @@ func (o *overageReader) failRun(account router.AccountID, token string, e Event)
 	o.s.events.emit(e)
 }
 
-// awaitSDKRefresh polls until the SDK's pending refresh of before finishes,
-// for at most sdkRefreshWait. It returns the credential the refresh
-// installed, or nil and whether the refresh finished without a new access
-// token.
+// awaitSDKRefresh polls until the SDK's pending refresh of before lands or
+// its exchange fails, for at most sdkRefreshWait. It returns the credential
+// the refresh installed, or nil and whether the exchange failed.
 func (o *overageReader) awaitSDKRefresh(ctx context.Context, authID string, before *coreauth.Auth) (*coreauth.Auth, bool) {
 	deadline := time.NewTimer(sdkRefreshWait)
 	defer deadline.Stop()
@@ -367,9 +371,9 @@ func (o *overageReader) awaitSDKRefresh(ctx context.Context, authID string, befo
 			return nil, false
 		}
 		if accessToken(cur) != accessToken(before) {
-			return cur, true
+			return cur, false
 		}
-		if !cur.NextRefreshAfter.Equal(before.NextRefreshAfter) {
+		if o.s.guard.failed(cur) {
 			return nil, true
 		}
 	}

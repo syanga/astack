@@ -268,7 +268,8 @@ watcher started" log line, then adding accounts one at a time and waiting until
 account state stops changing (`Probe.WaitQuiet`). `WaitQuiet` and the log-line
 wait are test heuristics, not synchronization. The default suite passes under
 `-race` with that order. The hot-reload probe sits behind the `sdkreload` build
-tag. A rotation or account change while requests are in flight is unestablished
+tag. The PR3 service applies a rotation or account change only by restart,
+and the SDK's own refresh ran in a live `-race` build with no race reported
 (row RP-16). A router barrier on dispatch does not help with either race,
 because the racing accesses are between SDK goroutines. A router-owned restart
 to apply credential changes moves the rotation race into the startup race. An
@@ -403,7 +404,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | RP-5 | Single-attempt posture makes one upstream attempt per call, for credentials without a refresh token | passed | `TestPinnedExecutorPostureMakesOneAttemptPerCall` | PR1 |
 | RP-5b | Single-attempt posture for credentials with a refresh token | blocked | A 401 triggers refresh and a same-auth redispatch (`conductor_stream.go:253-263`). The refresh dials `platform.claude.com`, so no offline probe can serve it. The PR3 service also reads the paid-overflow setting with the account's credential before dispatch. A forced invalid token fails that read with 401; the service then refreshes the credential once and reads again, so the inference that follows runs on the refreshed token and does not take the redispatch path. The path runs only when a token expires between the reading and a request. | Live observation when a token expires in service (PR4 or PR5 lanes), or an SDK seam for the refresh client |
 | RP-6 | A rotated credential reloaded from the auth directory keeps its account and auth ID, after a quiet period | passed | `TestRotatedCredentialKeepsAccount` | PR1 |
-| RP-7 | SDK-initiated OAuth refresh keeps the account | blocked | The Claude refresh client dials `platform.claude.com` directly. Needs the attended live lane or an SDK transport seam. Source: `conductor_refresh.go:561` updates the same auth ID. Offline, a credential renewed by restart keeps its auth ID and account (`TestRotatedCredentialAppliesAtRestartOnTheSameAccount`, lane 2 `renewal_keeps_account`), and a refresh through the SDK's own refresh path, with only the executor's token exchange replaced, keeps the account (`TestReadOfADueCredentialWaitsForTheSDKRefresh`, `TestUnauthorizedSettingsReadRefreshesOnceAndReadsAgain`). The live lane at `fb17a64` refreshed a token at start and persisted it, but the start read raced the refresh and got 401, so the step stopped before inference (`evidence/PR3/lane-1/`). | PR3 attended live lane (`reports/PR3-live-runbook.md`): a refreshed credential keeps its auth ID and pinned account |
+| RP-7 | SDK-initiated OAuth refresh keeps the account | passed | Live lane 1 rerun at `9b7e059` under `-race` (`evidence/PR3/lane-1-rerun/`): both accounts were due at start, the SDK refreshed them, the start reads logged `credential_refresh` `expiring` `sdk_refreshed` and read the setting, `refresh_sha256_12` and `last_refresh` changed for `work` (`rp7-before.json`, `rp7-after.json`), and step R8 served both accounts on their pinned conversations. The verifier ruled that `c95ae72` runs the same branches on that path (`reports/PR3-verify/c95ae72/receipt.md`, "Live equivalence"). The refresh guard adds no branch to it: a credential with a refresh pending at start is waited for, and the SDK's refresh passes the guard. Offline, a refresh through the SDK's own refresh path, with only the token exchange replaced, keeps the account (`TestReadOfADueCredentialWaitsForTheSDKRefresh`, `TestUnauthorizedSettingsReadRefreshesOnceAndReadsAgain`), and so does a credential renewed by restart (`TestRotatedCredentialAppliesAtRestartOnTheSameAccount`, lane 2 `renewal_keeps_account`). | PR3 |
 | RP-8 | Configuration applied at startup does not change pinned selection | passed | `TestConfigApplyKeepsPinnedSelection`, six configurations | PR1 |
 | RP-9 | An added account does not change pinned selection, after a quiet period | passed | `TestAccountReloadKeepsPinnedSelection` | PR1 |
 | RP-10 | Configuration hot reload is safe while serving | failed | SDK data race. Pinned selection held in all 20 runs. `evidence/PR1/sdk/reload-race.log`, `reload-norace.log`. Contract: restart instead of hot reload. | Closed by PR3: the service runs the SDK without a file watcher and applies configuration only by restart. `TestRestartKeepsBindings` and lane 2 (`config_change_keeps_bindings`, `config_change_applies`) show a changed configuration takes effect after restart with bindings unchanged. `TestAccountFileAddedWhileServingIsNotLoaded` shows nothing is loaded while serving |
@@ -411,7 +412,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | RP-12 | An in-stream error before output is delivered, not retried, and the SDK reports success | passed | `TestInStreamOverloadBeforeOutputIsDeliveredNotRetried` | PR1 |
 | RP-14 | Transient, throttle, exhaustion, model-limit, and auth failures classify distinctly from per-call signals | passed | `TestFailureSignalsClassifyDistinctly`. Real header shapes are pending the live lanes. | PR1 |
 | RP-15 | The passive quota snapshot describes the failed call | failed | `TestQuotaSnapshotOutlivesAHeaderlessFailure`. Contract: classify from per-attempt headers. | Closed by PR3: `classify` reads only the call's own attempt headers at the router's transport. `TestHeaderlessThrottleAfterExhaustionRetries` classifies a headerless 429 after an exhaustion as throttle and retries on the same account |
-| RP-16 | Credential rotation or an account-set change while requests are in flight is free of SDK races | blocked | Same reconciliation path as the startup race. PR3 removes that path while serving: without a file watcher, a credential or account change applies only by restart, which turns it into RP-20. `TestStartWithEnrolledAccountsUnderLoad` rotates a credential across restarts under concurrent load under `-race` (`evidence/PR3/rp20-e01433b/`). The SDK's own token refresh still writes the auth while serving. It dials `platform.claude.com`, so no offline probe drives it. | PR3 attended live lane (`reports/PR3-live-runbook.md`): a `-race` build refreshes a token at start and serves both accounts |
+| RP-16 | Credential rotation or an account-set change while requests are in flight is free of SDK races | passed | Same reconciliation path as the startup race. PR3 removes that path while serving: without a file watcher, a credential or account change applies only by restart, which turns it into RP-20. `TestStartWithEnrolledAccountsUnderLoad` rotates a credential across restarts under concurrent load under `-race` (`evidence/PR3/rp20-e01433b/`). The SDK's own token refresh, which writes the auth while serving, ran live in lane 1 rerun at `9b7e059` under a `-race` build: the SDK refreshed both accounts at start, both were served, and the build reported 0 data races (`evidence/PR3/lane-1-rerun/race-count.txt`). The verifier's live-equivalence ruling for `c95ae72` and the guard's pass-through of SDK refreshes carry this to the current head. | PR3 |
 | RP-17 | The router's transport observes every upstream attempt and ties it to its call, with no proxy in effect | passed | `Upstream.AttemptsFor` assertions in `TestPinnedRetriesStayOnSelectedAccount`, `TestNonStreamingPinnedRetriesStayOnSelectedAccount`, `TestPinnedExecutorPostureMakesOneAttemptPerCall`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover`, `TestFailureSignalsClassifyDistinctly`. Streaming and non-streaming paths; the refresh redispatch path is RP-5b. | PR1 |
 | RP-18 | A router-supplied transport in place of the SDK's uTLS transport is accepted upstream | blocked | Needs the user's attended login for a live request | PR3 attended live lane (`reports/PR3-live-runbook.md`): serves requests through the router transport without upstream rejection |
 | RP-19 | The SDK's request-scoped failures classify separately and are not retried | passed | `TestRequestScopedRefusalIsReportedWithoutRetry` sends `"speed":"fast"` through the SDK executor. The upstream refuses with the fast-mode credits 429, the SDK returns a request-scoped error, and the router classifies it `request_scoped`, answers once with `x-should-retry: false`, and keeps the account usable. `TestRequestScopedErrorAfterASuccessfulAttemptIsNotSentAgain`: after an upstream 200, a request-scoped SDK error is answered once, with one upstream attempt. | PR3 |
@@ -943,23 +944,56 @@ the usage endpoint answers 401, the read renews the credential:
 - If the SDK already installed a newer access token, the read uses it.
 - If the SDK has a refresh pending (`NextRefreshAfter` in the future), the
   read waits up to 3 s for it. If the refresh lands, the read uses the new
-  token. If it finishes without a new token, it failed. If it is still
-  running after 3 s, the read fails and a re-read follows (below).
+  token. If its exchange fails, the read fails. If it is still running after
+  3 s, the read fails and a re-read follows (below).
 - Otherwise the router refreshes through the SDK
   (`Manager.ForceRefreshAuth`), which takes the SDK's per-credential refresh
   lock.
 
+The router registers a refresh guard in place of the SDK's Claude executor
+before the start reads. The SDK calls the executor's `Refresh` for every
+refresh, its own and the router's, while it holds the credential's refresh
+lock, and hands it the credential as it is at that moment. The guard
+records, per credential, the last 8 refresh tokens an exchange sent and did
+not get back, and marks those whose exchange failed or ended unknown. A
+refresh the router started carries the access token the router decided on.
+The guard declines it, with no exchange, when the credential's access token
+has changed since then or its refresh token is recorded. The decline is a
+`context.Canceled`, for which the SDK records no failure and no backoff. The
+router then reads the credential again: a new access token counts as the
+SDK's refresh, and the same one starts a failure run. A credential with a
+refresh pending or a failed refresh when the guard is registered has its
+refresh token recorded, because that refresh may have run on the executor
+the guard replaced. Before the guard and the listener exist no inference
+runs, so a failure recorded on the credential then came from a refresh.
+
+**The router never sends a refresh token that an earlier exchange sent and
+did not get back.** That covers a token whose exchange failed or ended
+unknown, and a token whose rotation the SDK did not install. It holds in
+every interleaving with the SDK's refreshes, because the check runs under
+the SDK's refresh lock on the credential the exchange would send. The SDK's
+own refreshes pass the guard unchanged: its auto-refresh retries a failed
+refresh token after its backoff, and its request-time 401 path refreshes
+without a pending marker. If the SDK ever registers a new Claude executor
+in place of the guard, the router stops refreshing and its reads of a due or
+refused credential fail.
+
 A failed refresh, the router's or the SDK's, starts a failure run that lasts
-until the access token changes. The SDK marks its failure with `LastError`
-and a retry backoff in `NextRefreshAfter` (5 minutes, or 1 to 30 minutes for
-an invalid grant). During the run a read fails at once: it neither waits for
-the SDK nor refreshes, and the SDK's own retries pace the next exchange. The
-router therefore starts at most one refresh per failure run, the one that
-starts it, and starts none when the SDK's refresh failed first. It never
-resends a refresh token whose exchange failed. An inference error that the
-SDK recorded on the credential while a refresh is pending looks the same as
-a failed refresh; the read then fails closed, and the next read finds the
-new token.
+until the access token changes. The guard reports the SDK's failures. During
+the run a read fails at once: it neither waits for the SDK nor refreshes,
+and the SDK's own retries pace the next exchange. So the router starts at
+most one refresh per failure run, the one that starts it, and none when the
+SDK's refresh failed first. An inference error the SDK records on the
+credential does not start a run.
+
+The rule has one cost. When an access token is refused (usage 401) before it
+is due and the router's refresh of it fails, nothing refreshes it until the
+token enters the SDK's 4-hour lead: the SDK does not refresh a token that is
+not due, and the router does not resend the failed refresh token. Until
+then the account is refused once its reading goes stale, unless an
+inference request that the fresh reading still allows gets a 401 and the
+SDK's request-time refresh renews the credential. For an 8-hour token the
+outage is under 4 hours.
 
 One read sends at most two usage requests and starts at most one refresh.
 A refresh is one call to the executor's token exchange, which posts to the
@@ -968,44 +1002,55 @@ apart. The SDK gives each post its own 30 s timeout. The router's 30 s cap on
 its own refresh stops further posts but not one in progress. Neither cap
 covers the wait for the SDK's per-credential refresh lock: a refresh the
 router starts while the SDK refreshes the same credential without a pending
-marker (the SDK's request-time 401 path) waits for that refresh, which can
-hold the lock for about 93 s with three slow posts. So a read has no fixed
-wall-clock bound. The start reads' 15 s limit ends their waits and usage
-requests, but not a refresh in progress.
+marker (the SDK's request-time 401 path, or an auto-refresh whose exchange
+outlives its 60 s marker) waits for that refresh, which can hold the lock
+for about 93 s with three slow posts. So a read has no fixed wall-clock
+bound. The start reads' 15 s limit ends their waits and usage requests, but
+not a refresh in progress.
 
 Each refresh the router starts, each SDK refresh that a read waited for or
 found, and the first failure of a failure run record a `credential_refresh`
 event with its reason (`expiring` or `unauthorized`) and outcome
-(`refreshed`, `sdk_refreshed`, or `failed`). A failure the SDK's refresh
-reported carries the detail `sdk refresh`. The event carries no token and no
-error text (`TestReadOfADueCredentialWaitsForTheSDKRefresh`,
+(`refreshed`, `sdk_refreshed`, or `failed`). A failure of the SDK's refresh,
+or a refresh the guard declined on a spent token, carries the detail
+`sdk refresh`. The event carries no token and no error text
+(`TestReadOfADueCredentialWaitsForTheSDKRefresh`,
 `TestReadDoesNotRefreshWhileTheSDKRefreshIsRunning`,
 `TestRouterRefreshesADueCredentialTheSDKHasNotQueued`,
 `TestReadThatRefreshedDoesNotRefreshAgainAfterA401`,
 `TestUnauthorizedReadUsesTheTokenTheSDKInstalledDuringTheRead`,
 `TestUnauthorizedSettingsReadRefreshesOnceAndReadsAgain`,
 `TestFailedSDKRefreshIsNotRepeatedByReads`,
-`TestRouterRefreshIsNotRepeatedAfterItFails`). These tests replace only the
-token exchange of the SDK's Claude executor, after start, so the SDK's
-refresh lock, refresh loop, auth state, and file store all run.
+`TestRouterRefreshIsNotRepeatedAfterItFails`,
+`TestRouterRefreshQueuedBehindAFailingSDKRefreshSendsNoExchange`,
+`TestRouterRefreshAfterTheSDKMarkerExpiresSendsNoExchange`,
+`TestDueReadUsesTheTokenTheSDKInstalledWhileItWaitedForTheLock`,
+`TestSDKRefreshThatFailsDuringTheWaitFailsTheReadAtOnce`,
+`TestInferenceErrorDuringAPendingSDKRefreshDoesNotFailTheRead`,
+`TestFailureRunEndsWhenTheAccessTokenChanges`). These tests replace only the
+token exchange behind the guard, so the SDK's refresh lock, refresh loop,
+auth state, and file store, and the guard, all run. Their fake exchange
+fails a test when a refresh the router started sends a refresh token whose
+exchange failed.
 
 A failed read (an error status, a transport error, an unreadable answer, a
 failed refresh, or a 401 after the refresh) schedules a re-read. After the
-n-th failed read in a row, scheduled or on demand, the re-read waits
-5 s x 2^(n-1), or the endpoint's `Retry-After` when that is longer, capped
-at half of `overage_check_every`. A run of failed reads adds at most 6 re-reads. After
-them the account is read once per `overage_check_every` until a read
-succeeds. A success, scheduled or on demand, ends the run, and the next
-scheduled read comes one `overage_check_every` after it. With the defaults,
-the re-reads come 5, 10, 20, 40, 80, and 160 s apart, and an account sends
-at most 14 usage requests and starts at most 7 refreshes in the 10 minutes
-after a failed read, then at most 2 usage requests and 1 refresh per 10
-minutes. During a failure run of refreshes the router starts none after the
-first. On-demand reads add at most one read per 30 s while a request waits
-on the account
+n-th failed read in a row, scheduled or on demand, the next scheduled read
+comes 5 s x 2^(n-1) after it, or after the endpoint's `Retry-After` when
+that is longer, capped at half of `overage_check_every`. A run of failed
+reads adds at most 6 re-reads. After them the account is read once per
+`overage_check_every` until a read succeeds. A success, scheduled or on
+demand, ends the run, and the next scheduled read comes one
+`overage_check_every` after it. With the defaults, the re-reads come 5, 10,
+20, 40, 80, and 160 s apart, and an account sends at most 14 usage requests
+and starts at most 7 refreshes in the 10 minutes after a failed read, then
+at most 2 usage requests and 1 refresh per 10 minutes. During a failure run
+of refreshes the router starts none after the first. On-demand reads add at
+most one read per 30 s while a request waits on the account
 (`TestRateLimitedStartReadIsReadAgainAfterRetryAfter`,
 `TestPersistentUnauthorizedReadStaysUnknownWithBoundedReads`,
-`TestSuccessfulRecheckEndsTheRunOfFailedReads`). The live lane got 429 on
+`TestSuccessfulRecheckEndsTheRunOfFailedReads`,
+`TestFailedRecheckBringsTheReRead`). The live lane got 429 on
 the seventh start in 40 s; before this schedule, the account stayed unknown
 until the next 10-minute read.
 

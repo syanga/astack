@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -54,6 +55,7 @@ type Service struct {
 	transport *transport
 	overage   *overageReader
 	core      *coreauth.Manager
+	guard     *refreshGuard
 	base      *handlers.BaseAPIHandler
 	authIDs   map[router.AccountID]string
 	retryBase time.Duration
@@ -132,6 +134,9 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	if err = s.startSDK(); err != nil {
 		return nil, err
 	}
+	if s.guard, err = installRefreshGuard(s.core, slices.Collect(maps.Values(s.authIDs))); err != nil {
+		return nil, err
+	}
 
 	readCtx, cancelReads := context.WithTimeout(context.Background(), 15*time.Second)
 	var wg sync.WaitGroup
@@ -199,16 +204,16 @@ func (s *Service) Close() {
 
 // readOverage schedules one account's settings reads after the start read:
 // one read per OverageCheckEvery, and after failed reads a re-read with
-// backoff (nextRead). Failed reads count toward the run whether scheduled
-// or on demand, and a successful on-demand read ends the run and restarts
-// the interval from it.
+// backoff (nextRead). Every read, scheduled or on demand, counts toward the
+// run of failed reads, and the next scheduled read is timed from the last
+// read of either kind.
 func (s *Service) readOverage(ctx context.Context, account router.AccountID) {
 	defer s.bgDone.Done()
 	every := time.Duration(s.cfg.OverageCheckEvery)
-	succeeded := s.overage.successes(account)
+	settled := s.overage.settlements(account)
 	for {
 		select {
-		case <-succeeded:
+		case <-settled:
 		default:
 		}
 		streak := s.overage.failedReads(account)
@@ -217,7 +222,7 @@ func (s *Service) readOverage(ctx context.Context, account router.AccountID) {
 		case <-ctx.Done():
 			t.Stop()
 			return
-		case <-succeeded:
+		case <-settled:
 			t.Stop()
 			continue
 		case <-t.C:
