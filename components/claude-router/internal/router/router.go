@@ -22,9 +22,9 @@ const maxRouteAttempts = 3
 // them for one request. Every method takes the current time so the simulator
 // can drive the same code with a deterministic clock.
 //
-// After any journal write or sync failure, every method that answers with an
-// account or changes routing state returns ErrFailed until the store is
-// reopened.
+// After any journal write or sync failure, or a failed write of the account
+// state of a router made by Open, every method that answers with an account
+// or changes routing state returns ErrFailed until the store is reopened.
 type Router struct {
 	cfg   Config
 	store *Store
@@ -37,10 +37,14 @@ type Router struct {
 	accounts []accountView
 	index    map[AccountID]int
 	active   map[ConversationID]time.Time
+	// saved is the account state last written by persist, or nil for a
+	// router whose account state lives in memory only (New).
+	saved map[AccountID]AccountState
 }
 
 // New returns a router over the enrolled accounts, in tie-break order, and an
-// open store. Account login and quota state start unknown.
+// open store. Account login and quota state start unknown and live in memory
+// only; Open keeps them across restarts.
 func New(cfg Config, accounts []Account, store *Store) (*Router, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -248,6 +252,7 @@ func (r *Router) Observe(account AccountID, attemptStart time.Time, obs Observat
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.observe(account, obs)
+	r.persist()
 }
 
 func windowKey(w Window) string {
@@ -324,7 +329,12 @@ func (r *Router) Report(f Failure) Class {
 	switch f.Class {
 	case ClassAuth:
 		if ok {
-			r.accounts[idx].needsLogin = true
+			a := &r.accounts[idx]
+			a.needsLogin = true
+			if f.AttemptStart.After(a.needsLoginAt) {
+				a.needsLoginAt = f.AttemptStart
+			}
+			r.persist()
 		}
 	case ClassExhausted, ClassModelLimit:
 		confirmed := ok && fromAttempt(f.AttemptStart, f.Observation) &&
@@ -333,6 +343,7 @@ func (r *Router) Report(f Failure) Class {
 			return ClassThrottle
 		}
 		r.observe(f.Account, f.Observation)
+		r.persist()
 	}
 	return f.Class
 }
@@ -359,19 +370,7 @@ func (r *Router) ObserveOverage(account AccountID, state Overage, at time.Time) 
 	case at.After(a.checkAt), at.Equal(a.checkAt) && state != OverageDisabled:
 		a.check, a.checkAt = state, at
 	}
-}
-
-// BlockedUntil reports whether a known rejection blocks the model on an
-// account, and until when. Known is false when the reset is only a recheck
-// time for a rejection without a reported reset.
-func (r *Router) BlockedUntil(now time.Time, account AccountID, model string) (until time.Time, known, blocked bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	idx, ok := r.index[account]
-	if !ok {
-		return time.Time{}, false, false
-	}
-	return usableReset(r.cfg, now, r.accounts[idx].rejections, model)
+	r.persist()
 }
 
 // Relogin marks an account as logged in again.
@@ -385,8 +384,25 @@ func (r *Router) Relogin(account AccountID) error {
 	defer r.mu.Unlock()
 	if idx, ok := r.index[account]; ok {
 		r.accounts[idx].needsLogin = false
+		r.persist()
 	}
-	return nil
+	return r.store.Err()
+}
+
+// LoginConfirmed clears an account's login requirement when a request with
+// its credential that started at start succeeded after the failure that set
+// it: the credential works, so the account needs no browser login. It
+// reports whether it cleared the requirement.
+func (r *Router) LoginConfirmed(account AccountID, start time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	idx, ok := r.index[account]
+	if !ok || !r.accounts[idx].needsLogin || !start.After(r.accounts[idx].needsLoginAt) {
+		return false
+	}
+	r.accounts[idx].needsLogin = false
+	r.persist()
+	return true
 }
 
 func (r *Router) touch(conv ConversationID, now time.Time) {

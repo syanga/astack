@@ -1197,8 +1197,8 @@ func TestConfirmedExhaustionMigratesDespiteAStaleSourceCheck(t *testing.T) {
 	h.r.ObserveOverage(b, OverageDisabled, later)
 	moved := h.route(later, req("conv"))
 
-	if unverified.Kind != Refuse || unverified.Reason != ReasonNoVerified || !unverified.RecheckOverage || boundWhileUnverified != a {
-		t.Fatalf("with both checks stale got %+v bound to %s, want refuse with a recheck and no move from %s", unverified, boundWhileUnverified, a)
+	if unverified.Kind != Wait || !unverified.Until.Equal(later.Add(24*time.Hour)) || !unverified.RecheckOverage || boundWhileUnverified != a {
+		t.Fatalf("with both checks stale got %+v bound to %s, want a wait for %s's reset with a recheck and no move from %s", unverified, boundWhileUnverified, a, a)
 	}
 	if moved.Kind != Migrate || moved.From != a || moved.Account != b || moved.Reason != ReasonExhausted {
 		t.Fatalf("with a's check stale and b verified got %+v, want migration %s to %s for exhausted", moved, a, b)
