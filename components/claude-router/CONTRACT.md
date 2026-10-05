@@ -416,7 +416,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | RP-17 | The router's transport observes every upstream attempt and ties it to its call, with no proxy in effect | passed | `Upstream.AttemptsFor` assertions in `TestPinnedRetriesStayOnSelectedAccount`, `TestNonStreamingPinnedRetriesStayOnSelectedAccount`, `TestPinnedExecutorPostureMakesOneAttemptPerCall`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover`, `TestFailureSignalsClassifyDistinctly`. Streaming and non-streaming paths; the refresh redispatch path is RP-5b. | PR1 |
 | RP-18 | A router-supplied transport in place of the SDK's uTLS transport is accepted upstream | blocked | Needs the user's attended login for a live request | PR3 attended live lane (`reports/PR3-live-runbook.md`): serves requests through the router transport without upstream rejection |
 | RP-19 | The SDK's request-scoped failures classify separately and are not retried | passed | `TestRequestScopedRefusalIsReportedWithoutRetry` sends `"speed":"fast"` through the SDK executor. The upstream refuses with the fast-mode credits 429, the SDK returns a request-scoped error, and the router classifies it `request_scoped`, answers once with `x-should-retry: false`, and keeps the account usable. `TestRequestScopedErrorAfterASuccessfulAttemptIsNotSentAgain`: after an upstream 200, a request-scoped SDK error is answered once, with one upstream attempt. | PR3 |
-| RP-20 | Service startup with enrolled accounts is free of SDK data races | failed | `evidence/PR1/sdk/startup-race-before-mitigation.log`, `evidence/PR1/unit-6166c8c/go.log`. The racing accesses are SDK-internal, so a router barrier cannot serialize them. PR3 mitigation: no file watcher, so the SDK's auth-update consumer runs but nothing feeds it, and the client listener opens only after every account is registered and SDK account state has been quiet for 250 ms. `TestStartWithEnrolledAccountsUnderLoad` passed 50 of 50 starts under `-race`, each followed at once by 16 requests from 4 concurrent clients, with a credential rotated before each restart and no race reported (`evidence/PR3/rp20-e01433b/`; earlier runs `rp20-923bed9/` and `rp20-845ae3f/`). Residual: the SDK's token auto-refresh starts before startup model registration, so an access token that expired while the service was down can race it. The quiet period is a heuristic. | Upstream SDK fix, then the same probe passes repeatedly |
+| RP-20 | Service startup with enrolled accounts is free of SDK data races | failed | `evidence/PR1/sdk/startup-race-before-mitigation.log`, `evidence/PR1/unit-6166c8c/go.log`. The racing accesses are SDK-internal, so a router barrier cannot serialize them. PR3 mitigation: no file watcher, so the SDK's auth-update consumer runs but nothing feeds it, and the client listener opens only after every account is registered and SDK account state has been quiet for 250 ms. `TestStartWithEnrolledAccountsUnderLoad` passed 50 of 50 starts under `-race`, each followed at once by 16 requests from 4 concurrent clients, with a credential rotated before each restart and no race reported (`evidence/PR3/rp20-e01433b/`; earlier runs `rp20-923bed9/` and `rp20-845ae3f/`). Each start in that test also checks that the refresh guard is still the SDK's Claude executor after the load. Residual: the SDK's token auto-refresh starts before startup model registration, so an access token that expired while the service was down can race it. The quiet period is a heuristic. | Upstream SDK fix, then the same probe passes repeatedly |
 
 | ID | Client behavior | Terminal | Agent SDK (T3) | Evidence | Owner |
 | --- | --- | --- | --- | --- | --- |
@@ -963,24 +963,46 @@ has changed since then or its refresh token is recorded. The decline is a
 router then reads the credential again: a new access token counts as the
 SDK's refresh, and the same one starts a failure run. The SDK's refresh of
 a credential that is due at start can begin before the guard exists, on the
-executor the guard replaces. So a credential with a refresh pending when the
-guard is registered has its refresh token recorded, and one whose refresh
-already failed has it recorded as failed. For a refresh the guard did not
-see, the SDK's failure record on the credential (`LastError`) tells the
-router that it failed. While that credential's old token is current its
+executor the guard replaces. So a credential with a refresh marker
+(`NextRefreshAfter` set) when the guard is registered has its refresh token
+recorded, and one whose refresh already failed has it recorded as failed.
+The SDK sets the marker 60 s ahead when it queues an auto-refresh and
+changes it only when that refresh finishes, so a refresh whose exchange
+outlives the 60 s, as after a start stalled that long, still has its marker
+(`TestSDKRefreshThatBeganBeforeTheGuardAndOutlivedItsMarkerIsNotResent`).
+The marker can also be the SDK's 30 s pause after a refresh that returned a
+token that is still due. The SDK refreshes that token again after the
+pause, so recording it costs at most failed reads until that refresh lands.
+For a refresh the guard did not see, the SDK's failure record on the
+credential (`LastError`) tells the router that it failed. While that credential's old token is current its
 reading stays unknown, so no inference runs on the account, and a failure
 record can only come from the refresh.
 
 **The router never sends a refresh token that an earlier exchange sent and
 did not get back.** That covers a token whose exchange failed or ended
 unknown, and a token whose rotation the SDK did not install. It holds in
-every interleaving with the SDK's refreshes, because the check runs under
-the SDK's refresh lock on the credential the exchange would send. The SDK's
-own refreshes pass the guard unchanged: its auto-refresh retries a failed
-refresh token after its backoff, and its request-time 401 path refreshes
-without a pending marker. If the SDK ever registers a new Claude executor
-in place of the guard, the router stops refreshing and its reads of a due or
-refused credential fail.
+every interleaving with the SDK's refreshes in which two properties hold:
+every refresh takes the SDK's per-credential refresh lock and then looks up
+the registered Claude executor, and the guard is that executor. The check
+then runs under the lock on the credential the exchange would send. The
+SDK's own refreshes pass the guard unchanged: its auto-refresh retries a
+failed refresh token after its backoff, and its request-time 401 path
+refreshes without a pending marker.
+
+If the SDK registers a new Claude executor in place of the guard, the
+router stops refreshing and its reads of a due or refused credential fail.
+The router checks the registration after the start reads and before each
+refresh it starts, and logs `refresh_guard_replaced` the first time it
+finds the guard replaced. The check before a refresh is not atomic with the
+SDK's executor lookup: a replacement between the two lets that one refresh
+run without the guard. With the router's SDK configuration, only the SDK's
+startup model sync registers a Claude executor once the SDK has started,
+and it runs during the startup quiet period (row RP-20).
+
+The guard forwards the Claude executor's refresh, request, and request
+preparation methods, but not `ForAPIKey`. The SDK calls `ForAPIKey` only
+for an API-key credential (`executorForAuth`), and the router enrolls OAuth
+credentials only, so the SDK never needs it here.
 
 A failed refresh, the router's or the SDK's, starts a failure run that lasts
 until the access token changes. The guard reports the SDK's failures. During
@@ -991,13 +1013,14 @@ SDK's refresh failed first. An inference error the SDK records on the
 credential does not start a run.
 
 The rule has one cost. When an access token is refused (usage 401) before it
-is due and the router's refresh of it fails, nothing refreshes it until the
-token enters the SDK's 4-hour lead: the SDK does not refresh a token that is
-not due, and the router does not resend the failed refresh token. Until
-then the account is refused once its reading goes stale, unless an
-inference request that the fresh reading still allows gets a 401 and the
-SDK's request-time refresh renews the credential. For an 8-hour token the
-outage is under 4 hours.
+is due, and a refresh of it fails or ends unknown, the router's or the
+SDK's, nothing refreshes it until the token enters the SDK's 4-hour lead:
+the SDK does not refresh a token that is not due, and the router does not
+resend the refresh token. Until then the account is refused once its
+reading goes stale, unless an inference request that the fresh reading
+still allows gets a 401 and the SDK's request-time refresh renews the
+credential. For an 8-hour token the outage lasts under 4 hours, plus the
+SDK's refresh and the next read (up to `overage_check_every`).
 
 One read sends at most two usage requests and starts at most one refresh.
 A refresh is one call to the executor's token exchange, which posts to the
@@ -1032,12 +1055,18 @@ or a refresh the guard declined on a spent token, carries the detail
 `TestSDKRefreshThatFailsDuringTheWaitFailsTheReadAtOnce`,
 `TestInferenceErrorDuringAPendingSDKRefreshDoesNotFailTheRead`,
 `TestFailureRunEndsWhenTheAccessTokenChanges`,
-`TestRouterDoesNotRefreshWhenTheGuardIsNotTheSDKExecutor`,
+`TestRouterRefreshesOnlyWhileTheGuardIsTheSDKExecutor`,
+`TestSDKRefreshThatBeganBeforeTheGuardAndFailsFailsTheReadAtOnce`,
+`TestSDKRefreshThatBeganBeforeTheGuardAndOutlivedItsMarkerIsNotResent`,
 `TestRefreshGuardDeclinesRouterRefreshesOfSpentTokens`). The service tests replace only
 the token exchange behind the guard, so the SDK's refresh lock, refresh loop,
 auth state, and file store, and the guard, all run. Their fake exchange
 fails a test when a refresh the router started sends a refresh token whose
-exchange failed.
+exchange failed. In the tests of a refresh queued behind the SDK's, the
+SDK's exchange waits until the test releases it, and the test fails unless
+the router's read is still waiting for the refresh lock 500 ms after it
+began. The two tests that wait out the SDK's real 60 s marker run in
+parallel.
 
 A failed read (an error status, a transport error, an unreadable answer, a
 failed refresh, or a 401 after the refresh) schedules a re-read. After the
@@ -1180,7 +1209,7 @@ tested offline. PR1 lane 4 (CC-1) measures cache reads with real requests.
 `events.jsonl` in the state directory holds one JSON object per event:
 `request`, `attempt_failed`, `migrated`, `served`, `paid_use_observed`,
 `overage_read`, `client_auth_rejected`, `request_rejected`, `started`,
-`stopped`, and `test_upstream_in_use`. Events carry account IDs, the first 12
+`stopped`, `test_upstream_in_use`, and `refresh_guard_replaced`. Events carry account IDs, the first 12
 hex digits of the SHA-256 of the conversation key, statuses, classes,
 decisions, durations, and, on `request`, the usage counters the upstream
 reported. A counter the upstream did not report is `null`, not 0.
