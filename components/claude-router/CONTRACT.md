@@ -403,7 +403,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | RP-5 | Single-attempt posture makes one upstream attempt per call, for credentials without a refresh token | passed | `TestPinnedExecutorPostureMakesOneAttemptPerCall` | PR1 |
 | RP-5b | Single-attempt posture for credentials with a refresh token | blocked | A 401 triggers refresh and a same-auth redispatch (`conductor_stream.go:253-263`). The refresh dials `platform.claude.com`, so no offline probe can serve it. The PR3 service also reads the paid-overflow setting with the account's credential before dispatch. A forced invalid token fails that read with 401; the service then refreshes the credential once and reads again, so the inference that follows runs on the refreshed token and does not take the redispatch path. The path runs only when a token expires between the reading and a request. | Live observation when a token expires in service (PR4 or PR5 lanes), or an SDK seam for the refresh client |
 | RP-6 | A rotated credential reloaded from the auth directory keeps its account and auth ID, after a quiet period | passed | `TestRotatedCredentialKeepsAccount` | PR1 |
-| RP-7 | SDK-initiated OAuth refresh keeps the account | blocked | The Claude refresh client dials `platform.claude.com` directly. Needs the attended live lane or an SDK transport seam. Source: `conductor_refresh.go:561` updates the same auth ID. Offline, a credential renewed by restart keeps its auth ID and account (`TestRotatedCredentialAppliesAtRestartOnTheSameAccount`, lane 2 `renewal_keeps_account`), and a refresh the router forces through the SDK's auth manager, with a fake token exchange, keeps the account (`TestExpiredCredentialAtStartIsRefreshedBeforeTheSettingsRead`). The live lane at `fb17a64` refreshed a token at start and persisted it, but the start read raced the refresh and got 401, so the step stopped before inference (`evidence/PR3/lane-1/`). | PR3 attended live lane (`reports/PR3-live-runbook.md`): a refreshed credential keeps its auth ID and pinned account |
+| RP-7 | SDK-initiated OAuth refresh keeps the account | blocked | The Claude refresh client dials `platform.claude.com` directly. Needs the attended live lane or an SDK transport seam. Source: `conductor_refresh.go:561` updates the same auth ID. Offline, a credential renewed by restart keeps its auth ID and account (`TestRotatedCredentialAppliesAtRestartOnTheSameAccount`, lane 2 `renewal_keeps_account`), and a refresh through the SDK's own refresh path, with only the executor's token exchange replaced, keeps the account (`TestReadOfADueCredentialWaitsForTheSDKRefresh`, `TestUnauthorizedSettingsReadRefreshesOnceAndReadsAgain`). The live lane at `fb17a64` refreshed a token at start and persisted it, but the start read raced the refresh and got 401, so the step stopped before inference (`evidence/PR3/lane-1/`). | PR3 attended live lane (`reports/PR3-live-runbook.md`): a refreshed credential keeps its auth ID and pinned account |
 | RP-8 | Configuration applied at startup does not change pinned selection | passed | `TestConfigApplyKeepsPinnedSelection`, six configurations | PR1 |
 | RP-9 | An added account does not change pinned selection, after a quiet period | passed | `TestAccountReloadKeepsPinnedSelection` | PR1 |
 | RP-10 | Configuration hot reload is safe while serving | failed | SDK data race. Pinned selection held in all 20 runs. `evidence/PR1/sdk/reload-race.log`, `reload-norace.log`. Contract: restart instead of hot reload. | Closed by PR3: the service runs the SDK without a file watcher and applies configuration only by restart. `TestRestartKeepsBindings` and lane 2 (`config_change_keeps_bindings`, `config_change_applies`) show a changed configuration takes effect after restart with bindings unchanged. `TestAccountFileAddedWhileServingIsNotLoaded` shows nothing is loaded while serving |
@@ -937,35 +937,77 @@ A read never uses an access token that the SDK is about to replace. The SDK
 revokes the old access token when it refreshes, so a read that races the
 SDK's refresh gets 401. The live lane hit this race on a start with an
 expired credential. When the credential expires within the SDK's refresh
-lead (4 hours for Claude, the SDK's own test in `Manager.shouldRefresh`),
-the read waits up to 3 s for a refresh the SDK has pending. If that refresh
-does not land, the router refreshes through the SDK
-(`Manager.ForceRefreshAuth`), which runs after any SDK refresh still in
-flight. After a 401 on a credential the router did not just refresh, the
-read uses the SDK's newer token if there is one, or refreshes once, and
-reads once more. One read sends at most two usage requests and starts at
-most one refresh. Each refresh, and each refresh by the SDK that a read
-waited for, records a `credential_refresh` event with its reason
-(`expiring` or `unauthorized`) and outcome (`refreshed`, `sdk_refreshed`,
-or `failed`). The event carries no token and no error text
-(`TestExpiredCredentialAtStartIsRefreshedBeforeTheSettingsRead`,
-`TestUnauthorizedSettingsReadRefreshesOnceAndReadsAgain`).
+lead (4 hours for Claude, the SDK's own test in `Manager.shouldRefresh`), or
+the usage endpoint answers 401, the read renews the credential:
 
-A failed read (an error status, a transport error, an unreadable answer, or
-a 401 after the refresh) schedules a re-read. The n-th failure in a row
-waits 5 s x 2^(n-1), or the endpoint's `Retry-After` when that is longer,
-capped at half of `overage_check_every`. A run of failures adds at most 6
-re-reads. After them the account is read once per `overage_check_every`
-until a read succeeds, and a success resets the count. With the defaults,
+- If the SDK already installed a newer access token, the read uses it.
+- If the SDK has a refresh pending (`NextRefreshAfter` in the future), the
+  read waits up to 3 s for it. If the refresh lands, the read uses the new
+  token. If it finishes without a new token, it failed. If it is still
+  running after 3 s, the read fails and a re-read follows (below).
+- Otherwise the router refreshes through the SDK
+  (`Manager.ForceRefreshAuth`), which takes the SDK's per-credential refresh
+  lock.
+
+A failed refresh, the router's or the SDK's, starts a failure run that lasts
+until the access token changes. The SDK marks its failure with `LastError`
+and a retry backoff in `NextRefreshAfter` (5 minutes, or 1 to 30 minutes for
+an invalid grant). During the run a read fails at once: it neither waits for
+the SDK nor refreshes, and the SDK's own retries pace the next exchange. The
+router therefore starts at most one refresh per failure run, the one that
+starts it, and starts none when the SDK's refresh failed first. It never
+resends a refresh token whose exchange failed. An inference error that the
+SDK recorded on the credential while a refresh is pending looks the same as
+a failed refresh; the read then fails closed, and the next read finds the
+new token.
+
+One read sends at most two usage requests and starts at most one refresh.
+A refresh is one call to the executor's token exchange, which posts to the
+token endpoint up to 3 times on transport errors and 5xx answers, 1 s and 2 s
+apart. The SDK gives each post its own 30 s timeout. The router's 30 s cap on
+its own refresh stops further posts but not one in progress. Neither cap
+covers the wait for the SDK's per-credential refresh lock: a refresh the
+router starts while the SDK refreshes the same credential without a pending
+marker (the SDK's request-time 401 path) waits for that refresh, which can
+hold the lock for about 93 s with three slow posts. So a read has no fixed
+wall-clock bound. The start reads' 15 s limit ends their waits and usage
+requests, but not a refresh in progress.
+
+Each refresh the router starts, each SDK refresh that a read waited for or
+found, and the first failure of a failure run record a `credential_refresh`
+event with its reason (`expiring` or `unauthorized`) and outcome
+(`refreshed`, `sdk_refreshed`, or `failed`). A failure the SDK's refresh
+reported carries the detail `sdk refresh`. The event carries no token and no
+error text (`TestReadOfADueCredentialWaitsForTheSDKRefresh`,
+`TestReadDoesNotRefreshWhileTheSDKRefreshIsRunning`,
+`TestRouterRefreshesADueCredentialTheSDKHasNotQueued`,
+`TestReadThatRefreshedDoesNotRefreshAgainAfterA401`,
+`TestUnauthorizedReadUsesTheTokenTheSDKInstalledDuringTheRead`,
+`TestUnauthorizedSettingsReadRefreshesOnceAndReadsAgain`,
+`TestFailedSDKRefreshIsNotRepeatedByReads`,
+`TestRouterRefreshIsNotRepeatedAfterItFails`). These tests replace only the
+token exchange of the SDK's Claude executor, after start, so the SDK's
+refresh lock, refresh loop, auth state, and file store all run.
+
+A failed read (an error status, a transport error, an unreadable answer, a
+failed refresh, or a 401 after the refresh) schedules a re-read. After the
+n-th failed read in a row, scheduled or on demand, the re-read waits
+5 s x 2^(n-1), or the endpoint's `Retry-After` when that is longer, capped
+at half of `overage_check_every`. A run of failed reads adds at most 6 re-reads. After
+them the account is read once per `overage_check_every` until a read
+succeeds. A success, scheduled or on demand, ends the run, and the next
+scheduled read comes one `overage_check_every` after it. With the defaults,
 the re-reads come 5, 10, 20, 40, 80, and 160 s apart, and an account sends
 at most 14 usage requests and starts at most 7 refreshes in the 10 minutes
 after a failed read, then at most 2 usage requests and 1 refresh per 10
-minutes. On-demand reads add at most one read per 30 s while a request
-waits on the account
+minutes. During a failure run of refreshes the router starts none after the
+first. On-demand reads add at most one read per 30 s while a request waits
+on the account
 (`TestRateLimitedStartReadIsReadAgainAfterRetryAfter`,
-`TestPersistentUnauthorizedReadStaysUnknownWithBoundedReads`). The live
-lane got 429 on the seventh start in 40 s; before this schedule, the
-account stayed unknown until the next 10-minute read.
+`TestPersistentUnauthorizedReadStaysUnknownWithBoundedReads`,
+`TestSuccessfulRecheckEndsTheRunOfFailedReads`). The live lane got 429 on
+the seventh start in 40 s; before this schedule, the account stayed unknown
+until the next 10-minute read.
 
 Timestamp rule (PR2 item N11): the upstream makes a reading at an unknown
 time between the start of the read or attempt and its arrival. A `disabled`
