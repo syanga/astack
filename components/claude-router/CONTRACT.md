@@ -1027,8 +1027,10 @@ or a refresh the guard declined on a spent token, carries the detail
 `TestDueReadUsesTheTokenTheSDKInstalledWhileItWaitedForTheLock`,
 `TestSDKRefreshThatFailsDuringTheWaitFailsTheReadAtOnce`,
 `TestInferenceErrorDuringAPendingSDKRefreshDoesNotFailTheRead`,
-`TestFailureRunEndsWhenTheAccessTokenChanges`). These tests replace only the
-token exchange behind the guard, so the SDK's refresh lock, refresh loop,
+`TestFailureRunEndsWhenTheAccessTokenChanges`,
+`TestRouterDoesNotRefreshWhenTheGuardIsNotTheSDKExecutor`,
+`TestRefreshGuardDeclinesRouterRefreshesOfSpentTokens`). The service tests replace only
+the token exchange behind the guard, so the SDK's refresh lock, refresh loop,
 auth state, and file store, and the guard, all run. Their fake exchange
 fails a test when a refresh the router started sends a refresh token whose
 exchange failed.
