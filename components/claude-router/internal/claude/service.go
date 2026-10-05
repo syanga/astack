@@ -246,7 +246,8 @@ func (s *Service) Close() {
 // one read per OverageCheckEvery, and after failed reads a re-read with
 // backoff (nextRead). Every read, scheduled or on demand, counts toward the
 // run of failed reads, and the next scheduled read is timed from the last
-// read of either kind. It records each read's wall time for catchUp.
+// read of either kind. It records the wall time of each scheduled read for
+// catchUp.
 func (s *Service) readOverage(ctx context.Context, account router.AccountID) {
 	defer s.bgDone.Done()
 	every := time.Duration(s.cfg.OverageCheckEvery)
