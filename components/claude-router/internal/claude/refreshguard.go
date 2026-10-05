@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
-	"time"
 
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
@@ -60,8 +59,12 @@ func routerRefreshOf(ctx context.Context) (string, bool) {
 
 // installRefreshGuard registers the guard in place of the SDK's Claude
 // executor. An SDK refresh that began before it runs on the old executor, so
-// the guard treats the refresh token of a credential with a refresh pending
+// the guard treats the refresh token of a credential with a refresh marker
 // as spent and unseen, and of one whose refresh failed as failed.
+//
+// The SDK's auto-refresh job sets NextRefreshAfter 60 s ahead when it is
+// queued and changes it only when the job finishes, so an exchange that
+// outlives the 60 s leaves an expired marker that is still set.
 func installRefreshGuard(core *coreauth.Manager, authIDs []string) (*refreshGuard, error) {
 	inner, ok := core.Executor("claude")
 	if !ok {
@@ -69,13 +72,12 @@ func installRefreshGuard(core *coreauth.Manager, authIDs []string) (*refreshGuar
 	}
 	g := &refreshGuard{ProviderExecutor: inner, exchange: inner.Refresh, spent: map[string][]spentToken{}}
 	core.RegisterExecutor(g)
-	now := time.Now()
 	for _, id := range authIDs {
 		a, ok := core.GetByID(id)
 		if !ok || a == nil {
 			continue
 		}
-		if a.LastError != nil || a.NextRefreshAfter.After(now) {
+		if a.LastError != nil || !a.NextRefreshAfter.IsZero() {
 			g.mu.Lock()
 			g.spendLocked(id, refreshToken(a), a.LastError != nil)
 			g.findLocked(id, refreshToken(a)).unseen = a.LastError == nil
