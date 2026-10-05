@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+
 	"github.com/syanga/astack/components/claude-router/internal/router"
 )
 
@@ -57,6 +59,12 @@ func TestStartWithEnrolledAccountsUnderLoad(t *testing.T) {
 			t.Fatalf("round %d: bindings %v changed from %v across restart", round, now, bound)
 		}
 		bound = now
+		if ex, _ := e.svc.core.Executor("claude"); ex != coreauth.ProviderExecutor(e.svc.guard) {
+			t.Fatalf("round %d: the refresh guard is not the SDK's Claude executor after start and load", round)
+		}
+		if n := e.eventCount("refresh_guard_replaced"); n != 0 {
+			t.Fatalf("round %d: refresh_guard_replaced events %d, want 0", round, n)
+		}
 		if rotated != "" {
 			for _, s := range e.upstream.inference() {
 				if s.Account == "acct-a" && s.Token != rotated && s.At.After(e.svc.started) {

@@ -76,19 +76,47 @@ func TestRefreshGuardDeclinesRouterRefreshesOfSpentTokens(t *testing.T) {
 	}
 }
 
-func TestRouterDoesNotRefreshWhenTheGuardIsNotTheSDKExecutor(t *testing.T) {
+func TestRouterRefreshesOnlyWhileTheGuardIsTheSDKExecutor(t *testing.T) {
 	e := newEnv(t, "acct-a")
 	x := &tokenExchange{up: e.upstream, account: "acct-a", accept: true}
 	e.startWithoutSDKRefresh(x)
-	e.svc.core.RegisterExecutor(e.svc.guard.ProviderExecutor)
+	guard := e.svc.guard
+	e.svc.core.RegisterExecutor(guard.ProviderExecutor)
 
 	e.recheckNow(31 * time.Minute)
+	refused := []result{e.send(msg{Session: sessionID(1)})}
+	e.recheckNow(31 * time.Second)
+	refused = append(refused, e.send(msg{Session: sessionID(1)}))
+	exchangesWithoutGuard := x.exchanges(t)
+	e.svc.core.RegisterExecutor(guard)
+	e.recheckNow(31 * time.Second)
 	r := e.send(msg{Session: sessionID(1)})
 
-	if r.Status != http.StatusServiceUnavailable || len(e.upstream.inference()) != 0 {
-		t.Fatalf("got %d with %d inference attempts, want 503 and none", r.Status, len(e.upstream.inference()))
+	for i, refused := range refused {
+		if refused.Status != http.StatusServiceUnavailable {
+			t.Fatalf("send %d without the guard got %d, want 503", i, refused.Status)
+		}
 	}
-	if n := e.refreshEvents("refreshed"); n != 0 {
-		t.Fatalf("router refreshes %d, want 0 without the guard", n)
+	if exchangesWithoutGuard != 0 {
+		t.Fatalf("token exchanges %d without the guard, want 0", exchangesWithoutGuard)
 	}
+	if n := e.eventCount("refresh_guard_replaced"); n != 1 {
+		t.Fatalf("refresh_guard_replaced events %d, want 1", n)
+	}
+	if r.Status != 200 || r.Text != served("acct-a") {
+		t.Fatalf("with the guard registered again got %d %q, want 200 from acct-a", r.Status, r.Text)
+	}
+	if n, m := x.exchanges(t), e.refreshEvents("refreshed"); n != 1 || m != 1 {
+		t.Fatalf("token exchanges %d and router refreshes %d with the guard, want 1 and 1", n, m)
+	}
+}
+
+func (e *env) eventCount(kind string) int {
+	n := 0
+	for _, ev := range e.events() {
+		if ev.Kind == kind {
+			n++
+		}
+	}
+	return n
 }

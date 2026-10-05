@@ -69,6 +69,8 @@ type Service struct {
 	started time.Time
 	seq     atomic.Int64
 	closed  atomic.Bool
+
+	guardReplaced atomic.Bool
 }
 
 // Start validates the configuration and credentials, starts the SDK with the
@@ -149,6 +151,7 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	}
 	wg.Wait()
 	cancelReads()
+	s.guardRegistered()
 
 	bg, cancel := context.WithCancel(context.Background())
 	s.bgStop = cancel
@@ -167,6 +170,19 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	go func() { _ = s.server.Serve(ln) }()
 	s.events.emit(Event{Kind: "started", Detail: fmt.Sprintf("%d accounts", len(cfg.Accounts))})
 	return s, nil
+}
+
+// guardRegistered reports whether the refresh guard is still the SDK's
+// Claude executor. The router refreshes only through the guard. The first
+// time the guard is found replaced, the service logs refresh_guard_replaced.
+func (s *Service) guardRegistered() bool {
+	if ex, _ := s.core.Executor("claude"); ex == coreauth.ProviderExecutor(s.guard) {
+		return true
+	}
+	if s.guardReplaced.CompareAndSwap(false, true) {
+		s.events.emit(Event{Kind: "refresh_guard_replaced"})
+	}
+	return false
 }
 
 // Addr is the client-facing address.

@@ -293,7 +293,7 @@ func (o *overageReader) renew(ctx context.Context, account router.AccountID, aut
 	if ctx.Err() != nil {
 		return nil, false, errors.New("the read was canceled before the refresh")
 	}
-	if ex, _ := o.s.core.Executor("claude"); ex != coreauth.ProviderExecutor(o.s.guard) {
+	if !o.s.guardRegistered() {
 		return nil, false, errors.New("the refresh guard is not the SDK's Claude executor")
 	}
 	start := o.s.now()
