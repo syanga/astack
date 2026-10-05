@@ -50,7 +50,9 @@ func (a accountView) state() AccountState {
 }
 
 // needsWrite reports whether cur differs from the saved state in anything
-// but a disabled check that advanced by less than checkPersistEvery.
+// but a disabled check that advanced by less than checkPersistEvery, or a
+// rejection with a known reset that was observed again later. A saved
+// rejection's older time changes nothing before its reset.
 func needsWrite(saved, cur AccountState) bool {
 	advanced := cur.Check == OverageDisabled && saved.Check == OverageDisabled &&
 		cur.CheckAt.After(saved.CheckAt) && cur.CheckAt.Sub(saved.CheckAt) < checkPersistEvery
@@ -60,7 +62,7 @@ func needsWrite(saved, cur AccountState) bool {
 	return saved.NeedsLogin != cur.NeedsLogin || !saved.NeedsLoginAt.Equal(cur.NeedsLoginAt) ||
 		saved.Check != cur.Check || !saved.PaidUseAt.Equal(cur.PaidUseAt) ||
 		!slices.EqualFunc(saved.Rejections, cur.Rejections, func(x, y Rejection) bool {
-			return x.At.Equal(y.At) && x.Kind == y.Kind && x.Rejected == y.Rejected &&
+			return (x.At.Equal(y.At) || !x.ResetsAt.IsZero()) && x.Kind == y.Kind && x.Rejected == y.Rejected &&
 				x.ResetsAt.Equal(y.ResetsAt) && slices.Equal(x.Models, y.Models)
 		})
 }

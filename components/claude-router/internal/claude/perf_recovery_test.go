@@ -3,11 +3,15 @@
 // PR4.perf runs one controlled failure run against the service in this
 // tree: 16 conversations on two accounts, then one exhaustion event with a
 // five-second reset. The "partial" scenario exhausts acct-a only; the
-// "total" scenario exhausts both accounts. Each conversation is a waiting
-// client: it sleeps until the unified reset of a local 429, as Claude Code
-// does with CLAUDE_CODE_RETRY_WATCHDOG=1, and sends again. The run writes
-// its raw samples to CLAUDE_ROUTER_PERF_OUT/<CLAUDE_ROUTER_PERF_NAME>.json.
-// The same file runs in the parent tree for the baseline. Run:
+// "total" scenario exhausts both accounts. The event starts with one request
+// on the first conversation of each exhausted account, sent alone, so that
+// the router has read every rejection when the other conversations send:
+// from then on, any attempt on an exhausted account before its reset is one
+// the router made knowing it. Each conversation is a waiting client: it
+// sleeps until the unified reset of a local 429, as Claude Code does with
+// CLAUDE_CODE_RETRY_WATCHDOG=1, and sends again. The run writes its raw
+// samples to CLAUDE_ROUTER_PERF_OUT/<CLAUDE_ROUTER_PERF_NAME>.json. The same
+// file runs in the parent tree for the baseline. Run:
 //
 //	CLAUDE_ROUTER_PERF_OUT=DIR CLAUDE_ROUTER_PERF_NAME=head-1 \
 //	  go test -tags perfrecover -run TestRecoveryPerf -count=1 -v ./internal/claude
@@ -31,11 +35,6 @@ const (
 	recoveryConversations = 16
 	recoveryReset         = 5 * time.Second
 	recoveryDeadline      = 10 * time.Second
-	// knownAfter separates attempts the router dispatched before it could
-	// have read an account's first rejection from attempts it dispatched
-	// knowing it. Concurrent first requests reach the upstream within a few
-	// milliseconds of each other, before the first 429 returns.
-	knownAfter = 50 * time.Millisecond
 )
 
 // exhauster answers inference on an exhausted account with a 429 that
@@ -180,6 +179,26 @@ func runRecoveryScenario(t *testing.T, scenario string) scenarioResult {
 
 	res := scenarioResult{Scenario: scenario, ResetMS: ms(reset.Sub(t0)), AllWithinDeadline: true}
 	results := make([]conversationResult, len(sessions))
+	// The exhaustion event: the first conversation on each exhausted account
+	// sends one request alone. When its answer returns, the router has
+	// recorded every rejection that request met. Then every conversation,
+	// these two included, sends its next request at once.
+	known := map[string]time.Time{}
+	probes := []int{0}
+	if scenario == "total" {
+		probes = append(probes, 1)
+	}
+	for _, i := range probes {
+		e.send(msg{Session: sessions[i]})
+		now := time.Now()
+		x.mu.Lock()
+		for _, a := range x.seen {
+			if _, ok := known[a.Account]; a.Rejected && !ok {
+				known[a.Account] = now
+			}
+		}
+		x.mu.Unlock()
+	}
 	var wg sync.WaitGroup
 	for i, s := range sessions {
 		wg.Add(1)
@@ -199,18 +218,10 @@ func runRecoveryScenario(t *testing.T, scenario string) scenarioResult {
 	res.Conversations = results
 
 	x.mu.Lock()
-	firstRejection := map[string]time.Time{}
-	for _, a := range x.seen {
-		if a.Rejected {
-			if f, ok := firstRejection[a.Account]; !ok || a.end.Before(f) {
-				firstRejection[a.Account] = a.end
-			}
-		}
-	}
 	for _, a := range x.seen {
 		a.StartMS, a.EndMS = ms(a.start.Sub(t0)), ms(a.end.Sub(t0))
 		res.Attempts = append(res.Attempts, a)
-		if f, ok := firstRejection[a.Account]; ok && a.start.After(f.Add(knownAfter)) && a.start.Before(x.until[a.Account]) {
+		if k, ok := known[a.Account]; ok && a.start.After(k) && a.start.Before(x.until[a.Account]) {
 			res.KnownExhaustedAttempts++
 		}
 	}
@@ -220,7 +231,7 @@ func runRecoveryScenario(t *testing.T, scenario string) scenarioResult {
 			continue
 		}
 		res.Migrations++
-		if f, ok := firstRejection[string(ev.From)]; !ok || ev.At.Before(f) {
+		if _, exhausted := x.until[string(ev.From)]; !exhausted {
 			res.HealthyMigrations++
 		}
 	}
