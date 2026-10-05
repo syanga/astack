@@ -21,16 +21,19 @@ import (
 // lock, auth state, and file store, and through the guard. A successful
 // exchange revokes the old access token at the fake upstream, as the token
 // endpoint does, and rotates the refresh token. The new access token is
-// accepted only with accept set.
+// accepted only with accept set. With hold set, an exchange waits until hold
+// is closed.
 type tokenExchange struct {
 	up      *fakeUpstream
 	account string
 	delay   time.Duration
 	accept  bool
 	fail    bool
+	hold    chan struct{}
 
 	mu       sync.Mutex
 	calls    int
+	active   int
 	reused   int
 	resent   int
 	lastRT   string
@@ -54,9 +57,14 @@ func (x *tokenExchange) Refresh(ctx context.Context, a *coreauth.Auth) (*coreaut
 	if byRouter && x.failedRT[rt] {
 		x.resent++
 	}
-	delay, fail, accept := x.delay, x.fail, x.accept
+	x.active++
+	delay, fail, accept, hold := x.delay, x.fail, x.accept, x.hold
 	x.mu.Unlock()
+	defer x.set(func(x *tokenExchange) { x.active-- })
 	time.Sleep(delay)
+	if hold != nil {
+		<-hold
+	}
 	if fail {
 		x.mu.Lock()
 		if x.failedRT == nil {
@@ -100,6 +108,44 @@ func (x *tokenExchange) exchanges(t *testing.T) int {
 		t.Fatalf("%d refreshes the router started resent a refresh token whose exchange failed", x.resent)
 	}
 	return x.calls
+}
+
+// holdExchanges makes x's exchanges wait until release is called. The test
+// releases them at the latest when it ends.
+func (e *env) holdExchanges(x *tokenExchange) (release func()) {
+	e.t.Helper()
+	hold := make(chan struct{})
+	var once sync.Once
+	release = func() { once.Do(func() { close(hold) }) }
+	e.t.Cleanup(release)
+	x.set(func(x *tokenExchange) { x.hold = hold })
+	return release
+}
+
+func (e *env) waitExchanging(x *tokenExchange) {
+	e.t.Helper()
+	e.waitFor("an exchange is in flight", 10*time.Second, func() bool {
+		x.mu.Lock()
+		defer x.mu.Unlock()
+		return x.active == 1
+	})
+}
+
+// sendBehindTheHeldExchange sends a request whose on-demand read must
+// refresh, while a held exchange of the SDK's holds the credential's refresh
+// lock. The read has to wait for that lock: the test fails if the send
+// returns before release.
+func (e *env) sendBehindTheHeldExchange(release func()) result {
+	e.t.Helper()
+	sent := make(chan result, 1)
+	go func() { sent <- e.send(msg{Session: sessionID(1)}) }()
+	select {
+	case r := <-sent:
+		e.t.Fatalf("the send returned %d while the SDK's exchange held the refresh lock, want it to wait for the lock", r.Status)
+	case <-time.After(500 * time.Millisecond):
+	}
+	release()
+	return <-sent
 }
 
 // replaceTokenExchange puts x behind the router's refresh guard. Test
@@ -515,30 +561,28 @@ func (e *env) waitPending(account string) time.Time {
 
 // sdkRefreshWithoutMarker starts a refresh the way the SDK's request-time
 // 401 path does: under the credential's refresh lock and with no pending
-// marker. It returns once the refresh holds the lock.
-func (e *env) sdkRefreshWithoutMarker(x *tokenExchange, account string) <-chan struct{} {
+// marker. It returns once the refresh's exchange is in flight, held until
+// release.
+func (e *env) sdkRefreshWithoutMarker(x *tokenExchange, account string) (done <-chan struct{}, release func()) {
 	e.t.Helper()
-	done := make(chan struct{})
+	release = e.holdExchanges(x)
+	finished := make(chan struct{})
 	go func() {
-		defer close(done)
+		defer close(finished)
 		_, _ = e.svc.core.ForceRefreshAuth(context.Background(), e.svc.authIDs[router.AccountID(account)])
 	}()
-	e.waitFor("the SDK's refresh is exchanging", 5*time.Second, func() bool {
-		x.mu.Lock()
-		defer x.mu.Unlock()
-		return x.calls == 1
-	})
-	return done
+	e.waitExchanging(x)
+	return finished, release
 }
 
 func TestRouterRefreshQueuedBehindAFailingSDKRefreshSendsNoExchange(t *testing.T) {
 	e := newEnv(t, "acct-a")
-	x := &tokenExchange{up: e.upstream, account: "acct-a", delay: 1500 * time.Millisecond, fail: true}
+	x := &tokenExchange{up: e.upstream, account: "acct-a", fail: true}
 	e.startWithoutSDKRefresh(x)
-	sdk := e.sdkRefreshWithoutMarker(x, "acct-a")
+	sdk, release := e.sdkRefreshWithoutMarker(x, "acct-a")
 
 	e.recheckNow(31 * time.Minute)
-	r := e.send(msg{Session: sessionID(1)})
+	r := e.sendBehindTheHeldExchange(release)
 	<-sdk
 
 	if r.Status != http.StatusServiceUnavailable || len(e.upstream.inference()) != 0 {
@@ -554,12 +598,12 @@ func TestRouterRefreshQueuedBehindAFailingSDKRefreshSendsNoExchange(t *testing.T
 
 func TestDueReadUsesTheTokenTheSDKInstalledWhileItWaitedForTheLock(t *testing.T) {
 	e := newEnv(t, "acct-a")
-	x := &tokenExchange{up: e.upstream, account: "acct-a", delay: 1500 * time.Millisecond, accept: true}
+	x := &tokenExchange{up: e.upstream, account: "acct-a", accept: true}
 	e.startWithoutSDKRefresh(x)
-	sdk := e.sdkRefreshWithoutMarker(x, "acct-a")
+	sdk, release := e.sdkRefreshWithoutMarker(x, "acct-a")
 
 	e.recheckNow(31 * time.Minute)
-	r := e.send(msg{Session: sessionID(1)})
+	r := e.sendBehindTheHeldExchange(release)
 	<-sdk
 
 	if r.Status != 200 || r.Text != served("acct-a") {
@@ -575,19 +619,23 @@ func TestDueReadUsesTheTokenTheSDKInstalledWhileItWaitedForTheLock(t *testing.T)
 
 // The SDK's refresh job outlives its 60 s pending marker, so a read after
 // the marker finds no refresh pending and refreshes through the SDK, behind
-// the job.
+// the job. The test waits out the SDK's real marker; it runs in parallel
+// with the other test that does.
 func TestRouterRefreshAfterTheSDKMarkerExpiresSendsNoExchange(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t, "acct-a")
 	e.writeCredentialDueIn("acct-a", 3*time.Second)
 	e.clock.set(time.Now())
 	e.startWith(Options{ReadRetryBase: time.Hour})
-	x := &tokenExchange{up: e.upstream, account: "acct-a", delay: 65 * time.Second, fail: true}
+	x := &tokenExchange{up: e.upstream, account: "acct-a", fail: true}
+	release := e.holdExchanges(x)
 	e.replaceTokenExchange(x)
 	marker := e.waitPending("acct-a")
+	e.waitExchanging(x)
 	time.Sleep(time.Until(marker) + time.Second)
 
 	e.recheckNow(31 * time.Minute)
-	r := e.send(msg{Session: sessionID(1)})
+	r := e.sendBehindTheHeldExchange(release)
 
 	if r.Status != http.StatusServiceUnavailable || len(e.upstream.inference()) != 0 {
 		t.Fatalf("got %d with %d inference attempts, want 503 and none", r.Status, len(e.upstream.inference()))

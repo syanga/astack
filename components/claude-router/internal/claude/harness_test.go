@@ -130,10 +130,16 @@ func (e *env) start() *Service {
 	return e.startWith(Options{})
 }
 
+// startMu serializes the starts of parallel tests, because Start sets gin's
+// process-wide mode.
+var startMu sync.Mutex
+
 func (e *env) startWith(opts Options) *Service {
 	e.t.Helper()
 	opts.Upstream, opts.Now = e.upstream, e.clock.now
+	startMu.Lock()
 	svc, err := Start(e.cfg, opts)
+	startMu.Unlock()
 	if err != nil {
 		e.t.Fatalf("start: %v", err)
 	}
