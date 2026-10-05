@@ -35,6 +35,7 @@ func (s *Service) handler() http.Handler {
 	e.Use(preconnect, s.authenticate)
 	e.POST("/v1/messages", s.messages)
 	e.GET("/claude-router/status", s.status)
+	e.POST("/claude-router/move", s.move)
 	e.NoRoute(func(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "not_found_error", "claude-router serves POST /v1/messages only")
 	})
@@ -134,7 +135,7 @@ func (s *Service) messages(c *gin.Context) {
 	call := fmt.Sprintf("r%d", s.seq.Add(1))
 	budget := &atomic.Int32{}
 	upstream := 0
-	rechecked := false
+	rechecked := map[router.AccountID]bool{}
 	finish := func(kind string, account router.AccountID, d router.Decision, status int, out *outcome) {
 		dur := s.now().Sub(start).Milliseconds()
 		e := Event{Kind: kind, Conversation: conv, Account: account, Decision: d.Kind, Reason: string(d.Reason), Status: status, Attempt: req.Attempt, Attempts: upstream, Stream: &stream, DurationMS: &dur}
@@ -150,15 +151,7 @@ func (s *Service) messages(c *gin.Context) {
 
 	for step := 0; step < maxRoutingSteps; step++ {
 		now := s.now()
-		d, err := s.router.Decide(now, req)
-		if err == nil && d.Kind == router.Migrate && d.Reason == router.ReasonExhausted {
-			s.answerExhausted(c, now, d.From, id.Model)
-			finish("request", d.From, d, http.StatusTooManyRequests, nil)
-			return
-		}
-		if err == nil {
-			d, err = s.router.Route(now, req)
-		}
+		d, err := s.router.Route(now, req)
 		if err != nil {
 			finish("request", "", router.Decision{}, http.StatusServiceUnavailable, nil)
 			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: assignment journal unavailable; restart the router")
@@ -169,16 +162,22 @@ func (s *Service) messages(c *gin.Context) {
 		case router.Place, router.Dispatch, router.Retry:
 		case router.Migrate:
 			s.events.emit(Event{Kind: "migrated", Conversation: conv, Account: d.Account, From: d.From, Reason: string(d.Reason)})
+			if budget.Load() >= s.transport.limit {
+				s.answerWait(c, now, now.Add(time.Second), true, fmt.Sprintf("claude-router: this conversation moved from %s to %s; send the request again", d.From, d.Account))
+				finish("request", d.Account, d, http.StatusTooManyRequests, nil)
+				return
+			}
 		case router.Refuse:
-			if d.RecheckOverage && !rechecked {
-				rechecked = true
-				s.recheckOverage(c.Request.Context(), d.Account)
+			if d.RecheckOverage && s.recheckOverage(c.Request.Context(), d.Account, rechecked) {
 				continue
 			}
 			finish("request", d.Account, d, http.StatusServiceUnavailable, nil)
 			writeError(c, http.StatusServiceUnavailable, "api_error", s.refuseMessage(d))
 			return
 		case router.Wait:
+			if d.RecheckOverage && s.recheckOverage(c.Request.Context(), d.Account, rechecked) {
+				continue
+			}
 			s.answerWait(c, now, d.Until, d.ResetKnown, "claude-router: no account can serve this model now")
 			finish("request", "", d, http.StatusTooManyRequests, nil)
 			return
@@ -289,14 +288,25 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-func (s *Service) recheckOverage(ctx context.Context, account router.AccountID) {
-	if account != "" {
-		s.overage.recheck(ctx, account)
-		return
+// recheckOverage reads the setting of the account a decision relied on, or
+// of every account when the decision names none, once per client request
+// each. It reports whether it read any.
+func (s *Service) recheckOverage(ctx context.Context, account router.AccountID, done map[router.AccountID]bool) bool {
+	targets := []router.AccountID{account}
+	if account == "" {
+		targets = targets[:0]
+		for _, a := range s.cfg.Accounts {
+			targets = append(targets, a.ID)
+		}
 	}
-	for _, a := range s.cfg.Accounts {
-		s.overage.recheck(ctx, a.ID)
+	read := false
+	for _, a := range targets {
+		if !done[a] {
+			done[a], read = true, true
+			s.overage.recheck(ctx, a)
+		}
 	}
+	return read
 }
 
 // refuseMessage names the account and the reason. For an unknown reading it
@@ -350,11 +360,6 @@ func (s *Service) answerWait(c *gin.Context, now, until time.Time, known bool, p
 	c.Header("Retry-After", strconv.FormatInt(secs, 10))
 	body, _ := json.Marshal(map[string]any{"type": "error", "error": map[string]string{"type": "rate_limit_error", "message": msg}})
 	c.Data(http.StatusTooManyRequests, "application/json", body)
-}
-
-func (s *Service) answerExhausted(c *gin.Context, now time.Time, account router.AccountID, model string) {
-	until, known, _ := s.router.BlockedUntil(now, account, model)
-	s.answerWait(c, now, until, known, fmt.Sprintf("claude-router: account %s is exhausted and this build does not move conversations", account))
 }
 
 func (s *Service) dispatch(c *gin.Context, call, authID string, account router.AccountID, id Identity, body []byte, budget *atomic.Int32) outcome {
@@ -574,11 +579,14 @@ func (s *Service) markServed(conv router.ConversationID, account router.AccountI
 	return nil
 }
 
-// AccountStatus is one enrolled account in the status output.
+// AccountStatus is one enrolled account in the status output. NeedsLogin
+// and Rejections are the router's durable account state.
 type AccountStatus struct {
-	ID         router.AccountID `json:"id"`
-	Registered bool             `json:"registered"`
-	Overage    overageState     `json:"overage"`
+	ID         router.AccountID   `json:"id"`
+	Registered bool               `json:"registered"`
+	Overage    overageState       `json:"overage"`
+	NeedsLogin bool               `json:"needs_login"`
+	Rejections []router.Rejection `json:"rejections,omitempty"`
 }
 
 // Status is the status output. It holds no token, prompt, or header value.
@@ -593,10 +601,50 @@ func (s *Service) Status() Status {
 	ov := s.overage.snapshot()
 	bindings, _ := s.store.Bindings()
 	st := Status{Listen: s.addr, Conversations: len(bindings)}
-	for _, a := range s.cfg.Accounts {
-		st.Accounts = append(st.Accounts, AccountStatus{ID: a.ID, Registered: s.authIDs[a.ID] != "", Overage: ov[a.ID]})
+	for _, a := range s.router.AccountStates() {
+		st.Accounts = append(st.Accounts, AccountStatus{ID: a.ID, Registered: s.authIDs[a.ID] != "", Overage: ov[a.ID],
+			NeedsLogin: a.NeedsLogin, Rejections: a.Rejections})
 	}
 	return st
+}
+
+// move is the manual override: it binds an assigned conversation, named by
+// its session ID, to an enrolled account, whatever the account's quota or
+// login state, and records a manual migration.
+func (s *Service) move(c *gin.Context) {
+	var m struct {
+		Conversation string `json:"conversation"`
+		To           string `json:"to"`
+	}
+	body, _ := io.ReadAll(io.LimitReader(c.Request.Body, 1<<16))
+	if json.Unmarshal(body, &m) != nil || m.Conversation == "" || m.To == "" {
+		writeError(c, http.StatusBadRequest, "invalid_request_error", `claude-router: move takes {"conversation": SESSION_ID, "to": ACCOUNT}`)
+		return
+	}
+	conv, to := router.ConversationID(m.Conversation), router.AccountID(m.To)
+	b, ok, err := s.router.Lookup(conv)
+	if err == nil && !ok {
+		err = router.ErrUnassigned
+	}
+	if err == nil {
+		err = s.router.Move(s.now(), conv, to)
+	}
+	switch {
+	case errors.Is(err, router.ErrUnassigned):
+		writeError(c, http.StatusNotFound, "not_found_error", "claude-router: the conversation has no assignment")
+		return
+	case errors.Is(err, router.ErrFailed):
+		writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: assignment journal unavailable; restart the router")
+		return
+	case err != nil:
+		writeError(c, http.StatusBadRequest, "invalid_request_error", "claude-router: "+err.Error())
+		return
+	}
+	hash := conversationHash(conv)
+	if b.Account != to {
+		s.events.emit(Event{Kind: "migrated", Conversation: hash, Account: to, From: b.Account, Reason: string(router.ReasonManual)})
+	}
+	c.JSON(http.StatusOK, map[string]string{"conversation": hash, "from": string(b.Account), "account": string(to)})
 }
 
 func (s *Service) status(c *gin.Context) {

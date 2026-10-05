@@ -125,7 +125,7 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	}
 	policy := router.DefaultConfig()
 	policy.OverageFreshFor = time.Duration(cfg.OverageFreshFor)
-	if s.router, err = router.New(policy, cfg.Accounts, s.store); err != nil {
+	if s.router, err = router.Open(policy, cfg.Accounts, s.store, now()); err != nil {
 		return nil, err
 	}
 	s.overage = newOverageReader(s)

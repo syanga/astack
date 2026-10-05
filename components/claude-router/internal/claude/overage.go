@@ -159,6 +159,9 @@ func (o *overageReader) readLocked(ctx context.Context, account router.AccountID
 	stamp := readingStamp(state, begun, arrived)
 	o.s.router.ObserveOverage(account, state, stamp)
 	o.note(account, state, stamp, "settings")
+	if o.s.router.LoginConfirmed(account, begun) {
+		o.s.events.emit(Event{Kind: "login_confirmed", Account: account})
+	}
 	o.mu.Lock()
 	o.settle(account, nil)
 	o.mu.Unlock()
