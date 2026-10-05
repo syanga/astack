@@ -36,10 +36,13 @@ type refreshGuard struct {
 
 // spentToken is a refresh token an exchange sent and did not get back.
 // failed is set when that exchange returned an error, which includes an
-// exchange whose outcome at the token endpoint is unknown.
+// exchange whose outcome at the token endpoint is unknown. unseen is set
+// when the exchange may have run on the executor the guard replaced, so the
+// guard did not see how it ended.
 type spentToken struct {
 	hash   [sha256.Size]byte
 	failed bool
+	unseen bool
 }
 
 type routerRefreshKey struct{}
@@ -58,8 +61,7 @@ func routerRefreshOf(ctx context.Context) (string, bool) {
 // installRefreshGuard registers the guard in place of the SDK's Claude
 // executor. An SDK refresh that began before it runs on the old executor, so
 // the guard treats the refresh token of a credential with a refresh pending
-// as spent, and of one whose refresh failed as failed. Before the listener
-// opens no inference runs, so LastError comes only from a refresh.
+// as spent and unseen, and of one whose refresh failed as failed.
 func installRefreshGuard(core *coreauth.Manager, authIDs []string) (*refreshGuard, error) {
 	inner, ok := core.Executor("claude")
 	if !ok {
@@ -76,6 +78,7 @@ func installRefreshGuard(core *coreauth.Manager, authIDs []string) (*refreshGuar
 		if a.LastError != nil || a.NextRefreshAfter.After(now) {
 			g.mu.Lock()
 			g.spendLocked(id, refreshToken(a), a.LastError != nil)
+			g.findLocked(id, refreshToken(a)).unseen = a.LastError == nil
 			g.mu.Unlock()
 		}
 	}
@@ -109,12 +112,16 @@ func (g *refreshGuard) Refresh(ctx context.Context, a *coreauth.Auth) (*coreauth
 }
 
 // failed reports whether an exchange of the credential's refresh token
-// failed or ended unknown.
+// failed or ended unknown. For an exchange the guard did not see, the SDK's
+// failure record on the credential stands in. The SDK sets LastError for a
+// failed refresh and for a failed inference request; while the token from
+// before the guard is current, the account's reading stays unknown, so no
+// inference runs on it and LastError comes from the refresh.
 func (g *refreshGuard) failed(a *coreauth.Auth) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	s := g.findLocked(a.ID, refreshToken(a))
-	return s != nil && s.failed
+	return s != nil && (s.failed || s.unseen && a.LastError != nil)
 }
 
 func (g *refreshGuard) findLocked(id, rt string) *spentToken {
@@ -130,6 +137,7 @@ func (g *refreshGuard) findLocked(id, rt string) *spentToken {
 func (g *refreshGuard) spendLocked(id, rt string, failed bool) {
 	if s := g.findLocked(id, rt); s != nil {
 		s.failed = s.failed || failed
+		s.unseen = false
 		return
 	}
 	list := append(g.spent[id], spentToken{hash: sha256.Sum256([]byte(rt)), failed: failed})

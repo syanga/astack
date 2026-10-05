@@ -961,11 +961,15 @@ The guard declines it, with no exchange, when the credential's access token
 has changed since then or its refresh token is recorded. The decline is a
 `context.Canceled`, for which the SDK records no failure and no backoff. The
 router then reads the credential again: a new access token counts as the
-SDK's refresh, and the same one starts a failure run. A credential with a
-refresh pending or a failed refresh when the guard is registered has its
-refresh token recorded, because that refresh may have run on the executor
-the guard replaced. Before the guard and the listener exist no inference
-runs, so a failure recorded on the credential then came from a refresh.
+SDK's refresh, and the same one starts a failure run. The SDK's refresh of
+a credential that is due at start can begin before the guard exists, on the
+executor the guard replaces. So a credential with a refresh pending when the
+guard is registered has its refresh token recorded, and one whose refresh
+already failed has it recorded as failed. For a refresh the guard did not
+see, the SDK's failure record on the credential (`LastError`) tells the
+router that it failed. While that credential's old token is current its
+reading stays unknown, so no inference runs on the account, and a failure
+record can only come from the refresh.
 
 **The router never sends a refresh token that an earlier exchange sent and
 did not get back.** That covers a token whose exchange failed or ended
