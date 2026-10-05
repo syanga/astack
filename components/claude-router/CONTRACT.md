@@ -268,7 +268,8 @@ watcher started" log line, then adding accounts one at a time and waiting until
 account state stops changing (`Probe.WaitQuiet`). `WaitQuiet` and the log-line
 wait are test heuristics, not synchronization. The default suite passes under
 `-race` with that order. The hot-reload probe sits behind the `sdkreload` build
-tag. A rotation or account change while requests are in flight is unestablished
+tag. The PR3 service applies a rotation or account change only by restart,
+and the SDK's own refresh ran in a live `-race` build with no race reported
 (row RP-16). A router barrier on dispatch does not help with either race,
 because the racing accesses are between SDK goroutines. A router-owned restart
 to apply credential changes moves the rotation race into the startup race. An
@@ -390,7 +391,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | ID-3 | Parent linkage for subagents and nested subagents | passed | passed | `identity.json#rows[2]` | PR1 |
 | ID-4 | Binding key read before credential-specific rewriting | passed | passed | `identity.json#rows[3]` | PR1 |
 | ID-5 | A request without identity fails explicitly and is not retried | passed | passed | Client analogue: `runs/recovery-terminal-api-key-w-401-noretry`; `identity.json`, `missing_identity_policy`. The router's 400 is tested in PR3. | PR1 |
-| ID-6 | A fork links to its origin (informational; forks become new conversations) | failed | blocked | `identity.json#rows[4]`. Agent SDK: the `forkSession` path was not driven. | PR3: route a fork as a new conversation; no linkage check needed |
+| ID-6 | A fork links to its origin (informational; forks become new conversations) | failed | blocked | `identity.json#rows[4]`. Agent SDK: the `forkSession` path was not driven. | Closed by PR3: the router binds on the session header alone, so a fork is a new conversation (`TestAForkIsANewConversation`) |
 
 ### Retry ownership and pinning
 
@@ -401,21 +402,21 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | RP-3 | Bootstrap 401 and 403 do not fail over to another account | passed | `TestBootstrapAuthErrorsDoNotFailOver` | PR1 |
 | RP-4 | A pin to an unknown or cooling-down auth fails with 503 and selects no account | passed | `TestPinToUnknownAuthSelectsNothing`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover` | PR1 |
 | RP-5 | Single-attempt posture makes one upstream attempt per call, for credentials without a refresh token | passed | `TestPinnedExecutorPostureMakesOneAttemptPerCall` | PR1 |
-| RP-5b | Single-attempt posture for credentials with a refresh token | blocked | A 401 triggers refresh and a same-auth redispatch (`conductor_stream.go:253-263`). The refresh dials `platform.claude.com`, so no offline probe can serve it. Blocked with RP-7. | PR3: live lane with the attended login records the attempts on a forced 401 for a refresh-capable credential and accepts at most one same-account redispatch |
+| RP-5b | Single-attempt posture for credentials with a refresh token | blocked | A 401 triggers refresh and a same-auth redispatch (`conductor_stream.go:253-263`). The refresh dials `platform.claude.com`, so no offline probe can serve it. The PR3 service also reads the paid-overflow setting with the account's credential before dispatch. A forced invalid token fails that read with 401; the service then refreshes the credential once and reads again, so the inference that follows runs on the refreshed token and does not take the redispatch path. The path runs only when a token expires between the reading and a request. | Live observation when a token expires in service (PR4 or PR5 lanes), or an SDK seam for the refresh client |
 | RP-6 | A rotated credential reloaded from the auth directory keeps its account and auth ID, after a quiet period | passed | `TestRotatedCredentialKeepsAccount` | PR1 |
-| RP-7 | SDK-initiated OAuth refresh keeps the account | blocked | The Claude refresh client dials `platform.claude.com` directly. Needs the attended live lane or an SDK transport seam. Source: `conductor_refresh.go:561` updates the same auth ID. | PR3: live lane with the attended login shows a refreshed credential keeps its auth ID and pinned account |
+| RP-7 | SDK-initiated OAuth refresh keeps the account | passed | Live lane 1 rerun at `9b7e059` under `-race` (`evidence/PR3/lane-1-rerun/`): both accounts were due at start, the SDK refreshed them, the start reads logged `credential_refresh` `expiring` `sdk_refreshed` and read the setting, `refresh_sha256_12` and `last_refresh` changed for `work` (`rp7-before.json`, `rp7-after.json`), and step R8 served both accounts on their pinned conversations. The verifier ruled that `c95ae72` runs the same branches on that path (`reports/PR3-verify/c95ae72/receipt.md`, "Live equivalence"). The refresh guard adds no branch to it: a credential with a refresh pending at start is waited for, and the SDK's refresh passes the guard. Offline, a refresh through the SDK's own refresh path, with only the token exchange replaced, keeps the account (`TestReadOfADueCredentialWaitsForTheSDKRefresh`, `TestUnauthorizedSettingsReadRefreshesOnceAndReadsAgain`), and so does a credential renewed by restart (`TestRotatedCredentialAppliesAtRestartOnTheSameAccount`, lane 2 `renewal_keeps_account`). | PR3 |
 | RP-8 | Configuration applied at startup does not change pinned selection | passed | `TestConfigApplyKeepsPinnedSelection`, six configurations | PR1 |
 | RP-9 | An added account does not change pinned selection, after a quiet period | passed | `TestAccountReloadKeepsPinnedSelection` | PR1 |
-| RP-10 | Configuration hot reload is safe while serving | failed | SDK data race. Pinned selection held in all 20 runs. `evidence/PR1/sdk/reload-race.log`, `reload-norace.log`. Contract: restart instead of hot reload. | PR3: the service applies configuration only by restart; a probe shows a changed configuration takes effect after restart with pinned selection unchanged |
+| RP-10 | Configuration hot reload is safe while serving | failed | SDK data race. Pinned selection held in all 20 runs. `evidence/PR1/sdk/reload-race.log`, `reload-norace.log`. Contract: restart instead of hot reload. | Closed by PR3: the service runs the SDK without a file watcher and applies configuration only by restart. `TestRestartKeepsBindings` and lane 2 (`config_change_keeps_bindings`, `config_change_applies`) show a changed configuration takes effect after restart with bindings unchanged. `TestAccountFileAddedWhileServingIsNotLoaded` shows nothing is loaded while serving |
 | RP-11 | No SDK retry after partial stream output | passed | `TestNoAutomaticRetryAfterPartialOutput` (connection drop, in-stream overload) | PR1 |
 | RP-12 | An in-stream error before output is delivered, not retried, and the SDK reports success | passed | `TestInStreamOverloadBeforeOutputIsDeliveredNotRetried` | PR1 |
 | RP-14 | Transient, throttle, exhaustion, model-limit, and auth failures classify distinctly from per-call signals | passed | `TestFailureSignalsClassifyDistinctly`. Real header shapes are pending the live lanes. | PR1 |
-| RP-15 | The passive quota snapshot describes the failed call | failed | `TestQuotaSnapshotOutlivesAHeaderlessFailure`. Contract: classify from per-attempt headers. | PR3: classification reads only per-attempt headers; a probe classifies a headerless 429 after an exhaustion as throttle |
-| RP-16 | Credential rotation or an account-set change while requests are in flight is free of SDK races | blocked | Same reconciliation path as the startup race. The race is between two SDK goroutines, the update queue and model reconciliation, so a router barrier on dispatch cannot serialize it. Missing control: an upstream SDK fix, or a router-owned restart of the SDK service to apply credential changes. A restart turns this row into RP-20. | PR3: an upstream SDK fix, or restart-to-apply for credential changes (then closed with RP-20), with a `-race` probe that rotates under load |
+| RP-15 | The passive quota snapshot describes the failed call | failed | `TestQuotaSnapshotOutlivesAHeaderlessFailure`. Contract: classify from per-attempt headers. | Closed by PR3: `classify` reads only the call's own attempt headers at the router's transport. `TestHeaderlessThrottleAfterExhaustionRetries` classifies a headerless 429 after an exhaustion as throttle and retries on the same account |
+| RP-16 | Credential rotation or an account-set change while requests are in flight is free of SDK races | passed | Same reconciliation path as the startup race. PR3 removes that path while serving: without a file watcher, a credential or account change applies only by restart, which turns it into RP-20. `TestStartWithEnrolledAccountsUnderLoad` rotates a credential across restarts under concurrent load under `-race` (`evidence/PR3/rp20-e01433b/`). The SDK's own token refresh, which writes the auth while serving, ran live in lane 1 rerun at `9b7e059` under a `-race` build: the SDK refreshed both accounts at start, both were served, and the build reported 0 data races (`evidence/PR3/lane-1-rerun/race-count.txt`). The verifier's live-equivalence ruling for `c95ae72` and the guard's pass-through of SDK refreshes carry this to the current head. | PR3 |
 | RP-17 | The router's transport observes every upstream attempt and ties it to its call, with no proxy in effect | passed | `Upstream.AttemptsFor` assertions in `TestPinnedRetriesStayOnSelectedAccount`, `TestNonStreamingPinnedRetriesStayOnSelectedAccount`, `TestPinnedExecutorPostureMakesOneAttemptPerCall`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover`, `TestFailureSignalsClassifyDistinctly`. Streaming and non-streaming paths; the refresh redispatch path is RP-5b. | PR1 |
-| RP-18 | A router-supplied transport in place of the SDK's uTLS transport is accepted upstream | blocked | Needs the user's attended login for a live request | PR3: live lane with the attended login serves requests through the router transport without upstream rejection |
-| RP-19 | The SDK's request-scoped failures classify separately and are not retried | pending | `TestRequestScopedFailureClassifiesSeparately` covers the classifier only. The fake upstream does not reach the SDK's fast-mode path. PR3 adds the probe. | PR3: a probe drives the SDK fast-mode refusal and sees `request_scoped` with no retry |
-| RP-20 | Service startup with enrolled accounts is free of SDK data races | failed | `evidence/PR1/sdk/startup-race-before-mitigation.log`, `evidence/PR1/unit-6166c8c/go.log`. The racing accesses are SDK-internal, so a router barrier cannot serialize them. Missing control: an upstream SDK fix. The probes' startup order (an empty SDK auth directory until the watcher starts, then one credential at a time) lowers the odds but does not serialize the SDK's goroutines. | PR3: carry an upstream SDK fix, then a `-race` probe that starts with enrolled accounts passes repeatedly |
+| RP-18 | A router-supplied transport in place of the SDK's uTLS transport is accepted upstream | blocked | Needs the user's attended login for a live request | PR3 attended live lane (`reports/PR3-live-runbook.md`): serves requests through the router transport without upstream rejection |
+| RP-19 | The SDK's request-scoped failures classify separately and are not retried | passed | `TestRequestScopedRefusalIsReportedWithoutRetry` sends `"speed":"fast"` through the SDK executor. The upstream refuses with the fast-mode credits 429, the SDK returns a request-scoped error, and the router classifies it `request_scoped`, answers once with `x-should-retry: false`, and keeps the account usable. `TestRequestScopedErrorAfterASuccessfulAttemptIsNotSentAgain`: after an upstream 200, a request-scoped SDK error is answered once, with one upstream attempt. | PR3 |
+| RP-20 | Service startup with enrolled accounts is free of SDK data races | failed | `evidence/PR1/sdk/startup-race-before-mitigation.log`, `evidence/PR1/unit-6166c8c/go.log`. The racing accesses are SDK-internal, so a router barrier cannot serialize them. PR3 mitigation: no file watcher, so the SDK's auth-update consumer runs but nothing feeds it, and the client listener opens only after every account is registered and SDK account state has been quiet for 250 ms. `TestStartWithEnrolledAccountsUnderLoad` passed 50 of 50 starts under `-race`, each followed at once by 16 requests from 4 concurrent clients, with a credential rotated before each restart and no race reported (`evidence/PR3/rp20-e01433b/`; earlier runs `rp20-923bed9/` and `rp20-845ae3f/`). Each start in that test also checks that the refresh guard is still the SDK's Claude executor after the load. Residual: the SDK's token auto-refresh starts before startup model registration, so an access token that expired while the service was down can race it. The quiet period is a heuristic. | Upstream SDK fix, then the same probe passes repeatedly |
 
 | ID | Client behavior | Terminal | Agent SDK (T3) | Evidence | Owner |
 | --- | --- | --- | --- | --- | --- |
@@ -427,15 +428,15 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 
 | ID | Behavior | Terminal | Agent SDK (T3) | Evidence | Owner |
 | --- | --- | --- | --- | --- | --- |
-| IO-1 | Supported pre-request check or enforcement of disabled paid overflow, including changes outside the proxy | blocked | blocked | `included-only.json#rows[0]`, `missing_control`. Limit accepted under G1. | PR3 via IO-6 (limit accepted under G1) |
-| IO-2 | The client refuses to send after a response reports paid usage | failed | failed | `included-only.json#rows[1]` | PR3 via IO-6: the router stops routing on observed paid use |
-| IO-3 | The client tells missing overage data from disabled | failed | failed | `included-only.json#rows[2]` | PR3 via IO-6: the router treats missing overage data as unknown and refuses |
-| IO-4 | The setting is readable without a real login | blocked | blocked | `included-only.json#rows[3]`. Needs the user's attended real login. | PR3: live lane with the attended login reads the overage state at enrollment (IO-6) |
+| IO-1 | Supported pre-request check or enforcement of disabled paid overflow, including changes outside the proxy | blocked | blocked | `included-only.json#rows[0]`, `missing_control`. Limit accepted under G1. | Accepted limit under G1. The router control is IO-6 (passed at PR3) |
+| IO-2 | The client refuses to send after a response reports paid usage | failed | failed | `included-only.json#rows[1]` | Closed by router control IO-6 (PR3): the router stops routing to the account on that response (`TestPaidUseStopsRoutingToTheAccount`) |
+| IO-3 | The client tells missing overage data from disabled | failed | failed | `included-only.json#rows[2]` | Closed by router control IO-6 (PR3): missing data stays unknown and the router refuses (`TestUnknownOverageStateRefusesDispatch`) |
+| IO-4 | The setting is readable without a real login | blocked | blocked | `included-only.json#rows[3]`. Needs the user's attended real login. PR3 reads `extra_usage.is_enabled` from `GET /api/oauth/usage` at start; tested against a controlled fake only. | PR3 attended live lane (`reports/PR3-live-runbook.md`): the read returns `is_enabled` for each real account at enrollment |
 
 | ID | Contract behavior | Status | Evidence | Owner |
 | --- | --- | --- | --- | --- |
 | IO-5 | The remaining guarantee limit is stated | passed | `included-only.json`, `guarantee_limit`; "Included-only: the documented limit is accepted" above | PR1 |
-| IO-6 | The router refuses unknown or stale overage state and stops routing on observed paid use | pending | PR3 implements and tests both controls | PR3: probes refuse unknown or stale overage state and quarantine an account on a paid-use response |
+| IO-6 | The router refuses unknown or stale overage state and stops routing on observed paid use | passed | `TestUnknownOverageStateRefusesDispatch`, `TestAnAccountWithUnknownStateIsSkippedForPlacement`, `TestEnabledOverflowRefusesDispatch`, `TestStaleReadingIsRecheckedBeforeDispatch`, `TestResponseHeadersRefreshTheReading`, `TestPaidUseStopsRoutingToTheAccount`, `TestPaidUseWithoutAnotherAccountRefuses`. Paid-use detection needs every attempt to pass the router's transport: `TestCredentialsThatChangeTheUpstreamPathAreRefused` refuses a credential proxy or header override, and `TestTransportCapsAttemptsAndRefusesAnotherAccount` refuses an off-pin attempt; lane 2 `unsafe_account_not_placed`, `paid_use_stops_routing` (`evidence/PR3/lane-2/controls.json`). Controlled upstream only; the real usage endpoint is IO-4. | PR3 |
 
 ### Waiting and cancellation
 
@@ -744,3 +745,479 @@ with the defaults above, for 124 checks.
 | `06-restart-and-no-return` | The conversation stays on `acct-a` across a restart, 3 idle hours, and a model change. After exhaustion and another restart it stays on `acct-b` when `acct-a` recovers; a new conversation goes to `acct-a`. |
 | `07-auth-and-included-only` | With no verified account, a new conversation is refused with a recheck. An auth failure excludes `acct-a` from new placement. Its served conversation gets `reauth` and stays; its never-served conversation moves to `acct-b`. Paid use on `acct-b`, with `acct-a` logged out, refuses without moving; after relogin it moves to `acct-a` for `overage_observed`. A stale check on `acct-a` then refuses with a recheck and does not move, although `acct-b` is verified. |
 | `08-exhaustion-evidence` | A 429 with 10-minute-old evidence retries on `acct-a` and fails at attempt 4 without moving. Fresh evidence migrates to `acct-b`. A rejection with no reset waits inexactly until minute 17, then dispatches. |
+
+## Local service (PR3)
+
+PR3 adds the client-facing service in `internal/claude` and the
+`claude-router` command in `cmd/claude-router`. The service calls the PR2
+`Router` for every request. It has no placement logic of its own.
+
+### Start sequence
+
+`claude.Start(cfg, opts)` runs these steps in order and fails closed at each:
+
+1. Validate the configuration. `listen` must be a loopback IP and port. The
+   client token file must be mode 0600 and hold at least 32 characters.
+2. Check every enrolled credential, `auths/<id>.json` in the state directory.
+   It must be a Claude credential with an access token and mode 0600. After
+   `coreauth.NormalizeCredentialMetadata` rewrites aliases such as `proxy-url`,
+   it may hold only the keys the SDK's login and persistence write: `type`,
+   `email`, `access_token`, `refresh_token`, `id_token`, `last_refresh`,
+   `expired`, `refreshed`, `account_uuid`, `organization_uuid`,
+   `organization_name`, `claude_device_ids`,
+   `claude_account_profile_checked_at`, `skip_account_profile`, and `disabled`
+   set to false. Any other key, such as `proxy_url`, `base_url`, or `headers`,
+   refuses the start. The auth directory must hold no credential for an
+   account that is not enrolled.
+3. Open the assignment journal and build the `Router`.
+4. Write `sdk-config.yaml` with the executor posture: request retry 0,
+   bootstrap retries 0, cooling disabled, session affinity off,
+   `max-retry-credentials: 1`, no proxy at any level. The SDK server listens on
+   a private loopback port.
+5. Run the SDK with a no-op watcher (`cliproxy.WatcherWrapper{}`). The SDK
+   loads the enrolled credentials once, at start.
+6. Wait for the SDK's watcher-step log entry, then until every enrolled
+   account has an SDK auth with registered models and SDK account state has
+   not changed for 250 ms.
+7. Read each account's paid-overflow setting.
+8. Open the client listener.
+
+### Routes
+
+| Listener | Route | Answer |
+| --- | --- | --- |
+| Client | `POST /v1/messages` | The routed request. Every route first requires the client token as `x-api-key` or `Authorization: Bearer`, and removes both headers before the SDK sees the request. |
+| Client | `HEAD /api/hello` | 200 with no body, before authentication, with no upstream call and no event. Claude Code sends this preconnect probe without credentials at every start (`TestClaudeCodePreconnectIsAnsweredWithoutAuthentication`). Any other method or path without the client token gets 401. |
+| Client | `GET /claude-router/status` | Accounts, registration, the last paid-overflow reading and its source, and the number of bound conversations. |
+| Client | anything else, including `count_tokens` | 404 `not_found_error` |
+| SDK | every stock route behind the access manager | 401. The only SDK access provider is `claude-router-deny-all`, set as the exclusive provider. The management routes, including `/v0/management/api-call`, which selects credentials itself, exist only with a management secret. The configuration sets none, and the service refuses to start when `MANAGEMENT_PASSWORD` is set. WebSocket authentication (`ws-auth`) stays at its default, on. |
+
+### Identity
+
+`ResolveIdentity` reads `x-claude-code-session-id` from the raw request and
+`metadata.user_id.session_id` from the body, in the JSON form and the older
+`user_..._session_<id>` form. It answers 400 `invalid_request_error` with
+`x-should-retry: false` when the header is missing, when the body has no
+session to compare, or when the two disagree. Agent IDs are informational.
+
+The model is the body's `model`, except that an alias the Anthropic API
+accepts (`claude-sonnet-4-5`, `claude-haiku-4-5`, `claude-opus-4-5`,
+`claude-opus-4-1`, `claude-opus-4-0`, `claude-sonnet-4-0`) becomes the dated
+ID it names. The SDK's model registry lists only the dated IDs and refuses an
+alias without an upstream attempt. The upstream therefore receives the dated
+ID, and per-model state treats both names as one model
+(`TestModelAliasesTheAPIAcceptsAreServed`).
+
+### Routing loop
+
+For each request the service calls `Decide`. A `migrate` for `exhausted` is
+answered locally and nothing is committed. Any other decision goes to
+`Route`, which decides again and commits a placement or migration before it
+returns. A `Route` that decides an exhausted migration after the first
+`Decide` did not commits it, and the service then dispatches on the
+destination. A journal error answers 503. The service pins the SDK call with
+`handlers.WithPinnedAuthID` and tags the context with a call ID that the
+router's transport records. One routing step is one SDK call. With the
+executor posture, one SDK call is one upstream attempt, except the SDK's
+refresh redispatch (RP-5b).
+
+| Decision | Answer |
+| --- | --- |
+| `place`, `dispatch`, `retry`, and `migrate` for `overage_observed` or `never_served_relogin` | Dispatch on the bound account |
+| `migrate` for `exhausted` | Local 429. This build does not move a conversation on exhaustion. The reset is the assigned account's (`Router.BlockedUntil`). |
+| `wait` | Local 429 `rate_limit_error` with `anthropic-ratelimit-unified-status: rejected`, `anthropic-ratelimit-unified-reset`, and `retry-after` for the same delay. An unknown reset omits the reset header and sends `retry-after: 300`. |
+| `refuse` with `RecheckOverage` | Read the setting once, then decide again |
+| `refuse` | 503 `api_error`, `x-should-retry: false`, naming the account and the reason |
+| `reauth`, `unavailable` | 503 `api_error`, `x-should-retry: false`, naming `claude-router login`. An upstream 401 never reaches the client as 401. |
+| `fail` | 503 `api_error`, `x-should-retry: false` |
+| `reject` | 400 `invalid_request_error`, `x-should-retry: false` |
+
+A failure before output goes to `Router.Report` with the class from
+`classify`. It reads the status and headers of the call's last attempt at
+the transport, and the SDK error's status and scope:
+
+1. When the upstream answered that attempt with a 2xx status, the failure is
+   the SDK's own. A request-scoped error is then `request_scoped` before any
+   status check, so a generation the upstream already completed is never sent
+   again. The SDK gives such an error status 500 when it carries none
+   (`sdk/api/handlers/handlers_execution.go:358-361`).
+2. Otherwise the attempt failed, with an error status or with no response,
+   and the status decides first: 401 or 403 is `auth`, and 408 or 5xx is
+   `transient`, whatever the SDK's scope. The attempt's own status wins when
+   it is 400 or above; with no response, the SDK's status counts. In fast mode
+   the SDK marks every failure request-scoped, so this order keeps an upstream
+   401 from reaching the client as 401, and retries a dropped connection
+   (`TestFastModeConnectionFailureIsRetried`).
+3. Otherwise a request-scoped error is `request_scoped`. Either way it is
+   answered at once with the upstream status and message and
+   `x-should-retry: false`.
+4. A 429 is `exhausted`, `model_limit`, or `throttle` from the attempt's own
+   headers.
+
+Transient and throttle failures retry on the same account after 250 ms, then
+500 ms, up to `MaxAttempts`.
+
+One client request causes at most 4 upstream attempts. The router dispatches
+at most 3 times, and the SDK can add one same-account redispatch after a 401
+(RP-5b). The transport enforces the cap: it refuses a fifth attempt before
+sending it, and the service answers 503. It also refuses an attempt for any
+account but the one the call is pinned to. Before a response reaches the
+client, the service checks that the transport saw at least one attempt for
+the call, all on the pinned account, and otherwise answers 502.
+`max_upstream_attempts` lowers the cap to 1, 2, or 3. With 1 the router
+never retries, so upstream attempts equal client requests; the live lane
+uses this (`TestASingleAttemptCapNeverRetries`).
+
+The cap is per client HTTP request. Every router-made HTTP failure answer
+carries `x-should-retry: false`, which a client honors. Two answers do not
+stop client retries: an SSE `error` event after the response committed,
+which Claude Code 2.1.285 retries for `overloaded_error`, and the local 429,
+which clients wait through and resend. Each resend is a new request with its
+own cap. `CLAUDE_CODE_MAX_RETRIES=0` stops the client's HTTP retries but not
+its resend after an SSE `overloaded_error`: Claude Code 2.1.285 then sends the
+request 4 times in all (3 streaming, 1 non-streaming). A caller that needs a
+bound across requests counts requests in front of the client, as the live
+runbook's gate does.
+
+The router retries only a failure before output: an error status, an error
+event before any other event, or a connection that dropped before the first
+event. In the first two the upstream sent no output. A connection that drops,
+outside fast mode, may have dropped after the upstream began generating, and
+the retry can make it generate twice for one client request. Delivery of a
+dropped request is therefore at least once, not exactly once. A
+request-scoped SDK error after a 2xx attempt is final (rule 1 above).
+
+### Streams
+
+The service holds the response until the first complete SSE event. An
+`error` event first is a failure before output: `overloaded_error` and
+`api_error` are transient, `rate_limit_error` is throttle. An event without
+an `event:` line takes its name from the `type` field of its data, so a
+data-only error counts too. Any other first event, including `ping`,
+commits the response. An error after a `ping` therefore reaches the client,
+which retries it itself (`recovery.json`). After that the service relays every chunk,
+writes an `error` event if the SDK fails or if the stream ends without
+`message_stop`, and returns, which ends the chunked response cleanly. A client that goes away cancels the SDK call. The stream
+`stop_reason` and `message_stop` are relayed as received. A `stream: false`
+request, including the client's 300 s fallback, is the same conversation.
+
+### Served mark
+
+The service calls `Router.Served` for every successful response on a
+binding, subagent requests included: at the first `content_block_stop` of a
+stream, at `message_stop` for a stream without a content block, and before
+writing a non-streaming response. This answers PR2 item N13 (`TestSubagentSuccessMarksTheAssignmentServed`).
+This is the boundary where clients keep output (`recovery.json#rows[9]` to
+`#rows[13]`). `TestServedMarkFollowsTheFirstCompletedBlock` shows a cut
+before the first completed block leaves the assignment unmarked.
+
+This answers the N4 item above. The service scans each chunk before writing
+it, and `Served` returns, with the record synced, before the chunk that holds
+the first `content_block_stop` reaches the client. A non-streaming response
+is written after `Served` returns. A crash therefore cannot leave a completed
+block on the client with an unmarked assignment.
+`TestServedMarkIsOnDiskBeforeTheClientSeesTheCompletedBlock` reads the
+journal at the moment the client sees the block. If `Served` fails, the
+client gets an SSE `error` event in place of the completing chunk, or a 503
+for a non-streaming request, and the journal stops answering until restart
+(`TestServedMarkFailureStopsTheCompletedBlock`).
+
+### Paid-overflow reading
+
+The service reads `extra_usage.is_enabled` from
+`GET https://api.anthropic.com/api/oauth/usage` with the account's SDK
+credential (`Manager.NewHttpRequest`) through the router's transport. It
+sends `anthropic-beta: oauth-2025-04-20` and makes no inference request.
+`is_enabled: false` is `disabled`, `true` is `enabled`, and any other answer,
+including a missing `extra_usage` or a 401 that survives a refresh, leaves
+the state unknown, and an unknown state is refused. A usage-read 401 does not
+mark the account as needing login, because only a restart would clear the
+mark.
+
+A read never uses an access token that the SDK is about to replace. The SDK
+revokes the old access token when it refreshes, so a read that races the
+SDK's refresh gets 401. The live lane hit this race on a start with an
+expired credential. When the credential expires within the SDK's refresh
+lead (4 hours for Claude, the SDK's own test in `Manager.shouldRefresh`), or
+the usage endpoint answers 401, the read renews the credential:
+
+- If the SDK already installed a newer access token, the read uses it.
+- If the SDK has a refresh pending (`NextRefreshAfter` in the future), the
+  read waits up to 3 s for it. If the refresh lands, the read uses the new
+  token. If its exchange fails, the read fails. If it is still running after
+  3 s, the read fails and a re-read follows (below).
+- Otherwise the router refreshes through the SDK
+  (`Manager.ForceRefreshAuth`), which takes the SDK's per-credential refresh
+  lock.
+
+The router registers a refresh guard in place of the SDK's Claude executor
+before the start reads. The SDK calls the executor's `Refresh` for every
+refresh, its own and the router's, while it holds the credential's refresh
+lock, and hands it the credential as it is at that moment. The guard
+records, per credential, the last 8 refresh tokens an exchange sent and did
+not get back, and marks those whose exchange failed or ended unknown. A
+refresh the router started carries the access token the router decided on.
+The guard declines it, with no exchange, when the credential's access token
+has changed since then or its refresh token is recorded. The decline is a
+`context.Canceled`, for which the SDK records no failure and no backoff. The
+router then reads the credential again: a new access token counts as the
+SDK's refresh, and the same one starts a failure run. The SDK's refresh of
+a credential that is due at start can begin before the guard exists, on the
+executor the guard replaces. So a credential with a refresh marker
+(`NextRefreshAfter` set) when the guard is registered has its refresh token
+recorded, and one whose refresh already failed has it recorded as failed.
+The SDK sets the marker 60 s ahead when it queues an auto-refresh and
+changes it only when that refresh finishes, so a refresh whose exchange
+outlives the 60 s, as after a start stalled that long, still has its marker
+(`TestSDKRefreshThatBeganBeforeTheGuardAndOutlivedItsMarkerIsNotResent`).
+The marker can also be the SDK's 30 s pause after a refresh that returned a
+token that is still due. The SDK refreshes that token again after the
+pause, so recording it costs at most failed reads until that refresh lands.
+For a refresh the guard did not see, the SDK's failure record on the
+credential (`LastError`) tells the router that it failed. While that credential's old token is current its
+reading stays unknown, so no inference runs on the account, and a failure
+record can only come from the refresh.
+
+**The router never sends a refresh token that an earlier exchange sent and
+did not get back.** That covers a token whose exchange failed or ended
+unknown, and a token whose rotation the SDK did not install. It holds in
+every interleaving with the SDK's refreshes in which two properties hold:
+every refresh takes the SDK's per-credential refresh lock and then looks up
+the registered Claude executor, and the guard is that executor. The check
+then runs under the lock on the credential the exchange would send. The
+SDK's own refreshes pass the guard unchanged: its auto-refresh retries a
+failed refresh token after its backoff, and its request-time 401 path
+refreshes without a pending marker.
+
+If the SDK registers a new Claude executor in place of the guard, the
+router stops refreshing and its reads of a due or refused credential fail.
+The router checks the registration after the start reads and before each
+refresh it starts, and logs `refresh_guard_replaced` the first time it
+finds the guard replaced. The check before a refresh is not atomic with the
+SDK's executor lookup: a replacement between the two lets that one refresh
+run without the guard. With the router's SDK configuration, only the SDK's
+startup model sync registers a Claude executor once the SDK has started,
+and it runs during the startup quiet period (row RP-20).
+
+The guard forwards the Claude executor's refresh, request, and request
+preparation methods, but not `ForAPIKey`. The SDK calls `ForAPIKey` only
+for an API-key credential (`executorForAuth`), and the router enrolls OAuth
+credentials only, so the SDK never needs it here.
+
+A failed refresh, the router's or the SDK's, starts a failure run that lasts
+until the access token changes. The guard reports the SDK's failures. During
+the run a read fails at once: it neither waits for the SDK nor refreshes,
+and the SDK's own retries pace the next exchange. So the router starts at
+most one refresh per failure run, the one that starts it, and none when the
+SDK's refresh failed first. An inference error the SDK records on the
+credential does not start a run.
+
+The rule has one cost. When an access token is refused (usage 401) before it
+is due, and a refresh of it fails or ends unknown, the router's or the
+SDK's, nothing refreshes it until the token enters the SDK's 4-hour lead:
+the SDK does not refresh a token that is not due, and the router does not
+resend the refresh token. Until then the account is refused once its
+reading goes stale, unless an inference request that the fresh reading
+still allows gets a 401 and the SDK's request-time refresh renews the
+credential. For an 8-hour token the outage lasts under 4 hours, plus the
+SDK's refresh and the next read (up to `overage_check_every`).
+
+One read sends at most two usage requests and starts at most one refresh.
+A refresh is one call to the executor's token exchange, which posts to the
+token endpoint up to 3 times on transport errors and 5xx answers, 1 s and 2 s
+apart. The SDK gives each post its own 30 s timeout. The router's 30 s cap on
+its own refresh stops further posts but not one in progress. Neither cap
+covers the wait for the SDK's per-credential refresh lock: a refresh the
+router starts while the SDK refreshes the same credential without a pending
+marker (the SDK's request-time 401 path, or an auto-refresh whose exchange
+outlives its 60 s marker) waits for that refresh, which can hold the lock
+for about 93 s with three slow posts. So a read has no fixed wall-clock
+bound. The start reads' 15 s limit ends their waits and usage requests, but
+not a refresh in progress.
+
+Each refresh the router starts, each SDK refresh that a read waited for or
+found, and the first failure of a failure run record a `credential_refresh`
+event with its reason (`expiring` or `unauthorized`) and outcome
+(`refreshed`, `sdk_refreshed`, or `failed`). A failure of the SDK's refresh,
+or a refresh the guard declined on a spent token, carries the detail
+`sdk refresh`. The event carries no token and no error text
+(`TestReadOfADueCredentialWaitsForTheSDKRefresh`,
+`TestReadDoesNotRefreshWhileTheSDKRefreshIsRunning`,
+`TestRouterRefreshesADueCredentialTheSDKHasNotQueued`,
+`TestReadThatRefreshedDoesNotRefreshAgainAfterA401`,
+`TestUnauthorizedReadUsesTheTokenTheSDKInstalledDuringTheRead`,
+`TestUnauthorizedSettingsReadRefreshesOnceAndReadsAgain`,
+`TestFailedSDKRefreshIsNotRepeatedByReads`,
+`TestRouterRefreshIsNotRepeatedAfterItFails`,
+`TestRouterRefreshQueuedBehindAFailingSDKRefreshSendsNoExchange`,
+`TestRouterRefreshAfterTheSDKMarkerExpiresSendsNoExchange`,
+`TestDueReadUsesTheTokenTheSDKInstalledWhileItWaitedForTheLock`,
+`TestSDKRefreshThatFailsDuringTheWaitFailsTheReadAtOnce`,
+`TestInferenceErrorDuringAPendingSDKRefreshDoesNotFailTheRead`,
+`TestFailureRunEndsWhenTheAccessTokenChanges`,
+`TestRouterRefreshesOnlyWhileTheGuardIsTheSDKExecutor`,
+`TestSDKRefreshThatBeganBeforeTheGuardAndFailsFailsTheReadAtOnce`,
+`TestSDKRefreshThatBeganBeforeTheGuardAndOutlivedItsMarkerIsNotResent`,
+`TestRefreshGuardDeclinesRouterRefreshesOfSpentTokens`). The service tests replace only
+the token exchange behind the guard, so the SDK's refresh lock, refresh loop,
+auth state, and file store, and the guard, all run. Their fake exchange
+fails a test when a refresh the router started sends a refresh token whose
+exchange failed. In the tests of a refresh queued behind the SDK's, the
+SDK's exchange waits until the test releases it, and the test fails unless
+the router's read is still waiting for the refresh lock 500 ms after it
+began. The two tests that wait out the SDK's real 60 s marker run in
+parallel.
+
+A failed read (an error status, a transport error, an unreadable answer, a
+failed refresh, or a 401 after the refresh) schedules a re-read. After the
+n-th failed read in a row, scheduled or on demand, the next scheduled read
+comes 5 s x 2^(n-1) after it, or after the endpoint's `Retry-After` when
+that is longer, capped at half of `overage_check_every`. A run of failed
+reads adds at most 6 re-reads. After them the account is read once per
+`overage_check_every` until a read succeeds. A success, scheduled or on
+demand, ends the run, and the next scheduled read comes one
+`overage_check_every` after it. With the defaults, the re-reads come 5, 10,
+20, 40, 80, and 160 s apart, and an account sends at most 14 usage requests
+and starts at most 7 refreshes in the 10 minutes after a failed read, then
+at most 2 usage requests and 1 refresh per 10 minutes. During a failure run
+of refreshes the router starts none after the first. On-demand reads add at
+most one read per 30 s while a request waits on the account
+(`TestRateLimitedStartReadIsReadAgainAfterRetryAfter`,
+`TestPersistentUnauthorizedReadStaysUnknownWithBoundedReads`,
+`TestSuccessfulRecheckEndsTheRunOfFailedReads`,
+`TestFailedRecheckBringsTheReRead`). The live lane got 429 on
+the seventh start in 40 s; before this schedule, the account stayed unknown
+until the next 10-minute read.
+
+Timestamp rule (PR2 item N11): the upstream makes a reading at an unknown
+time between the start of the read or attempt and its arrival. A `disabled`
+reading, which allows dispatch, is stamped with that start. An `enabled` or
+paid-use reading, which blocks dispatch, is stamped with its arrival. This
+applies to settings reads and to response headers alike. Under PR2's ordering
+rules (the latest check wins, and paid use clears only on a `disabled` check
+stamped strictly after it), a `disabled` reading supersedes blocking evidence
+only when its read or attempt started strictly after that evidence arrived.
+Overlapping readings resolve toward blocking: an `enabled` reading that
+overlaps a `disabled` one is ordered after it, even when the upstream made
+it first. Examples:
+- A `disabled` response or read that started before a paid-use response
+  arrived does not clear the paid use, even when it arrives later
+  (`TestDisabledResponseFromAnAttemptStartedBeforePaidUseDoesNotClearIt`).
+- An `enabled` settings read in flight outranks a `disabled` response from
+  an attempt that started during the read
+  (`TestEnabledSettingsReadInFlightOutranksAnEarlierDisabledResponse`).
+- Paid use is stamped at its arrival, so only a `disabled` read that started
+  after it arrived can clear it, whatever order the router applies the two
+  in. The router can apply a `disabled` reading first while the paid-use
+  response is still on its way to `ObserveOverage`.
+
+Every stamp the service passes to the router (`Observe`, `ObserveOverage`,
+and the attempt start in `Report`) comes from the service clock, read at the
+start of a read or attempt or at an arrival. It is never zero and never
+later than the clock at the time of the call. In-process comparisons use Go's
+monotonic clock reading, so a wall-clock step does not reorder them. The
+service enforces the rule at the boundary (`Service.bounded`), because PR2
+misorders readings otherwise: a future stamp sweeps a live rejection or
+clears paid use, and paid use stamped with the zero time is dropped. The
+service checks a reading's start and arrival stamps together. When either
+breaks the rule, a blocking reading (paid use, `enabled`, a rejection, or a
+failure report) is kept and stamped with the current time at both ends,
+which is no earlier than the reading. A reading that only permits dispatch
+(`disabled`, or windows without a rejection) is dropped. Both cases record a
+`stamp_bounded` event
+(`TestObservationsReachTheRouterStampedNoLaterThanNowAndNeverZero`).
+
+Observed paid use does not expire (PR2 at `22d4342`): a later `enabled`
+check puts it back in force after a `disabled` check cleared it.
+
+A refusal for an unknown reading names each failed settings read and the
+login command, because a revoked login shows up only as a failed read.
+
+Every upstream response also reports the setting at the time it was served.
+The transport feeds it to `Router.ObserveOverage` before the SDK reads the
+body:
+
+| Response headers | State |
+| --- | --- |
+| `anthropic-ratelimit-unified-representative-claim: overage` or `anthropic-ratelimit-unified-overage-in-use: true` | `paid_use` |
+| `anthropic-ratelimit-unified-overage-status: rejected` | `disabled` |
+| `anthropic-ratelimit-unified-overage-status: allowed` or `allowed_warning` | `enabled` |
+| none of these | no change |
+
+| Setting | Value |
+| --- | --- |
+| `overage_fresh_for` | 30 min. The service overrides the router default of 1 h. |
+| `overage_check_every` | 10 min, for every account |
+| Re-read after a failed read | 5 s x 2^(n-1) or `Retry-After`, capped at half of `overage_check_every`, at most 6 per run of failures |
+| On-demand read | When `Decide` sets `RecheckOverage`, at most once per account per 30 s |
+
+The usage endpoint is undocumented as an API. The Agent SDK exposes it only
+as `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET()`. If it
+changes shape or stops answering, every idle account becomes unknown and the
+router refuses it. An account in use stays fresh from its response headers.
+The remaining gap is the one stated under "Included-only": usage credits
+turned on outside the proxy after the last reading, while the account's
+included windows are exhausted, produce one paid response before the router
+sees it.
+
+### Configuration and credentials change only by restart
+
+- The SDK has no file watcher, so it never reloads `sdk-config.yaml` and never
+  loads a credential added or rewritten while it runs.
+- The SDK writes its in-memory credential back to `auths/<id>.json` after
+  requests. A credential file rewritten under a running service is
+  overwritten. `claude-router login` refuses while a service holds the state
+  directory's lock.
+
+### Upstream request bytes
+
+`TestUpstreamReceivesTheClientsCacheablePrefix` sends a Claude Code tool turn
+(`testdata/requests/claude-code-tool-turn.json`) with the 2.1.285 headers and
+compares each top-level field the upstream receives with the client's.
+`messages`, `tools`, `thinking`, `context_management`, `model`, `max_tokens`,
+and `stream` are byte-identical. Two SDK changes are allowed:
+
+- `metadata.user_id.device_id` and `account_uuid` are rewritten per
+  credential. `session_id` is unchanged.
+- The `cch=` value in the billing header of `system[0]` is recomputed. The SDK
+  signs the final body (`internal/runtime/executor/claude_signing.go`), and
+  the body changed with the metadata.
+
+Two identical client requests reach the upstream with identical bytes.
+
+The SDK can change more for request shapes the fixture does not cover. An
+outside review of the SDK source found these paths
+(`internal/runtime/executor/`):
+
+- It drops a `thinking` block whose signature is not a structurally valid
+  Claude signature (`internal/signature`).
+- It removes cache breakpoints beyond the API's limit of four, and removes a
+  `1h` TTL that follows a five-minute breakpoint. Helper and subagent
+  requests can lose TTLs (`claude_executor_execute.go:241`, `:247`).
+- It moves a body `betas` field into the beta header, and can add or drop
+  entries of the `anthropic-beta` header (`claude_executor_request.go:1152`).
+- It deletes empty web-search domain lists.
+- A forced `tool_choice` removes `thinking` and `output_config.effort`.
+- It prepends a billing block to `system` when the request has none
+  (`claude_signing.go:73`).
+
+Whether these paths keep a conversation's prefix stable across turns is not
+tested offline. PR1 lane 4 (CC-1) measures cache reads with real requests.
+
+### Events and status
+
+`events.jsonl` in the state directory holds one JSON object per event:
+`request`, `attempt_failed`, `migrated`, `served`, `paid_use_observed`,
+`overage_read`, `client_auth_rejected`, `request_rejected`, `started`,
+`stopped`, `test_upstream_in_use`, and `refresh_guard_replaced`. Events carry account IDs, the first 12
+hex digits of the SHA-256 of the conversation key, statuses, classes,
+decisions, durations, and, on `request`, the usage counters the upstream
+reported. A counter the upstream did not report is `null`, not 0.
+`TestNoSecretInStatusEventsOrLogs` and lane 2 search events, status, logs,
+the journal, and the SDK configuration for every token.
+
+### Test upstream
+
+`test_upstream` in the configuration redirects `api.anthropic.com` to a
+loopback `http://` URL. Lane 2 uses it with the compiled binary. The service
+records `test_upstream_in_use` at start.

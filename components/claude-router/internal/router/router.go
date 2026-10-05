@@ -361,6 +361,19 @@ func (r *Router) ObserveOverage(account AccountID, state Overage, at time.Time) 
 	}
 }
 
+// BlockedUntil reports whether a known rejection blocks the model on an
+// account, and until when. Known is false when the reset is only a recheck
+// time for a rejection without a reported reset.
+func (r *Router) BlockedUntil(now time.Time, account AccountID, model string) (until time.Time, known, blocked bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	idx, ok := r.index[account]
+	if !ok {
+		return time.Time{}, false, false
+	}
+	return usableReset(r.cfg, now, r.accounts[idx].rejections, model)
+}
+
 // Relogin marks an account as logged in again.
 func (r *Router) Relogin(account AccountID) error {
 	r.commitMu.Lock()

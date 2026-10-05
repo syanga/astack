@@ -51,8 +51,17 @@ func TestNonStreamingPinnedRetriesStayOnSelectedAccount(t *testing.T) {
 	if out.Status != 200 || out.Text != "served-by:acct-a" {
 		t.Fatalf("client saw status %d text %q, want 200 from acct-a", out.Status, out.Text)
 	}
-	if n := len(p.Upstream.AttemptsFor(out.Call)); n != 3 {
+	attempts := p.Upstream.AttemptsFor(out.Call)
+	if n := len(attempts); n != 3 {
 		t.Fatalf("transport tied %d attempts to %s, want 3", n, out.Call)
+	}
+	for i, a := range attempts {
+		if a.Events != 0 {
+			t.Fatalf("attempt %d streamed %d events, want 0 on the non-streaming path", i+1, a.Events)
+		}
+	}
+	if last := attempts[2]; last.Outcome != "completed" {
+		t.Fatalf("final attempt ended %q, want the upstream's non-streaming completion", last.Outcome)
 	}
 	wantAttempts(t, p, "acct-a", "acct-a", "acct-a")
 }
