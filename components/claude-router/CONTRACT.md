@@ -441,12 +441,12 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 
 | ID | Behavior | Terminal | Agent SDK (T3) | Evidence | Owner |
 | --- | --- | --- | --- | --- | --- |
-| WC-1 | Automatic waiting for a long reset with cancellation and resumption | passed with `CLAUDE_CODE_RETRY_WATCHDOG=1`; failed with defaults | passed with the watchdog; failed with defaults | `waiting.json#rows[4]`. Through the PR4 router against a controlled upstream: both clients waited out a 75 s usable reset behind the router's local 429 and resumed, and SIGINT or `interrupt()` ended a 2 h wait (`evidence/PR4/lane-2/recovery.json`, `wait_nested`, `long_reset_cancel`). | PR5: managed client wiring sets `CLAUDE_CODE_RETRY_WATCHDOG=1`. The live check is step W1 of `reports/PR4-live-runbook.md`, not yet run |
+| WC-1 | Automatic waiting for a long reset with cancellation and resumption | passed with `CLAUDE_CODE_RETRY_WATCHDOG=1`; failed with defaults | passed with the watchdog; failed with defaults | `waiting.json#rows[4]`. Through the PR4 router against a controlled upstream: both clients waited out a 75 s usable reset behind the router's local 429 and resumed, and SIGINT or `interrupt()` ended a 2 h wait (`evidence/PR4/lane-2/recovery.json`, `wait_nested`, `long_reset_cancel`). | PR5: managed client wiring sets `CLAUDE_CODE_RETRY_WATCHDOG=1`. The live check is step W1 of `reports/PR4-live-runbook.md`, with a terminal and an Agent SDK waiter, not yet run |
 | WC-2 | Bounded connection lifetime: client limits measured | passed | passed | `waiting.json#rows[0]` to `#rows[2]` | PR1 |
 | WC-3 | Short reset resumes automatically | passed | passed | `waiting.json#rows[3]` | PR1 |
 | WC-4 | Unknown reset has explicit behavior | passed | passed | `waiting.json#rows[5]` | PR1 |
 | WC-5 | Client cancellation ends the turn and closes the upstream connection | passed | passed | `recovery.json#rows[14]`, `#rows[15]` | PR1 |
-| WC-6 | A multi-hour wait completes | blocked | blocked | `waiting.json#rows[6]`. Needs a wait run to completion through laptop sleep and wake. The PR4 fake session ran step W6 with a 150 s reset, a router restart during the wait, and no sleep. | Step W6 of `reports/PR4-live-runbook.md` (3 h reset, a sleep of at least 30 min, a router restart during the wait), attended; must pass before PR6 cutover |
+| WC-6 | A multi-hour wait completes | blocked | blocked | `waiting.json#rows[6]`. Needs a wait run to completion through laptop sleep and wake. The PR4 fake session ran step W6 with a 150 s reset, a router restart during the wait, and no sleep. | Step W6 of `reports/PR4-live-runbook.md` (3 h reset, a sleep of at least 30 min, a router restart during the wait, a terminal and an Agent SDK waiter), attended; must pass before PR6 cutover |
 
 | ID | SDK behavior | Status | Evidence | Owner |
 | --- | --- | --- | --- | --- |
@@ -457,7 +457,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 
 | ID | Behavior | Status | Evidence | Owner |
 | --- | --- | --- | --- | --- |
-| CC-1 | Stable routing preserves cacheable prefixes | blocked | Needs PR1 lane 4 with real accounts | PR1 lane 4, run with PR3 live lanes after IO-6 and the attended login; must pass before PR4 |
+| CC-1 | Stable routing preserves cacheable prefixes | passed | PR3 live lane 1 (`evidence/PR3/lane-1/RESULTS.md`): routed requests that stayed on one account read the cache, terminal R2 (6,177 tokens), R4 (8,940), and R5 (6,217), and Agent SDK R7 (6,303) after a restart. The direct baseline read about the same (`evidence/PR3/lane-1-rerun/RESULTS.md`, D2 6,309 and D4 8,929, against R2 and R4). | PR3 live lane 1 |
 | CC-2 | Migration preserves tools, thinking, and account-scoped artifacts | blocked | Same | PR1 lane 4, as CC-1 |
 | CC-3 | Cache creation and read counters are measured | blocked | Same | PR1 lane 4, as CC-1 |
 
@@ -1110,8 +1110,9 @@ it first. Examples:
 Every stamp the service passes to the router (`Observe`, `ObserveOverage`,
 and the attempt start in `Report`) comes from the service clock, read at the
 start of a read or attempt or at an arrival. It is never zero and never
-later than the clock at the time of the call. In-process comparisons use Go's
-monotonic clock reading, so a wall-clock step does not reorder them. The
+later than the clock at the time of the call. The service clock is wall time
+without Go's monotonic reading and never moves backward, so a wall-clock step
+back does not reorder readings (PR4, "Wall time across sleep"). The
 service enforces the rule at the boundary (`Service.bounded`), because PR2
 misorders readings otherwise: a future stamp sweeps a live rejection or
 clears paid use, and paid use stamped with the zero time is dropped. The
@@ -1146,6 +1147,7 @@ body:
 | `overage_check_every` | 10 min, for every account |
 | Re-read after a failed read | 5 s x 2^(n-1) or `Retry-After`, capped at half of `overage_check_every`, at most 6 per run of failures |
 | On-demand read | When `Decide` sets `RecheckOverage`, at most once per account per 30 s |
+| Overdue read (PR4) | Before routing a client request, for every account whose scheduled read is more than 1 s overdue by wall time |
 
 The usage endpoint is undocumented as an API. The Agent SDK exposes it only
 as `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET()`. If it
@@ -1225,6 +1227,38 @@ PR4 replaces PR3's local 429 for an exhausted conversation with migration,
 keeps account state across restarts, and adds the manual override. The
 policy is PR2's. Two policy changes are listed under "Waiting".
 
+### Wall time across sleep
+
+Go's monotonic clock stops while macOS sleeps (and during Linux suspend), and
+`time.Time` comparisons use it when both times carry it. Before PR4's fix, a
+`disabled` reading taken 5 minutes before a 2-hour sleep still counted as 5
+minutes old after the wake, so the router could dispatch on a reading that
+was stale by wall time.
+
+- **The service clock is wall time.** The service strips the monotonic
+  reading from every time it takes, so every stamp it gives the router and
+  every `now` the policy compares against is wall time: overage freshness,
+  the order of checks and paid use, unknown-reset rechecks, and request
+  times. The saved account state already held wall time only, so one rule
+  holds before and after a restart. The clock never returns a time earlier
+  than one it returned: after a backward wall-clock step it stands still
+  until the wall clock catches up, so a later reading is never stamped
+  before an earlier one (`TestThePolicyComparesStampsWithoutAMonotonicReading`,
+  `TestTheServiceClockNeverStepsBack`).
+- **Overdue reads come first.** The scheduler's timers also run on the
+  monotonic clock, so after a wake the next scheduled settings read can be
+  up to `overage_check_every` of awake time away. The scheduler records the
+  wall time of each account's next read. Before routing a client request,
+  the service reads, in parallel, every account whose scheduled read is more
+  than 1 s overdue by wall time, and the request waits for those reads. A
+  read of either kind resets the schedule. After a wake, the first request
+  therefore decides on readings taken after the wake
+  (`TestAfterTheWallClockJumpsTheAccountIsReadBeforeDispatch`).
+
+No offline test can put the machine to sleep. The tests move the injected
+wall clock while no scheduler timer fires, which is what a sleep looks like
+to the service. The live step W6 checks the wait across a real sleep.
+
 ### Migration
 
 A confirmed exhaustion before output is a 429 whose own attempt headers
@@ -1247,7 +1281,10 @@ destination receives the same session identity the source did
 - **Attempt cap.** With `max_upstream_attempts` spent, the migration is
   still committed, and the client gets a local 429 with a reset 1 s away
   that names the destination. Its resend dispatches there
-  (`TestMigrationWithTheAttemptCapSpentAsksTheClientToSendAgain`).
+  (`TestMigrationWithTheAttemptCapSpentAsksTheClientToSendAgain`). The same
+  answer goes to a concurrent request whose conversation another request
+  moved after this one's last attempt
+  (`TestWithTheAttemptCapSpentTheLoserOfAConcurrentMigrationIsAskedToSendAgain`).
 - **Concurrency.** Concurrent requests of one conversation commit one
   migration: `Commit` decides again under its lock, so a request that loses
   the race dispatches on the destination
@@ -1257,18 +1294,30 @@ destination receives the same session identity the source did
   (`TestADispatchedRequestKeepsItsAccountWhileTheConversationMigrates`).
 - **No return.** A migrated conversation stays on its destination when the
   source recovers (`TestMigratedConversationStaysAfterTheSourceRecovers`).
-  It moves again only on a new confirmed exhaustion or a manual move.
+  It moves again only on a new confirmed exhaustion, observed paid use, a
+  login requirement before it was served (PR2), or a manual move.
 - **Cancellation.** A client that goes away during the destination's
   response cancels that attempt; the committed migration stays
   (`TestClientCancellationDuringTheMovedResponseKeepsTheMigration`).
 
 ### Waiting
 
-When no eligible account can serve the model, the router answers the local
-429 of the client contract and makes no upstream attempt. Its reset is the
-earliest usable reset over the accounts: for each account, the latest reset
-among its rejections that apply to the model. A near five-hour reset under
-a weekly rejection is not usable. The waiting is the client's: with
+When every account that could serve the model is blocked until a reset,
+the router answers the local 429 of the client contract and makes no
+upstream attempt. Its reset is the earliest usable reset over the
+accounts: for each account, the latest reset among its rejections that
+apply to the model. A near five-hour reset under a weekly rejection is not
+usable.
+
+When no account could serve even after a reset, the router refuses with
+503 and `x-should-retry: false`, as PR3 does: no account is logged in, or
+every account without a rejection in force is barred by paid overflow
+enabled, paid use, or an unknown or stale check, and no account is blocked
+until a reset. A conversation's own account is refused the same way when
+it has no rejection in force and its check is enabled, or unknown or stale
+after one reread.
+
+The waiting is the client's: with
 `CLAUDE_CODE_RETRY_WATCHDOG=1`, both clients sleep until the reset with no
 connection open and send again, and cancel at once on SIGINT or
 `interrupt()`. Nothing in the router waits, so cancellation needs nothing
@@ -1281,9 +1330,12 @@ PR4 changes two things:
   When every account was blocked and its check had aged past
   `overage_fresh_for`, the router refused with `no_included_only_account`
   (503, `x-should-retry: false`), which ends the client's wait. An account
-  blocked until a reset now counts toward the wait whatever its check; the
-  check is read again by the time the account could serve
-  (`TestConfirmedExhaustionMigratesDespiteAStaleSourceCheck` was updated to
+  blocked until a reset now counts toward the wait when its check is
+  unknown or stale. One with paid overflow enabled or paid use still does
+  not. The check is read again before the account serves: at the reset, the
+  stale check refuses dispatch until a reread says `disabled`
+  (`TestAWaitThatOutlivesTheCheckReadsItAgainAtTheResetBeforeDispatch`;
+  `TestConfirmedExhaustionMigratesDespiteAStaleSourceCheck` was updated to
   expect the wait).
 - **Rereads before a wait.** PR2 sets `RecheckOverage` on a `wait` when an
   unblocked account is held back only by an unknown or stale check. The
@@ -1302,7 +1354,7 @@ The router never sends a request again after it has committed a response
 (PR3, "Streams"). After a failure in the response it writes an SSE `error`
 event, ends the stream, and keeps the assignment. The outcome is recorded
 as `error_after_output` or `incomplete` on the `request` event
-(`TestInterruptionAfterOutputIsReportedAndWaitsForAnExplicitRetry`). An
+(`TestInterruptionAfterOutputIsReportedAndNeverResent`). An
 exhaustion that shows only in a stream after output carries no attempt
 headers, so it is not confirmed; the next request learns it from its own
 attempt and migrates then.
@@ -1322,6 +1374,15 @@ SDK with T3's options, behind the router (`evidence/PR4/lane-2/recovery.json`):
   and 1.2 s apart, then once non-streaming. That is the silent resend
   budget of the follow-up of the same name.
 
+Deviation from the plan, pending acceptance: the plan says that partial
+output "requires explicit retry". Neither native client waits for one: each
+sends one continuation turn on its own after the cut. The router never
+resends the cut request and no completed tool runs twice, but the router
+cannot make the client wait for the user. Until the user or coordinator
+accepts "client-initiated continuation, no router resend, no tool replay"
+as meeting the plan, this predicate of PR4.live.2 is recorded as failed as
+written.
+
 ### Login and manual movement
 
 An `auth` failure marks the account as needing login. New conversations
@@ -1337,7 +1398,11 @@ that never served moves (PR2). The mark is cleared by:
 
 `POST /claude-router/move` moves a conversation explicitly, whatever the
 account's state (`TestRevokedLoginKeepsAssignmentsAcrossRestartUntilMovedOrConfirmed`,
-`TestMoveRequiresTheClientTokenAndAnAssignedConversation`).
+`TestMoveRequiresTheClientTokenAndAnAssignedConversation`). Its answer and
+its `migrated` event name the account the conversation left, read under the
+commit lock, so concurrent moves report each transition once
+(`Router.MoveFrom`, `TestManualOverrideMovesAndPersists`). `LoginConfirmed`
+takes the commit lock too, so a commit in progress decides again after it.
 
 ### Durable account state
 
@@ -1354,8 +1419,13 @@ On load, a stamp later than the clock is clamped as live readings are:
 blocking evidence is kept and stamped now, and a disabled check is
 dropped. Utilization and allowed-window reports are not kept: the first
 goes stale within `FreshFor`, and losing the second can only keep a
-delayed rejection, which blocks longer. A restart therefore never
-dispatches to a known exhausted account before its reset
+delayed rejection, which blocks longer. The record of an account left out
+of the configuration is written back unchanged, so the account keeps its
+rejections, login requirement, and paid use when it returns
+(`TestAnAccountLeftOutOfTheConfigurationKeepsItsStateUntilItReturns`). As
+long as `accounts.json` survives, a restart therefore never dispatches to a
+known exhausted account before its reset; a deleted file starts with no
+rejections
 (`TestRestartDuringAWaitKeepsTheResetAndResumesAfterIt`,
 `TestRestartBeforeTheResetNeverDispatchesToTheExhaustedAccount`,
 `TestExhaustionLoginAndOverageStateSurviveRestart`). The simulator still
