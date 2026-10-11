@@ -10,10 +10,5 @@
     "skills": {"default": ".agents", "suffix": "skills"},
     "settings": {"default": ".codex", "env": "CODEX_HOME", "suffix": "config.toml", "format": "toml", "source": "codex.json"},
     "overlay": "CODEX.md"
-  },
-  "opencode": {
-    "instructions": {"default": ".config", "env": "XDG_CONFIG_HOME", "suffix": "opencode/AGENTS.md"},
-    "skills": {"default": ".config", "env": "XDG_CONFIG_HOME", "suffix": "opencode/skills"},
-    "overlay": "OPENCODE.md"
   }
 }
