@@ -2,6 +2,7 @@
 
 import json
 import os
+import subprocess
 import sys
 import unittest
 
@@ -15,10 +16,11 @@ import sys
 
 NAME = Path(sys.argv[0]).name
 CONFIG = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME"}[NAME]
-if Path(os.environ["HOME"]).resolve() != Path(EXPECTED_HOME).resolve() or CONFIG in os.environ:
+if Path(os.environ["HOME"]).resolve() != Path(EXPECTED_HOME).resolve() or \
+        (os.environ.get("FAKE_EXPECT_NO_CONFIG") and CONFIG in os.environ):
     sys.exit("fake {} saw HOME={} and {}={}".format(NAME, os.environ["HOME"], CONFIG, os.environ.get(CONFIG)))
 argv = sys.argv[1:]
-home = Path(os.environ["HOME"])
+home = Path(os.environ.get(CONFIG) or os.environ["HOME"])
 home.mkdir(parents=True, exist_ok=True)
 with (home / ".fake-{}.log".format(NAME)).open("a") as log:
     log.write(" ".join(argv) + "\n")
@@ -26,6 +28,7 @@ if os.environ.get("FAKE_FAIL") and " ".join(argv).startswith(os.environ["FAKE_FA
     sys.exit("fake failure in " + " ".join(argv))
 path = home / ".fake-{}.json".format(NAME)
 state = json.loads(path.read_text()) if path.exists() else {"marketplaces": [], "plugins": []}
+project = state.pop("project", [])
 markets, plugins = state["marketplaces"], state["plugins"]
 words = {"claude": {"refresh": "update", "install": "install", "remove": "uninstall"},
          "codex": {"refresh": "upgrade", "install": "add", "remove": "remove"}}[NAME]
@@ -43,7 +46,7 @@ if argv == ["plugin", "marketplace", "list", "--json"]:
 elif argv == ["plugin", "list", "--json"]:
     if NAME == "claude":
         print(json.dumps([{"id": plugin, "scope": "user"} for plugin in plugins]
-                         + [{"id": "project-only@elsewhere", "scope": "project"}]))
+                         + [{"id": plugin, "scope": "project"} for plugin in project + ["project-only@elsewhere"]]))
     else:
         print(json.dumps({"installed": [{"pluginId": plugin, "installed": True} for plugin in plugins]
                           + [{"pluginId": "available@elsewhere", "installed": False}]}))
@@ -64,7 +67,7 @@ elif command == "plugin " + words["remove"]:
     plugins.remove(argument)
 else:
     sys.exit("fake {} does not know {}".format(NAME, " ".join(argv)))
-path.write_text(json.dumps(state))
+path.write_text(json.dumps(dict(state, project=project) if project else state))
 '''
 
 
@@ -90,7 +93,7 @@ class PluginTests(InstallerFixture):
         }))
 
     def env(self, **values):
-        return dict(os.environ, PATH=os.pathsep.join([str(self.bin), "/usr/bin", "/bin"]),
+        return dict(os.environ, PATH=os.pathsep.join([str(self.bin), "/usr/bin", "/bin"]), FAKE_EXPECT_NO_CONFIG="1",
                     CLAUDE_CONFIG_DIR=str(self.root / "outside"), CODEX_HOME=str(self.root / "outside"), **values)
 
     def install(self, *arguments, command="install", success=True, **values):
@@ -158,6 +161,39 @@ class PluginTests(InstallerFixture):
         self.assertEqual(self.cli_state("claude"), {"marketplaces": ["test-market"], "plugins": ["own@test-market"]})
         self.assertNotIn("plugins", self.manifest())
 
+    def assert_project_plugin_keeps_marketplace(self, project_plugin):
+        self.install()
+        state = self.cli_state("claude")
+        (self.home / ".fake-claude.json").write_text(json.dumps(dict(state, project=[project_plugin])))
+        result = self.install(command="uninstall")
+        self.assertIn("KEEP MARKETPLACE test-market (claude)", result.stdout)
+        self.assertEqual(self.cli_state("claude"), {"marketplaces": ["test-market"], "plugins": [],
+                                                    "project": [project_plugin]})
+
+    def test_uninstall_keeps_a_marketplace_a_project_plugin_uses(self):
+        self.assert_project_plugin_keeps_marketplace("own@test-market")
+
+    def test_uninstall_keeps_a_marketplace_when_the_plugin_is_also_project_scoped(self):
+        self.assert_project_plugin_keeps_marketplace("demo@test-market")
+
+    def test_uninstall_refuses_a_moved_config_directory(self):
+        first, second = self.root / "config one", self.root / "config two"
+        env = dict(os.environ, PATH=os.pathsep.join([str(self.bin), "/usr/bin", "/bin"]), HOME=str(self.home),
+                   CODEX_HOME=str(self.root / "codex"), XDG_STATE_HOME=str(self.root / "state"))
+
+        def run(command, config):
+            return subprocess.run([str(self.repo / (command + ".sh"))], cwd=str(self.root), capture_output=True,
+                                  text=True, env=dict(env, CLAUDE_CONFIG_DIR=str(config)))
+
+        self.assertEqual(run("install", first).returncode, 0)
+        moved = run("uninstall", second)
+        self.assertNotEqual(moved.returncode, 0)
+        self.assertIn("set CLAUDE_CONFIG_DIR back", moved.stderr)
+        self.assertTrue((first / "CLAUDE.md").exists())
+        self.assertEqual(json.loads((first / ".fake-claude.json").read_text())["plugins"], ["demo@test-market"])
+        self.assertEqual(run("uninstall", first).returncode, 0)
+        self.assertEqual(json.loads((first / ".fake-claude.json").read_text())["plugins"], [])
+
     def test_missing_cli_is_skipped(self):
         (self.bin / "codex").unlink()
         result = self.install()
@@ -178,7 +214,7 @@ class PluginTests(InstallerFixture):
         self.install()
         self.seed("claude", [], [])
         self.install(command="uninstall")
-        self.assertEqual(self.take_calls("claude")[-2:], ["plugin marketplace list --json", "plugin list --json"])
+        self.assertFalse([call for call in self.take_calls("claude") if "remove" in call or "uninstall" in call])
         self.assertNotIn("plugins", self.manifest())
 
     def test_failing_command_stops_install_and_rerun_recovers(self):

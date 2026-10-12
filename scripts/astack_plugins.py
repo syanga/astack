@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
 from typing import Callable
@@ -15,9 +16,23 @@ class Source:
 
 
 @dataclass(frozen=True)
+class ConfigDir:
+    path: Path
+    variable: str
+    home: Path
+    use_env: bool
+
+    def environment(self):
+        env = dict(os.environ)
+        if not self.use_env:
+            env["HOME"] = str(self.home)
+            env.pop(self.variable, None)
+        return env
+
+
+@dataclass(frozen=True)
 class PluginCli:
     command: str
-    env: str
     list_marketplaces: tuple[str, ...]
     list_plugins: tuple[str, ...]
     add_marketplace: tuple[str, ...]
@@ -28,11 +43,16 @@ class PluginCli:
     remove_marketplace: tuple[str, ...]
     marketplace_names: Callable[[object], set[str]]
     plugin_ids: Callable[[object], set[str]]
+    used_plugin_ids: Callable[[object], set[str]]
+
+
+def codex_plugin_ids(data):
+    return {item["pluginId"] for item in data["installed"] if item.get("installed")}
 
 
 CLIS = {
     "claude": PluginCli(
-        command="claude", env="CLAUDE_CONFIG_DIR",
+        command="claude",
         list_marketplaces=("plugin", "marketplace", "list", "--json"),
         list_plugins=("plugin", "list", "--json"),
         add_marketplace=("plugin", "marketplace", "add"),
@@ -43,9 +63,10 @@ CLIS = {
         remove_marketplace=("plugin", "marketplace", "remove"),
         marketplace_names=lambda data: {item["name"] for item in data},
         plugin_ids=lambda data: {item["id"] for item in data if item.get("scope") == "user"},
+        used_plugin_ids=lambda data: {item["id"] for item in data},
     ),
     "codex": PluginCli(
-        command="codex", env="CODEX_HOME",
+        command="codex",
         list_marketplaces=("plugin", "marketplace", "list", "--json"),
         list_plugins=("plugin", "list", "--json"),
         add_marketplace=("plugin", "marketplace", "add"),
@@ -55,7 +76,8 @@ CLIS = {
         remove_plugin=("plugin", "remove"),
         remove_marketplace=("plugin", "marketplace", "remove"),
         marketplace_names=lambda data: {item["name"] for item in data["marketplaces"]},
-        plugin_ids=lambda data: {item["pluginId"] for item in data["installed"] if item.get("installed")},
+        plugin_ids=codex_plugin_ids,
+        used_plugin_ids=codex_plugin_ids,
     ),
 }
 
@@ -79,7 +101,14 @@ def load(path):
     return Source(marketplaces, tuple(dict.fromkeys(plugins)))
 
 
-def sync(target, source, state, state_path, home, use_env, dry_run):
+def check_config(target, state, config):
+    recorded = state.get("plugins", {}).get(target, {}).get("config")
+    if recorded and recorded != str(config.path):
+        raise ValueError("{} plugins were installed in {}; set {} back to that directory to change them".format(
+            target, recorded, config.variable))
+
+
+def sync(target, source, state, state_path, config, dry_run):
     cli = CLIS[target]
     owned = state.get("plugins", {}).get(target, {})
     owned_marketplaces = set(owned.get("marketplaces", []))
@@ -102,10 +131,7 @@ def sync(target, source, state, state_path, home, use_env, dry_run):
             print("REMOVE MARKETPLACE {} ({}) if no other plugin uses it".format(name, target))
         return
 
-    env = dict(os.environ)
-    if not use_env:
-        env["HOME"] = str(home)
-        env.pop(cli.env, None)
+    env = config.environment()
 
     def run(prefix, *arguments):
         argv = [*prefix, *arguments]
@@ -117,24 +143,26 @@ def sync(target, source, state, state_path, home, use_env, dry_run):
                 cli.command, " ".join(argv), result.returncode, tail))
         return result.stdout
 
-    def query(prefix, parse):
+    def query(prefix, *parsers):
         output = run(prefix)
         try:
-            return parse(json.loads(output))
+            data = json.loads(output)
+            return [parse(data) for parse in parsers]
         except (ValueError, KeyError, TypeError):
             raise ValueError("Unexpected output from {} {}".format(cli.command, " ".join(prefix))) from None
 
     def record():
         entries = state.setdefault("plugins", {})
-        entries[target] = {"marketplaces": sorted(owned_marketplaces), "plugins": sorted(owned_plugins)}
+        entries[target] = {"config": str(config.path), "marketplaces": sorted(owned_marketplaces),
+                           "plugins": sorted(owned_plugins)}
         if not owned_marketplaces and not owned_plugins:
             entries.pop(target)
         if not entries:
             state.pop("plugins")
         files.save_manifest(state_path, state)
 
-    known = query(cli.list_marketplaces, cli.marketplace_names)
-    installed = query(cli.list_plugins, cli.plugin_ids)
+    [known] = query(cli.list_marketplaces, cli.marketplace_names)
+    [installed] = query(cli.list_plugins, cli.plugin_ids)
     for name in needed:
         if name not in known:
             print("ADD MARKETPLACE {} ({})".format(name, target))
@@ -160,8 +188,10 @@ def sync(target, source, state, state_path, home, use_env, dry_run):
             installed.discard(plugin)
         owned_plugins.discard(plugin)
         record()
-    in_use = {marketplace(plugin) for plugin in installed}
-    for name in sorted(owned_marketplaces - set(needed)):
+    unneeded = sorted(owned_marketplaces - set(needed))
+    [used] = query(cli.list_plugins, cli.used_plugin_ids) if unneeded else [set()]
+    in_use = {marketplace(plugin) for plugin in used}
+    for name in unneeded:
         if name in in_use:
             print("KEEP MARKETPLACE {} ({}): other plugins use it".format(name, target))
         elif name in known:
