@@ -80,11 +80,11 @@ def load(path):
 
 
 def sync(target, source, state, state_path, home, use_env, dry_run):
-    cli = CLIS.get(target)
+    cli = CLIS[target]
     owned = state.get("plugins", {}).get(target, {})
     owned_marketplaces = set(owned.get("marketplaces", []))
     owned_plugins = set(owned.get("plugins", []))
-    if cli is None or not (source.plugins or owned_marketplaces or owned_plugins):
+    if not (source.plugins or owned_marketplaces or owned_plugins):
         return
     needed = list(dict.fromkeys(marketplace(plugin) for plugin in source.plugins))
     executable = shutil.which(cli.command)
@@ -99,7 +99,7 @@ def sync(target, source, state, state_path, home, use_env, dry_run):
         for plugin in sorted(owned_plugins - set(source.plugins)):
             print("REMOVE PLUGIN {} ({})".format(plugin, target))
         for name in sorted(owned_marketplaces - set(needed)):
-            print("REMOVE MARKETPLACE {} ({})".format(name, target))
+            print("REMOVE MARKETPLACE {} ({}) if no other plugin uses it".format(name, target))
         return
 
     env = dict(os.environ)

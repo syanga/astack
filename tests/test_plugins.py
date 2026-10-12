@@ -104,7 +104,7 @@ class PluginTests(InstallerFixture):
         (self.home / ".fake-{}.json".format(name)).write_text(
             json.dumps({"marketplaces": marketplaces, "plugins": plugins}))
 
-    def calls(self, name):
+    def take_calls(self, name):
         log = self.home / ".fake-{}.log".format(name)
         calls = log.read_text().splitlines() if log.exists() else []
         log.unlink(missing_ok=True)
@@ -114,7 +114,7 @@ class PluginTests(InstallerFixture):
         self.install()
         for name, install in (("claude", "install"), ("codex", "add")):
             self.assertEqual(self.cli_state(name), {"marketplaces": ["test-market"], "plugins": ["demo@test-market"]})
-            self.assertEqual(self.calls(name), [
+            self.assertEqual(self.take_calls(name), [
                 "plugin marketplace list --json",
                 "plugin list --json",
                 "plugin marketplace add example/test-market",
@@ -123,13 +123,13 @@ class PluginTests(InstallerFixture):
             ])
         result = self.install()
         self.assertIn("UPDATE PLUGIN demo@test-market (claude)", result.stdout)
-        self.assertEqual(self.calls("claude"), [
+        self.assertEqual(self.take_calls("claude"), [
             "plugin marketplace list --json",
             "plugin list --json",
             "plugin marketplace update test-market",
             "plugin update demo@test-market",
         ])
-        self.assertEqual(self.calls("codex"), [
+        self.assertEqual(self.take_calls("codex"), [
             "plugin marketplace list --json",
             "plugin list --json",
             "plugin marketplace upgrade test-market",
@@ -178,7 +178,7 @@ class PluginTests(InstallerFixture):
         self.install()
         self.seed("claude", [], [])
         self.install(command="uninstall")
-        self.assertEqual(self.calls("claude")[-2:], ["plugin marketplace list --json", "plugin list --json"])
+        self.assertEqual(self.take_calls("claude")[-2:], ["plugin marketplace list --json", "plugin list --json"])
         self.assertNotIn("plugins", self.manifest())
 
     def test_failing_command_stops_install_and_rerun_recovers(self):
@@ -197,10 +197,10 @@ class PluginTests(InstallerFixture):
         self.assertIn("PLUGIN demo@test-market (codex)", result.stdout)
         self.assertFalse(self.home.exists())
         self.install()
-        self.calls("claude")
+        self.take_calls("claude")
         result = self.install("--dry-run", command="uninstall")
         self.assertIn("REMOVE PLUGIN demo@test-market (claude)", result.stdout)
-        self.assertEqual(self.calls("claude"), [])
+        self.assertEqual(self.take_calls("claude"), [])
         self.assertEqual(self.cli_state("claude")["plugins"], ["demo@test-market"])
 
     def test_plugin_removed_from_source_is_removed(self):
