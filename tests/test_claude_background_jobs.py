@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -173,8 +174,12 @@ class HookTests(unittest.TestCase):
         self.assertEqual((completed.returncode, completed.stdout), (1, ''))
 
     def test_installed_settings_run_the_installed_hook(self):
+        bin_dir = self.root / 'bin'
+        bin_dir.mkdir()
+        (bin_dir / 'python3').symlink_to(sys.executable)
         subprocess.run([str(REPO / 'install.sh'), '--home', str(self.home), '--target', 'claude'],
-                       check=True, capture_output=True, text=True, timeout=60)
+                       check=True, capture_output=True, text=True, timeout=60,
+                       env=dict(os.environ, PATH=os.pathsep.join([str(bin_dir), '/usr/bin', '/bin'])))
         settings = json.loads((self.home / '.claude/settings.json').read_text())
         command, = [hook['command'] for group in settings['hooks']['PreToolUse'] for hook in group['hooks']]
         core = self.home / '.claude' / CORE

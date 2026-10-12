@@ -21,6 +21,7 @@ class InstallerFixture(unittest.TestCase):
         self.home = self.root / "test home"
         # The user's growing skill collection is not part of this test fixture.
         shutil.rmtree(self.repo / "skills")
+        (self.repo / "settings/plugins.json").unlink()
         self.skill = self.repo / "skills/test-skill"
         self.skill.mkdir(parents=True)
         (self.skill / "SKILL.md").write_text(
