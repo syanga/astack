@@ -19,8 +19,9 @@ class InstallerFixture(unittest.TestCase):
         self.repo = self.root / "checkout with spaces"
         shutil.copytree(SOURCE, self.repo, ignore=shutil.ignore_patterns(".git", ".cache", "__pycache__", "node_modules"))
         self.home = self.root / "test home"
-        # The user's growing skill collection is not part of this test fixture.
+        # The user's growing skill collection and plugins are not part of this test fixture.
         shutil.rmtree(self.repo / "skills")
+        (self.repo / "settings/plugins.json").unlink()
         self.skill = self.repo / "skills/test-skill"
         self.skill.mkdir(parents=True)
         (self.skill / "SKILL.md").write_text(
