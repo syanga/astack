@@ -143,11 +143,10 @@ def sync(target, source, state, state_path, config, dry_run):
                 cli.command, " ".join(argv), result.returncode, tail))
         return result.stdout
 
-    def query(prefix, *parsers):
+    def query(prefix, parse):
         output = run(prefix)
         try:
-            data = json.loads(output)
-            return [parse(data) for parse in parsers]
+            return parse(json.loads(output))
         except (ValueError, KeyError, TypeError):
             raise ValueError("Unexpected output from {} {}".format(cli.command, " ".join(prefix))) from None
 
@@ -161,8 +160,8 @@ def sync(target, source, state, state_path, config, dry_run):
             state.pop("plugins")
         files.save_manifest(state_path, state)
 
-    [known] = query(cli.list_marketplaces, cli.marketplace_names)
-    [installed] = query(cli.list_plugins, cli.plugin_ids)
+    known = query(cli.list_marketplaces, cli.marketplace_names)
+    installed = query(cli.list_plugins, cli.plugin_ids)
     for name in needed:
         if name not in known:
             print("ADD MARKETPLACE {} ({})".format(name, target))
@@ -189,7 +188,7 @@ def sync(target, source, state, state_path, config, dry_run):
         owned_plugins.discard(plugin)
         record()
     unneeded = sorted(owned_marketplaces - set(needed))
-    [used] = query(cli.list_plugins, cli.used_plugin_ids) if unneeded else [set()]
+    used = query(cli.list_plugins, cli.used_plugin_ids) if unneeded else set()
     in_use = {marketplace(plugin) for plugin in used}
     for name in unneeded:
         if name in in_use:
