@@ -248,6 +248,8 @@ func (c Config) Validate() error {
 		return fmt.Errorf("reset bias %v is not a finite non-negative number", c.ResetBias)
 	case c.FreshFor <= 0, c.ActiveFor <= 0, c.UnknownResetRecheck <= 0, c.OverageFreshFor <= 0:
 		return errors.New("every duration must be positive")
+	case c.UnknownResetRecheck > Weekly.Period():
+		return errors.New("unknown reset recheck must not exceed one week, the horizon for forgetting reset rejections")
 	case c.MaxAttempts < 1:
 		return errors.New("max attempts must be at least 1")
 	}

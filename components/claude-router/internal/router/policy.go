@@ -6,13 +6,14 @@ import (
 
 type accountView struct {
 	Account
-	needsLogin  bool
-	observation Observation
-	rejections  []rejection
-	allowedAt   map[string]time.Time
-	check       Overage
-	checkAt     time.Time
-	paidUseAt   time.Time
+	needsLogin   bool
+	needsLoginAt time.Time
+	observation  Observation
+	rejections   []rejection
+	allowedAt    map[string]time.Time
+	check        Overage
+	checkAt      time.Time
+	paidUseAt    time.Time
 }
 
 // paidUse reports whether observed paid use excludes the account: it does
@@ -129,6 +130,12 @@ func place(cfg Config, now time.Time, v view, model string) Decision {
 		loggedIn = true
 		until, known, blocked := usableReset(cfg, now, a.rejections, model)
 		if bar := overageBar(cfg, now, a); bar != "" {
+			// An account blocked until a reset waits for it even when its
+			// check is unknown or stale: the check is read again by then.
+			if blocked && recheck(bar) {
+				earliest, earliestKnown = earlier(earliest, earliestKnown, until, known)
+				continue
+			}
 			barred = true
 			stale = stale || recheck(bar) && !blocked
 			continue
