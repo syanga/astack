@@ -1,0 +1,16 @@
+[Unit]
+Description=Claude account router (astack)
+StartLimitIntervalSec=600
+StartLimitBurst=6
+
+[Service]
+Type=simple
+Environment={home_env}
+WorkingDirectory={state}
+ExecStart={binary} serve -supervised -config {config}
+Restart=on-failure
+RestartSec=10
+UMask=0077
+
+[Install]
+WantedBy=default.target
