@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 func TestStatusReportsCapacityQuotaAndEachBinding(t *testing.T) {
 	e := newEnv(t, "acct-a", "acct-b")
 	e.cfg.Accounts[0].Capacity = 5
+	before := time.Now()
 	e.start()
 	fiveHour := time.Now().Add(3 * time.Hour).Truncate(time.Second)
 	e.upstream.script("acct-a", reply{Header: map[string]string{
@@ -24,6 +26,7 @@ func TestStatusReportsCapacityQuotaAndEachBinding(t *testing.T) {
 	e.send(msg{Session: sessionID(1)})
 	e.send(msg{Session: sessionID(2)})
 
+	sent := time.Now()
 	st := e.svc.Status()
 
 	a, b := st.Accounts[0], st.Accounts[1]
@@ -43,16 +46,17 @@ func TestStatusReportsCapacityQuotaAndEachBinding(t *testing.T) {
 	}
 	want := map[string]bool{conversationHash(router.ConversationID(sessionID(1))): true, conversationHash(router.ConversationID(sessionID(2))): true}
 	for _, bs := range st.Bindings {
-		if !want[bs.Conversation] || !bs.Served || bs.LastRequest.IsZero() || !bs.Active || bs.Reason == "" {
-			t.Fatalf("binding %+v, want one of the two sent conversations, served, active, with its last request and reason", bs)
+		if !want[bs.Conversation] || !bs.Served || bs.LastRequest.Before(before) || bs.LastRequest.After(sent) ||
+			!bs.Active || bs.Account != a.ID && bs.Account != b.ID || bs.Reason != router.ReasonCapacity {
+			t.Fatalf("binding %+v, want one of the two sent conversations, served, active, assigned for capacity, last request between %v and %v", bs, before, sent)
 		}
 		delete(want, bs.Conversation)
 	}
 	if len(want) != 0 {
 		t.Fatalf("bindings %+v miss %v", st.Bindings, want)
 	}
-	if st.Journal != "ok" || st.PID == 0 || st.Started.IsZero() || time.Duration(st.QuotaFreshFor) != 15*time.Minute {
-		t.Fatalf("journal %q, pid %d, started %v, quota_fresh_for %v; want ok, a pid, a start time, 15m", st.Journal, st.PID, st.Started, time.Duration(st.QuotaFreshFor))
+	if st.Journal != "ok" || st.PID != os.Getpid() || st.Started.Before(before) || st.Started.After(sent) || time.Duration(st.QuotaFreshFor) != 15*time.Minute {
+		t.Fatalf("journal %q, pid %d, started %v, quota_fresh_for %v; want ok, pid %d, started between %v and %v, 15m", st.Journal, st.PID, st.Started, time.Duration(st.QuotaFreshFor), os.Getpid(), before, sent)
 	}
 }
 
@@ -131,8 +135,6 @@ func TestMoveRefusesAHashPrefixThatNamesTwoConversations(t *testing.T) {
 	}
 }
 
-// collidingSessions returns two session IDs whose hashes share their first n
-// hex digits.
 func collidingSessions(n int) (string, string) {
 	seen := map[string]string{}
 	for i := 0; ; i++ {

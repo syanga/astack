@@ -9,6 +9,7 @@ import argparse
 from contextlib import redirect_stdout
 import fcntl
 from dataclasses import dataclass, field
+import hashlib
 import io
 import json
 import os
@@ -21,7 +22,6 @@ import stat
 import subprocess
 import sys
 import tempfile
-import time
 import uuid
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -197,7 +197,7 @@ def helper_files():
 def desired_files(lay, binary):
     record = {"manager": lay.manager, "name": lay.service if lay.descriptor else None,
               "descriptor": str(lay.descriptor) if lay.descriptor else None, "config": str(lay.config),
-              "helper": str(lay.lib / "claude_router.py"), "manifest": str(lay.manifest)}
+              "helper": str(lay.lib / "claude_router.py"), "python": sys.executable, "manifest": str(lay.manifest)}
     result = {
         str(lay.binary): (binary, 0o755),
         str(lay.state / "service.json"): ((json.dumps({k: v for k, v in record.items() if v}, indent=2) + "\n").encode(), 0o600),
@@ -318,6 +318,7 @@ def stop_service(lay, dry_run):
     result = subprocess.run([str(lay.binary), "stop", "-state", str(lay.state)], capture_output=True, text=True)
     if result.returncode != 0:
         raise ValueError("Could not stop the router: {}".format((result.stderr or result.stdout).strip()))
+    print(result.stdout, end="")
 
 
 def apply(p, state, state_path, backup_root, dry_run=False):
@@ -416,8 +417,10 @@ def describe(value):
     return json.dumps(value["value"]) if not isinstance(value["value"], str) else value["value"]
 
 
-def leaf_count(data):
-    return sum(1 for _ in astack_settings.leaves(data)) if isinstance(data, dict) else 0
+def other_keys(data, owned):
+    if not isinstance(data, dict):
+        return 0
+    return sum(1 for path, _ in astack_settings.leaves(data) if json.dumps(path) not in owned)
 
 
 def router_inventory(state_dir):
@@ -433,59 +436,75 @@ def router_inventory(state_dir):
     return "router logins {}; {} assignments".format(", ".join(logins) or "none", len(conversations))
 
 
-def direct(state_dir, manifest_path, mode):
+NOTHING_OWNED = 3
+
+
+def direct_backup(manifest_path, filename):
+    """Name the backup by the file's content, so prepare and apply print the same path."""
+    digest = hashlib.sha256(Path(filename).read_bytes()).hexdigest()[:12]
+    return manifest_path.parent / "backups" / ("direct-" + digest) / Path(filename).name
+
+
+def direct(state_dir, manifest_path, mode, stopped=False):
     """Restore the client settings the router's activation owns.
 
     mode is "prepare" (print, change nothing), "check" (refuse on a local
-    edit, print nothing else), or "apply".
+    edit, exit NOTHING_OWNED when nothing is owned, print nothing else), or
+    "apply". A key that already holds its value from before activation, as
+    after a crash between the settings write and the manifest save, is
+    skipped, and apply drops its record.
     """
     state = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     owned = state.get("settings", {}).get(NAME, {})
     inventory = router_inventory(state_dir)
     if not owned:
-        if mode != "check":
-            print("keep    no client settings name the router; " + inventory)
-            print("ready   nothing to change")
+        if mode == "check":
+            return NOTHING_OWNED
+        print("keep    no client settings name the router; " + inventory)
+        print("ready   nothing to change")
         return 0
-    lines, others, needs_login = [], 0, False
+    lines, skipped, pending, others, needs_login = [], [], {}, 0, False
     for filename, record in sorted(owned.items()):
         current = astack_settings.document(record["format"], Path(filename).read_text(encoding="utf-8") if Path(filename).exists() else "")
+        keys = {}
         for key, entry in sorted(record["keys"].items()):
             path = tuple(json.loads(key))
             label = ".".join(path)
             found = current.get(path)
             if not astack_settings.same(found, entry["installed"]):
+                if astack_settings.same(found, entry["before"]):
+                    skipped.append("skip    {} {} (already restored)".format(shown(filename), label))
+                    continue
                 print("claude-router: direct: {} changed after activation".format(label), file=sys.stderr)
                 print("        expected {}, found {}".format(redact(label, entry["installed"]), redact(label, found)), file=sys.stderr)
                 print("next    restore or remove the key, then run again (local edits are kept)", file=sys.stderr)
                 return 1
+            keys[key] = entry
             verb = "restore" if entry["before"].get("exists") else "remove "
             lines.append("{} {} {} ({})".format(verb, shown(filename), label, redact(label, entry["installed"])))
             needs_login = needs_login or label in ("env.ANTHROPIC_AUTH_TOKEN", "env.ANTHROPIC_API_KEY")
-        others += leaf_count(current.data) - len(record["keys"])
+        pending[filename] = dict(record, keys=keys)
+        others += other_keys(current.data, record["keys"])
     if mode == "check":
         return 0
-    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    backup_root = manifest_path.parent / "backups" / ("direct-" + stamp)
-    for line in lines:
+    backups = {filename: direct_backup(manifest_path, filename) for filename, record in pending.items() if record["keys"]}
+    for line in lines + skipped:
         print(line)
     print("keep    {} other settings keys; {}".format(others, inventory))
-    for filename in sorted(owned):
-        print("backup  {}".format(shown(backup_root / filename.lstrip("/"))))
+    for filename in sorted(backups):
+        print("backup  {}".format(shown(backups[filename])))
     if needs_login:
         print("after   claude needs its own /login")
     if mode == "prepare":
         print("ready   nothing changed; apply with claude-router direct")
         return 0
-    changes = astack_settings.prepare(NAME, owned, {}, False)
-    for filename in sorted(owned):
-        source = Path(filename)
-        if source.exists():
-            files.atomic_write(backup_root / filename.lstrip("/"), source.read_bytes(), 0o600)
+    changes = astack_settings.prepare(NAME, pending, {}, False)
+    for filename, backup in backups.items():
+        files.atomic_write(backup, Path(filename).read_bytes(), 0o600)
     with redirect_stdout(io.StringIO()):
         for change in changes:
-            change.apply(state, manifest_path, backup_root / uuid.uuid4().hex)
-    print("done    clients connect directly; the router stays installed and stopped")
+            change.apply(state, manifest_path, manifest_path.parent / "backups" / uuid.uuid4().hex)
+    print("done    clients connect directly; the router stays installed" + (" and stopped" if stopped else ""))
     return 0
 
 
@@ -514,9 +533,10 @@ def main():
     mode = d.add_mutually_exclusive_group()
     mode.add_argument("--prepare", action="store_true")
     mode.add_argument("--check", action="store_true")
+    d.add_argument("--stopped", action="store_true", help="the caller stopped the service")
     args = parser.parse_args()
     if args.command == "direct":
-        return direct(args.state, args.manifest, "prepare" if args.prepare else "check" if args.check else "apply")
+        return direct(args.state, args.manifest, "prepare" if args.prepare else "check" if args.check else "apply", args.stopped)
     home = (args.home or Path.home()).expanduser().resolve()
     use_env = args.home is None
     state_root = env_dir("XDG_STATE_HOME", ".local/state", home, use_env) / "astack"

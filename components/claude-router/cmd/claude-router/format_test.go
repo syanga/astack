@@ -12,10 +12,6 @@ import (
 	"github.com/syanga/astack/components/claude-router/internal/router"
 )
 
-// The fixtures in testdata/status are the screens of the selected output
-// layout (mock C with its three additions). Each case rebuilds the sample
-// state those screens show.
-
 var pacific = mustLocation("America/Los_Angeles")
 
 func mustLocation(name string) *time.Location {
@@ -26,8 +22,6 @@ func mustLocation(name string) *time.Location {
 	return loc
 }
 
-// at returns a time on the sample day, Thursday 2026-10-15, or daysAgo days
-// before it, in Pacific time.
 func at(daysAgo, hour, minute int) time.Time {
 	return time.Date(2026, 10, 15-daysAgo, hour, minute, 0, 0, pacific)
 }

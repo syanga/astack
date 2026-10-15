@@ -213,12 +213,12 @@ def main():
         for filename, record in records.items():
             keys.setdefault(destination_identity(Path(filename)), {})[target] = set(record["keys"])
     for change in settings + (component.settings if component else []):
-        record = change._record["keys"] if change._record else {}
-        keys.setdefault(destination_identity(change.path), {})[change.target] = set(record)
+        keys.setdefault(destination_identity(change.path), {})[change.target] = change.owned_keys
     for filename, by_target in keys.items():
-        if filename in owners:
+        harness_targets = {t for t in by_target if t != claude_router.NAME}
+        if filename in owners or len(harness_targets) > 1:
             raise ValueError("Targets must use distinct destinations: {} ({})".format(
-                filename, ", ".join(sorted(owners[filename] | {t + " settings" for t in by_target}))))
+                filename, ", ".join(sorted(owners.get(filename, set()) | {t + " settings" for t in by_target}))))
         claimed = {}
         for target, names in by_target.items():
             for name in names:

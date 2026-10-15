@@ -26,6 +26,7 @@ type report struct {
 	Status     claude.Status
 	Sup        supervision
 	Digest     digest
+	ConfigErr  string
 }
 
 func writeStatus(w io.Writer, r report, verbose bool) {
@@ -39,6 +40,15 @@ func writeStatus(w io.Writer, r report, verbose bool) {
 			fmt.Fprintf(w, "        last error: %s\n", r.Sup.LastError)
 		}
 		fmt.Fprintln(w, "next    fix the error, then claude-router start")
+		return
+	case r.ConfigErr != "":
+		state, next := "stopped", "fix the configuration, then claude-router start"
+		if r.Running {
+			state, next = "running", "fix the configuration; the running router keeps the one it started with"
+		}
+		fmt.Fprintf(w, "%-69s%s\n", fmt.Sprintf("router  %s  %s", state, r.Manager), clock)
+		fmt.Fprintf(w, "        config error: %s\n", r.ConfigErr)
+		fmt.Fprintf(w, "next    %s\n", next)
 		return
 	case !r.Running:
 		fmt.Fprintf(w, "%-69s%s\n", fmt.Sprintf("router  stopped  %s  %s", r.Listen, r.Manager), clock)

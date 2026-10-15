@@ -60,16 +60,18 @@ func status(args []string) error {
 	if err != nil {
 		return err
 	}
+	r := report{Now: time.Now(), Manager: in.Manager, StateShown: tilde(in.State)}
+	if r.Sup, err = loadSupervision(in.supervisionDir()); err != nil {
+		return err
+	}
 	cfg, err := in.config()
 	if err != nil {
-		return err
-	}
-	r := report{Now: time.Now(), Manager: in.Manager, Listen: cfg.Listen, StateShown: tilde(in.State)}
-	if r.Sup, err = loadSupervision(in.State); err != nil {
-		return err
-	}
-	if st, err := fetchStatus(in); err == nil {
-		r.Running, r.Status = true, st
+		r.ConfigErr, r.Running = err.Error(), locked(in.State)
+	} else {
+		r.Listen = cfg.Listen
+		if st, err := fetchStatus(in); err == nil {
+			r.Running, r.Status = true, st
+		}
 	}
 	if r.Digest, err = readDigest(filepath.Join(in.State, "events.jsonl")); err != nil {
 		return err
@@ -104,10 +106,14 @@ func start(args []string) error {
 		return nil
 	}
 	begun := time.Now()
-	if err := (supervision{}).save(in.State); err != nil {
+	if err := (supervision{}).save(in.supervisionDir()); err != nil {
 		return err
 	}
 	if err := startService(in); err != nil {
+		var f foreignJob
+		if errors.As(err, &f) {
+			return nextError{err: f, next: "stop the router that installation runs, or install this one with another --service"}
+		}
 		return err
 	}
 	for deadline := begun.Add(*wait); time.Now().Before(deadline); time.Sleep(250 * time.Millisecond) {
@@ -115,7 +121,7 @@ func start(args []string) error {
 			fmt.Printf("router  running  %s  %s\n", cfg.Listen, in.Manager)
 			return nil
 		}
-		if sup, err := loadSupervision(in.State); err == nil && sup.LastErrorAt.After(begun) {
+		if sup, err := loadSupervision(in.supervisionDir()); err == nil && sup.LastErrorAt.After(begun) {
 			return nextError{err: errors.New("router did not start"), detail: "last error: " + sup.LastError,
 				next: fmt.Sprintf("fix the error; %s retries up to %d starts in %s, or run claude-router stop", in.Manager, crashLimit, shortDuration(crashWindow))}
 		}
@@ -131,7 +137,15 @@ func stop(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := stopService(in); err != nil {
+	return stopOwn(in)
+}
+
+func stopOwn(in installation) error {
+	var f foreignJob
+	if err := stopService(in); errors.As(err, &f) {
+		fmt.Printf("router  not stopped: %v; left running\n", f)
+		return nil
+	} else if err != nil {
 		return err
 	}
 	if err := waitUnlocked(in.State, 40*time.Second); err != nil {
@@ -206,37 +220,62 @@ func direct(args []string) error {
 	if in.Helper == "" || in.Manifest == "" {
 		return errors.New("no astack installation records this state directory; direct recovery needs one")
 	}
+	if in.Python == "" {
+		return nextError{err: errors.New("service.json names no Python for the direct-recovery helper"), next: "./install.sh --component claude-router"}
+	}
+	if _, err := os.Stat(in.Python); err != nil {
+		return nextError{err: fmt.Errorf("the Python that installed claude-router is gone: %s", in.Python),
+			next: "./install.sh --component claude-router, from the astack checkout, with a Python 3.10 or later"}
+	}
 	helper := []string{in.Helper, "direct", "--state", in.State, "--manifest", in.Manifest}
 	if *prepare {
-		return runHelper(append(helper, "--prepare"))
+		return exitWith(runHelper(in, append(helper, "--prepare")))
 	}
-	if err := runHelper(append(helper, "--check")); err != nil {
+	switch code, err := runHelper(in, append(helper, "--check")); {
+	case err != nil:
+		return err
+	case code == nothingOwned:
+		return exitWith(runHelper(in, helper))
+	case code != 0:
+		os.Exit(code)
+	}
+	if in.Manager == "foreground" {
+		return exitWith(runHelper(in, helper))
+	}
+	if err := stopOwn(in); err != nil {
 		return err
 	}
-	if in.Manager != "foreground" {
-		if err := stopService(in); err != nil {
-			return err
-		}
-		if err := waitUnlocked(in.State, 40*time.Second); err != nil {
-			return err
-		}
-		fmt.Println("router  stopped; assignments kept")
-	}
-	return runHelper(helper)
+	return exitWith(runHelper(in, append(helper, "--stopped")))
 }
 
-func runHelper(args []string) error {
-	cmd := exec.Command("python3", args...)
+const nothingOwned = 3
+
+func runHelper(in installation, args []string) (int, error) {
+	cmd := exec.Command(in.Python, args...)
 	cmd.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1")
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
-			os.Exit(exit.ExitCode())
-		}
-		return err
+	err := cmd.Run()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitCode(), nil
 	}
-	return nil
+	return 0, err
+}
+
+func exitWith(code int, err error) error {
+	if err == nil && code != 0 {
+		os.Exit(code)
+	}
+	return err
+}
+
+func locked(state string) bool {
+	f, err := os.OpenFile(filepath.Join(state, "assignments", "lock"), os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil
 }
 
 func waitUnlocked(state string, wait time.Duration) error {

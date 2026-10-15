@@ -1535,11 +1535,12 @@ claude-router` call it with the default layout. The default targets and
 | Prerequisites | Go 1.26.0 or later. `go env` must report the host's OS and architecture for both target and host; cross-compilation settings, an older Go, an unsupported OS, or a failed build stop the run before any write. |
 | Payload | `$XDG_DATA_HOME/astack/claude-router/bin/claude-router` and the helper with its imports in `lib/`. Both are copies, so a moved checkout leaves them runnable. |
 | Descriptor | launchd: `~/Library/LaunchAgents/<service>.plist`. systemd: `$XDG_CONFIG_HOME/systemd/user/<service>.service`. Both run `serve -supervised -config <state>/config.json` with `HOME` set to the installer's home and the state directory as working directory. |
-| State | `$XDG_STATE_HOME/astack/claude-router`, mode 0700. `config.json` and `client-token` are created once, when missing, and never rewritten. `service.json` records the manager, service name, descriptor, configuration, helper, and astack manifest for the command. |
+| State | `$XDG_STATE_HOME/astack/claude-router`, mode 0700. `config.json` and `client-token` are created once, when missing, and never rewritten. `service.json` records the manager, service name, descriptor, configuration, helper, the Python that ran the installer, and astack manifest for the command. |
 | Ownership record | `components.claude-router` in the astack manifest: the layout, a fingerprint per managed file, the fingerprints of created seeds, the commit, and `pending`. It holds no secret. |
 | Interruption | Before each write, the helper records the file's expected fingerprint in `pending` and saves the manifest. A rerun adopts a pending file that holds that fingerprint. Other interruptions leave a file the next run reports as a conflict. The installer is not a transaction. |
 | Conflicts | An unmanaged or locally modified payload, descriptor, or `service.json` stops install and uninstall; `--force` moves it to `backups/<id>/` first. A component path that a harness target manages is refused. A changed data, state, or descriptor location needs an uninstall first. |
 | Update | A changed binary is replaced. A running service keeps the old binary until `stop` and `start`, and the installer prints that. |
+| Service name | Installs in different homes that use one `--service` name share one launchd label or systemd unit name. `start`, `stop`, `direct`, and uninstall act on a loaded job only when its descriptor is this installation's: launchd's `path` from `launchctl print`, or systemd's `FragmentPath`, compared after resolving symlinks. On a mismatch, `start` refuses and `stop` leaves the other job running and says so (`TestStopAndStartLeaveAJobLoadedFromAnotherHome`, `TestSystemdStopAndStartActOnlyOnTheirOwnUnit`). |
 | Removal | The helper runs the installed `claude-router stop`, then removes the payload, descriptor, and `service.json`, and an unedited `config.json`. It keeps `auths/`, `assignments/`, `accounts.json`, `client-token`, `events.jsonl`, and an edited `config.json`. |
 
 ### Settings ownership
@@ -1553,35 +1554,50 @@ settings that name one of them are refused. The component's settings record
 is `settings.claude-router` in the manifest, the format the harness targets
 use. PR5 writes none. Uninstall and `direct` restore one if it exists.
 
-The harness record format stores each installed and prior value. PR6 must not
-store the client token there: the manifest would then hold a secret.
+The harness record format stores each installed and prior value, and the
+settings file's original and last text. Once activation writes the client
+token into a settings file, the manifest's `settings.claude-router` record
+holds that token, and each `direct` backup holds a copy of the activated file
+with the token. The manifest and the backups have mode 0600. The plan asks to
+redact secret values in ownership records and backups, so this is open, not
+passed: PR6 must keep the token out of both, or the user must accept mode 0600
+as the protection.
 
 ### Supervision
 
-`serve -supervised` keeps `supervision.json` in the state directory. Each
-start records its time; a clean stop on SIGINT or SIGTERM removes it. When 5
+`serve -supervised` keeps `supervision.json` beside its `-config` file, which
+the installer puts in the state directory. Each start records its time before
+the service reads its configuration; a clean stop on SIGINT or SIGTERM removes
+it. An unreadable `supervision.json` is replaced by a new record. When 5
 starts within 10 minutes have no clean stop, the next start records
-`gave_up_at` and exits 0. launchd (`KeepAlive` with `SuccessfulExit` false,
+`gave_up_at` and exits 0. A start that cannot save the record also exits 0
+without serving. launchd (`KeepAlive` with `SuccessfulExit` false,
 `ThrottleInterval` 10) and systemd (`Restart=on-failure`, `RestartSec=10`)
-do not restart a job that exits 0. A failed start records its error.
-`claude-router start` clears the record, so an explicit start always runs.
-`serve` without `-supervised` says that nothing restarts it.
+do not restart a job that exits 0. A failed start, including a configuration
+that does not load, records its error
+(`TestAConfigThatFailsToLoadCountsTowardTheLimit`,
+`TestAnUnreadableSupervisionRecordStillBoundsRestarts`). `claude-router
+start` clears the record, so an explicit start always runs. `serve` without
+`-supervised` says that nothing restarts it.
 
 ### Commands
 
 The layout is the user's selection, mock C with three additions
-(`evidence/PR5/output-mocks/selected.txt`). `cmd/claude-router/testdata/status/`
-holds its status screens, and `TestStatusMatchesTheSelectedLayout` renders
+(`evidence/PR5/output-mocks/selected.txt`). `selected.txt` also holds screens
+in C's line format for states the mocks did not show, and the commands print
+a few more such lines, such as `status`'s `config error:` and `direct`'s
+`skip`. The user has not reviewed those yet. `cmd/claude-router/testdata/status/`
+holds the status screens, and `TestStatusMatchesTheSelectedLayout` renders
 each from sample state.
 
 | Command | Contract |
 | --- | --- |
-| `status` | Reads `GET /claude-router/status`, `events.jsonl`, `supervision.json`, and `service.json`. It marks a quota observation or paid-overflow reading older than 15 minutes with a `stale` line. A service that does not answer is `stopped`, or `failed` when supervision gave up. |
+| `status` | Reads `GET /claude-router/status`, `events.jsonl`, `supervision.json`, and `service.json`. It marks a quota observation or paid-overflow reading older than 15 minutes with a `stale` line. A service that does not answer is `stopped`, or `failed` when supervision gave up. When `config.json` does not load, status prints `config error:` with the error, and `running` or `stopped` from the assignment lock. |
 | `status -v` | Adds every reading with its age, cache counters per account, each assigned conversation, and the migrations, newest first, at most 20. |
-| `start`, `stop` | launchd: `bootstrap` or `kickstart`, and `bootout`. systemd: `daemon-reload`, `reset-failed`, `start`, and `stop`. `start` waits up to 90 s for status to answer or for a start error; `stop` waits until the assignment lock is free. Foreground installations refuse both. |
+| `start`, `stop` | launchd: `bootstrap` or `kickstart`, and `bootout`. systemd: `daemon-reload`, `reset-failed`, `start`, and `stop`. Each acts only on this installation's job (Service name, above). `start` waits up to 90 s for status to answer or for a start error; `stop` waits until the assignment lock is free. Foreground installations refuse both. |
 | `login` | Unchanged flow. It refuses while a process holds the state directory, names that process's pid when status answers, and prints `next    claude-router stop`. |
 | `move` | Takes the 12-hex hash that status shows, a prefix of at least 4 hex digits, or a session ID. A prefix that matches two conversations is answered 409 and nothing moves. |
-| `direct -prepare`, `direct` | Run the installed helper. `-prepare` prints each owned key with its installed value, secrets as `[redacted]`, the count of other keys, the router's logins and assignment count, and the backup path, and changes nothing. `direct` refuses on a key edited after activation, then stops the service, copies each settings file to the backup with mode 0600, and restores the keys. Logins, assignments, the binary, and the job stay. |
+| `direct -prepare`, `direct` | Run the installed helper with the Python recorded in `service.json`, and refuse, naming it, when that interpreter is gone. `-prepare` prints each owned key with its installed value, secrets as `[redacted]`, the count of other keys, the router's logins and assignment count, and the backup path, and changes nothing. The backup path is `backups/direct-<first 12 hex of the file's SHA-256>/<file name>`, so `-prepare` and `direct` print the same path while the file is unchanged. `direct` refuses on a key edited after activation, then stops the service, copies each settings file to the backup with mode 0600, and restores the keys. A key that already holds its value from before activation, as after a crash between the settings write and the manifest save, prints `skip` and its record is dropped. With no owned settings, `direct` prints `nothing to change` and stops nothing. In foreground mode it stops nothing and does not say the router stopped. Logins, assignments, the binary, and the job stay. |
 
 The status endpoint adds `capacity`, `quota` (the newest observation, kept in
 memory only), `bound` and `active` counts, `needs_login_at`, a `bindings`

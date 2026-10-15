@@ -69,11 +69,16 @@ state directory above. The installer seeds `config.json` with
 `127.0.0.1:18787` and no accounts, and creates `client-token` with mode 0600.
 
 To serve on another port, or to install a second copy beside the first, run the
-helper directly:
+helper directly with its own service name and port:
 
 ```sh
 python3 scripts/claude_router.py install --service dev.example.router --port 28787 --home /path/to/home
 ```
+
+Two installs with one service name share one launchd label or systemd unit.
+`start`, `stop`, `direct`, and uninstall act only on the job loaded from their
+own descriptor. They refuse to start, or leave running, a job loaded from the
+other install.
 
 ## Enroll accounts and start
 
@@ -123,17 +128,20 @@ start`.
 | `claude-router login -account ID` | Logs in again after a revoked login. It refuses while the service runs, because the service would write its old credential back. Run `stop`, `login`, then `start`. |
 | `claude-router move -conversation HASH -to ID` | Moves a conversation, named by the hash that status shows, to another account. A prefix of 4 or more hex digits works if it matches one conversation. |
 | `claude-router direct -prepare` | Lists the client settings that router activation owns and that `direct` would restore, and the backup it would write. Changes nothing. |
-| `claude-router direct` | Stops the service and restores those client settings. Logins, assignments, the binary, and the job stay. A key edited after activation stops it, and the edit is kept. |
+| `claude-router direct` | Stops the service and restores those client settings, backing each file up to the path that `-prepare` printed. Logins, assignments, the binary, and the job stay. A key edited after activation stops it, and the edit is kept. With no client settings to restore, it changes nothing and leaves the service running. |
 
 Status shows hashes, account names, counters, and times, never a token or a
-prompt.
+prompt. A `direct` backup is a copy of the activated settings file, client
+token included, with mode 0600.
 
-The managed job runs `claude-router serve -supervised`. After 5 starts within
-10 minutes that did not end in a clean stop, it records that it gave up and
-exits 0. launchd (`KeepAlive` with `SuccessfulExit` false) and systemd
-(`Restart=on-failure`) do not restart a job that exits 0, so a crash loop
-ends there, and `status` shows `failed` with the last start error until the
-next `start`. launchd waits 10 seconds between starts (`ThrottleInterval`) and
+The managed job runs `claude-router serve -supervised`. It counts each start
+before it reads `config.json`. After 5 starts within 10 minutes that did not
+end in a clean stop, it records that it gave up and exits 0. launchd
+(`KeepAlive` with `SuccessfulExit` false) and systemd (`Restart=on-failure`)
+do not restart a job that exits 0, so a crash loop ends there, including one
+caused by a mistake in `config.json`. `status` shows `failed` with the last
+start error until the next `start`, and shows `config error:` while
+`config.json` does not load. launchd waits 10 seconds between starts (`ThrottleInterval`) and
 systemd waits 10 seconds (`RestartSec`). launchd has no restart count of its
 own; the limit is the router's.
 

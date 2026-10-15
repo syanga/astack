@@ -153,6 +153,10 @@ class ComponentSelectionTests(ComponentFixture):
         self.assertEqual(record["manager"], self.manager_name)
         self.assertEqual(record["name"], "dev.astack.claude-router")
         self.assertEqual(record["helper"], str(self.data / "lib/claude_router.py"))
+        helper = subprocess.run([record["python"], record["helper"], "direct", "--prepare", "--state", str(self.state_dir),
+                                 "--manifest", record["manifest"]], capture_output=True, text=True, env=self.env)
+        self.assertEqual((helper.returncode, helper.stdout), (0, "keep    no client settings name the router; router logins none; 0 assignments\n"
+                                                                "ready   nothing to change\n"), helper.stderr)
         self.assertFalse((self.home / ".claude").exists())
         self.assertFalse((self.home / ".codex").exists())
         self.assertNotIn("settings", self.manifest())
@@ -363,17 +367,18 @@ class DirectRecoveryTests(ComponentFixture):
             "remove  ~/.claude/settings.json env.CLAUDE_CODE_RETRY_WATCHDOG (1)",
             "keep    2 other settings keys; router logins work; 2 assignments",
         ])
-        self.assertRegex(lines[4], r"^backup  ~/\.local/state/astack/backups/direct-\d{8}T\d{6}Z/.+/settings\.json$")
+        self.assertRegex(lines[4], r"^backup  ~/\.local/state/astack/backups/direct-[0-9a-f]{12}/settings\.json$")
         self.assertEqual(lines[5:], ["after   claude needs its own /login", "ready   nothing changed; apply with claude-router direct"])
         self.assertEqual(self.settings_path.read_bytes(), self.activated)
         self.assertNotIn("router-client-token-value", result.stdout + result.stderr)
 
     def test_apply_restores_the_settings_backs_them_up_and_keeps_router_state(self):
-        result = self.direct()
+        prepared = self.direct("--prepare").stdout.splitlines()
+        result = self.direct("--stopped")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[-1], "done    clients connect directly; the router stays installed and stopped")
+        self.assertEqual(result.stdout.splitlines(), prepared[:-1] + ["done    clients connect directly; the router stays installed and stopped"])
         self.assertEqual(self.settings_path.read_bytes(), self.before)
-        backup, = (self.home / ".local/state/astack/backups").rglob("settings.json")
+        backup = self.home / prepared[4].split("~/", 1)[1]
         self.assertEqual(backup.read_bytes(), self.activated)
         self.assertEqual(stat.S_IMODE(backup.stat().st_mode), 0o600)
         self.assertNotIn("claude-router", self.manifest().get("settings", {}))
@@ -383,6 +388,39 @@ class DirectRecoveryTests(ComponentFixture):
         again = self.direct("--prepare")
         self.assertEqual(again.stdout, "keep    no client settings name the router; router logins work; 2 assignments\n"
                                        "ready   nothing to change\n")
+        check = self.direct("--check")
+        self.assertEqual((check.returncode, check.stdout, check.stderr), (3, "", ""))
+
+    def test_without_a_stopped_service_apply_does_not_claim_one(self):
+        result = self.direct()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-1], "done    clients connect directly; the router stays installed")
+        self.assertEqual(self.settings_path.read_bytes(), self.before)
+
+    def test_a_crash_after_the_settings_write_is_recovered_by_the_next_run(self):
+        sys.path.insert(0, str(self.data / "lib"))
+        try:
+            spec = importlib.util.spec_from_file_location("installed_helper", self.data / "lib/claude_router.py")
+            helper = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(helper)
+        finally:
+            sys.path.remove(str(self.data / "lib"))
+        manifest = self.home / ".local/state/astack/manifest.json"
+        with patch.object(helper.files, "save_manifest", side_effect=KeyboardInterrupt), redirect_stdout(io.StringIO()):
+            with self.assertRaises(KeyboardInterrupt):
+                helper.direct(self.state_dir, manifest, "apply")
+        self.assertEqual(self.settings_path.read_bytes(), self.before)
+        self.assertIn("claude-router", self.manifest()["settings"])
+        prepared = self.direct("--prepare")
+        self.assertEqual(prepared.stdout.splitlines()[:3], [
+            "skip    ~/.claude/settings.json env.ANTHROPIC_AUTH_TOKEN (already restored)",
+            "skip    ~/.claude/settings.json env.ANTHROPIC_BASE_URL (already restored)",
+            "skip    ~/.claude/settings.json env.CLAUDE_CODE_RETRY_WATCHDOG (already restored)",
+        ])
+        result = self.direct()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.settings_path.read_bytes(), self.before)
+        self.assertNotIn("claude-router", self.manifest().get("settings", {}))
 
     def test_a_local_edit_refuses_and_is_kept(self):
         content = json.loads(self.activated)
@@ -434,19 +472,27 @@ class SettingsOwnershipTests(ComponentFixture):
 
 
 class RedactionTests(ComponentFixture):
-    def test_no_secret_reaches_output_or_the_manifest(self):
+    def test_activated_output_and_the_component_record_hold_no_secret(self):
         outputs = [self.component().stdout]
         self.enroll()
         settings_path = self.home / ".claude/settings.json"
         self.activate(settings_path)
         token = (self.state_dir / "client-token").read_text().strip()
-        direct = subprocess.run([sys.executable, str(self.data / "lib/claude_router.py"), "direct", "--prepare",
-                                 "--state", str(self.state_dir), "--manifest", str(self.home / ".local/state/astack/manifest.json")],
-                                capture_output=True, text=True, env=self.env)
-        outputs += [direct.stdout, direct.stderr, self.component("--dry-run", command="uninstall").stdout]
-        manifest = (self.home / ".local/state/astack/manifest.json").read_text()
-        for secret in (token, "credential-secret-value", "router-client-token-value"):
-            for text in outputs:
+
+        def direct():
+            return subprocess.run([sys.executable, str(self.data / "lib/claude_router.py"), "direct", "--prepare",
+                                   "--state", str(self.state_dir), "--manifest", str(self.home / ".local/state/astack/manifest.json")],
+                                  capture_output=True, text=True, env=dict(self.env, HOME=str(self.home)))
+        prepared = direct()
+        self.assertIn("remove  ~/.claude/settings.json env.ANTHROPIC_AUTH_TOKEN ([redacted])\n", prepared.stdout)
+        content = json.loads(settings_path.read_text())
+        content["env"]["ANTHROPIC_AUTH_TOKEN"] = "edited-secret-value"
+        settings_path.write_text(json.dumps(content))
+        edited = direct()
+        self.assertIn("        expected [redacted], found [redacted]\n", edited.stderr)
+        outputs += [prepared.stdout, prepared.stderr, edited.stdout, edited.stderr,
+                    self.component("--dry-run", command="uninstall", success=False).stderr]
+        component = json.dumps(self.manifest()["components"]["claude-router"])
+        for secret in (token, "credential-secret-value", "router-client-token-value", "edited-secret-value"):
+            for text in outputs + [component]:
                 self.assertNotIn(secret, text)
-        self.assertNotIn(token, manifest)
-        self.assertNotIn("credential-secret-value", manifest)

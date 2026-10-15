@@ -686,10 +686,6 @@ func (s *Service) Status() Status {
 	return st
 }
 
-// move is the manual override: it binds an assigned conversation to an
-// enrolled account, whatever the account's quota or login state, and records
-// a manual migration. The conversation is its session ID, or a prefix of at
-// least 4 hex digits of the hash that status and events show.
 func (s *Service) move(c *gin.Context) {
 	var m struct {
 		Conversation string `json:"conversation"`

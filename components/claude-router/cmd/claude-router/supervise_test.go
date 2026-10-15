@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -45,5 +49,61 @@ func TestACleanStopDoesNotCountTowardTheLimit(t *testing.T) {
 	}
 	if len(s.Unclean) != 0 || s.Runs != 10 {
 		t.Fatalf("record %+v, want no unclean starts and 10 runs", s)
+	}
+}
+
+func TestAConfigThatFailsToLoadCountsTowardTheLimit(t *testing.T) {
+	state := t.TempDir()
+	config := filepath.Join(state, "config.json")
+	if err := os.WriteFile(config, []byte(`{"listen": "127.0.0.1:18787", "capcity": 5}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-supervised", "-config", config}
+	for i := range crashLimit {
+		if err := serve(args); err == nil || !strings.Contains(err.Error(), `unknown field "capcity"`) {
+			t.Fatalf("start %d: %v, want the config error", i+1, err)
+		}
+	}
+	if err := serve(args); err != nil {
+		t.Fatalf("start %d: %v, want a clean exit that the service manager does not restart", crashLimit+1, err)
+	}
+	s, err := loadSupervision(state)
+	if err != nil || s.GaveUpAt.IsZero() || s.Runs != crashLimit || !strings.Contains(s.LastError, `unknown field "capcity"`) {
+		t.Fatalf("record %+v (%v), want gave up after %d runs with the config error", s, err, crashLimit)
+	}
+	var out bytes.Buffer
+	writeStatus(&out, report{Now: time.Now(), Manager: "launchd", Sup: s, ConfigErr: s.LastError}, false)
+	if line := strings.Split(out.String(), "\n")[1]; !strings.HasPrefix(line, "        last error: "+config+": json: unknown field \"capcity\"") {
+		t.Fatalf("status line %q, want the recorded config error", line)
+	}
+}
+
+func TestAnUnreadableSupervisionRecordStillBoundsRestarts(t *testing.T) {
+	state := t.TempDir()
+	config := filepath.Join(state, "config.json")
+	if err := os.WriteFile(config, []byte(`{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, supervisionFile), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-supervised", "-config", config}
+	starts := 0
+	for ; starts < 2*crashLimit && serve(args) != nil; starts++ {
+	}
+	if starts != crashLimit {
+		t.Fatalf("%d failed starts before giving up, want %d", starts, crashLimit)
+	}
+}
+
+func TestStatusShowsAConfigThatDoesNotLoad(t *testing.T) {
+	var out bytes.Buffer
+	writeStatus(&out, report{Now: sampleNow, Manager: "launchd",
+		ConfigErr: `/s/config.json: json: unknown field "capcity"`}, false)
+	want := "router  stopped  launchd                                             14:20 PDT\n" +
+		"        config error: /s/config.json: json: unknown field \"capcity\"\n" +
+		"next    fix the configuration, then claude-router start\n"
+	if out.String() != want {
+		t.Fatalf("status:\n%s\nwant:\n%s", out.String(), want)
 	}
 }

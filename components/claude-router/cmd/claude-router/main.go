@@ -90,27 +90,39 @@ func serve(args []string) error {
 	if *path == "" {
 		return errors.New("-config is required")
 	}
-	cfg, err := claude.LoadConfig(*path)
-	if err != nil {
-		return err
-	}
-	var sup supervision
 	begun := time.Now().Round(0)
+	dir := filepath.Dir(*path)
 	if *supervised {
-		if cfg.StateDir == "" || !filepath.IsAbs(cfg.StateDir) {
-			return errors.New("state_dir: need an absolute path")
+		if !filepath.IsAbs(*path) {
+			return errors.New("-supervised needs an absolute -config path")
 		}
-		if sup, err = loadSupervision(cfg.StateDir); err != nil {
-			return err
+		sup, err := loadSupervision(dir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "claude-router: %s unreadable, starting a new record: %v\n", supervisionFile, err)
+			sup = supervision{}
 		}
-		if !sup.begin(begun) {
-			_ = sup.save(cfg.StateDir)
+		allowed := sup.begin(begun)
+		if err := sup.save(dir); err != nil {
+			fmt.Fprintf(os.Stderr, "claude-router: cannot record this start in %s: %v; not starting\n", supervisionFile, err)
+			return nil
+		}
+		if !allowed {
 			fmt.Fprintf(os.Stderr, "claude-router: %d starts in %s without a clean stop; not starting again until claude-router start\n", crashLimit, shortDuration(crashWindow))
 			return nil
 		}
-		if err := sup.save(cfg.StateDir); err != nil {
-			return err
+	}
+	failed := func(err error) error {
+		if *supervised {
+			if s, lerr := loadSupervision(dir); lerr == nil {
+				s.fail(time.Now(), err)
+				_ = s.save(dir)
+			}
 		}
+		return err
+	}
+	cfg, err := claude.LoadConfig(*path)
+	if err != nil {
+		return failed(err)
 	}
 	// The service needs Info entries enabled: it waits for an SDK Info
 	// entry during startup. Only warnings and errors reach stderr.
@@ -119,13 +131,7 @@ func serve(args []string) error {
 	log.AddHook(stderrHook{})
 	svc, err := claude.Start(cfg, claude.Options{})
 	if err != nil {
-		if *supervised {
-			if s, lerr := loadSupervision(cfg.StateDir); lerr == nil {
-				s.fail(time.Now(), err)
-				_ = s.save(cfg.StateDir)
-			}
-		}
-		return err
+		return failed(err)
 	}
 	if *supervised {
 		fmt.Fprintf(os.Stderr, "claude-router: serving on http://%s\n", svc.Addr())
@@ -137,9 +143,9 @@ func serve(args []string) error {
 	<-sig
 	svc.Close()
 	if *supervised {
-		if s, err := loadSupervision(cfg.StateDir); err == nil {
+		if s, err := loadSupervision(dir); err == nil {
 			s.stopped(begun)
-			_ = s.save(cfg.StateDir)
+			_ = s.save(dir)
 		}
 	}
 	return nil
