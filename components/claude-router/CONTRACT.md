@@ -425,7 +425,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | RP-3 | Bootstrap 401 and 403 do not fail over to another account | passed | `TestBootstrapAuthErrorsDoNotFailOver` | PR1 |
 | RP-4 | A pin to an unknown or cooling-down auth fails with 503 and selects no account | passed | `TestPinToUnknownAuthSelectsNothing`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover` | PR1 |
 | RP-5 | Single-attempt posture makes one upstream attempt per call, for credentials without a refresh token | passed | `TestPinnedExecutorPostureMakesOneAttemptPerCall` | PR1 |
-| RP-5b | Single-attempt posture for credentials with a refresh token | blocked | A 401 triggers refresh and a same-auth redispatch (`conductor_stream.go:253-263`). The refresh dials `platform.claude.com`, so no offline probe can serve it. The PR3 service also reads the paid-overflow setting with the account's credential before dispatch. A forced invalid token fails that read with 401; the service then refreshes the credential once and reads again, so the inference that follows runs on the refreshed token and does not take the redispatch path. The path runs only when a token expires between the reading and a request. | Live observation when a token expires in service (PR5 lanes), or an SDK seam for the refresh client. The PR4 live session had no attempt that failed with 401 (`evidence/PR4/live-2-cc2.1.300/events.jsonl`). The PR4 runbook's steps do not force it: each step starts the router, which reads and renews a due credential before any inference |
+| RP-5b | Single-attempt posture for credentials with a refresh token | blocked | A 401 triggers refresh and a same-auth redispatch (`conductor_stream.go:253-263`). The refresh dials `platform.claude.com`, so no offline probe can serve it. The PR3 service also reads the paid-overflow setting with the account's credential before dispatch. A forced invalid token fails that read with 401; the service then refreshes the credential once and reads again, so the inference that follows runs on the refreshed token and does not take the redispatch path. The path runs only when a token expires between the reading and a request. | Live observation when a token expires in service, or an SDK seam for the refresh client. The PR4 live session had no attempt that failed with 401 (`evidence/PR4/live-2-cc2.1.300/events.jsonl`). The PR4 runbook's steps do not force it: each step starts the router, which reads and renews a due credential before any inference. The PR5 lanes use fake credentials without a refresh token against a controlled upstream, so they cannot reach the path (`evidence/PR5/lane-2/macos.json`). Next chance: PR6's live acceptance |
 | RP-6 | A rotated credential reloaded from the auth directory keeps its account and auth ID, after a quiet period | passed | `TestRotatedCredentialKeepsAccount` | PR1 |
 | RP-7 | SDK-initiated OAuth refresh keeps the account | passed | Live lane 1 rerun at `9b7e059` under `-race` (`evidence/PR3/lane-1-rerun/`): both accounts were due at start, the SDK refreshed them, the start reads logged `credential_refresh` `expiring` `sdk_refreshed` and read the setting, `refresh_sha256_12` and `last_refresh` changed for `work` (`rp7-before.json`, `rp7-after.json`), and step R8 served both accounts on their pinned conversations. The verifier ruled that `c95ae72` runs the same branches on that path (`reports/PR3-verify/c95ae72/receipt.md`, "Live equivalence"). The refresh guard adds no branch to it: a credential with a refresh pending at start is waited for, and the SDK's refresh passes the guard. Offline, a refresh through the SDK's own refresh path, with only the token exchange replaced, keeps the account (`TestReadOfADueCredentialWaitsForTheSDKRefresh`, `TestUnauthorizedSettingsReadRefreshesOnceAndReadsAgain`), and so does a credential renewed by restart (`TestRotatedCredentialAppliesAtRestartOnTheSameAccount`, lane 2 `renewal_keeps_account`). | PR3 |
 | RP-8 | Configuration applied at startup does not change pinned selection | passed | `TestConfigApplyKeepsPinnedSelection`, six configurations | PR1 |
@@ -465,7 +465,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 
 | ID | Behavior | Terminal | Agent SDK (T3) | Evidence | Owner |
 | --- | --- | --- | --- | --- | --- |
-| WC-1 | Automatic waiting for a long reset with cancellation and resumption | passed with `CLAUDE_CODE_RETRY_WATCHDOG=1`; failed with defaults | passed with the watchdog; failed with defaults | `waiting.json#rows[4]`. Through the PR4 router against a controlled upstream: both clients waited out a 75 s usable reset behind the router's local 429 and resumed, and SIGINT or `interrupt()` ended a 2 h wait (`evidence/PR4/lane-2/recovery.json`, `wait_nested`, `long_reset_cancel`). Live through the PR4 router with real accounts, Claude Code 2.1.300, and Agent SDK 0.3.300 (step W1, `evidence/PR4/live-2-cc2.1.300/W1/`): a local gate injected the exhaustion of both accounts with a 120 s reset. Both waiters got the router's local 429 and counted down in 30 s steps from 119.6 s (terminal) and 118.5 s (Agent SDK). Neither sent a request during the wait. The first resend came 0.01 s after the reset, and each resend got one real attempt and completed. Cancellation was not run live. | PR5: managed client wiring sets `CLAUDE_CODE_RETRY_WATCHDOG=1` |
+| WC-1 | Automatic waiting for a long reset with cancellation and resumption | passed with `CLAUDE_CODE_RETRY_WATCHDOG=1`; failed with defaults | passed with the watchdog; failed with defaults | `waiting.json#rows[4]`. Through the PR4 router against a controlled upstream: both clients waited out a 75 s usable reset behind the router's local 429 and resumed, and SIGINT or `interrupt()` ended a 2 h wait (`evidence/PR4/lane-2/recovery.json`, `wait_nested`, `long_reset_cancel`). Live through the PR4 router with real accounts, Claude Code 2.1.300, and Agent SDK 0.3.300 (step W1, `evidence/PR4/live-2-cc2.1.300/W1/`): a local gate injected the exhaustion of both accounts with a 120 s reset. Both waiters got the router's local 429 and counted down in 30 s steps from 119.6 s (terminal) and 118.5 s (Agent SDK). Neither sent a request during the wait. The first resend came 0.01 s after the reset, and each resend got one real attempt and completed. Cancellation was not run live. | PR6: activation's client wiring sets `CLAUDE_CODE_RETRY_WATCHDOG=1`. PR5 installs the service only and sets no client environment; it reserves the key for activation ("Settings ownership") |
 | WC-2 | Bounded connection lifetime: client limits measured | passed | passed | `waiting.json#rows[0]` to `#rows[2]` | PR1 |
 | WC-3 | Short reset resumes automatically | passed | passed | `waiting.json#rows[3]` | PR1 |
 | WC-4 | Unknown reset has explicit behavior | passed | passed | `waiting.json#rows[5]` | PR1 |
@@ -494,8 +494,8 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | PS-3 | A second writer process is refused | passed | Same test and comparison | PR1 |
 | PS-4 | Torn tail truncates; corrupt or incomplete interior records fail closed | passed | `TestJournalTruncatesTornFinalRecord`, `TestJournalRefusesCorruptInteriorRecord` | PR1 |
 | PS-7 | A write or sync error stops acknowledgments until recovery, and no acknowledgment disagrees with replay | passed | `TestJournalStopsAcknowledgingAfterFailedSync`, `TestJournalRecoversFromPartialWrite` | PR1 |
-| PS-5 | Durability across OS crash or power loss | blocked | No power-cut rig. Relies on `F_FULLFSYNC` and `fsync`. | PR5: supervision lane records the durability scope; a power-cut check stays out of scope unless a rig exists |
-| PS-6 | Storage behavior on Linux | blocked | No Linux environment in PR1 | PR5: Linux lane runs the journal probes under systemd-user |
+| PS-5 | Durability across OS crash or power loss | blocked | No power-cut rig. Relies on `F_FULLFSYNC` and `fsync`. PR5's supervision lane killed the service with SIGKILL, which is a process crash (PS-1), not an OS crash. The README states the untested scope. | Accepted limit unless a power-cut rig exists. Never pass it on documentation |
+| PS-6 | Storage behavior on Linux | blocked | No Linux environment in PR1 or PR5. The PR5 Linux lane is prepared and not run (`evidence/PR5/lane-3/`). | PR5 lane 3 on a Linux host: the journal probes and the systemd-user lifecycle |
 | DS-1 | Pinned source build with an explicit Go prerequisite | passed | `go.mod`, `go.sum`; `toolchain/go-toolchain.json` in the store | PR1 |
 | DS-2 | SDK license and version requirement recorded | passed | Pinned SDK table above | PR1 |
 | DS-3 | Offline build and test from the prepared module cache | passed | `evidence/PR1/unit-<head>/go.log` | PR1 |
@@ -1515,3 +1515,90 @@ builds its router with `New`, so its restarts forget account state.
 | PR4.perf | 5 parent and 5 head runs, interleaved, 16 waiting conversations, 5 s reset. Head: 0 attempts on a known exhausted account before its reset, p95 resumption 18 ms after the reset, 0 healthy migrations, every conversation done within 10 s. With one of two accounts exhausted, the head finished in under 81 ms by migrating; the parent waited for the reset. | `evidence/PR4/perf/perf.json`, `baseline.json` |
 | Lane 2 (PR4.live.2 with a controlled upstream) | 10 scenarios, each with terminal Claude 2.1.285 and the Agent SDK driver, sandboxed; rerun with Claude Code 2.1.300 and Agent SDK 0.3.300, all passed | `evidence/PR4/lane-2/recovery.json`, `evidence/PR4/lane-2-cc2.1.300/recovery.json` |
 | PR4.live.1, the attended part of PR4.live.2, WC-1, WC-6 | Passed with real accounts `work` and `alumni`, Claude Code 2.1.300, and Agent SDK 0.3.300: 10 real attempts, at most 2 per step. A local gate injected every exhaustion. The parent (PR3) answered the injected exhaustion with its local 429 and kept the conversation (M2). The head moved the terminal conversation (M3) and the Agent SDK conversation (M6) to the other account within the request, on the same model. The moved terminal reply named the sentinel word that only the earlier tool result held, and no tool ran again. The conversation stayed on the destination after the source's reset (M4). W1 and W6 are rows WC-1 and WC-6. Races 0. | `evidence/PR4/live-2-cc2.1.300/RESULTS.md` and its step folders; `reports/PR4-live-runbook.md` in the execution store |
+
+## Operation (PR5)
+
+PR5 installs the router as an optional per-user service and operates it from
+the command line. It never writes client settings: activation is PR6.
+
+### Installation
+
+`scripts/claude_router.py` is the component's lifecycle helper.
+`./install.sh --component claude-router` and `./uninstall.sh --component
+claude-router` call it with the default layout. The default targets and
+`--target all` never select it. Run directly, the helper also takes
+`--service NAME`, `--port PORT`, and `--manager launchd|systemd|foreground`.
+
+| Rule | Behavior |
+| --- | --- |
+| Build | `go build -trimpath -buildvcs=false` of `./cmd/claude-router` with `GOPROXY=off GOSUMDB=off GOFLAGS=-mod=readonly CGO_ENABLED=0`, into a temporary directory outside the home. The linker gets the checkout's short commit, because Go records no revision for a build inside a linked Git worktree. A preview builds too, so it reports `WRITE` or `KEEP` exactly. |
+| Prerequisites | Go 1.26.0 or later. `go env` must report the host's OS and architecture for both target and host; cross-compilation settings, an older Go, an unsupported OS, or a failed build stop the run before any write. |
+| Payload | `$XDG_DATA_HOME/astack/claude-router/bin/claude-router` and the helper with its imports in `lib/`. Both are copies, so a moved checkout leaves them runnable. |
+| Descriptor | launchd: `~/Library/LaunchAgents/<service>.plist`. systemd: `$XDG_CONFIG_HOME/systemd/user/<service>.service`. Both run `serve -supervised -config <state>/config.json` with `HOME` set to the installer's home and the state directory as working directory. |
+| State | `$XDG_STATE_HOME/astack/claude-router`, mode 0700. `config.json` and `client-token` are created once, when missing, and never rewritten. `service.json` records the manager, service name, descriptor, configuration, helper, and astack manifest for the command. |
+| Ownership record | `components.claude-router` in the astack manifest: the layout, a fingerprint per managed file, the fingerprints of created seeds, the commit, and `pending`. It holds no secret. |
+| Interruption | Before each write, the helper records the file's expected fingerprint in `pending` and saves the manifest. A rerun adopts a pending file that holds that fingerprint. Other interruptions leave a file the next run reports as a conflict. The installer is not a transaction. |
+| Conflicts | An unmanaged or locally modified payload, descriptor, or `service.json` stops install and uninstall; `--force` moves it to `backups/<id>/` first. A component path that a harness target manages is refused. A changed data, state, or descriptor location needs an uninstall first. |
+| Update | A changed binary is replaced. A running service keeps the old binary until `stop` and `start`, and the installer prints that. |
+| Removal | The helper runs the installed `claude-router stop`, then removes the payload, descriptor, and `service.json`, and an unedited `config.json`. It keeps `auths/`, `assignments/`, `accounts.json`, `client-token`, `events.jsonl`, and an edited `config.json`. |
+
+### Settings ownership
+
+A settings file can have several owners, one per key. The installer refuses a
+run in which two owners claim one key, and a run that would change the same
+settings file for a harness and the component, which must run separately.
+Router activation owns `env.ANTHROPIC_BASE_URL`, `env.ANTHROPIC_AUTH_TOKEN`,
+and `env.CLAUDE_CODE_RETRY_WATCHDOG` in the Claude settings file. Harness
+settings that name one of them are refused. The component's settings record
+is `settings.claude-router` in the manifest, the format the harness targets
+use. PR5 writes none. Uninstall and `direct` restore one if it exists.
+
+The harness record format stores each installed and prior value. PR6 must not
+store the client token there: the manifest would then hold a secret.
+
+### Supervision
+
+`serve -supervised` keeps `supervision.json` in the state directory. Each
+start records its time; a clean stop on SIGINT or SIGTERM removes it. When 5
+starts within 10 minutes have no clean stop, the next start records
+`gave_up_at` and exits 0. launchd (`KeepAlive` with `SuccessfulExit` false,
+`ThrottleInterval` 10) and systemd (`Restart=on-failure`, `RestartSec=10`)
+do not restart a job that exits 0. A failed start records its error.
+`claude-router start` clears the record, so an explicit start always runs.
+`serve` without `-supervised` says that nothing restarts it.
+
+### Commands
+
+The layout is the user's selection, mock C with three additions
+(`evidence/PR5/output-mocks/selected.txt`). `cmd/claude-router/testdata/status/`
+holds its status screens, and `TestStatusMatchesTheSelectedLayout` renders
+each from sample state.
+
+| Command | Contract |
+| --- | --- |
+| `status` | Reads `GET /claude-router/status`, `events.jsonl`, `supervision.json`, and `service.json`. It marks a quota observation or paid-overflow reading older than 15 minutes with a `stale` line. A service that does not answer is `stopped`, or `failed` when supervision gave up. |
+| `status -v` | Adds every reading with its age, cache counters per account, each assigned conversation, and the migrations, newest first, at most 20. |
+| `start`, `stop` | launchd: `bootstrap` or `kickstart`, and `bootout`. systemd: `daemon-reload`, `reset-failed`, `start`, and `stop`. `start` waits up to 90 s for status to answer or for a start error; `stop` waits until the assignment lock is free. Foreground installations refuse both. |
+| `login` | Unchanged flow. It refuses while a process holds the state directory, names that process's pid when status answers, and prints `next    claude-router stop`. |
+| `move` | Takes the 12-hex hash that status shows, a prefix of at least 4 hex digits, or a session ID. A prefix that matches two conversations is answered 409 and nothing moves. |
+| `direct -prepare`, `direct` | Run the installed helper. `-prepare` prints each owned key with its installed value, secrets as `[redacted]`, the count of other keys, the router's logins and assignment count, and the backup path, and changes nothing. `direct` refuses on a key edited after activation, then stops the service, copies each settings file to the backup with mode 0600, and restores the keys. Logins, assignments, the binary, and the job stay. |
+
+The status endpoint adds `capacity`, `quota` (the newest observation, kept in
+memory only), `bound` and `active` counts, `needs_login_at`, a `bindings`
+list (hash, account, reason, since, served, last request, active), and `now`,
+`started`, `pid`, `journal`, `binary`, `sdk`, `quota_fresh_for`,
+`overage_fresh_for`, and `active_for` (`TestStatusReportsCapacityQuotaAndEachBinding`,
+`TestStatusCountsAnIdleConversationAsBoundButNotActive`). A `request` event
+with decision `wait` carries `until`, the reset it waits for
+(`TestAWaitEventCarriesTheResetItWaitsFor`). Status derives cache read
+share, waits, refusals, holds, moves, and context size from `events.jsonl`.
+
+### Verification
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| PR5.unit | `python3 -m unittest discover -s tests -v` and the Go tests under `-race`, with `go vet` | `evidence/PR5/unit-<sha>/` |
+| PR5.live.1 | Ordinary install, repeat, update with a changed unrelated setting, preview, uninstall preview, and uninstall gave the same output and inventories on parent `40937db` and head. On head, the component built from the pinned cache, a repeat wrote nothing, the Claude settings file did not change, a default install left the component alone, and after the checkout moved the binary ran and the component uninstalled. | `evidence/PR5/lane-1/ordinary-install.json` |
+| PR5.live.2 | launchd on macOS with a unique label, port, temporary HOME, fake credentials, and a loopback upstream: install, readiness, 401 without the token and 200 with it, the binding kept across stop and start and across SIGKILL, a crash loop that gave up after 4 kills with no pid for 25 s, recovery by `start`, a visible credential-mode failure and port conflict, loopback-only connections, and uninstall that booted out the job and kept logins, assignments, and client settings | `evidence/PR5/lane-2/macos.json`, `evidence/PR5/lifecycle.json`, `evidence/PR5/restoration.json` |
+| PR5.live.3 | Blocked: no Linux host. The systemd-user lane is prepared as `lane-3/lane3_linux.py`. The foreground mode passed on macOS. | `evidence/PR5/lane-3/` |
+| PR5.perf | Not applicable. The request path changed only to stamp `until` on wait events. | |

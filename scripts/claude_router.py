@@ -138,11 +138,22 @@ def check_go():
     return go
 
 
+def source_revision():
+    """Return the checkout's short commit, with +dirty for local component changes, or unknown."""
+    component = repo() / "components" / NAME
+    head = subprocess.run(["git", "-C", str(component), "rev-parse", "--short=7", "HEAD"], capture_output=True, text=True)
+    if head.returncode != 0:
+        return "unknown"
+    dirty = subprocess.run(["git", "-C", str(component), "status", "--porcelain", "--", "."], capture_output=True, text=True)
+    return head.stdout.strip() + ("+dirty" if dirty.stdout.strip() else "")
+
+
 def build(go, directory):
     """Build the binary from the pinned dependency cache into directory."""
     output = directory / NAME
     env = dict(os.environ, GOPROXY="off", GOSUMDB="off", GOFLAGS="-mod=readonly", CGO_ENABLED="0")
-    result = subprocess.run([go, "build", "-trimpath", "-o", str(output), "./cmd/claude-router"],
+    revision = "-X github.com/syanga/astack/components/claude-router/internal/claude.linkedRevision=" + source_revision()
+    result = subprocess.run([go, "build", "-trimpath", "-buildvcs=false", "-ldflags=" + revision, "-o", str(output), "./cmd/claude-router"],
                             cwd=str(repo() / "components" / NAME), env=env, capture_output=True, text=True)
     if result.returncode != 0:
         tail = "\n  ".join(result.stderr.strip().splitlines()[-8:])
