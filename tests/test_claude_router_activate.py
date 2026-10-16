@@ -5,6 +5,8 @@ import io
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -113,10 +115,7 @@ class ActivationFixture(ComponentFixture):
         super().setUp()
         self.component()
         self.enroll()
-        state_path = self.home / ".local/state/astack/manifest.json"
-        state = json.loads(state_path.read_text())
-        state["components"]["claude-router"]["commit"] = COMMIT
-        state_path.write_text(json.dumps(state))
+        self.set_commit()
         tools = self.root / "fake bin"
         for name, text in (("launchctl", FAKE_LAUNCHER), ("systemctl", FAKE_LAUNCHER), ("fake-client", FAKE_CLIENT),
                            ("claude", "#!/bin/sh\necho '2.1.300 (Claude Code)'\n")):
@@ -151,6 +150,12 @@ class ActivationFixture(ComponentFixture):
         self.identity = json.loads(self.helper("identity", "--claude", str(self.claude), "--agent-sdk", str(self.sdk)).stdout)
         self.acceptance = self.root / "acceptance.json"
         self.accept()
+
+    def set_commit(self):
+        state_path = self.home / ".local/state/astack/manifest.json"
+        state = json.loads(state_path.read_text())
+        state["components"]["claude-router"]["commit"] = COMMIT
+        state_path.write_text(json.dumps(state))
 
     def accept(self, **changes):
         record = dict(self.identity, result="pass")
@@ -256,7 +261,9 @@ class ActivationTests(ActivationFixture):
                 ({"clients": {"claude_code": "2.1.299", "agent_sdk": "0.3.300"}}, "claude_code: accepted 2.1.299, --claude has 2.1.300"),
                 ({"clients": {"claude_code": "2.1.300", "agent_sdk": "0.3.276"}}, "agent_sdk: accepted 0.3.276, --agent-sdk has 0.3.300"),
                 ({"sdk": "v8.0.10"}, "sdk: accepted v8.0.10, running v8.0.11"),
-                ({"helpers_sha256": "c" * 64}, "helpers: accepted cccccccccccc, installed {}".format(self.identity["helpers_sha256"][:12]))):
+                ({"helpers_sha256": "c" * 64}, "helpers: accepted cccccccccccc, installed {}".format(self.identity["helpers_sha256"][:12])),
+                ({"helpers_sha256": None}, "helpers: the record names no digest"),
+                ({"helpers_sha256": self.identity["helpers_sha256"][:12]}, "helpers: the record names no digest")):
             with self.subTest(changes):
                 self.accept(**changes)
                 self.assert_refused_before_any_write(self.run_activate(), expected)
@@ -279,16 +286,76 @@ class ActivationTests(ActivationFixture):
         (self.data / "bin/claude-router").write_text("#!/bin/sh\n# rebuilt\n")
         self.assert_refused_before_any_write(self.run_activate(), "binary: accepted {}, installed ".format(self.binary_sha256[:12]))
 
-    def test_an_edited_helper_payload_refuses_before_any_write(self):
-        installed = self.data / "lib/claude_router.py"
-        installed.write_text(installed.read_text() + "\n# a local edit\n")
-        identity = json.loads(self.helper("identity", "--claude", str(self.claude), "--agent-sdk", str(self.sdk)).stdout)
-        self.assertNotEqual(identity["helpers_sha256"], self.identity["helpers_sha256"])
-        self.assertEqual({k: v for k, v in identity.items() if k != "helpers_sha256"},
-                         {k: v for k, v in self.identity.items() if k != "helpers_sha256"})
+    def test_the_helpers_digest_covers_each_installed_file_by_path_and_content(self):
+        lib = self.data / "lib"
+        listed = sorted((path.relative_to(lib).as_posix(), hashlib.sha256(path.read_bytes()).hexdigest())
+                        for path in lib.rglob("*") if path.is_file())
+        self.assertIn("_vendor/tomllib/_parser.py", dict(listed))
+        expected = hashlib.sha256("".join("{}\0{}\n".format(name, digest) for name, digest in listed).encode()).hexdigest()
+        self.assertEqual(self.identity["helpers_sha256"], expected)
 
-        self.assert_refused_before_any_write(self.run_activate(), "        helpers: accepted {}, installed {}\n".format(
-            self.identity["helpers_sha256"][:12], identity["helpers_sha256"][:12]))
+        for cache in (lib / "__pycache__/claude_router.cpython-312.pyc", lib / "_vendor/tomllib/__pycache__/_parser.cpython-312.pyc"):
+            cache.parent.mkdir(exist_ok=True)
+            cache.write_bytes(b"compiled")
+        identity = json.loads(self.helper("identity", "--claude", str(self.claude), "--agent-sdk", str(self.sdk)).stdout)
+        self.assertEqual(identity["helpers_sha256"], self.identity["helpers_sha256"])
+        self.assertEqual(self.run_activate("--prepare").returncode, 0)
+
+    def test_an_install_from_an_edited_checkout_refuses_before_any_write(self):
+        for name in ("claude_router.py", "_vendor/tomllib/_parser.py"):
+            with self.subTest(name):
+                checkout = self.repo / "scripts" / name
+                original = checkout.read_bytes()
+                checkout.write_bytes(original + b"\n# a local edit\n")
+                self.addCleanup(checkout.write_bytes, original)
+                self.component()
+                self.set_commit()
+                identity = json.loads(self.helper("identity", "--claude", str(self.claude), "--agent-sdk", str(self.sdk)).stdout)
+                self.assertNotEqual(identity["helpers_sha256"], self.identity["helpers_sha256"])
+                self.assertEqual({k: v for k, v in identity.items() if k != "helpers_sha256"},
+                                 {k: v for k, v in self.identity.items() if k != "helpers_sha256"})
+
+                self.assert_refused_before_any_write(self.run_activate(), "        helpers: accepted {}, installed {}\n".format(
+                    self.identity["helpers_sha256"][:12], identity["helpers_sha256"][:12]))
+                checkout.write_bytes(original)
+                self.component()
+                self.set_commit()
+
+    def test_activation_refuses_when_the_running_helpers_differ_from_the_installed_ones(self):
+        lib = self.data / "lib"
+        for edited in (self.repo / "scripts/astack_settings.py", lib / "astack_settings.py",
+                       self.repo / "scripts/_vendor/tomllib/_re.py", lib / "_vendor/tomllib/_re.py"):
+            with self.subTest(edited):
+                original = edited.read_bytes()
+                edited.write_bytes(original + b"\n# a local edit\n")
+                result = self.run_activate("--prepare")
+                edited.write_bytes(original)
+                self.assert_refused_before_any_write(result, "")
+                self.assertRegex(result.stderr,
+                                 r"^claude-router: activate: the helpers running this command differ from the installed ones\n"
+                                 r"        helpers: running [0-9a-f]{12} from .+/scripts, installed [0-9a-f]{12}\n"
+                                 r"next    run ~/\.local/share/astack/claude-router/lib/claude_router\.py instead\n$")
+        shutil.rmtree(lib)
+        self.assertRegex(self.run_activate().stderr, r"        helpers: running [0-9a-f]{12} from .+/scripts, installed none\n")
+        self.assertEqual(self.settings_path.read_bytes(), self.before)
+
+    def test_uninstall_refuses_to_restore_settings_with_helpers_other_than_the_installed_ones(self):
+        self.assertEqual(self.run_activate().returncode, 0)
+        activated = self.settings_path.read_bytes()
+        checkout = self.repo / "scripts/astack_settings.py"
+        checkout.write_bytes(checkout.read_bytes() + b"\n# a local edit\n")
+
+        refused = self.component(command="uninstall", success=False)
+
+        self.assertEqual(refused.returncode, 1)
+        self.assertRegex(refused.stderr, r"Uninstall would restore client settings, but the helpers running this command differ from "
+                                         r"the installed ones \(helpers: running [0-9a-f]{12} from .+/scripts, installed [0-9a-f]{12}\); "
+                                         r"run claude-router direct, then uninstall")
+        self.assertEqual(self.settings_path.read_bytes(), activated)
+        self.assertEqual(self.journal()["phase"], "active")
+        self.assertEqual(self.direct().returncode, 0)
+        self.component(command="uninstall")
+        self.assertEqual(self.settings_path.read_bytes(), self.before)
 
     def test_a_router_that_is_not_ready_refuses_before_any_write(self):
         no_account = ("claude-router: activate: the router is not ready\n"
@@ -333,6 +400,12 @@ class ActivationTests(ActivationFixture):
                       unrouted.stderr)
         self.assert_direct_and_state_kept()
 
+        routed_then_failed = self.run_activate(verify=((SESSION, "fake-client {}; exit 3".format(SESSION)),))
+        self.assertEqual(routed_then_failed.returncode, 1)
+        self.assertIn("claude-router: activate: fake-client (conversation {}) exited 3\n".format(CONVERSATION), routed_then_failed.stderr)
+        self.assertIn('"conversation": "{}", "status": 200'.format(CONVERSATION), self.events.read_text())
+        self.assert_direct_and_state_kept()
+
         self.fake_router.overloaded.add(SESSION)
         refused = self.run_activate(verify=((SESSION, "fake-client {} || true".format(SESSION)),))
         self.assertEqual(refused.returncode, 1)
@@ -366,6 +439,22 @@ class ActivationTests(ActivationFixture):
         self.addCleanup(lambda: subprocess.run(["kill", "-9", str(pid)], capture_output=True))
         self.assertTrue(self.gone(pid), "the continuation's child {} still runs".format(pid))
 
+    def test_a_continuation_s_children_are_killed_when_it_ends(self):
+        for ending, expected_exit in (("exit 5", 1), ("fake-client {}".format(SESSION), 0)):
+            with self.subTest(ending):
+                pidfile = self.root / "child-{}.pid".format(expected_exit)
+                command = ("exec > /dev/null 2>&1; sh -c 'echo $$ > \"{0}\"; exec sleep 30' & "
+                           "while [ ! -s \"{0}\" ]; do sleep 0.05; done; {1}".format(pidfile, ending))
+                result = self.run_activate(verify=((SESSION, command),))
+                pid = int(pidfile.read_text())
+                self.addCleanup(lambda pid=pid: subprocess.run(["kill", "-9", str(pid)], capture_output=True))
+
+                self.assertEqual(result.returncode, expected_exit, result.stderr)
+                self.assertTrue(self.gone(pid), "the continuation's child {} still runs".format(pid))
+                if expected_exit == 0:
+                    self.assertEqual(self.direct().returncode, 0)
+                self.assert_direct_and_state_kept()
+
     def gone(self, pid):
         deadline = time.time() + 5
         while time.time() < deadline:
@@ -375,7 +464,7 @@ class ActivationTests(ActivationFixture):
         return False
 
     def test_an_interrupted_verification_restores_the_direct_settings(self):
-        for sent in (signal.SIGINT, signal.SIGTERM):
+        for sent in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             with self.subTest(sent):
                 pidfile = self.root / "verify-{}.pid".format(int(sent))
                 command = [sys.executable, "-c", HELPER_WITH_MANAGED_SETTINGS, "activate", "--home", str(self.home),
@@ -413,21 +502,33 @@ class ActivationTests(ActivationFixture):
         self.assertNotIn("claude-router", self.manifest().get("settings", {}))
 
     def test_a_settings_edit_during_a_failed_continuation_is_kept(self):
-        edit = "python3 -c 'import json, sys; p = sys.argv[1]; d = json.load(open(p)); d[\"theme\"] = \"light\"; " \
-               "json.dump(d, open(p, \"w\"))' \"{}\"; exit 7".format(self.settings_path)
+        edit = "'{}' -c 'import json, sys; p = sys.argv[1]; d = json.load(open(p)); d[\"theme\"] = \"light\"; " \
+               "json.dump(d, open(p, \"w\"))' \"{}\"; exit 7".format(sys.executable, self.settings_path)
 
         result = self.run_activate(verify=((SESSION, edit),))
 
         self.assertEqual(result.returncode, 1)
         self.assertRegex(result.stderr,
-                         r"^claude-router: activate: python3 \(conversation {}\) exited 7\n"
+                         r"^claude-router: activate: {} \(conversation {}\) exited 7\n"
                          r"claude-router: activate: ~/\.claude/settings\.json changed after an interrupted activation\n"
                          r"        backup  ~/\.local/state/astack/backups/activate-[0-9a-f]{{12}}/settings\.json\n"
                          r"next    restore the file or remove the router keys, then remove ~/\.local/state/astack/claude-router/"
-                         r"activation\.json \(local edits are kept\)\n$".format(CONVERSATION))
+                         r"activation\.json \(local edits are kept\)\n$".format(re.escape(Path(sys.executable).name), CONVERSATION))
         settings = json.loads(self.settings_path.read_text())
         self.assertEqual((settings["theme"], settings["env"]["ANTHROPIC_BASE_URL"]), ("light", self.listen))
         self.assertEqual(self.journal()["phase"], "verifying")
+
+        original = json.loads(self.before)
+        settings.update(apiKeyHelper=original["apiKeyHelper"], env=original["env"])
+        self.settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+        for still in (self.direct(), self.run_activate()):
+            self.assertEqual(still.returncode, 1)
+            self.assertIn("~/.claude/settings.json changed after an interrupted activation\n", still.stderr)
+        (self.state_dir / "activation.json").unlink()
+        recovered = self.direct()
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assertEqual(json.loads(self.settings_path.read_text()), dict(original, theme="light"))
+        self.assertNotIn("claude-router", self.manifest().get("settings", {}))
 
     def test_local_settings_and_environment_tokens_are_refused_or_named(self):
         content = json.loads(self.before)
@@ -545,6 +646,10 @@ class InterruptedActivationTests(ActivationFixture):
         self.interrupt("verification")
         self.assertEqual(self.journal()["phase"], "verifying")
         self.assertIn("claude-router", self.manifest()["settings"])
+        prepared = self.run_activate("--prepare")
+        self.assertEqual(prepared.stdout, "undo    an interrupted activation of ~/.claude/settings.json; activate restores it first\n"
+                                          "ready   nothing changed; activate without --prepare\n")
+        self.assertEqual(self.journal()["phase"], "verifying")
 
         result = self.run_activate()
 
@@ -561,7 +666,7 @@ class InterruptedActivationTests(ActivationFixture):
         self.settings_path.write_text(json.dumps(edited))
         kept = self.settings_path.read_bytes()
 
-        for result in (self.direct("--check"), self.direct("--prepare"), self.direct(), self.run_activate()):
+        for result in (self.direct("--check"), self.direct("--prepare"), self.direct(), self.run_activate("--prepare"), self.run_activate()):
             self.assertEqual(result.returncode, 1)
             self.assertIn("~/.claude/settings.json changed after an interrupted activation\n", result.stderr)
             self.assertRegex(result.stderr, r"        backup  ~/\.local/state/astack/backups/activate-[0-9a-f]{12}/settings\.json\n")

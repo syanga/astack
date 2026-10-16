@@ -268,6 +268,12 @@ def plan(command, state, lay, force=False):
     journal = read_journal(lay.state) if command == "uninstall" and old else None
     if journal and journal["phase"] != "active":
         raise ValueError("An activation of claude-router was interrupted; run claude-router direct, then uninstall")
+    if command == "uninstall" and old and (journal or state.get("settings", {}).get(NAME)):
+        try:
+            check_checkout(lay)
+        except Refusal as refusal:
+            raise ValueError("Uninstall would restore client settings, but {} ({}); run claude-router direct, then uninstall".format(
+                refusal, refusal.details[0])) from None
     result = Plan(command=command, lay=lay, old=old)
     desired, seeds = {}, {}
     if command == "install":
@@ -629,15 +635,29 @@ def client_versions(claude, agent_sdk):
     return versions
 
 
-def payload_sha256(lib):
+def payload_digest(contents):
     digest = hashlib.sha256()
+    for relative in sorted(contents):
+        digest.update("{}\0{}\n".format(relative, hashlib.sha256(contents[relative]).hexdigest()).encode())
+    return digest.hexdigest()
+
+
+def payload_sha256(lib):
     if not lib.is_dir():
         return None
-    for path in sorted(lib.rglob("*")):
-        relative = path.relative_to(lib)
-        if path.is_file() and "__pycache__" not in relative.parts and path.suffix not in (".pyc", ".pyo"):
-            digest.update("{}\0{}\n".format(relative.as_posix(), file_sha256(path)).encode())
-    return digest.hexdigest()
+    return payload_digest({path.relative_to(lib).as_posix(): path.read_bytes() for path in lib.rglob("*")
+                           if path.is_file() and "__pycache__" not in path.relative_to(lib).parts
+                           and path.suffix not in (".pyc", ".pyo")})
+
+
+def check_checkout(lay):
+    """Refuse unless the code running now is the installed helper payload that the acceptance record covers."""
+    checkout = payload_digest({relative: payload for relative, (payload, _) in helper_files().items()})
+    installed = payload_sha256(lay.lib)
+    if checkout != installed:
+        raise Refusal("the helpers running this command differ from the installed ones",
+                      ["helpers: running {} from {}, installed {}".format(short(checkout), shown(SCRIPTS), short(installed))],
+                      "run {} instead".format(shown(lay.lib / "claude_router.py")))
 
 
 def measure(lay, record, status, claude, agent_sdk):
@@ -666,8 +686,11 @@ def mismatches(accepted, current):
         found.append("binary: accepted {}, installed {}".format(short(binary), short(current["binary_sha256"])))
     elif binary != current["running_binary_sha256"]:
         found.append("binary: accepted {}, running {}".format(short(binary), short(current["running_binary_sha256"])))
-    if accepted.get("helpers_sha256") != current["helpers_sha256"]:
-        found.append("helpers: accepted {}, installed {}".format(short(accepted.get("helpers_sha256")), short(current["helpers_sha256"])))
+    helpers = accepted.get("helpers_sha256")
+    if not isinstance(helpers, str) or not re.fullmatch(r"[0-9a-f]{64}", helpers):
+        found.append("helpers: the record names no digest")
+    elif helpers != current["helpers_sha256"]:
+        found.append("helpers: accepted {}, installed {}".format(short(helpers), short(current["helpers_sha256"])))
     if accepted.get("sdk") != current["sdk"]:
         found.append("sdk: accepted {}, running {}".format(accepted.get("sdk"), current["sdk"]))
     clients = accepted.get("clients") if isinstance(accepted.get("clients"), dict) else {}
@@ -780,12 +803,11 @@ def run_verify(command, timeout):
     except subprocess.TimeoutExpired:
         return None
     finally:
-        if process.returncode is None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait()
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
 
 
 def routed_requests(events, offset, conversation):
@@ -840,10 +862,12 @@ def interrupted(signum, frame):
 def activate(args, state_root, home, use_env):
     manifest_path, state = load_state(state_root)
     lay, record = installed_layout(state, state_root, home)
+    check_checkout(lay)
     journal = read_journal(lay.state)
     if journal and journal["phase"] != "active":
         if args.prepare:
-            print("undo    an interrupted activation of {}; activate restores it first".format(shown(Path(journal["settings"]))))
+            settings = undo_interrupted(lay.state, state, manifest_path, check=True)
+            print("undo    an interrupted activation of {}; activate restores it first".format(shown(settings)))
             print("ready   nothing changed; activate without --prepare")
             return 0
         print("undo    {} restored after an interrupted activation".format(shown(undo_interrupted(lay.state, state, manifest_path))))
@@ -914,13 +938,14 @@ def activate(args, state_root, home, use_env):
     with redirect_stdout(io.StringIO()):
         change.apply(state, manifest_path, manifest_path.parent / "backups" / uuid.uuid4().hex)
     write_journal(lay.state, dict(journal, phase="verifying"))
-    previous = signal.signal(signal.SIGTERM, interrupted)
+    previous = {signum: signal.signal(signum, interrupted) for signum in (signal.SIGTERM, signal.SIGHUP)}
     try:
         failed = verify_wiring(lay, args.verify, args.verify_timeout)
     except KeyboardInterrupt:
         failed = "verification was interrupted"
     finally:
-        signal.signal(signal.SIGTERM, previous)
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
     if failed:
         print("claude-router: activate: {}".format(failed), file=sys.stderr)
         undo_interrupted(lay.state, state, manifest_path)
