@@ -1845,21 +1845,42 @@ or with `--home`.
     - a nonzero exit, even after a counted request
     - a timeout
     - no counted request
-    - SIGINT, SIGTERM, or SIGHUP to activation while step 10 runs, including
-      the SIGHUP from closing the terminal
+    - SIGINT, SIGTERM, or SIGHUP to activation, including the SIGHUP from
+      closing the terminal, from the start of step 8 until the last signal
+      check (below)
 
-    From the end of step 10 until the undo ends, activation ignores further
-    SIGINT, SIGTERM, and SIGHUP. On a failure, it prints the failure and
-    undoes the write as an interrupted activation does (below). It then prints `undo    <file> restored; the router keeps
-    its logins and assignments` and exits 1. When the terminal is gone and a
-    line cannot be written, activation sends the rest of its output to
-    `/dev/null`, and the undo and the exit status stay the same
+    From the start of step 8 until activation exits, these signals do not
+    stop activation. The first one sends SIGKILL to the running command's
+    process group, and activation starts no further command. Activation
+    checks for a signal before and after each command, and once more after
+    the last one, and the failure line is then `claude-router: activate:
+    verification was interrupted`. A signal after that last check changes
+    nothing.
+    A signal that was ignored when activation started stays ignored: under
+    `nohup`, a hangup does not stop the verification. Before step 8 the
+    signals have their usual effect.
+
+    On a failure, activation prints the failure and undoes the write as an
+    interrupted activation does (below). It then prints `undo    <file>
+    restored; the router keeps its logins and assignments` and `next
+    claude-router status`, and exits 1. Signals during the undo change
+    neither the undo nor the exit status. When a line cannot be written to
+    stdout or stderr, because the terminal or a pipe's reader is gone,
+    activation sends the rest of that stream to `/dev/null` and keeps
+    writing the other stream, and the undo and the exit status stay the
+    same
     (`test_a_failed_or_unrouted_continuation_restores_the_direct_settings`,
     `test_an_interrupted_verification_restores_the_direct_settings`,
-    `test_repeated_signals_do_not_stop_the_undo`,
-    `test_closing_the_terminal_during_verification_restores_the_direct_settings`).
+    `test_repeated_and_mixed_signals_do_not_stop_the_undo_or_change_the_exit_status`,
+    `test_signals_during_the_undo_after_a_failed_continuation_do_not_stop_it`,
+    `test_signals_ignored_when_activation_starts_stay_ignored`,
+    `test_closing_the_terminal_during_verification_restores_the_direct_settings`,
+    `test_a_stdout_that_breaks_during_verification_keeps_the_failure_lines_on_stderr`,
+    `test_a_stdout_without_a_reader_changes_neither_stderr_nor_the_exit_status`).
 13. If the settings file changed while the command ran, that undo refuses.
-    Activation prints `<file> changed after an interrupted activation`,
+    Activation prints `<file> changed after an interrupted activation` on
+    stderr, also when stdout is gone
+    (`test_a_stdout_that_breaks_during_verification_keeps_the_edit_refusal_on_stderr`),
     leaves the file with the router's keys and the edit, leaves
     `activation.json` in phase `verifying`, and exits 1. `claude-router
     direct` and the next `activate` refuse the same way for as long as the
@@ -1872,8 +1893,8 @@ or with `--home`.
 14. The router never sends a request around itself: a stopped router fails
     the client's request (`evidence/PR6/lane-3/cutover-isolated.json`, step
     `unavailable_after_activation_no_bypass`).
-15. Otherwise set the phase to `active` and print `done    clients connect
-    through the router; undo with claude-router direct`.
+15. Otherwise set the phase to `active`, print `done    clients connect
+    through the router; undo with claude-router direct`, and exit 0.
 
 Activation never starts, stops, or enables the service, and never touches
 logins, assignments, or the client token. It needs one `--verify` and does
@@ -1944,7 +1965,7 @@ Uninstall removes an `active` journal after it restores the settings
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| PR6.unit | `python3 -m unittest discover -s tests -v` and the Go tests under `-race`, with `go vet`. Mutations of each new guard are listed in the evidence. | `evidence/PR6/unit-<sha>/`, `evidence/PR6/mutation/`, `evidence/PR6/mutation-r3/`, `evidence/PR6/mutation-r4/`, `evidence/PR6/mutation-r5/` |
+| PR6.unit | `python3 -m unittest discover -s tests -v` and the Go tests under `-race`, with `go vet`. Mutations of each new guard are listed in the evidence. | `evidence/PR6/unit-<sha>/`, `evidence/PR6/mutation/`, `evidence/PR6/mutation-r3/`, `evidence/PR6/mutation-r4/`, `evidence/PR6/mutation-r5/`, `evidence/PR6/mutation-r6/` |
 | PR6.live.1 | In isolated homes with Claude Code 2.1.300 and Agent SDK 0.3.300 sandboxed, fake credentials, and a loopback fake upstream: the parent `ae25eb0` with direct wiring and the head with activated wiring each completed a new terminal conversation, two resumes, an Agent SDK session with T3's options and its resume, and a recovery resume. On head every routed step went through the router, the terminal and Agent SDK conversations kept their accounts across resume and a router stop and start, no request used the direct key while activated, and `claude-router direct` restored the settings byte for byte so the same conversation continued directly. | `evidence/PR6/lane-1/default.json` |
 | PR6.live.3, isolated parts | Under launchd label `dev.astack.claude-router.pr6test.<hex>`: activation refused with the service stopped and with another process on its port; a SIGKILL before any write left nothing to undo; a SIGKILL during verification was undone by `direct` and, a second time, by the next activation; a failed continuation rolled back; a stopped router failed the client with no direct request; an edit of an owned key stopped `direct` and was kept, and an unrelated edit survived it. A `--verify` command that sent nothing failed while another client routed a request in another conversation, and passed when that client continued the same session (the Known limit above). An install from a checkout with an edited helper made activation refuse, and so did activation run from an edited checkout over a clean install. A command that left a background child and exited 5 left no child, and activation exited 1. SIGTERM, SIGHUP, and closing the pseudo-terminal whose session activation leads, during verification, each rolled back with exit 1. The daily-driver cutover is not run. | `evidence/PR6/lane-3/cutover-isolated.json` |
 | PR6.live.1 and PR6.live.3 on Linux | Blocked: no Linux host. | |

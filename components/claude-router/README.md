@@ -174,7 +174,9 @@ Before it writes, activation backs the settings file up under
 `--verify` command. Each must exit 0 and complete at least one request
 through the router for the conversation whose session ID precedes it;
 otherwise activation restores the settings file and exits 1. Ctrl-C, SIGTERM,
-or closing the terminal during these commands does the same. When a command
+or closing the terminal during these commands does the same, unless the shell
+started activation with that signal ignored, as `nohup` does for a hangup.
+Further signals do not interrupt the restore. When a command
 ends, activation kills every process in the command's process group. A
 process that starts its own session or group, such as a detached Node child,
 keeps running. Activation prints only each command's program name, never its
