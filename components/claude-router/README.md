@@ -175,16 +175,20 @@ Before it writes, activation backs the settings file up under
 through the router for the conversation whose session ID precedes it;
 otherwise activation restores the settings file and exits 1. Ctrl-C, SIGTERM,
 or closing the terminal during these commands does the same. When a command
-ends, activation kills every process it started. Activation prints only each
-command's program name, never its arguments.
+ends, activation kills every process in the command's process group. A
+process that starts its own session or group, such as a detached Node child,
+keeps running. Activation prints only each command's program name, never its
+arguments.
 
 Run activation from the checkout that installed the router, or run the
 installed copy, `~/.local/share/astack/claude-router/lib/claude_router.py`.
 Activation, and uninstall while it would restore client settings, refuse when
 the helper scripts they run differ from the installed ones, because the
-acceptance record covers only the installed copy. To go back to a direct connection later, run `claude-router direct`.
-It also undoes an activation that was interrupted. Uninstall refuses until
-then.
+acceptance record covers only the installed copy. `claude-router direct` runs
+the installed copy without that check.
+
+To go back to a direct connection later, run `claude-router direct`. It also
+undoes an activation that was interrupted. Uninstall refuses until then.
 
 ## Operate the service
 
