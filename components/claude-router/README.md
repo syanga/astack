@@ -87,7 +87,8 @@ other install. launchd keeps one on/off switch per label, and the install whose
 plist is in your own `~/Library/LaunchAgents` owns it: the other install's
 `stop` leaves it on, and its `start` refuses while that install has turned it
 off. The owning install's `stop` turns the switch off even while the other
-install's job runs, leaves that job running, and says so.
+install's job runs, leaves that job running, and says so. Its uninstall turns
+the switch back on and also leaves that job running.
 
 ## Enroll accounts and start
 
@@ -169,8 +170,12 @@ its own; the limit is the router's.
 
 `stop` turns the job off with `launchctl disable` or `systemctl --user
 disable` before it stops the job, so a `stop` that fails or is interrupted
-still leaves it off at login. `start` turns it back on with `enable`. Uninstall stops the job
-and leaves neither manager set to keep a later install from starting at login.
+still leaves it off at login. `start` turns it back on with `enable`, also when
+the router is still running. Uninstall stops the job and leaves no setting that
+keeps a later install from starting at login: it turns the launchd switch back
+on, also while another install's job runs, and disables the systemd unit, whose
+file it then removes. A launchd switch that another install owns stays as that
+install set it.
 
 Durability across a power loss or OS crash is not tested. The journal relies
 on `F_FULLFSYNC` on macOS and `fsync` on Linux (CONTRACT.md, PS-5).
