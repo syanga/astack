@@ -32,6 +32,7 @@ type Event struct {
 	Overage      router.Overage   `json:"overage,omitempty"`
 	Usage        *Usage           `json:"usage,omitempty"`
 	DurationMS   *int64           `json:"duration_ms,omitempty"`
+	Until        time.Time        `json:"until,omitzero"`
 	Detail       string           `json:"detail,omitempty"`
 }
 

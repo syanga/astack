@@ -2,12 +2,17 @@ package claude
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -140,6 +145,9 @@ func (s *Service) messages(c *gin.Context) {
 	finish := func(kind string, account router.AccountID, d router.Decision, status int, out *outcome) {
 		dur := s.now().Sub(start).Milliseconds()
 		e := Event{Kind: kind, Conversation: conv, Account: account, Decision: d.Kind, Reason: string(d.Reason), Status: status, Attempt: req.Attempt, Attempts: upstream, Stream: &stream, DurationMS: &dur}
+		if d.Kind == router.Wait {
+			e.Until = d.Until
+		}
 		if out != nil {
 			e.Outcome, e.Class = out.Result, out.Class
 			if out.Usage.known() {
@@ -585,38 +593,99 @@ func (s *Service) markServed(conv router.ConversationID, account router.AccountI
 	return nil
 }
 
-// AccountStatus is one enrolled account in the status output. NeedsLogin
-// and Rejections are the router's durable account state.
+// AccountStatus is one enrolled account in the status output. NeedsLogin,
+// NeedsLoginAt, and Rejections are the router's durable account state.
+// Quota is the newest quota observation, kept only in memory; its At is the
+// time the response that carried it arrived. Bound counts the account's
+// assigned conversations, and Active those with a request or assignment
+// within ActiveFor.
 type AccountStatus struct {
-	ID         router.AccountID   `json:"id"`
-	Registered bool               `json:"registered"`
-	Overage    overageState       `json:"overage"`
-	NeedsLogin bool               `json:"needs_login"`
-	Rejections []router.Rejection `json:"rejections,omitempty"`
+	ID           router.AccountID   `json:"id"`
+	Registered   bool               `json:"registered"`
+	Overage      overageState       `json:"overage"`
+	NeedsLogin   bool               `json:"needs_login"`
+	NeedsLoginAt time.Time          `json:"needs_login_at,omitzero"`
+	Rejections   []router.Rejection `json:"rejections,omitempty"`
+	Capacity     float64            `json:"capacity"`
+	Quota        router.Observation `json:"quota"`
+	Bound        int                `json:"bound"`
+	Active       int                `json:"active"`
+}
+
+// BindingStatus is one assigned conversation. Conversation is the first 12
+// hex digits of the SHA-256 of the session ID, as in events. LastRequest is
+// zero when the conversation has had no request since the service started.
+type BindingStatus struct {
+	Conversation string           `json:"conversation"`
+	Account      router.AccountID `json:"account"`
+	Reason       router.Reason    `json:"reason"`
+	Since        time.Time        `json:"since"`
+	Served       bool             `json:"served"`
+	LastRequest  time.Time        `json:"last_request,omitzero"`
+	Active       bool             `json:"active"`
 }
 
 // Status is the status output. It holds no token, prompt, or header value.
+// Journal is "ok", or the error that stopped the assignment journal.
 type Status struct {
-	Listen        string          `json:"listen"`
-	Accounts      []AccountStatus `json:"accounts"`
-	Conversations int             `json:"conversations"`
+	Listen          string          `json:"listen"`
+	Accounts        []AccountStatus `json:"accounts"`
+	Conversations   int             `json:"conversations"`
+	Bindings        []BindingStatus `json:"bindings"`
+	Now             time.Time       `json:"now"`
+	Started         time.Time       `json:"started"`
+	PID             int             `json:"pid"`
+	Journal         string          `json:"journal"`
+	Binary          string          `json:"binary"`
+	SDK             string          `json:"sdk"`
+	QuotaFreshFor   Duration        `json:"quota_fresh_for"`
+	OverageFreshFor Duration        `json:"overage_fresh_for"`
+	ActiveFor       Duration        `json:"active_for"`
 }
 
 // Status returns the service status.
 func (s *Service) Status() Status {
+	now := s.now()
+	cfg := s.router.Config()
 	ov := s.overage.snapshot()
-	bindings, _ := s.store.Bindings()
-	st := Status{Listen: s.addr, Conversations: len(bindings)}
-	for _, a := range s.router.AccountStates() {
+	last := s.router.LastRequests()
+	st := Status{Listen: s.addr, Now: now, Started: s.started, PID: os.Getpid(), Journal: "ok",
+		Binary: buildRevision, SDK: sdkVersion, QuotaFreshFor: Duration(cfg.FreshFor), OverageFreshFor: s.cfg.OverageFreshFor, ActiveFor: Duration(cfg.ActiveFor)}
+	bindings, err := s.store.Bindings()
+	if err != nil {
+		st.Journal = err.Error()
+	}
+	st.Conversations = len(bindings)
+	horizon := now.Add(-cfg.ActiveFor)
+	bound, active := map[router.AccountID]int{}, map[router.AccountID]int{}
+	for conv, b := range bindings {
+		seen := last[conv]
+		latest := seen
+		if b.Since.After(latest) {
+			latest = b.Since
+		}
+		on := !latest.Before(horizon)
+		bound[b.Account]++
+		if on {
+			active[b.Account]++
+		}
+		st.Bindings = append(st.Bindings, BindingStatus{Conversation: conversationHash(conv), Account: b.Account,
+			Reason: b.Reason, Since: b.Since, Served: b.Served, LastRequest: seen, Active: on})
+	}
+	sort.Slice(st.Bindings, func(i, j int) bool {
+		if !st.Bindings[i].Since.Equal(st.Bindings[j].Since) {
+			return st.Bindings[i].Since.After(st.Bindings[j].Since)
+		}
+		return st.Bindings[i].Conversation < st.Bindings[j].Conversation
+	})
+	for _, a := range s.router.Accounts() {
 		st.Accounts = append(st.Accounts, AccountStatus{ID: a.ID, Registered: s.authIDs[a.ID] != "", Overage: ov[a.ID],
-			NeedsLogin: a.NeedsLogin, Rejections: a.Rejections})
+			NeedsLogin: a.NeedsLogin, NeedsLoginAt: a.NeedsLoginAt, Rejections: a.Rejections, Capacity: a.Capacity,
+			Quota: a.Observation, Bound: bound[a.ID], Active: active[a.ID]})
 	}
 	return st
 }
 
-// move is the manual override: it binds an assigned conversation, named by
-// its session ID, to an enrolled account, whatever the account's quota or
-// login state, and records a manual migration.
 func (s *Service) move(c *gin.Context) {
 	var m struct {
 		Conversation string `json:"conversation"`
@@ -624,10 +693,19 @@ func (s *Service) move(c *gin.Context) {
 	}
 	body, _ := io.ReadAll(io.LimitReader(c.Request.Body, 1<<16))
 	if json.Unmarshal(body, &m) != nil || m.Conversation == "" || m.To == "" {
-		writeError(c, http.StatusBadRequest, "invalid_request_error", `claude-router: move takes {"conversation": SESSION_ID, "to": ACCOUNT}`)
+		writeError(c, http.StatusBadRequest, "invalid_request_error", `claude-router: move takes {"conversation": SESSION_ID or HASH, "to": ACCOUNT}`)
 		return
 	}
-	conv, to := router.ConversationID(m.Conversation), router.AccountID(m.To)
+	conv, matches, err := s.resolveConversation(m.Conversation)
+	switch {
+	case errors.Is(err, router.ErrFailed):
+		writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: assignment journal unavailable; restart the router")
+		return
+	case matches > 1:
+		writeError(c, http.StatusConflict, "invalid_request_error", fmt.Sprintf("claude-router: %s matches %d conversations; give more of the hash", m.Conversation, matches))
+		return
+	}
+	to := router.AccountID(m.To)
 	from, err := s.router.MoveFrom(s.now(), conv, to)
 	switch {
 	case errors.Is(err, router.ErrUnassigned):
@@ -646,6 +724,34 @@ func (s *Service) move(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, map[string]string{"conversation": hash, "from": string(from), "account": string(to)})
 }
+
+func (s *Service) resolveConversation(ref string) (router.ConversationID, int, error) {
+	if _, ok, err := s.router.Lookup(router.ConversationID(ref)); ok || err != nil {
+		return router.ConversationID(ref), 1, err
+	}
+	if !hashPrefix.MatchString(ref) {
+		return router.ConversationID(ref), 0, nil
+	}
+	bindings, err := s.store.Bindings()
+	if err != nil {
+		return "", 0, err
+	}
+	var found router.ConversationID
+	matches := 0
+	for conv := range bindings {
+		sum := sha256.Sum256([]byte(conv))
+		if strings.HasPrefix(hex.EncodeToString(sum[:]), ref) {
+			found = conv
+			matches++
+		}
+	}
+	if matches == 0 {
+		return router.ConversationID(ref), 0, nil
+	}
+	return found, matches, nil
+}
+
+var hashPrefix = regexp.MustCompile(`^[0-9a-f]{4,64}$`)
 
 func (s *Service) status(c *gin.Context) {
 	c.JSON(http.StatusOK, s.Status())
