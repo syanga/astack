@@ -882,6 +882,7 @@ class Stop:
         self.group = None
 
     def __call__(self, signum, frame):
+        signal.pthread_sigmask(signal.SIG_BLOCK, STOPS)
         self.signal = self.signal or signum
         self.kill()
 
@@ -1042,8 +1043,6 @@ def main():
         except Refusal as refusal:
             report(args.command, refusal)
             return 1
-        finally:
-            signal.pthread_sigmask(signal.SIG_BLOCK, STOPS)
     run(args.command, state_root, layout(home, use_env, state_root, args.manager, args.service, args.port), args)
     return 0
 
@@ -1081,9 +1080,15 @@ def finish(p, state, state_path, state_root, args):
     apply(p, state, state_path, state_root / "backups" / uuid.uuid4().hex, dry_run=args.dry_run)
 
 
-if __name__ == "__main__":
+def cli():
     try:
-        sys.exit(main())
+        code = main()
     except (OSError, ValueError, KeyError) as error:
         print("astack: {}".format(error), file=sys.stderr)
-        sys.exit(1)
+        code = 1
+    signal.pthread_sigmask(signal.SIG_BLOCK, STOPS)
+    sys.exit(code)
+
+
+if __name__ == "__main__":
+    cli()

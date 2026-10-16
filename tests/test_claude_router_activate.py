@@ -51,9 +51,29 @@ sys.path.insert(0, os.environ["ROUTER_SCRIPTS"])
 import claude_router
 claude_router.MANAGED_SETTINGS = {sys.platform: Path(os.environ["MANAGED_SETTINGS"])}
 sys.argv = ["claude_router.py"] + sys.argv[1:]
-sys.exit(claude_router.main())
+claude_router.cli()
 '''
 
+
+SIGNAL_SENDER = r'''
+import os, sys, time
+pid, gate = int(sys.argv[1]), sys.argv[2]
+deadline = time.time() + 30
+while not os.path.exists(gate) and time.time() < deadline:
+    pass
+deadline, sent = time.time() + 2, 0
+while time.time() < deadline:
+    try:
+        os.kill(pid, (15, 1, 2)[sent % 3])
+    except ProcessLookupError:
+        break
+    sent += 1
+'''
+# CPython resets signal handlers to SIG_DFL while the interpreter exits; atexit runs in that phase.
+SIGNALED_AT_EXIT = HELPER_WITH_MANAGED_SETTINGS.replace("import claude_router\n", """import claude_router
+import atexit, signal
+atexit.register(lambda: (signal.signal(signal.SIGTERM, signal.SIG_DFL), os.kill(os.getpid(), signal.SIGTERM)))
+""")
 
 OTHER = "6f1d2c3b-0000-4000-8000-00000000000b"
 OTHER_CONVERSATION = hashlib.sha256(OTHER.encode()).hexdigest()[:12]
@@ -64,6 +84,10 @@ STOPPED = "claude-router: activate: verification was interrupted\n" + UNDONE
 
 class Killed(BaseException):
     pass
+
+
+def raise_killed(*args):
+    raise Killed
 
 
 class FakeRouter:
@@ -549,29 +573,60 @@ class ActivationTests(ActivationFixture):
                 self.assert_direct_and_state_kept()
                 self.assertTrue(self.gone(pid), "the continuation {} still runs".format(pid))
 
+    def test_signals_from_many_parallel_senders_do_not_stop_the_undo_or_change_the_exit_status(self):
+        pidfile, command = self.sleeper("verify-parallel")
+        gate = self.root / "parallel.go"
+        process = self.start_activate((SESSION, command), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        senders = [subprocess.Popen([sys.executable, "-c", SIGNAL_SENDER, str(process.pid), str(gate)]) for _ in range(8)]
+        for sender in senders:
+            self.addCleanup(sender.kill)
+        pid = self.wait_for_pid(pidfile)
+        gate.touch()
+        for sender in senders:
+            sender.wait(timeout=30)
+        _, stderr = process.communicate(timeout=30)
+
+        self.assertEqual(process.returncode, 1)
+        self.assertEqual(stderr, STOPPED)
+        self.assert_direct_and_state_kept()
+        self.assertTrue(self.gone(pid), "the continuation {} still runs".format(pid))
+
+    def test_a_signal_while_activation_exits_changes_neither_the_result_nor_the_exit_status(self):
+        command = self.activate_command((SESSION, "fake-client " + SESSION))
+        command[2] = SIGNALED_AT_EXIT
+        result = subprocess.run(command, env=self.activate_env(), capture_output=True, text=True, timeout=60)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-1], "done    clients connect through the router; undo with claude-router direct")
+        self.assertEqual(self.journal()["phase"], "active")
+
     def test_signals_during_the_undo_after_a_failed_continuation_do_not_stop_it(self):
         process = self.start_activate((SESSION, "exit 5"), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        watchdog = threading.Timer(30, process.kill)
+        watchdog.start()
+        self.addCleanup(watchdog.cancel)
         failure = process.stderr.readline()
-        sent = 0
-        while process.poll() is None:
+        deadline, sent = time.time() + 10, 0
+        while True:
             os.kill(process.pid, STOPS[sent % len(STOPS)])
             sent += 1
+            if process.poll() is not None or time.time() > deadline:
+                break
         _, rest = process.communicate(timeout=30)
 
         self.assertEqual(failure, "claude-router: activate: exit (conversation {}) exited 5\n".format(CONVERSATION))
         self.assertEqual(rest, UNDONE)
         self.assertEqual(process.returncode, 1)
-        self.assertGreater(sent, 0)
         self.assert_direct_and_state_kept()
 
     def test_signals_ignored_when_activation_starts_stay_ignored(self):
         pidfile, go = self.root / "ignored.pid", self.root / "ignored.go"
         command = "echo $$ > \"{}\"; while [ ! -e \"{}\" ]; do sleep 0.05; done; fake-client {}".format(pidfile, go, SESSION)
-        process = self.start_activate((SESSION, command), prefix=("/bin/sh", "-c", 'trap "" HUP INT; exec "$@"', "sh"),
+        process = self.start_activate((SESSION, command), prefix=("/bin/sh", "-c", 'trap "" HUP INT TERM; exec "$@"', "sh"),
                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         pid = self.wait_for_pid(pidfile)
-        process.send_signal(signal.SIGHUP)
-        process.send_signal(signal.SIGINT)
+        for sent in STOPS:
+            process.send_signal(sent)
         time.sleep(0.3)
         go.touch()
         stdout, stderr = process.communicate(timeout=30)
@@ -769,6 +824,7 @@ class InterruptedActivationTests(ActivationFixture):
             sys.path.remove(str(spec_path.parent))
         for signum in STOPS:
             self.addCleanup(signal.signal, signum, signal.getsignal(signum))
+        self.addCleanup(signal.pthread_sigmask, signal.SIG_SETMASK, signal.pthread_sigmask(signal.SIG_BLOCK, []))
         return helper
 
     def activate_in_process(self, helper, command="fake-client " + SESSION, timeout=60):
@@ -799,6 +855,17 @@ class InterruptedActivationTests(ActivationFixture):
             return result
         return patch.object(helper, name, call_then_signal)
 
+    def test_a_signal_right_after_the_backup_write_starts_no_command_and_rolls_back(self):
+        helper = self.load_helper()
+        signal.signal(signal.SIGTERM, raise_killed)
+        marker = self.root / "command-ran"
+        with self.signal_after(helper.files, "atomic_write", lambda path, *rest: path.parent.name.startswith("activate-")):
+            result = self.activate_in_process(helper, "touch \"{}\"; fake-client {}".format(marker, SESSION))
+
+        self.assertEqual(result, (1, STOPPED))
+        self.assertFalse(marker.exists())
+        self.assert_direct_and_state_kept()
+
     def test_a_signal_before_the_first_command_starts_no_command_and_rolls_back(self):
         helper = self.load_helper()
         marker = self.root / "command-ran"
@@ -819,12 +886,19 @@ class InterruptedActivationTests(ActivationFixture):
         self.assertFalse(marker.exists())
         self.assert_direct_and_state_kept()
 
-    def test_a_signal_after_the_last_command_passes_rolls_back(self):
+    def test_a_signal_after_the_last_command_passes_rolls_back_without_signaling_its_group_again(self):
         helper = self.load_helper()
-        with self.signal_after(helper, "verify_wiring"):
-            result = self.activate_in_process(helper)
+        pidfile = self.root / "last.pid"
+        groups, killpg = [], os.killpg
+
+        def record(group, signum):
+            groups.append((group, signum))
+            return killpg(group, signum)
+        with patch.object(helper.os, "killpg", record), self.signal_after(helper, "verify_wiring"):
+            result = self.activate_in_process(helper, "echo $$ > \"{}\"; fake-client {}".format(pidfile, SESSION))
 
         self.assertEqual(result, (1, STOPPED))
+        self.assertEqual(groups, [(int(pidfile.read_text()), signal.SIGKILL)])
         self.assert_direct_and_state_kept()
 
     def test_direct_and_uninstall_after_an_interruption_between_the_settings_write_and_its_record(self):
