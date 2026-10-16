@@ -117,6 +117,9 @@ func start(args []string) error {
 		return err
 	}
 	if _, err := fetchStatus(in); err == nil {
+		if err := switchOn(in); err != nil {
+			return err
+		}
 		fmt.Printf("router  running  %s  %s\n", cfg.Listen, in.Manager)
 		return nil
 	}
@@ -167,9 +170,9 @@ func stop(args []string) error {
 
 func stopOwn(in installation, mode stopMode) (stopped bool, err error) {
 	var f foreignJob
-	if err := stopService(in, mode); errors.As(err, &f) {
+	if keptOff, err := stopService(in, mode); errors.As(err, &f) {
 		fmt.Printf("router  not stopped: %v; left running\n", f)
-		if f.keptOff {
+		if keptOff {
 			fmt.Println("        this installation stays off until claude-router start")
 		}
 		return false, nil

@@ -14,7 +14,6 @@ import (
 
 type foreignJob struct {
 	name, path string
-	keptOff    bool
 }
 
 func (e foreignJob) Error() string {
@@ -190,55 +189,77 @@ func startService(in installation) error {
 	return fmt.Errorf("the router runs in the foreground here; run: claude-router serve -supervised -config %s", in.Config)
 }
 
-func stopService(in installation, mode stopMode) error {
+func switchOn(in installation) error {
+	var held labelHeld
+	var foreign foreignJob
+	switch in.Manager {
+	case "launchd":
+		if err := enableLaunchd(in); err != nil && !errors.As(err, &held) {
+			return err
+		}
+	case "systemd":
+		loaded, err := ownJob(in)
+		if err != nil && !errors.As(err, &foreign) {
+			return err
+		}
+		if loaded {
+			return run("systemctl", "--user", "enable", in.Name)
+		}
+	}
+	return nil
+}
+
+func stopService(in installation, mode stopMode) (keptOff bool, err error) {
 	switch in.Manager {
 	case "launchd":
 		if mode == release {
-			return releaseLaunchd(in)
+			return false, releaseLaunchd(in)
 		}
 		return keepOffLaunchd(in)
 	case "systemd":
 		loaded, err := ownJob(in)
 		if err != nil || !loaded {
-			return err
+			return false, err
 		}
 		if err := run("systemctl", "--user", "disable", in.Name); err != nil {
-			return err
+			return false, err
 		}
-		return run("systemctl", "--user", "stop", in.Name)
+		return true, run("systemctl", "--user", "stop", in.Name)
 	}
-	return errors.New("the router runs in the foreground here; stop it with Ctrl-C or SIGTERM")
+	return false, errors.New("the router runs in the foreground here; stop it with Ctrl-C or SIGTERM")
 }
 
-func keepOffLaunchd(in installation) error {
+func keepOffLaunchd(in installation) (keptOff bool, err error) {
 	loaded, err := ownJob(in)
 	var foreign foreignJob
 	isForeign := errors.As(err, &foreign)
 	if err != nil && !isForeign {
-		return err
+		return false, err
 	}
 	owner, _, err := loginOwner(in)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if owner == thisInstallation || owner == noOwner && !isForeign {
 		if err := run("launchctl", "disable", launchdTarget(in)); err != nil {
-			return err
+			return false, err
 		}
-		foreign.keptOff = true
+		keptOff = true
 	}
 	if isForeign {
-		return foreign
+		return keptOff, foreign
 	}
 	if loaded {
-		return run("launchctl", "bootout", launchdTarget(in))
+		return keptOff, run("launchctl", "bootout", launchdTarget(in))
 	}
-	return nil
+	return keptOff, nil
 }
 
 func releaseLaunchd(in installation) error {
 	loaded, err := ownJob(in)
-	if err != nil {
+	var foreign foreignJob
+	isForeign := errors.As(err, &foreign)
+	if err != nil && !isForeign {
 		return err
 	}
 	if loaded {
@@ -246,9 +267,11 @@ func releaseLaunchd(in installation) error {
 			return err
 		}
 	}
-	var held labelHeld
-	if err := enableLaunchd(in); !errors.As(err, &held) {
+	if err := switchOn(in); err != nil {
 		return err
+	}
+	if isForeign {
+		return foreign
 	}
 	return nil
 }

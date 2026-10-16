@@ -48,12 +48,21 @@ func (s supervision) save(state string) error {
 	if err != nil {
 		return err
 	}
-	tmp := filepath.Join(state, supervisionFile+".tmp")
-	_ = os.Remove(tmp)
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
+	f, err := os.CreateTemp(state, supervisionFile+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, filepath.Join(state, supervisionFile))
+	_, err = f.Write(append(data, '\n'))
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), filepath.Join(state, supervisionFile))
+	}
+	if err != nil {
+		os.Remove(f.Name())
+	}
+	return err
 }
 
 func (s *supervision) begin(now time.Time) bool {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -143,6 +144,32 @@ func TestALeftoverUnwritableTemporaryRecordDoesNotStopASupervisedStart(t *testin
 	s, loadErr := loadSupervision(state)
 	if err == nil || loadErr != nil || s.Runs != 1 {
 		t.Fatalf("serve: %v; record %+v (%v); want the start recorded and the config error returned", err, s, loadErr)
+	}
+}
+
+func TestConcurrentSupervisionSavesEachSucceed(t *testing.T) {
+	state := t.TempDir()
+	errs := make(chan error, 400)
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 50 {
+				errs <- supervision{Runs: i}.save(state)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("a save beside other saves failed: %v", err)
+		}
+	}
+	if _, err := loadSupervision(state); err != nil {
+		t.Fatal(err)
 	}
 }
 
