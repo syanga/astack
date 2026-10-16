@@ -358,9 +358,9 @@ class ActivationTests(ActivationFixture):
     def test_a_timed_out_continuation_is_killed_with_its_children(self):
         pidfile = self.root / "grandchild.pid"
         slow = self.run_activate("--verify-timeout", "1",
-                                 verify=((SESSION, "sh -c 'echo $$ > \"{}\"; exec sleep 30' & wait".format(pidfile)),))
+                                 verify=((SESSION, "exec > /dev/null 2>&1; sh -c 'echo $$ > \"{}\"; exec sleep 30' & wait".format(pidfile)),))
         self.assertEqual(slow.returncode, 1)
-        self.assertIn("claude-router: activate: sh (conversation {}) timed out after 1 s\n".format(CONVERSATION), slow.stderr)
+        self.assertIn("claude-router: activate: exec (conversation {}) timed out after 1 s\n".format(CONVERSATION), slow.stderr)
         self.assert_direct_and_state_kept()
         pid = int(pidfile.read_text())
         self.addCleanup(lambda: subprocess.run(["kill", "-9", str(pid)], capture_output=True))
@@ -380,7 +380,7 @@ class ActivationTests(ActivationFixture):
                 pidfile = self.root / "verify-{}.pid".format(int(sent))
                 command = [sys.executable, "-c", HELPER_WITH_MANAGED_SETTINGS, "activate", "--home", str(self.home),
                            "--acceptance", str(self.acceptance), "--claude", str(self.claude), "--agent-sdk", str(self.sdk),
-                           "--verify", SESSION, "echo $$ > \"{}\"; exec sleep 30".format(pidfile)]
+                           "--verify", SESSION, "echo $$ > \"{}\"; exec sleep 30 > /dev/null 2>&1".format(pidfile)]
                 process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                            env=dict(self.env, HOME=str(self.home.resolve()), ROUTER_SCRIPTS=str(self.repo / "scripts"),
                                                     MANAGED_SETTINGS=str(self.managed)))
