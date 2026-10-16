@@ -1,6 +1,12 @@
 package claude
 
-import "runtime/debug"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
+	"os"
+	"runtime/debug"
+)
 
 const sdkModule = "github.com/router-for-me/CLIProxyAPI/v8"
 
@@ -40,4 +46,23 @@ func readBuildInfo() (string, string) {
 		}
 	}
 	return revision, sdk
+}
+
+// ExecutableDigest returns the hex SHA-256 of the running executable's file,
+// or "unknown".
+func ExecutableDigest() string {
+	path, err := os.Executable()
+	if err != nil {
+		return "unknown"
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "unknown"
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "unknown"
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }

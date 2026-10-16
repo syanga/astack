@@ -117,26 +117,80 @@ the switch back on and also leaves that job running.
    claude-router start
    ```
 
-4. Point Claude Code at it in its settings file:
-
-   ```json
-   {
-     "apiKeyHelper": "cat ~/.local/state/astack/claude-router/client-token",
-     "env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:18787", "CLAUDE_CODE_RETRY_WATCHDOG": "1"}
-   }
-   ```
-
-   Claude Code runs `apiKeyHelper` with `/bin/sh` and sends its output as both
-   `X-Api-Key` and `Authorization: Bearer`; the router accepts either. The
-   token stays in `client-token`, and no settings file holds it. Remove
-   `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` from the client's settings
-   and environment first: Claude Code uses either one before `apiKeyHelper`.
-   `CLAUDE_CODE_RETRY_WATCHDOG=1` makes the client wait out a long reset
-   instead of stopping. The installer does not write these settings yet.
+4. Make the router Claude Code's default connection, as
+   [Activate the router](#activate-the-router) describes.
 
 The service reads `config.json` and the credentials once, at start. To change
 either, run `claude-router stop`, make the change, and run `claude-router
 start`.
+
+`start` refuses while `auths/` holds a login whose file name is not an
+account in `config.json`. To take an account out of rotation, stop the
+router, remove it from `accounts`, move `auths/<id>.json` out of `auths/`,
+and start again.
+
+## Activate the router
+
+Activation points Claude Code at the router. It refuses unless an acceptance
+record matches the installed commit, the installed and running binary, the
+installed helper scripts, the pinned SDK, and both clients: the terminal
+`claude` and the Agent SDK that T3 runs. `claude_router.py identity` prints that identity for the record; the
+acceptance run adds `"result": "pass"`. From the repository root, preview the
+change, then apply it:
+
+```sh
+python3 scripts/claude_router.py activate --prepare --acceptance acceptance.json \
+  --claude "$(command -v claude)" --agent-sdk /path/to/node_modules/@anthropic-ai/claude-agent-sdk
+python3 scripts/claude_router.py activate --acceptance acceptance.json \
+  --claude "$(command -v claude)" --agent-sdk /path/to/node_modules/@anthropic-ai/claude-agent-sdk \
+  --verify SESSION_ID 'claude -p --resume SESSION_ID "Reply with one word."' \
+  --verify T3_SESSION_ID 'T3_CONTINUATION_COMMAND'
+```
+
+The router must be running with at least one usable account. Activation
+writes three keys into `~/.claude/settings.json`, or into
+`$CLAUDE_CONFIG_DIR/settings.json`:
+
+```json
+{
+  "apiKeyHelper": "cat ~/.local/state/astack/claude-router/client-token",
+  "env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:18787", "CLAUDE_CODE_RETRY_WATCHDOG": "1"}
+}
+```
+
+Claude Code runs `apiKeyHelper` with `/bin/sh` and sends its output as both
+`X-Api-Key` and `Authorization: Bearer`; the router accepts either. The token
+stays in `client-token`. Claude Code uses `ANTHROPIC_AUTH_TOKEN` or
+`ANTHROPIC_API_KEY` before `apiKeyHelper`, so activation refuses a settings
+file that sets either one, and prints a `warn` line for each other place it
+finds one: a project named with `--project`, managed settings, the shell's
+environment, and the environment launchd or systemd gives apps.
+`CLAUDE_CODE_RETRY_WATCHDOG=1` makes the client wait out a long reset instead
+of stopping.
+
+Before it writes, activation backs the settings file up under
+`~/.local/state/astack/backups/activate-*/` and records the change in
+`activation.json` in the state directory. After it writes, it runs each
+`--verify` command. Each must exit 0 and complete at least one request
+through the router for the conversation whose session ID precedes it;
+otherwise activation restores the settings file and exits 1. Ctrl-C, SIGTERM,
+or closing the terminal during these commands does the same, unless the shell
+started activation with that signal ignored, as `nohup` does for a hangup.
+Further signals do not interrupt the restore. When a command
+ends, activation kills every process in the command's process group. A
+process that starts its own session or group, such as a detached Node child,
+keeps running. Activation prints only each command's program name, never its
+arguments.
+
+Run activation from the checkout that installed the router, or run the
+installed copy, `~/.local/share/astack/claude-router/lib/claude_router.py`.
+Activation, and uninstall while it would restore client settings, refuse when
+the helper scripts they run differ from the installed ones, because the
+acceptance record covers only the installed copy. `claude-router direct` runs
+the installed copy without that check.
+
+To go back to a direct connection later, run `claude-router direct`. It also
+undoes an activation that was interrupted. Uninstall refuses until then.
 
 ## Operate the service
 
@@ -149,7 +203,7 @@ start`.
 | `claude-router login -account ID` | Logs in again after a revoked login. It refuses while the service runs, because the service would write its old credential back. Run `stop`, `login`, then `start`. |
 | `claude-router move -conversation HASH -to ID` | Moves a conversation, named by the hash that status shows, to another account. A prefix of 4 or more hex digits works if it matches one conversation. |
 | `claude-router direct -prepare` | Lists the client settings that router activation owns and that `direct` would restore, and the backup it would write. Changes nothing. |
-| `claude-router direct` | Stops the service as `stop` does and restores those client settings, backing each file up to the path that `-prepare` printed. Logins, assignments, the binary, and the job stay. A key edited after activation stops it, and the edit is kept. With no client settings to restore, it changes nothing and leaves the service running. A job loaded from another install keeps running, and `direct` does not say the router stopped. |
+| `claude-router direct` | Stops the service as `stop` does and restores those client settings, backing each file up to the path that `-prepare` printed. It restores the file of an interrupted activation from its backup; if that file changed since, it refuses before it stops the service, and the edit is kept. Logins, assignments, the binary, and the job stay. A key edited after activation stops it, and the edit is kept. With no client settings to restore, it changes nothing and leaves the service running. A job loaded from another install keeps running, and `direct` does not say the router stopped. |
 
 Status shows hashes, account names, counters, and times, never a token or a
 prompt. A `direct` backup is a copy of the activated settings file with mode

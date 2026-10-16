@@ -465,7 +465,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 
 | ID | Behavior | Terminal | Agent SDK (T3) | Evidence | Owner |
 | --- | --- | --- | --- | --- | --- |
-| WC-1 | Automatic waiting for a long reset with cancellation and resumption | passed with `CLAUDE_CODE_RETRY_WATCHDOG=1`; failed with defaults | passed with the watchdog; failed with defaults | `waiting.json#rows[4]`. Through the PR4 router against a controlled upstream: both clients waited out a 75 s usable reset behind the router's local 429 and resumed, and SIGINT or `interrupt()` ended a 2 h wait (`evidence/PR4/lane-2/recovery.json`, `wait_nested`, `long_reset_cancel`). Live through the PR4 router with real accounts, Claude Code 2.1.300, and Agent SDK 0.3.300 (step W1, `evidence/PR4/live-2-cc2.1.300/W1/`): a local gate injected the exhaustion of both accounts with a 120 s reset. Both waiters got the router's local 429 and counted down in 30 s steps from 119.6 s (terminal) and 118.5 s (Agent SDK). Neither sent a request during the wait. The first resend came 0.01 s after the reset, and each resend got one real attempt and completed. Cancellation was not run live. | PR6: activation's client wiring sets `CLAUDE_CODE_RETRY_WATCHDOG=1`. PR5 installs the service only and sets no client environment; it reserves the key for activation ("Settings ownership") |
+| WC-1 | Automatic waiting for a long reset with cancellation and resumption | passed with `CLAUDE_CODE_RETRY_WATCHDOG=1`; failed with defaults | passed with the watchdog; failed with defaults | `waiting.json#rows[4]`. Through the PR4 router against a controlled upstream: both clients waited out a 75 s usable reset behind the router's local 429 and resumed, and SIGINT or `interrupt()` ended a 2 h wait (`evidence/PR4/lane-2/recovery.json`, `wait_nested`, `long_reset_cancel`). Live through the PR4 router with real accounts, Claude Code 2.1.300, and Agent SDK 0.3.300 (step W1, `evidence/PR4/live-2-cc2.1.300/W1/`): a local gate injected the exhaustion of both accounts with a 120 s reset. Both waiters got the router's local 429 and counted down in 30 s steps from 119.6 s (terminal) and 118.5 s (Agent SDK). Neither sent a request during the wait. The first resend came 0.01 s after the reset, and each resend got one real attempt and completed. Cancellation was not run live. | PR6: activation writes `env.CLAUDE_CODE_RETRY_WATCHDOG` `1` into the activated settings file (`test_activation_routes_a_continuation_and_direct_restores_the_prior_settings`; `evidence/PR6/lane-1/default.json`, step `head_activate`). A managed settings file, or the settings of a project named with `--project`, that sets the key wins, and activation warns about it; activation checks no other project |
 | WC-2 | Bounded connection lifetime: client limits measured | passed | passed | `waiting.json#rows[0]` to `#rows[2]` | PR1 |
 | WC-3 | Short reset resumes automatically | passed | passed | `waiting.json#rows[3]` | PR1 |
 | WC-4 | Unknown reset has explicit behavior | passed | passed | `waiting.json#rows[5]` | PR1 |
@@ -1583,16 +1583,13 @@ These parts stay open:
 
 - Claude Code uses `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` before
   `apiKeyHelper` wherever it finds one. `client_settings` sees only the
-  settings file it is given. An env token in another settings layer (a
-  project's `.claude/settings.json` or `.claude/settings.local.json`, or
-  managed settings) or exported in the client's process environment still
-  takes precedence, and no installer check sees it.
-- Nothing in PR5 calls `client_settings`. Its env-token refusal and its report
-  of a replaced `apiKeyHelper` reach the user only when PR6 activation calls it
-  and shows the result.
+  settings file it is given. Activation calls it, and warns about the other
+  places Claude Code reads first, but it does not refuse on them and reads
+  only the projects named with `--project` (Activation, below).
 - That `apiKeyHelper` takes precedence over a credential stored by `/login`
   rests on the documentation. The client probe ran with no stored login, so it
-  does not show it.
+  does not show it. `reports/PR6-live-runbook.md` probes it with an attended
+  sign-in before cutover.
 - The harness record format stores the settings file's original and last text,
   so any other secret a user keeps in that settings file is copied into the
   manifest and backups at mode 0600.
@@ -1672,7 +1669,7 @@ each from sample state.
 The status endpoint adds `capacity`, `quota` (the newest observation, kept in
 memory only), `bound` and `active` counts, `needs_login_at`, a `bindings`
 list (hash, account, reason, since, served, last request, active), and `now`,
-`started`, `pid`, `journal`, `binary`, `sdk`, `quota_fresh_for`,
+`started`, `pid`, `journal`, `binary`, `binary_sha256` (PR6), `sdk`, `quota_fresh_for`,
 `overage_fresh_for`, and `active_for` (`TestStatusReportsCapacityQuotaAndEachBinding`,
 `TestStatusCountsAnIdleConversationAsBoundButNotActive`). A `request` event
 with decision `wait` carries `until`, the reset it waits for
@@ -1691,3 +1688,290 @@ share, waits, refusals, holds, moves, and context size from `events.jsonl`.
 | Load failure under launchd | With the plist bootstrapped directly, as at login, the seeded config without accounts, a config with an unknown field, and a corrupt `supervision.json` each ended after 5 failed starts: launchd counted 6 runs, the last exited 0, and `status` showed `failed` with the error. | `evidence/PR5/loadfail-r2/loadfail.json` |
 | PR5.live.3 | Blocked: no Linux host. The systemd-user lane is prepared as `lane-3/lane3_linux.py`. The foreground mode passed on macOS. | `evidence/PR5/lane-3/` |
 | PR5.perf | Not applicable. The request path changed only to stamp `until` on wait events. | |
+
+## Activation (PR6)
+
+PR6 points Claude Code at the router only after an acceptance record matches
+the installation. Activation and its undo live in `scripts/claude_router.py`.
+PR6 adds one service field, `binary_sha256` in `GET /claude-router/status`,
+the SHA-256 of the executable file that `serve` hashes as its first step,
+before it reads its configuration or starts the SDK
+(`TestStatusReportsTheExecutableDigestTakenAtStart`,
+`TestExecutableDigestIsTheSHA256OfTheRunningExecutable`). Activation needs it
+to compare the running binary, not only the file on disk, which an update
+replaces while the old binary keeps running.
+
+### Acceptance record
+
+`claude_router.py identity --claude PATH --agent-sdk DIR` prints the
+installation's identity as JSON. The acceptance run saves that identity with
+its verdict. Activation reads these fields of the record and ignores the rest:
+
+| Field | Activation compares it with |
+| --- | --- |
+| `result` | Must be `pass`. |
+| `head` | The full commit in the astack manifest's `components.claude-router.commit`, and its first 7 hex digits with the running service's `binary` revision. A `+dirty` build never matches. |
+| `binary_sha256` | The SHA-256 of the installed `bin/claude-router`, and the running service's `binary_sha256`. |
+| `helpers_sha256` | Must be 64 hex digits and equal the digest of the installed helper payload in `lib/`. For each file in `lib/`, sorted by relative path, the digest input holds one line: the relative path, a NUL byte, and the file's SHA-256 in hex. `__pycache__` and compiled files are skipped. The digest is the SHA-256 of these lines (`test_the_helpers_digest_covers_each_installed_file_by_path_and_content`). See "Which code runs" below. |
+| `sdk` | The running service's `sdk`, the pinned CLIProxyAPI module version. |
+| `clients.claude_code` | The first word of `--claude PATH --version`, which must exit 0. |
+| `clients.agent_sdk` | `version` in `--agent-sdk DIR/package.json`, whose `name` must be `@anthropic-ai/claude-agent-sdk`. |
+
+A missing record, a record that does not parse, or any mismatch refuses
+before any write and lists every mismatch
+(`test_a_missing_or_mismatched_acceptance_record_refuses_before_any_write`,
+`test_an_install_from_an_edited_checkout_refuses_before_any_write`). Both client fields
+are required, because acceptance covers the terminal client and T3's Agent
+SDK. Two installs of one clean commit with the same Go in different homes
+built the same bytes (`evidence/PR6/reproducible-build/run.txt`). A binary
+built in an acceptance lane therefore matches the daily-driver build only
+when both used the same Go and a clean checkout: an edit under
+`components/claude-router` links `<commit>+dirty`, which changes the bytes
+and never matches a `head`. The installer copies the helpers from the
+working tree, so an edit under `scripts/` changes `helpers_sha256` instead
+(`test_an_install_from_an_edited_checkout_refuses_before_any_write`).
+
+### Which code runs
+
+The helper payload is `claude_router.py`, `astack_files.py`,
+`astack_settings.py`, and `_vendor/`. The Go `claude-router direct` runs the
+installed copy in `lib/`. `activate` and `./uninstall.sh` run the copy in the
+checkout they are started from. Before anything else, `activate` computes the
+same digest over the payload it is running and refuses when it differs from
+the installed `lib/`, or when `lib/` is missing:
+
+```text
+claude-router: activate: the helpers running this command differ from the installed ones
+        helpers: running <12 hex> from <scripts directory>, installed <12 hex or none>
+next    run ~/.local/share/astack/claude-router/lib/claude_router.py instead
+```
+
+When the refused command already runs from `lib/`, or `lib/` is missing, the
+last line is `next    reinstall from a checkout of the accepted head:
+./install.sh --component claude-router`.
+
+Uninstall applies the same check when the manifest records the component and
+uninstall would restore client settings, that is, when
+`settings.claude-router` owns a file or `activation.json` exists. It exits 1
+with `Uninstall would restore client settings, but the helpers running this
+command differ from the installed ones (...); run claude-router direct, then
+uninstall`
+(`test_activation_refuses_when_the_running_helpers_differ_from_the_installed_ones`,
+`test_an_edited_checkout_refuses_before_it_undoes_an_interrupted_activation`,
+`test_uninstall_refuses_to_restore_settings_with_helpers_other_than_the_installed_ones`).
+
+So `activate`, and an uninstall that restores client settings while the
+component is installed, run only helper bytes equal to the installed `lib/`.
+These paths run without that check:
+
+- The Go `claude-router direct` runs `lib/` itself and does not compare it
+  with the record's `helpers_sha256`. An edit to `lib/` after activation runs.
+- `claude_router.py direct`, the internal subcommand the Go `direct` calls,
+  runs unchecked when started by hand from a checkout.
+- An uninstall from a checkout when the manifest keeps
+  `settings.claude-router` but has no `components.claude-router` record. The
+  tools never write that state.
+- `scripts/manage.py`, the entry point of `./install.sh` and
+  `./uninstall.sh`, which calls the payload.
+- `service.json`, from which the Go `direct` reads the helper path and the
+  Python interpreter.
+
+### Order of operations
+
+`claude_router.py activate --acceptance FILE --claude PATH --agent-sdk DIR
+--verify SESSION COMMAND [--verify SESSION COMMAND]... [--settings FILE]
+[--project DIR]... [--prepare]` runs these steps. `--settings` defaults to
+`$CLAUDE_CONFIG_DIR/settings.json`, or `~/.claude/settings.json` without it
+or with `--home`.
+
+1. Check that the running helpers are the installed ones (Which code runs,
+   above). Then undo an interrupted activation (below). With `--prepare`,
+   run only the undo's checks. A refusal exits 1, as `direct -prepare` does.
+   Otherwise print `undo    an interrupted activation of <file>; activate
+   restores it first` and `ready   nothing changed; activate without
+   --prepare`, and exit 0 before step 2.
+2. Refuse when `settings.claude-router` already owns a file: `claude-router
+   direct` comes first.
+3. Read the record, ask the running service for its status with the client
+   token, and compare (Acceptance record, above). A service that does not
+   answer refuses with `next    claude-router start, then run again`.
+4. Check readiness: the assignment journal is `ok`, and at least one account
+   is registered, needs no login, and has a `disabled` paid-overflow reading
+   (`test_a_router_that_is_not_ready_refuses_before_any_write`).
+5. Call `client_settings` on the settings file. An env token in that file
+   refuses. Each owned key prints `set`, or `replace` when it already holds
+   another value. A replaced `env.ANTHROPIC_BASE_URL` prints the old and new
+   values. A replaced secret-named key, such as a foreign `apiKeyHelper`,
+   prints only `the old value stays in <backup>`, because a helper command
+   can hold a secret.
+6. Print a `warn` line, without values, for each other place Claude Code
+   reads first: a `--project` directory's `.claude/settings.json` or
+   `.claude/settings.local.json`, or the managed settings file
+   (`/Library/Application Support/ClaudeCode/managed-settings.json`,
+   `/etc/claude-code/managed-settings.json`), that sets an owned key or an
+   env token; and `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` in the
+   environment of the command or in `launchctl getenv` or `systemctl --user
+   show-environment`
+   (`test_local_settings_and_environment_tokens_are_refused_or_named`).
+   Activation checks no other project.
+7. With `--prepare`, stop here. Otherwise refuse without a `--verify`.
+8. Copy the settings file to
+   `backups/activate-<first 12 hex of its SHA-256>/settings.json` with mode
+   0600, and write `activation.json` in the state directory with phase
+   `writing`: the settings path, its mode, the original and activated
+   SHA-256, the backup path, the accepted identity, and the undo command
+   `claude-router direct`.
+9. Write the settings and their `settings.claude-router` record, as the
+   harness targets do, then set the phase to `verifying`.
+10. Run each `--verify` `COMMAND` with `/bin/sh -c` in its own process group.
+    Each must exit 0 within `--verify-timeout` seconds (default 600) and add
+    at least one `request` event to `events.jsonl` whose `conversation` is
+    the first 12 hex digits of the SHA-256 of its `SESSION`, the Claude
+    session ID the command continues, with status 200 and outcome
+    `completed`. A request for another conversation does not count, even
+    when it arrives while the command runs
+    (`test_a_continuation_counts_only_requests_of_its_own_conversation`). A
+    client that sends the wrong token gets the router's 401 and fails this
+    check. Output names a command by its program, the first word that is
+    not a `NAME=value` assignment, and never prints its arguments:
+    `verify  <program> (conversation <hash>): exit 0, <n> routed request[s]`.
+11. When each command ends, by exit, by timeout, or by a signal to
+    activation, activation sends SIGKILL to the command's process group
+    (`test_a_continuation_s_children_are_killed_when_it_ends`,
+    `test_a_timed_out_continuation_is_killed_with_its_children`). A process
+    that starts its own session or process group, such as a Node child
+    spawned with `detached: true`, is not in that group and keeps running.
+12. Step 10 fails on any of these:
+    - a nonzero exit, even after a counted request
+    - a timeout
+    - no counted request
+    - SIGINT, SIGTERM, or SIGHUP to activation, including the SIGHUP from
+      closing the terminal, from the start of step 8 until the last signal
+      check (below)
+
+    From the start of step 8 until activation exits, these signals do not
+    stop activation. The first one blocks all three until activation exits
+    and sends SIGKILL to the running command's process group. Activation
+    kills any command it starts after that. It checks for a signal before
+    and after each command and once more after the last one. When a check
+    finds one, the failure line is `claude-router: activate: verification
+    was interrupted`. A signal after that last check changes nothing.
+    A signal that was ignored when activation started stays ignored: under
+    `nohup`, a hangup does not stop the verification. Before step 8 the
+    signals have their usual effect. SIGQUIT (Ctrl-\\) is not handled: it
+    ends activation with the settings on the router and `activation.json`
+    in phase `verifying`, and the running command keeps running.
+    `claude-router direct` or the next `activate` restores the settings.
+
+    On a failure, activation prints the failure and undoes the write as an
+    interrupted activation does (below). It then prints `undo    <file>
+    restored; the router keeps its logins and assignments` and `next
+    claude-router status`, and exits 1. Signals during the undo change
+    neither the undo nor the exit status. When a line cannot be written to
+    stdout or stderr, because the terminal or a pipe's reader is gone,
+    activation sends the rest of that stream to `/dev/null` and keeps
+    writing the other stream, and the undo and the exit status stay the
+    same
+    (`test_a_failed_or_unrouted_continuation_restores_the_direct_settings`,
+    `test_an_interrupted_verification_restores_the_direct_settings`,
+    `test_repeated_and_mixed_signals_do_not_stop_the_undo_or_change_the_exit_status`,
+    `test_signals_from_many_parallel_senders_do_not_stop_the_undo_or_change_the_exit_status`,
+    `test_a_signal_while_activation_exits_changes_neither_the_result_nor_the_exit_status`,
+    `test_signals_during_the_undo_after_a_failed_continuation_do_not_stop_it`,
+    `test_signals_ignored_when_activation_starts_stay_ignored`,
+    `test_closing_the_terminal_during_verification_restores_the_direct_settings`,
+    `test_a_stdout_that_breaks_during_verification_keeps_the_failure_lines_on_stderr`,
+    `test_a_stdout_without_a_reader_changes_neither_stderr_nor_the_exit_status`).
+13. If the settings file changed while the command ran, that undo refuses.
+    Activation prints `<file> changed after an interrupted activation` on
+    stderr, also when stdout is gone
+    (`test_a_stdout_that_breaks_during_verification_keeps_the_edit_refusal_on_stderr`),
+    leaves the file with the router's keys and the edit, leaves
+    `activation.json` in phase `verifying`, and exits 1. `claude-router
+    direct` and the next `activate` refuse the same way for as long as the
+    file holds neither the activated nor the original bytes and
+    `activation.json` exists. Removing only the router's keys does not end
+    this. The printed `next` line names the recovery: restore the file, or
+    remove the router's keys by hand, then delete `activation.json`; after
+    that `claude-router direct` drops the record and keeps the edit
+    (`test_a_settings_edit_during_a_failed_continuation_is_kept`).
+14. The router never sends a request around itself: a stopped router fails
+    the client's request (`evidence/PR6/lane-3/cutover-isolated.json`, step
+    `unavailable_after_activation_no_bypass`).
+15. Otherwise set the phase to `active`, print `done    clients connect
+    through the router; undo with claude-router direct`, and exit 0.
+
+Activation never starts, stops, or enables the service, and never touches
+logins, assignments, or the client token. It needs one `--verify` and does
+not know which client a command runs. The runbook's cutover passes two, a
+terminal continuation and an Agent SDK continuation with T3's options
+(`reports/PR6-live-runbook.md`, Part E).
+
+### Undo and interrupted activation
+
+`claude-router direct` is the rollback. It stops the router as `stop` does
+and restores the owned keys from the `settings.claude-router` record, as in
+PR5, and then removes `activation.json`. Logins, assignments, the client token,
+the binary, and the job stay (`evidence/PR6/direct-recovery.json`). With no
+owned record, `direct` changes no settings and still removes
+`activation.json`
+(`test_direct_without_an_owned_settings_record_removes_the_activation_record`).
+
+An `activation.json` in phase `writing` or `verifying` marks an activation
+that did not finish. `direct`, and the next `activate`, undo it by file
+hashes:
+
+| Settings file | Action |
+| --- | --- |
+| Holds the activated SHA-256 | Restore the backup with the recorded mode, after checking the backup's SHA-256, or delete the file when it did not exist before. A changed backup refuses. |
+| Holds the original SHA-256 | Nothing to restore. |
+| Anything else | Refuse, name the backup, and keep the edit. |
+
+Both then drop the file's `settings.claude-router` record and
+`activation.json`. `direct --check` and `direct -prepare` apply the same
+checks without writing. When the undo would refuse, `direct --check` exits 1
+with the refusal, so `claude-router direct` refuses before it stops the
+service; otherwise `claude-router direct` stops the service first.
+`direct -prepare` prints `restore <file> (interrupted activation)`.
+Uninstall refuses while such a journal exists, because the helper that
+undoes it is part of the payload uninstall removes
+(`test_direct_and_uninstall_after_an_interruption_between_the_settings_write_and_its_record`,
+`test_direct_after_an_interruption_before_the_settings_write_drops_the_record`,
+`test_the_next_activation_undoes_an_interrupted_verification_first`,
+`test_an_edit_after_an_interruption_refuses_and_is_kept`,
+`test_a_changed_backup_refuses_the_undo_and_keeps_the_settings`,
+`test_a_settings_file_that_did_not_exist_is_removed_again_after_a_failed_continuation`).
+Uninstall removes an `active` journal after it restores the settings
+(`test_uninstall_after_activation_restores_the_settings_and_removes_the_record`).
+
+### Known limits
+
+- A client update after activation is not checked. Claude Code and T3 update
+  themselves, and the acceptance record then names an older client.
+- An install after activation is not checked either. `./install.sh` can
+  replace the binary and the helpers while `activation.json` is `active`,
+  and after the next `start` the activated clients route through a build no
+  acceptance run covered. Nothing refuses or warns. Run `claude-router
+  direct` before installing another head, then activate against its own
+  record.
+- `--verify` counts requests by conversation, not by process. A request in
+  the named session from another client, or one that started before the
+  command and completed while it ran, also counts. Name a session that
+  nothing else uses, as the runbook's cutover does.
+- A passing `--verify` says nothing about clients and environments its
+  commands do not run. A project not named with `--project`, or an app
+  started with an env token, can still bypass the router's wiring;
+  activation only warns.
+- The manifest has no lock shared with `./install.sh`. A concurrent install
+  or uninstall during activation can lose the settings record; the backup and
+  `activation.json` still allow the undo.
+
+### Verification
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| PR6.unit | `python3 -m unittest discover -s tests -v` and the Go tests under `-race`, with `go vet`. Mutations of each new guard are listed in the evidence. | `evidence/PR6/unit-<sha>/`, `evidence/PR6/mutation/`, `evidence/PR6/mutation-r3/`, `evidence/PR6/mutation-r4/`, `evidence/PR6/mutation-r5/`, `evidence/PR6/mutation-r6/`, `evidence/PR6/mutation-r7/` |
+| PR6.live.1 | In isolated homes with Claude Code 2.1.300 and Agent SDK 0.3.300 sandboxed, fake credentials, and a loopback fake upstream: the parent `ae25eb0` with direct wiring and the head with activated wiring each completed a new terminal conversation, two resumes, an Agent SDK session with T3's options and its resume, and a recovery resume. On head every routed step went through the router, the terminal and Agent SDK conversations kept their accounts across resume and a router stop and start, no request used the direct key while activated, and `claude-router direct` restored the settings byte for byte so the same conversation continued directly. | `evidence/PR6/lane-1/default.json` |
+| PR6.live.3, isolated parts | Under launchd label `dev.astack.claude-router.pr6test.<hex>`: activation refused with the service stopped and with another process on its port; a SIGKILL before any write left nothing to undo; a SIGKILL during verification was undone by `direct` and, a second time, by the next activation; a failed continuation rolled back; a stopped router failed the client with no direct request; an edit of an owned key stopped `direct` and was kept, and an unrelated edit survived it. A `--verify` command that sent nothing failed while another client routed a request in another conversation, and passed when that client continued the same session (the Known limit above). An install from a checkout with an edited helper made activation refuse, and so did activation run from an edited checkout over a clean install. A command that left a background child and exited 5 left no child, and activation exited 1. SIGTERM, SIGHUP, and closing the pseudo-terminal whose session activation leads, during verification, each rolled back with exit 1. With the real client, a mixed SIGTERM, SIGHUP, and SIGINT storm during verification, and a storm from the failure line of a failed continuation until exit, each exited 1 with the settings restored. With stdout's reader gone and stderr to a file, stderr kept the failure, `undo`, and `next` lines, and, when the command also edited the settings, the refusal and its `next` line. The daily-driver cutover is not run. | `evidence/PR6/lane-3/cutover-isolated.json` |
+| PR6.live.1 and PR6.live.3 on Linux | Blocked: no Linux host. | |
+| PR6.live.2, PR6.perf, cutover | Not run: they need the user's attended sign-ins and go (`reports/PR6-live-runbook.md`). | |

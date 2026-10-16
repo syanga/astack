@@ -19,10 +19,14 @@ import re
 import secrets
 import shlex
 import shutil
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
+import urllib.request
 import uuid
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -39,6 +43,10 @@ CLIENT_KEYS = ("apiKeyHelper", "env.ANTHROPIC_BASE_URL", "env.CLAUDE_CODE_RETRY_
 BEFORE_HELPER = ("env.ANTHROPIC_AUTH_TOKEN", "env.ANTHROPIC_API_KEY")
 SECRET_KEY = re.compile(r"TOKEN|KEY|SECRET|PASSWORD", re.IGNORECASE)
 HELPER = ("claude_router.py", "astack_files.py", "astack_settings.py")
+ACTIVATION = "activation.json"
+CLIENTS = (("claude_code", "--claude"), ("agent_sdk", "--agent-sdk"))
+MANAGED_SETTINGS = {"darwin": Path("/Library/Application Support/ClaudeCode/managed-settings.json"),
+                    "linux": Path("/etc/claude-code/managed-settings.json")}
 
 
 def repo():
@@ -257,6 +265,15 @@ def plan(command, state, lay, force=False):
         lay = Layout(home=lay.home, data=Path(recorded["data"]), state=Path(recorded["state"]), manifest=lay.manifest,
                      manager=recorded["manager"], service=recorded["service"],
                      descriptor=Path(recorded["descriptor"]) if recorded["descriptor"] else None, port=lay.port)
+    journal = read_journal(lay.state) if command == "uninstall" and old else None
+    if journal and journal["phase"] != "active":
+        raise ValueError("An activation of claude-router was interrupted; run claude-router direct, then uninstall")
+    if command == "uninstall" and old and (journal or state.get("settings", {}).get(NAME)):
+        try:
+            check_checkout(lay)
+        except Refusal as refusal:
+            raise ValueError("Uninstall would restore client settings, but {} ({}); run claude-router direct, then uninstall".format(
+                refusal, refusal.details[0])) from None
     result = Plan(command=command, lay=lay, old=old)
     desired, seeds = {}, {}
     if command == "install":
@@ -412,6 +429,8 @@ def apply(p, state, state_path, backup_root, dry_run=False):
     if p.command == "uninstall":
         print("KEEP {} (logins, assignments, client token, events)".format(lay.state))
         if not dry_run:
+            if (lay.state / ACTIVATION).exists():
+                (lay.state / ACTIVATION).unlink()
             state.get("components", {}).pop(NAME, None)
             for cache in sorted(lay.lib.rglob("__pycache__")) if lay.lib.is_dir() else []:
                 shutil.rmtree(cache)
@@ -467,11 +486,32 @@ def direct(state_dir, manifest_path, mode, stopped=False):
     state = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     owned = state.get("settings", {}).get(NAME, {})
     inventory = router_inventory(state_dir)
+    done = "done    clients connect directly; the router stays installed" + (" and stopped" if stopped else "")
+    journal = read_journal(state_dir)
+    if journal and journal["phase"] != "active":
+        try:
+            settings = undo_interrupted(state_dir, state, manifest_path, check=mode != "apply")
+        except Refusal as refusal:
+            report("direct", refusal)
+            return 1
+        if mode == "check":
+            return 0
+        if mode == "prepare":
+            print("restore {} (interrupted activation)".format(shown(settings)))
+            print("keep    " + inventory)
+            print("ready   nothing changed; apply with claude-router direct")
+            return 0
+        print("restore {} (interrupted activation)".format(shown(settings)))
+        print("keep    " + inventory)
+        print(done)
+        return 0
     if not owned:
         if mode == "check":
             return NOTHING_OWNED
         print("keep    no client settings name the router; " + inventory)
         print("ready   nothing to change")
+        if mode == "apply" and journal:
+            (state_dir / ACTIVATION).unlink()
         return 0
     lines, skipped, pending, others, needs_login = [], [], {}, 0, False
     for filename, record in sorted(owned.items()):
@@ -514,7 +554,9 @@ def direct(state_dir, manifest_path, mode, stopped=False):
     with redirect_stdout(io.StringIO()):
         for change in changes:
             change.apply(state, manifest_path, manifest_path.parent / "backups" / uuid.uuid4().hex)
-    print("done    clients connect directly; the router stays installed" + (" and stopped" if stopped else ""))
+    if journal:
+        (state_dir / ACTIVATION).unlink()
+    print(done)
     return 0
 
 
@@ -524,6 +566,438 @@ def redact(label, entry):
             return "unset"
         entry = entry.get("value")
     return "[redacted]" if SECRET_KEY.search(label.rsplit(".", 1)[-1]) else (entry if isinstance(entry, str) else json.dumps(entry))
+
+
+class Refusal(Exception):
+    def __init__(self, error, details=(), next_step=None):
+        super().__init__(error)
+        self.details = list(details)
+        self.next_step = next_step
+
+
+def say(line, stream=None):
+    stream = stream or sys.stdout
+    try:
+        print(line, file=stream, flush=True)
+    except OSError:
+        null = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(null, stream.fileno())
+        os.close(null)
+
+
+def report(command, refusal):
+    say("claude-router: {}: {}".format(command, refusal), sys.stderr)
+    for line in refusal.details:
+        say("        " + line, sys.stderr)
+    if refusal.next_step:
+        say("next    " + refusal.next_step, sys.stderr)
+
+
+def file_sha256(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+
+
+def installed_layout(state, state_root, home):
+    record = state.get("components", {}).get(NAME, {})
+    recorded = record.get("layout")
+    if not recorded:
+        raise Refusal("claude-router is not installed", next_step="./install.sh --component claude-router")
+    lay = Layout(home=home, data=Path(recorded["data"]), state=Path(recorded["state"]), manifest=state_root / "manifest.json",
+                 manager=recorded["manager"], service=recorded["service"],
+                 descriptor=Path(recorded["descriptor"]) if recorded["descriptor"] else None, port=DEFAULT_PORT)
+    return lay, record
+
+
+def fetch_status(listen, token):
+    request = urllib.request.Request("http://{}/claude-router/status".format(listen),
+                                     headers={"Authorization": "Bearer " + token})
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def router_config(state_dir):
+    config = json.loads((state_dir / "config.json").read_text(encoding="utf-8"))
+    return config["listen"], Path(state_dir).absolute() / config["client_token_file"]
+
+
+def running_status(state_dir):
+    listen, token_file = router_config(state_dir)
+    try:
+        return listen, fetch_status(listen, token_file.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError) as error:
+        raise Refusal("the router at {} does not answer: {}".format(listen, getattr(error, "reason", error)),
+                      next_step="claude-router start, then run again") from None
+
+
+def client_versions(claude, agent_sdk):
+    versions = {"claude_code": None}
+    try:
+        result = subprocess.run([str(claude), "--version"], capture_output=True, text=True, timeout=120)
+        words = result.stdout.split()
+        versions["claude_code"] = words[0] if result.returncode == 0 and words else None
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        package = json.loads((agent_sdk / "package.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        package = {}
+    versions["agent_sdk"] = package.get("version") if package.get("name") == "@anthropic-ai/claude-agent-sdk" else None
+    return versions
+
+
+def payload_digest(contents):
+    digest = hashlib.sha256()
+    for relative in sorted(contents):
+        digest.update("{}\0{}\n".format(relative, hashlib.sha256(contents[relative]).hexdigest()).encode())
+    return digest.hexdigest()
+
+
+def payload_sha256(lib):
+    if not lib.is_dir():
+        return None
+    return payload_digest({path.relative_to(lib).as_posix(): path.read_bytes() for path in lib.rglob("*")
+                           if path.is_file() and "__pycache__" not in path.relative_to(lib).parts
+                           and path.suffix not in (".pyc", ".pyo")})
+
+
+def check_checkout(lay):
+    checkout = payload_digest({relative: payload for relative, (payload, _) in helper_files().items()})
+    installed = payload_sha256(lay.lib)
+    if checkout != installed:
+        raise Refusal("the helpers running this command differ from the installed ones",
+                      ["helpers: running {} from {}, installed {}".format(short(checkout), shown(SCRIPTS), short(installed))],
+                      "reinstall from a checkout of the accepted head: ./install.sh --component claude-router"
+                      if installed is None or SCRIPTS == lay.lib.resolve() else "run {} instead".format(shown(lay.lib / "claude_router.py")))
+
+
+def measure(lay, record, status, claude, agent_sdk):
+    return {"head": record.get("commit"), "binary_sha256": file_sha256(lay.binary), "helpers_sha256": payload_sha256(lay.lib),
+            "running_binary": status.get("binary"), "running_binary_sha256": status.get("binary_sha256"),
+            "sdk": status.get("sdk"), "clients": client_versions(claude, agent_sdk)}
+
+
+def short(value):
+    return value[:12] if isinstance(value, str) else "none"
+
+
+def mismatches(accepted, current):
+    found = []
+    if accepted.get("result") != "pass":
+        found.append("result: {}, not pass".format(accepted.get("result", "missing")))
+    head = accepted.get("head")
+    if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
+        found.append("head: the record names no full commit")
+    elif head != current["head"]:
+        found.append("head: accepted {}, installed {}".format(short(head), short(current["head"])))
+    elif current["running_binary"] != head[:7]:
+        found.append("head: accepted {}, running binary built from {}".format(head[:7], current["running_binary"]))
+    binary = accepted.get("binary_sha256")
+    if binary != current["binary_sha256"]:
+        found.append("binary: accepted {}, installed {}".format(short(binary), short(current["binary_sha256"])))
+    elif binary != current["running_binary_sha256"]:
+        found.append("binary: accepted {}, running {}".format(short(binary), short(current["running_binary_sha256"])))
+    helpers = accepted.get("helpers_sha256")
+    if not isinstance(helpers, str) or not re.fullmatch(r"[0-9a-f]{64}", helpers):
+        found.append("helpers: the record names no digest")
+    elif helpers != current["helpers_sha256"]:
+        found.append("helpers: accepted {}, installed {}".format(short(helpers), short(current["helpers_sha256"])))
+    if accepted.get("sdk") != current["sdk"]:
+        found.append("sdk: accepted {}, running {}".format(accepted.get("sdk"), current["sdk"]))
+    clients = accepted.get("clients") if isinstance(accepted.get("clients"), dict) else {}
+    for key, flag in CLIENTS:
+        if not clients.get(key):
+            found.append("{}: the record names no version".format(key))
+        elif clients[key] != current["clients"].get(key):
+            found.append("{}: accepted {}, {} has {}".format(key, clients[key], flag, current["clients"].get(key) or "no version"))
+    return found
+
+
+def usable_accounts(status):
+    problems = [] if status.get("journal") == "ok" else ["assignment journal: {}".format(status.get("journal"))]
+    usable = [a["id"] for a in status.get("accounts") or []
+              if a.get("registered") and not a.get("needs_login") and (a.get("overage") or {}).get("state") == "disabled"]
+    if not usable:
+        problems.append("no account has a login and a reading that paid overflow is disabled")
+    return usable, problems
+
+
+def launcher_has(name):
+    try:
+        if sys.platform == "darwin":
+            result = subprocess.run(["launchctl", "getenv", name], capture_output=True, text=True, timeout=10)
+            return "launchd" if result.returncode == 0 and result.stdout.strip() else None
+        result = subprocess.run(["systemctl", "--user", "show-environment"], capture_output=True, text=True, timeout=10)
+        found = result.returncode == 0 and any(line.startswith(name + "=") for line in result.stdout.splitlines())
+        return "systemd" if found else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def override_warnings(settings_path, projects, managed, environment):
+    lines = []
+    layers = [project / ".claude" / name for project in projects for name in ("settings.json", "settings.local.json")]
+    for path in layers + ([managed] if managed else []):
+        if not path.exists() or path.resolve() == settings_path.resolve():
+            continue
+        try:
+            data = astack_settings.json_loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            lines.append("warn    {} does not load as JSON; check it for router keys by hand".format(shown(path)))
+            continue
+        for key in BEFORE_HELPER + CLIENT_KEYS:
+            try:
+                present = astack_settings.lookup(data, tuple(key.split(".")))["exists"]
+            except ValueError:
+                present = False
+            if present and key in BEFORE_HELPER:
+                lines.append("warn    {} sets {}, which Claude Code uses instead of the router's apiKeyHelper".format(shown(path), key))
+            elif present:
+                lines.append("warn    {} sets {}, which Claude Code uses instead of {}".format(shown(path), key, shown(settings_path)))
+    for key in BEFORE_HELPER:
+        name = key.split(".", 1)[1]
+        if environment.get(name):
+            lines.append("warn    this environment exports {}, which Claude Code uses instead of the router's apiKeyHelper".format(name))
+        manager = launcher_has(name)
+        if manager:
+            lines.append("warn    {} gives the apps it starts {}, which Claude Code uses instead of the router's apiKeyHelper".format(manager, name))
+    return lines
+
+
+def read_journal(state_dir):
+    path = state_dir / ACTIVATION
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+def write_journal(state_dir, journal):
+    files.atomic_write(state_dir / ACTIVATION, (json.dumps(journal, indent=2) + "\n").encode(), 0o600)
+
+
+def undo_interrupted(state_dir, state, manifest_path, check=False):
+    journal = read_journal(state_dir)
+    if not journal or journal["phase"] == "active":
+        return None
+    settings = Path(journal["settings"])
+    current = file_sha256(settings)
+    if current not in (journal["activated_sha256"], journal["original_sha256"]):
+        raise Refusal("{} changed after an interrupted activation".format(shown(settings)),
+                      ["backup  {}".format(shown(Path(journal["backup"]))) if journal["backup"] else "before  the file did not exist"],
+                      "restore the file or remove the router keys, then remove {} (local edits are kept)".format(shown(state_dir / ACTIVATION)))
+    original = None
+    if current == journal["activated_sha256"] and journal["original_sha256"] is not None:
+        backup = Path(journal["backup"])
+        original = backup.read_bytes() if backup.exists() else None
+        if original is None or hashlib.sha256(original).hexdigest() != journal["original_sha256"]:
+            raise Refusal("the backup of {} changed: {}".format(shown(settings), shown(backup)),
+                          next_step="restore {} by hand, then remove {}".format(shown(settings), shown(state_dir / ACTIVATION)))
+    if check:
+        return settings
+    if current == journal["activated_sha256"]:
+        if original is None:
+            settings.unlink()
+        else:
+            files.atomic_write(settings, original, journal["mode"])
+    owned = state.get("settings", {}).get(NAME, {})
+    if str(settings) in owned:
+        del owned[str(settings)]
+        if not owned:
+            state["settings"].pop(NAME)
+        files.save_manifest(manifest_path, state)
+    (state_dir / ACTIVATION).unlink()
+    return settings
+
+
+def run_verify(command, timeout, stop):
+    process = subprocess.Popen(["/bin/sh", "-c", command], start_new_session=True)
+    stop.group = process.pid
+    stop.kill()
+    try:
+        return process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None
+    finally:
+        stop.group = None
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+
+
+def routed_requests(events, offset, conversation):
+    if not events.exists():
+        return 0
+    with open(events, "rb") as stream:
+        stream.seek(offset)
+        count = 0
+        for line in stream.read().decode("utf-8", "replace").splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            count += (event.get("kind") == "request" and event.get("conversation") == conversation
+                      and event.get("status") == 200 and event.get("outcome") == "completed")
+    return count
+
+
+def conversation_hash(session):
+    return hashlib.sha256(session.strip().encode()).hexdigest()[:12]
+
+
+def program(command):
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        words = command.split()
+    words = [word for word in words if not re.match(r"[A-Za-z_][A-Za-z0-9_]*=", word)]
+    return os.path.basename(words[0]) if words else "command"
+
+
+def verify_wiring(lay, checks, timeout, stop):
+    events = lay.state / "events.jsonl"
+    for session, command in checks:
+        if stop.signal:
+            return INTERRUPTED
+        conversation = conversation_hash(session)
+        label = "{} (conversation {})".format(program(command), conversation)
+        offset = events.stat().st_size if events.exists() else 0
+        code = run_verify(command, timeout, stop)
+        routed = routed_requests(events, offset, conversation)
+        if stop.signal:
+            return INTERRUPTED
+        if code != 0:
+            return "{} {}".format(label, "timed out after {} s".format(timeout) if code is None else "exited {}".format(code))
+        if routed == 0:
+            return "{} completed no request through the router".format(label)
+        say("verify  {}: exit 0, {} routed request{}".format(label, routed, "" if routed == 1 else "s"))
+    return None
+
+
+STOPS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+INTERRUPTED = "verification was interrupted"
+
+
+class Stop:
+    def __init__(self):
+        self.signal = None
+        self.group = None
+
+    def __call__(self, signum, frame):
+        signal.pthread_sigmask(signal.SIG_BLOCK, STOPS)
+        self.signal = self.signal or signum
+        self.kill()
+
+    def kill(self):
+        if self.signal and self.group:
+            try:
+                os.killpg(self.group, signal.SIGKILL)
+            except OSError:
+                pass
+
+    def install(self):
+        for signum in STOPS:
+            if signal.getsignal(signum) is not signal.SIG_IGN:
+                signal.signal(signum, self)
+
+
+def activate(args, state_root, home, use_env):
+    manifest_path, state = load_state(state_root)
+    lay, record = installed_layout(state, state_root, home)
+    check_checkout(lay)
+    journal = read_journal(lay.state)
+    if journal and journal["phase"] != "active":
+        if args.prepare:
+            settings = undo_interrupted(lay.state, state, manifest_path, check=True)
+            print("undo    an interrupted activation of {}; activate restores it first".format(shown(settings)))
+            print("ready   nothing changed; activate without --prepare")
+            return 0
+        print("undo    {} restored after an interrupted activation".format(shown(undo_interrupted(lay.state, state, manifest_path))))
+    owned = sorted(state.get("settings", {}).get(NAME, {}))
+    if owned:
+        raise Refusal("router activation already owns {}".format(", ".join(shown(Path(name)) for name in owned)),
+                      next_step="claude-router direct, then run again")
+    try:
+        accepted = json.loads(args.acceptance.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise Refusal("cannot read the acceptance record {}: {}".format(args.acceptance, error),
+                      next_step="run the acceptance matrix and pass its record with --acceptance") from None
+    listen, status = running_status(lay.state)
+    current = measure(lay, record, status, args.claude, args.agent_sdk)
+    found = mismatches(accepted if isinstance(accepted, dict) else {}, current)
+    if found:
+        raise Refusal("the acceptance record does not match this installation", found,
+                      "run the acceptance matrix at this installation, or install the accepted head")
+    usable, problems = usable_accounts(status)
+    if problems:
+        raise Refusal("the router is not ready", problems, "claude-router status")
+    settings_path = args.settings or (Path(os.environ["CLAUDE_CONFIG_DIR"]) if use_env and os.environ.get("CLAUDE_CONFIG_DIR")
+                                      else home / ".claude") / "settings.json"
+    settings_path = settings_path.absolute()
+    text = settings_path.read_text(encoding="utf-8") if settings_path.exists() else ""
+    try:
+        values, replaced = client_settings(lay.state, astack_settings.document("json", text).data)
+    except ValueError as error:
+        raise Refusal(str(error), next_step="remove the key from {}, then run again".format(shown(settings_path))) from None
+    change, = astack_settings.prepare(NAME, {}, {str(settings_path): ("json", values)})
+    print("accept  head {}, binary {}, helpers {}, sdk {}, claude {}, agent sdk {}".format(
+        current["head"][:7], short(current["binary_sha256"]), short(current["helpers_sha256"]), current["sdk"],
+        current["clients"]["claude_code"], current["clients"]["agent_sdk"]))
+    print("ready   router running {}; usable accounts {}".format(listen, ", ".join(usable)))
+    original = settings_path.read_bytes() if settings_path.exists() else None
+    backup = (manifest_path.parent / "backups" / ("activate-" + hashlib.sha256(original).hexdigest()[:12]) / settings_path.name
+              if original is not None else None)
+    before = astack_settings.document("json", text)
+    for key in CLIENT_KEYS:
+        path = tuple(key.split("."))
+        installed_value = astack_settings.lookup(values, path)
+        if key in replaced and SECRET_KEY.search(key.rsplit(".", 1)[-1]):
+            print("replace {} {} (the old value stays in {})".format(shown(settings_path), key, shown(backup)))
+        elif key in replaced:
+            print("replace {} {} ({} with {})".format(shown(settings_path), key, redact(key, before.get(path)), redact(key, installed_value)))
+        else:
+            print("set     {} {} ({})".format(shown(settings_path), key, redact(key, installed_value)))
+    for line in override_warnings(settings_path, [p.absolute() for p in args.project],
+                                  MANAGED_SETTINGS.get(sys.platform), os.environ):
+        print(line)
+    if backup:
+        print("backup  {}".format(shown(backup)))
+    say("undo    claude-router direct")
+    if args.prepare:
+        print("ready   nothing changed; activate without --prepare")
+        return 0
+    if not args.verify:
+        raise Refusal("activation needs at least one --verify continuation", next_step="pass --verify for the terminal client and for T3")
+    stop = Stop()
+    stop.install()
+    if backup:
+        files.atomic_write(backup, original, 0o600)
+    journal = {"phase": "writing", "settings": str(settings_path), "mode": stat.S_IMODE(settings_path.stat().st_mode) if original is not None else 0o600,
+               "original_sha256": hashlib.sha256(original).hexdigest() if original is not None else None,
+               "activated_sha256": hashlib.sha256(change.rendered.encode()).hexdigest(),
+               "backup": str(backup) if backup else None, "undo": "claude-router direct",
+               "acceptance": {key: accepted.get(key) for key in ("head", "binary_sha256", "helpers_sha256", "sdk", "clients")},
+               "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    write_journal(lay.state, journal)
+    with redirect_stdout(io.StringIO()):
+        change.apply(state, manifest_path, manifest_path.parent / "backups" / uuid.uuid4().hex)
+    write_journal(lay.state, dict(journal, phase="verifying"))
+    failed = verify_wiring(lay, args.verify, args.verify_timeout, stop) or (stop.signal and INTERRUPTED)
+    if failed:
+        say("claude-router: activate: {}".format(failed), sys.stderr)
+        undo_interrupted(lay.state, state, manifest_path)
+        say("undo    {} restored; the router keeps its logins and assignments".format(shown(settings_path)), sys.stderr)
+        say("next    claude-router status", sys.stderr)
+        return 1
+    write_journal(lay.state, dict(journal, phase="active", activated=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
+    say("done    clients connect through the router; undo with claude-router direct")
+    return 0
+
+
+def print_identity(args, state_root, home):
+    _, state = load_state(state_root)
+    lay, record = installed_layout(state, state_root, home)
+    _, status = running_status(lay.state)
+    print(json.dumps(measure(lay, record, status, args.claude, args.agent_sdk), indent=2))
+    return 0
 
 
 def main():
@@ -544,12 +1018,31 @@ def main():
     mode.add_argument("--prepare", action="store_true")
     mode.add_argument("--check", action="store_true")
     d.add_argument("--stopped", action="store_true", help="the caller stopped the service")
+    a = sub.add_parser("activate", help="point Claude Code at the router after acceptance passes")
+    i = sub.add_parser("identity", help="print the installation's identity for an acceptance record")
+    for p in (a, i):
+        p.add_argument("--home", type=Path, help="alternate home; ignores configuration environment overrides")
+        p.add_argument("--claude", type=Path, required=True, help="the terminal Claude Code executable to check")
+        p.add_argument("--agent-sdk", type=Path, required=True, help="the installed @anthropic-ai/claude-agent-sdk package directory")
+    a.add_argument("--acceptance", type=Path, required=True, help="the acceptance record of this installation")
+    a.add_argument("--settings", type=Path, help="Claude settings file; default $CLAUDE_CONFIG_DIR or ~/.claude, then settings.json")
+    a.add_argument("--project", type=Path, action="append", default=[], help="a project whose .claude settings to check; repeat")
+    a.add_argument("--verify", nargs=2, action="append", default=[], metavar=("SESSION", "COMMAND"),
+                   help="a shell command that continues the conversation with this Claude session ID; repeat per client")
+    a.add_argument("--verify-timeout", type=int, default=600, help="seconds each --verify command may take")
+    a.add_argument("--prepare", action="store_true", help="show the changes without making them")
     args = parser.parse_args()
     if args.command == "direct":
         return direct(args.state, args.manifest, "prepare" if args.prepare else "check" if args.check else "apply", args.stopped)
     home = (args.home or Path.home()).expanduser().resolve()
     use_env = args.home is None
     state_root = env_dir("XDG_STATE_HOME", ".local/state", home, use_env) / "astack"
+    if args.command in ("activate", "identity"):
+        try:
+            return activate(args, state_root, home, use_env) if args.command == "activate" else print_identity(args, state_root, home)
+        except Refusal as refusal:
+            report(args.command, refusal)
+            return 1
     run(args.command, state_root, layout(home, use_env, state_root, args.manager, args.service, args.port), args)
     return 0
 
@@ -587,9 +1080,15 @@ def finish(p, state, state_path, state_root, args):
     apply(p, state, state_path, state_root / "backups" / uuid.uuid4().hex, dry_run=args.dry_run)
 
 
-if __name__ == "__main__":
+def cli():
     try:
-        sys.exit(main())
+        code = main()
     except (OSError, ValueError, KeyError) as error:
         print("astack: {}".format(error), file=sys.stderr)
-        sys.exit(1)
+        code = 1
+    signal.pthread_sigmask(signal.SIG_BLOCK, STOPS)
+    sys.exit(code)
+
+
+if __name__ == "__main__":
+    cli()

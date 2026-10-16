@@ -42,6 +42,9 @@ type Options struct {
 	// ReadRetryBase replaces the delay before the first re-read after a
 	// failed settings read.
 	ReadRetryBase time.Duration
+	// BinarySHA256 is the SHA-256 of the executable, taken when the process
+	// started. Status reports it as binary_sha256.
+	BinarySHA256 string
 }
 
 // wallClock is the service clock. It returns wall time without Go's
@@ -91,6 +94,7 @@ type Service struct {
 	server  *http.Server
 	addr    string
 	started time.Time
+	digest  string
 	seq     atomic.Int64
 	closed  atomic.Bool
 
@@ -190,6 +194,7 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	}
 	s.addr = ln.Addr().String()
 	s.started = time.Now()
+	s.digest = opts.BinarySHA256
 	s.server = &http.Server{Handler: s.handler(), ReadHeaderTimeout: 30 * time.Second}
 	go func() { _ = s.server.Serve(ln) }()
 	s.events.emit(Event{Kind: "started", Detail: fmt.Sprintf("%d accounts", len(cfg.Accounts))})

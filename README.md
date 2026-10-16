@@ -70,9 +70,12 @@ and the pinned module cache. To install it, select it explicitly:
 ```
 
 It adds a launchd agent on macOS or a systemd user unit on Linux and changes no
-agent settings. `./uninstall.sh --component claude-router` removes it and keeps
-its logins and assignments. The component README explains enrollment and
-daily operation.
+agent settings. After an acceptance run passes, `python3 scripts/claude_router.py
+activate` makes it Claude Code's default connection, and `claude-router direct`
+switches Claude Code back to a direct connection.
+`./uninstall.sh --component claude-router` removes it and keeps its logins and
+assignments. The component README explains enrollment, activation, and daily
+operation.
 
 ## Find a skill
 
