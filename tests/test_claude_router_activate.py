@@ -1,4 +1,4 @@
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
@@ -22,6 +22,7 @@ COMMIT = "4b1f0c2d9e8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c"
 SDK = "v8.0.11"
 SESSION = "6f1d2c3b-0000-4000-8000-00000000000a"
 CONVERSATION = hashlib.sha256(SESSION.encode()).hexdigest()[:12]
+STOPS = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
 
 FAKE_CLIENT = r'''#!/usr/bin/env python3
 import json, os, subprocess, sys, urllib.request
@@ -52,6 +53,13 @@ claude_router.MANAGED_SETTINGS = {sys.platform: Path(os.environ["MANAGED_SETTING
 sys.argv = ["claude_router.py"] + sys.argv[1:]
 sys.exit(claude_router.main())
 '''
+
+
+OTHER = "6f1d2c3b-0000-4000-8000-00000000000b"
+OTHER_CONVERSATION = hashlib.sha256(OTHER.encode()).hexdigest()[:12]
+UNDONE = ("undo    ~/.claude/settings.json restored; the router keeps its logins and assignments\n"
+          "next    claude-router status\n")
+STOPPED = "claude-router: activate: verification was interrupted\n" + UNDONE
 
 
 class Killed(BaseException):
@@ -175,6 +183,27 @@ class ActivationFixture(ComponentFixture):
         for session, check in verify:
             command += ["--verify", session, check]
         return self.helper(*command, *arguments, **env)
+
+    def activate_command(self, *verify):
+        command = [sys.executable, "-c", HELPER_WITH_MANAGED_SETTINGS, "activate", "--home", str(self.home),
+                   "--acceptance", str(self.acceptance), "--claude", str(self.claude), "--agent-sdk", str(self.sdk)]
+        for session, check in verify:
+            command += ["--verify", session, check]
+        return command
+
+    def activate_env(self):
+        return dict(self.env, HOME=str(self.home.resolve()), ROUTER_SCRIPTS=str(self.repo / "scripts"), MANAGED_SETTINGS=str(self.managed))
+
+    def start_activate(self, *verify, prefix=(), **streams):
+        return subprocess.Popen([*prefix, *self.activate_command(*verify)], env=self.activate_env(), **streams)
+
+    def wait_for_pid(self, pidfile):
+        deadline = time.time() + 30
+        while not (pidfile.exists() and pidfile.read_text().strip()) and time.time() < deadline:
+            time.sleep(0.05)
+        pid = int(pidfile.read_text())
+        self.addCleanup(lambda: subprocess.run(["kill", "-9", str(pid)], capture_output=True))
+        return pid
 
     def direct(self, *mode):
         return subprocess.run([sys.executable, str(self.data / "lib/claude_router.py"), "direct", *mode,
@@ -484,59 +513,132 @@ class ActivationTests(ActivationFixture):
             time.sleep(0.05)
         return False
 
+    def sleeper(self, name):
+        pidfile = self.root / "{}.pid".format(name)
+        return pidfile, "echo $$ > \"{}\"; exec sleep 30 > /dev/null 2>&1".format(pidfile)
+
     def test_an_interrupted_verification_restores_the_direct_settings(self):
         for sent in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             with self.subTest(sent):
-                pidfile = self.root / "verify-{}.pid".format(int(sent))
-                command = [sys.executable, "-c", HELPER_WITH_MANAGED_SETTINGS, "activate", "--home", str(self.home),
-                           "--acceptance", str(self.acceptance), "--claude", str(self.claude), "--agent-sdk", str(self.sdk),
-                           "--verify", SESSION, "echo $$ > \"{}\"; exec sleep 30 > /dev/null 2>&1".format(pidfile)]
-                process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                           env=dict(self.env, HOME=str(self.home.resolve()), ROUTER_SCRIPTS=str(self.repo / "scripts"),
-                                                    MANAGED_SETTINGS=str(self.managed)))
-                deadline = time.time() + 30
-                while not (pidfile.exists() and pidfile.read_text().strip()) and time.time() < deadline:
-                    time.sleep(0.05)
-                pid = int(pidfile.read_text())
-                self.addCleanup(lambda pid=pid: subprocess.run(["kill", "-9", str(pid)], capture_output=True))
+                pidfile, command = self.sleeper("verify-{}".format(int(sent)))
+                process = self.start_activate((SESSION, command), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                pid = self.wait_for_pid(pidfile)
                 process.send_signal(sent)
                 _, stderr = process.communicate(timeout=30)
 
                 self.assertEqual(process.returncode, 1)
-                self.assertEqual(stderr, "claude-router: activate: verification was interrupted\n"
-                                         "undo    ~/.claude/settings.json restored; the router keeps its logins and assignments\n"
-                                         "next    claude-router status\n")
+                self.assertEqual(stderr, STOPPED)
                 self.assert_direct_and_state_kept()
                 self.assertTrue(self.gone(pid), "the continuation {} still runs".format(pid))
 
-    def test_repeated_signals_do_not_stop_the_undo(self):
-        pidfile = self.root / "verify-repeated.pid"
-        command = [sys.executable, "-c", HELPER_WITH_MANAGED_SETTINGS, "activate", "--home", str(self.home),
-                   "--acceptance", str(self.acceptance), "--claude", str(self.claude), "--agent-sdk", str(self.sdk),
-                   "--verify", SESSION, "echo $$ > \"{}\"; exec sleep 30 > /dev/null 2>&1".format(pidfile)]
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   env=dict(self.env, HOME=str(self.home.resolve()), ROUTER_SCRIPTS=str(self.repo / "scripts"),
-                                            MANAGED_SETTINGS=str(self.managed)))
-        deadline = time.time() + 30
-        while not (pidfile.exists() and pidfile.read_text().strip()) and time.time() < deadline:
-            time.sleep(0.05)
-        pid = int(pidfile.read_text())
-        self.addCleanup(lambda: subprocess.run(["kill", "-9", str(pid)], capture_output=True))
+    def test_repeated_and_mixed_signals_do_not_stop_the_undo_or_change_the_exit_status(self):
+        for name, signals in (("repeated", (signal.SIGTERM,)), ("mixed", (signal.SIGHUP, signal.SIGINT, signal.SIGTERM))):
+            with self.subTest(name):
+                pidfile, command = self.sleeper("verify-" + name)
+                process = self.start_activate((SESSION, command), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                pid = self.wait_for_pid(pidfile)
+                deadline = time.time() + 10
+                sent = 0
+                while process.poll() is None and time.time() < deadline:
+                    os.kill(process.pid, signals[sent % len(signals)])
+                    sent += 1
+                _, stderr = process.communicate(timeout=30)
 
-        deadline = time.time() + 10
-        while process.poll() is None and time.time() < deadline:
-            os.kill(process.pid, signal.SIGTERM)
-        process.communicate(timeout=30)
+                self.assertEqual(process.returncode, 1)
+                self.assertEqual(stderr, STOPPED)
+                self.assert_direct_and_state_kept()
+                self.assertTrue(self.gone(pid), "the continuation {} still runs".format(pid))
 
+    def test_signals_during_the_undo_after_a_failed_continuation_do_not_stop_it(self):
+        process = self.start_activate((SESSION, "exit 5"), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        failure = process.stderr.readline()
+        sent = 0
+        while process.poll() is None:
+            os.kill(process.pid, STOPS[sent % len(STOPS)])
+            sent += 1
+        _, rest = process.communicate(timeout=30)
+
+        self.assertEqual(failure, "claude-router: activate: exit (conversation {}) exited 5\n".format(CONVERSATION))
+        self.assertEqual(rest, UNDONE)
+        self.assertEqual(process.returncode, 1)
+        self.assertGreater(sent, 0)
         self.assert_direct_and_state_kept()
-        self.assertTrue(self.gone(pid), "the continuation {} still runs".format(pid))
+
+    def test_signals_ignored_when_activation_starts_stay_ignored(self):
+        pidfile, go = self.root / "ignored.pid", self.root / "ignored.go"
+        command = "echo $$ > \"{}\"; while [ ! -e \"{}\" ]; do sleep 0.05; done; fake-client {}".format(pidfile, go, SESSION)
+        process = self.start_activate((SESSION, command), prefix=("/bin/sh", "-c", 'trap "" HUP INT; exec "$@"', "sh"),
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        pid = self.wait_for_pid(pidfile)
+        process.send_signal(signal.SIGHUP)
+        process.send_signal(signal.SIGINT)
+        time.sleep(0.3)
+        go.touch()
+        stdout, stderr = process.communicate(timeout=30)
+
+        self.assertEqual(process.returncode, 0, stderr)
+        self.assertEqual(stdout.splitlines()[-1], "done    clients connect through the router; undo with claude-router direct")
+        self.assertEqual(self.journal()["phase"], "active")
+        self.assertTrue(self.gone(pid))
+        self.assertEqual(self.direct().returncode, 0)
+        self.assert_direct_and_state_kept()
+
+    def activate_while_stdout_breaks(self, second):
+        go = self.root / "stdout-gone.go"
+        go.unlink(missing_ok=True)
+        first = "while [ ! -e \"{}\" ]; do sleep 0.05; done; fake-client {}".format(go, SESSION)
+        process = self.start_activate((SESSION, first), (OTHER, second), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        while process.stdout.readline() not in ("undo    claude-router direct\n", ""):
+            pass
+        process.stdout.close()
+        go.touch()
+        _, stderr = process.communicate(timeout=30)
+        return process.returncode, stderr
+
+    def activate_without_a_stdout_reader(self, continuation):
+        reader, writer = os.pipe()
+        os.close(reader)
+        process = self.start_activate((SESSION, continuation), stdout=writer, stderr=subprocess.PIPE, text=True)
+        os.close(writer)
+        _, stderr = process.communicate(timeout=30)
+        return process.returncode, stderr
+
+    def test_a_stdout_that_breaks_during_verification_keeps_the_failure_lines_on_stderr(self):
+        code, stderr = self.activate_while_stdout_breaks("exit 5")
+
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr, "claude-router: activate: exit (conversation {}) exited 5\n".format(OTHER_CONVERSATION) + UNDONE)
+        self.assert_direct_and_state_kept()
+
+    def test_a_stdout_that_breaks_during_verification_keeps_the_edit_refusal_on_stderr(self):
+        edit = "'{}' -c 'import json, sys; p = sys.argv[1]; d = json.load(open(p)); d[\"theme\"] = \"light\"; " \
+               "json.dump(d, open(p, \"w\"))' \"{}\"; exit 7".format(sys.executable, self.settings_path)
+
+        code, stderr = self.activate_while_stdout_breaks(edit)
+
+        self.assertEqual(code, 1)
+        self.assertRegex(stderr,
+                         r"^claude-router: activate: {} \(conversation {}\) exited 7\n"
+                         r"claude-router: activate: ~/\.claude/settings\.json changed after an interrupted activation\n"
+                         r"        backup  ~/\.local/state/astack/backups/activate-[0-9a-f]{{12}}/settings\.json\n"
+                         r"next    restore the file or remove the router keys, then remove ~/\.local/state/astack/claude-router/"
+                         r"activation\.json \(local edits are kept\)\n$".format(re.escape(Path(sys.executable).name), OTHER_CONVERSATION))
+        self.assertEqual(json.loads(self.settings_path.read_text())["theme"], "light")
+        self.assertEqual(self.journal()["phase"], "verifying")
+
+    def test_a_stdout_without_a_reader_changes_neither_stderr_nor_the_exit_status(self):
+        failed = self.activate_without_a_stdout_reader("exit 5")
+        self.assertEqual(failed, (1, "claude-router: activate: exit (conversation {}) exited 5\n".format(CONVERSATION) + UNDONE))
+        self.assert_direct_and_state_kept()
+
+        passed = self.activate_without_a_stdout_reader("fake-client " + SESSION)
+        self.assertEqual(passed, (0, ""))
+        self.assertEqual(self.journal()["phase"], "active")
 
     def test_closing_the_terminal_during_verification_restores_the_direct_settings(self):
-        pidfile = self.root / "verify-pty.pid"
-        command = [sys.executable, "-c", HELPER_WITH_MANAGED_SETTINGS, "activate", "--home", str(self.home),
-                   "--acceptance", str(self.acceptance), "--claude", str(self.claude), "--agent-sdk", str(self.sdk),
-                   "--verify", SESSION, "echo $$ > \"{}\"; exec sleep 30 > /dev/null 2>&1".format(pidfile)]
-        env = dict(self.env, HOME=str(self.home.resolve()), ROUTER_SCRIPTS=str(self.repo / "scripts"), MANAGED_SETTINGS=str(self.managed))
+        pidfile, check = self.sleeper("verify-pty")
+        command = self.activate_command((SESSION, check))
+        env = self.activate_env()
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", r"This process .* is multi-threaded", DeprecationWarning)
             process, terminal = pty.fork()
@@ -545,11 +647,7 @@ class ActivationTests(ActivationFixture):
                 os.execve(command[0], command, env)
             finally:
                 os._exit(127)
-        deadline = time.time() + 30
-        while not (pidfile.exists() and pidfile.read_text().strip()) and time.time() < deadline:
-            time.sleep(0.05)
-        pid = int(pidfile.read_text())
-        self.addCleanup(lambda: subprocess.run(["kill", "-9", str(pid)], capture_output=True))
+        pid = self.wait_for_pid(pidfile)
 
         os.close(terminal)
         _, status = os.waitpid(process, 0)
@@ -654,7 +752,7 @@ class ActivationTests(ActivationFixture):
 
 
 class InterruptedActivationTests(ActivationFixture):
-    def interrupt(self, during):
+    def load_helper(self):
         spec_path = self.repo / "scripts/claude_router.py"
         sys.path.insert(0, str(spec_path.parent))
         try:
@@ -664,15 +762,65 @@ class InterruptedActivationTests(ActivationFixture):
             spec.loader.exec_module(helper)
         finally:
             sys.path.remove(str(spec_path.parent))
+        for signum in STOPS:
+            self.addCleanup(signal.signal, signum, signal.getsignal(signum))
+        return helper
+
+    def activate_in_process(self, helper, command="fake-client " + SESSION, timeout=60):
         args = helper.argparse.Namespace(acceptance=self.acceptance, claude=self.claude, agent_sdk=self.sdk, settings=None,
-                                         project=[], verify=[(SESSION, "fake-client " + SESSION)], verify_timeout=60, prepare=False)
+                                         project=[], verify=[(SESSION, command)], verify_timeout=timeout, prepare=False)
+        stderr = io.StringIO()
+        with patch.dict(os.environ, dict(self.env, HOME=str(self.home.resolve())), clear=True), \
+                patch.object(helper, "MANAGED_SETTINGS", {sys.platform: self.managed}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(stderr):
+            code = helper.activate(args, self.home.resolve() / ".local/state/astack", self.home.resolve(), False)
+        return code, stderr.getvalue()
+
+    def interrupt(self, during):
+        helper = self.load_helper()
         target = {"before the settings write": (helper.astack_settings.SettingsChange, "apply"),
                   "settings write": (helper.files, "save_manifest"),
                   "verification": (helper, "verify_wiring")}[during]
-        with patch.object(*target, side_effect=Killed), patch.dict(os.environ, self.env, clear=True), \
-                patch.object(helper, "MANAGED_SETTINGS", {sys.platform: self.managed}), redirect_stdout(io.StringIO()):
-            with self.assertRaises(Killed):
-                helper.activate(args, self.home.resolve() / ".local/state/astack", self.home.resolve(), False)
+        with patch.object(*target, side_effect=Killed), self.assertRaises(Killed):
+            self.activate_in_process(helper)
+
+    def signal_after(self, helper, name, when=lambda *args: True):
+        original = getattr(helper, name)
+
+        def call_then_signal(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if when(*args):
+                signal.raise_signal(signal.SIGTERM)
+            return result
+        return patch.object(helper, name, call_then_signal)
+
+    def test_a_signal_before_the_first_command_starts_no_command_and_rolls_back(self):
+        helper = self.load_helper()
+        marker = self.root / "command-ran"
+        with self.signal_after(helper, "write_journal", lambda state, journal: journal["phase"] == "verifying"):
+            result = self.activate_in_process(helper, "touch \"{}\"; fake-client {}".format(marker, SESSION))
+
+        self.assertEqual(result, (1, STOPPED))
+        self.assertFalse(marker.exists())
+        self.assert_direct_and_state_kept()
+
+    def test_a_signal_as_a_command_starts_kills_it_and_rolls_back(self):
+        helper = self.load_helper()
+        marker = self.root / "command-finished"
+        with self.signal_after(helper.subprocess, "Popen", lambda argv, *rest: str(marker) in argv[-1]):
+            result = self.activate_in_process(helper, "sleep 1; touch \"{}\"".format(marker), timeout=3)
+
+        self.assertEqual(result, (1, STOPPED))
+        self.assertFalse(marker.exists())
+        self.assert_direct_and_state_kept()
+
+    def test_a_signal_after_the_last_command_passes_rolls_back(self):
+        helper = self.load_helper()
+        with self.signal_after(helper, "verify_wiring"):
+            result = self.activate_in_process(helper)
+
+        self.assertEqual(result, (1, STOPPED))
+        self.assert_direct_and_state_kept()
 
     def test_direct_and_uninstall_after_an_interruption_between_the_settings_write_and_its_record(self):
         self.settings_path.chmod(0o640)

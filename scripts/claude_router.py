@@ -576,12 +576,12 @@ class Refusal(Exception):
 
 
 def say(line, stream=None):
+    stream = stream or sys.stdout
     try:
-        print(line, file=stream or sys.stdout, flush=True)
+        print(line, file=stream, flush=True)
     except OSError:
         null = os.open(os.devnull, os.O_WRONLY)
-        os.dup2(null, 1)
-        os.dup2(null, 2)
+        os.dup2(null, stream.fileno())
         os.close(null)
 
 
@@ -806,13 +806,16 @@ def undo_interrupted(state_dir, state, manifest_path, check=False):
     return settings
 
 
-def run_verify(command, timeout):
+def run_verify(command, timeout, stop):
     process = subprocess.Popen(["/bin/sh", "-c", command], start_new_session=True)
+    stop.group = process.pid
+    stop.kill()
     try:
         return process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         return None
     finally:
+        stop.group = None
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
@@ -849,14 +852,18 @@ def program(command):
     return os.path.basename(words[0]) if words else "command"
 
 
-def verify_wiring(lay, checks, timeout):
+def verify_wiring(lay, checks, timeout, stop):
     events = lay.state / "events.jsonl"
     for session, command in checks:
+        if stop.signal:
+            return INTERRUPTED
         conversation = conversation_hash(session)
         label = "{} (conversation {})".format(program(command), conversation)
         offset = events.stat().st_size if events.exists() else 0
-        code = run_verify(command, timeout)
+        code = run_verify(command, timeout, stop)
         routed = routed_requests(events, offset, conversation)
+        if stop.signal:
+            return INTERRUPTED
         if code != 0:
             return "{} {}".format(label, "timed out after {} s".format(timeout) if code is None else "exited {}".format(code))
         if routed == 0:
@@ -866,16 +873,29 @@ def verify_wiring(lay, checks, timeout):
 
 
 STOPS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+INTERRUPTED = "verification was interrupted"
 
 
-def ignore(signum, frame):
-    pass
+class Stop:
+    def __init__(self):
+        self.signal = None
+        self.group = None
 
+    def __call__(self, signum, frame):
+        self.signal = self.signal or signum
+        self.kill()
 
-def interrupted(signum, frame):
-    for each in STOPS:
-        signal.signal(each, ignore)
-    raise KeyboardInterrupt
+    def kill(self):
+        if self.signal and self.group:
+            try:
+                os.killpg(self.group, signal.SIGKILL)
+            except OSError:
+                pass
+
+    def install(self):
+        for signum in STOPS:
+            if signal.getsignal(signum) is not signal.SIG_IGN:
+                signal.signal(signum, self)
 
 
 def activate(args, state_root, home, use_env):
@@ -939,12 +959,14 @@ def activate(args, state_root, home, use_env):
         print(line)
     if backup:
         print("backup  {}".format(shown(backup)))
-    print("undo    claude-router direct")
+    say("undo    claude-router direct")
     if args.prepare:
         print("ready   nothing changed; activate without --prepare")
         return 0
     if not args.verify:
         raise Refusal("activation needs at least one --verify continuation", next_step="pass --verify for the terminal client and for T3")
+    stop = Stop()
+    stop.install()
     if backup:
         files.atomic_write(backup, original, 0o600)
     journal = {"phase": "writing", "settings": str(settings_path), "mode": stat.S_IMODE(settings_path.stat().st_mode) if original is not None else 0o600,
@@ -957,26 +979,16 @@ def activate(args, state_root, home, use_env):
     with redirect_stdout(io.StringIO()):
         change.apply(state, manifest_path, manifest_path.parent / "backups" / uuid.uuid4().hex)
     write_journal(lay.state, dict(journal, phase="verifying"))
-    previous = {signum: signal.signal(signum, interrupted) for signum in STOPS}
-    try:
-        try:
-            failed = verify_wiring(lay, args.verify, args.verify_timeout)
-        except KeyboardInterrupt:
-            failed = "verification was interrupted"
-        for signum in STOPS:
-            signal.signal(signum, ignore)
-        if failed:
-            say("claude-router: activate: {}".format(failed), sys.stderr)
-            undo_interrupted(lay.state, state, manifest_path)
-            say("undo    {} restored; the router keeps its logins and assignments".format(shown(settings_path)), sys.stderr)
-            say("next    claude-router status", sys.stderr)
-            return 1
-        write_journal(lay.state, dict(journal, phase="active", activated=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
-        say("done    clients connect through the router; undo with claude-router direct")
-        return 0
-    finally:
-        for signum, handler in previous.items():
-            signal.signal(signum, handler)
+    failed = verify_wiring(lay, args.verify, args.verify_timeout, stop) or (stop.signal and INTERRUPTED)
+    if failed:
+        say("claude-router: activate: {}".format(failed), sys.stderr)
+        undo_interrupted(lay.state, state, manifest_path)
+        say("undo    {} restored; the router keeps its logins and assignments".format(shown(settings_path)), sys.stderr)
+        say("next    claude-router status", sys.stderr)
+        return 1
+    write_journal(lay.state, dict(journal, phase="active", activated=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
+    say("done    clients connect through the router; undo with claude-router direct")
+    return 0
 
 
 def print_identity(args, state_root, home):
@@ -1030,6 +1042,8 @@ def main():
         except Refusal as refusal:
             report(args.command, refusal)
             return 1
+        finally:
+            signal.pthread_sigmask(signal.SIG_BLOCK, STOPS)
     run(args.command, state_root, layout(home, use_env, state_root, args.manager, args.service, args.port), args)
     return 0
 
