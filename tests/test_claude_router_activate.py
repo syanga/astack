@@ -588,6 +588,9 @@ class ActivationTests(ActivationFixture):
         go.unlink(missing_ok=True)
         first = "while [ ! -e \"{}\" ]; do sleep 0.05; done; fake-client {}".format(go, SESSION)
         process = self.start_activate((SESSION, first), (OTHER, second), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        deadline = threading.Timer(30, process.kill)
+        deadline.start()
+        self.addCleanup(deadline.cancel)
         while process.stdout.readline() not in ("undo    claude-router direct\n", ""):
             pass
         process.stdout.close()
