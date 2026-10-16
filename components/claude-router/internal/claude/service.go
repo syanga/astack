@@ -91,6 +91,7 @@ type Service struct {
 	server  *http.Server
 	addr    string
 	started time.Time
+	digest  string
 	seq     atomic.Int64
 	closed  atomic.Bool
 
@@ -190,6 +191,7 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	}
 	s.addr = ln.Addr().String()
 	s.started = time.Now()
+	s.digest = executableDigest()
 	s.server = &http.Server{Handler: s.handler(), ReadHeaderTimeout: 30 * time.Second}
 	go func() { _ = s.server.Serve(ln) }()
 	s.events.emit(Event{Kind: "started", Detail: fmt.Sprintf("%d accounts", len(cfg.Accounts))})

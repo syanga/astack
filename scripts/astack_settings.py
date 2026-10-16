@@ -32,6 +32,11 @@ class SettingsChange:
     def owned_keys(self):
         return set(self._record["keys"]) if self._record else set()
 
+    @property
+    def rendered(self):
+        """The file's text after apply, or None when apply removes the file."""
+        return self._rendered
+
     def check_unchanged(self, stage):
         if files.current_hash(self.path) != self._original_hash:
             raise ValueError("Settings changed during {}; retry: {}".format(stage, self.path))

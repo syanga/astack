@@ -147,3 +147,20 @@ func collidingSessions(n int) (string, string) {
 		seen[p] = id
 	}
 }
+
+func TestStatusNamesTheSHA256OfTheRunningExecutable(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	e.start()
+	path, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	if got, want := e.svc.Status().BinarySHA256, hex.EncodeToString(sum[:]); got != want {
+		t.Fatalf("binary_sha256 %q, want %q, the SHA-256 of %s", got, want, path)
+	}
+}
