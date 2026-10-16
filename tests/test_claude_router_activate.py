@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import pty
 import re
 import shutil
 import signal
@@ -13,6 +14,7 @@ import sys
 import threading
 import time
 from unittest.mock import patch
+import warnings
 
 from test_claude_router_install import ComponentFixture
 
@@ -335,8 +337,18 @@ class ActivationTests(ActivationFixture):
                                  r"^claude-router: activate: the helpers running this command differ from the installed ones\n"
                                  r"        helpers: running [0-9a-f]{12} from .+/scripts, installed [0-9a-f]{12}\n"
                                  r"next    run ~/\.local/share/astack/claude-router/lib/claude_router\.py instead\n$")
+
+        (lib / "notes.txt").write_text("stray\n")
+        from_lib = subprocess.run([sys.executable, str(lib / "claude_router.py"), "activate", "--prepare", "--home", str(self.home),
+                                   "--acceptance", str(self.acceptance), "--claude", str(self.claude), "--agent-sdk", str(self.sdk)],
+                                  capture_output=True, text=True, env=dict(self.env, HOME=str(self.home.resolve())))
+        self.assertEqual(from_lib.returncode, 1)
+        self.assertTrue(from_lib.stderr.endswith("next    reinstall from a checkout of the accepted head: "
+                                                 "./install.sh --component claude-router\n"), from_lib.stderr)
         shutil.rmtree(lib)
-        self.assertRegex(self.run_activate().stderr, r"        helpers: running [0-9a-f]{12} from .+/scripts, installed none\n")
+        missing = self.run_activate()
+        self.assertRegex(missing.stderr, r"        helpers: running [0-9a-f]{12} from .+/scripts, installed none\n"
+                                         r"next    reinstall from a checkout of the accepted head: \./install\.sh --component claude-router\n$")
         self.assertEqual(self.settings_path.read_bytes(), self.before)
 
     def test_uninstall_refuses_to_restore_settings_with_helpers_other_than_the_installed_ones(self):
@@ -496,6 +508,55 @@ class ActivationTests(ActivationFixture):
                                          "next    claude-router status\n")
                 self.assert_direct_and_state_kept()
                 self.assertTrue(self.gone(pid), "the continuation {} still runs".format(pid))
+
+    def test_repeated_signals_do_not_stop_the_undo(self):
+        pidfile = self.root / "verify-repeated.pid"
+        command = [sys.executable, "-c", HELPER_WITH_MANAGED_SETTINGS, "activate", "--home", str(self.home),
+                   "--acceptance", str(self.acceptance), "--claude", str(self.claude), "--agent-sdk", str(self.sdk),
+                   "--verify", SESSION, "echo $$ > \"{}\"; exec sleep 30 > /dev/null 2>&1".format(pidfile)]
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   env=dict(self.env, HOME=str(self.home.resolve()), ROUTER_SCRIPTS=str(self.repo / "scripts"),
+                                            MANAGED_SETTINGS=str(self.managed)))
+        deadline = time.time() + 30
+        while not (pidfile.exists() and pidfile.read_text().strip()) and time.time() < deadline:
+            time.sleep(0.05)
+        pid = int(pidfile.read_text())
+        self.addCleanup(lambda: subprocess.run(["kill", "-9", str(pid)], capture_output=True))
+
+        deadline = time.time() + 10
+        while process.poll() is None and time.time() < deadline:
+            os.kill(process.pid, signal.SIGTERM)
+        process.communicate(timeout=30)
+
+        self.assert_direct_and_state_kept()
+        self.assertTrue(self.gone(pid), "the continuation {} still runs".format(pid))
+
+    def test_closing_the_terminal_during_verification_restores_the_direct_settings(self):
+        pidfile = self.root / "verify-pty.pid"
+        command = [sys.executable, "-c", HELPER_WITH_MANAGED_SETTINGS, "activate", "--home", str(self.home),
+                   "--acceptance", str(self.acceptance), "--claude", str(self.claude), "--agent-sdk", str(self.sdk),
+                   "--verify", SESSION, "echo $$ > \"{}\"; exec sleep 30 > /dev/null 2>&1".format(pidfile)]
+        env = dict(self.env, HOME=str(self.home.resolve()), ROUTER_SCRIPTS=str(self.repo / "scripts"), MANAGED_SETTINGS=str(self.managed))
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", r"This process .* is multi-threaded", DeprecationWarning)
+            process, terminal = pty.fork()
+        if process == 0:
+            try:
+                os.execve(command[0], command, env)
+            finally:
+                os._exit(127)
+        deadline = time.time() + 30
+        while not (pidfile.exists() and pidfile.read_text().strip()) and time.time() < deadline:
+            time.sleep(0.05)
+        pid = int(pidfile.read_text())
+        self.addCleanup(lambda: subprocess.run(["kill", "-9", str(pid)], capture_output=True))
+
+        os.close(terminal)
+        _, status = os.waitpid(process, 0)
+
+        self.assertEqual(os.waitstatus_to_exitcode(status), 1)
+        self.assert_direct_and_state_kept()
+        self.assertTrue(self.gone(pid), "the continuation {} still runs".format(pid))
 
     def test_a_settings_file_that_did_not_exist_is_removed_again_after_a_failed_continuation(self):
         self.settings_path.unlink()
@@ -665,6 +726,23 @@ class InterruptedActivationTests(ActivationFixture):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines()[0], "undo    ~/.claude/settings.json restored after an interrupted activation")
         self.assertEqual(self.journal()["phase"], "active")
+        self.assertEqual(self.direct().returncode, 0)
+        self.assert_direct_and_state_kept()
+
+    def test_an_edited_checkout_refuses_before_it_undoes_an_interrupted_activation(self):
+        self.interrupt("verification")
+        activated = self.settings_path.read_bytes()
+        checkout = self.repo / "scripts/astack_settings.py"
+        original = checkout.read_bytes()
+        checkout.write_bytes(original + b"\n# a local edit\n")
+
+        for result in (self.run_activate("--prepare"), self.run_activate()):
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, "")
+            self.assertIn("the helpers running this command differ from the installed ones\n", result.stderr)
+            self.assertEqual(self.settings_path.read_bytes(), activated)
+            self.assertEqual(self.journal()["phase"], "verifying")
+        checkout.write_bytes(original)
         self.assertEqual(self.direct().returncode, 0)
         self.assert_direct_and_state_kept()
 

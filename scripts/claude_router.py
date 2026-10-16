@@ -575,12 +575,22 @@ class Refusal(Exception):
         self.next_step = next_step
 
 
+def say(line, stream=None):
+    try:
+        print(line, file=stream or sys.stdout, flush=True)
+    except OSError:
+        null = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(null, 1)
+        os.dup2(null, 2)
+        os.close(null)
+
+
 def report(command, refusal):
-    print("claude-router: {}: {}".format(command, refusal), file=sys.stderr)
+    say("claude-router: {}: {}".format(command, refusal), sys.stderr)
     for line in refusal.details:
-        print("        " + line, file=sys.stderr)
+        say("        " + line, sys.stderr)
     if refusal.next_step:
-        print("next    " + refusal.next_step, file=sys.stderr)
+        say("next    " + refusal.next_step, sys.stderr)
 
 
 def file_sha256(path):
@@ -651,13 +661,13 @@ def payload_sha256(lib):
 
 
 def check_checkout(lay):
-    """Refuse unless the code running now is the installed helper payload that the acceptance record covers."""
     checkout = payload_digest({relative: payload for relative, (payload, _) in helper_files().items()})
     installed = payload_sha256(lay.lib)
     if checkout != installed:
         raise Refusal("the helpers running this command differ from the installed ones",
                       ["helpers: running {} from {}, installed {}".format(short(checkout), shown(SCRIPTS), short(installed))],
-                      "run {} instead".format(shown(lay.lib / "claude_router.py")))
+                      "reinstall from a checkout of the accepted head: ./install.sh --component claude-router"
+                      if installed is None or SCRIPTS == lay.lib.resolve() else "run {} instead".format(shown(lay.lib / "claude_router.py")))
 
 
 def measure(lay, record, status, claude, agent_sdk):
@@ -851,11 +861,20 @@ def verify_wiring(lay, checks, timeout):
             return "{} {}".format(label, "timed out after {} s".format(timeout) if code is None else "exited {}".format(code))
         if routed == 0:
             return "{} completed no request through the router".format(label)
-        print("verify  {}: exit 0, {} routed request{}".format(label, routed, "" if routed == 1 else "s"))
+        say("verify  {}: exit 0, {} routed request{}".format(label, routed, "" if routed == 1 else "s"))
     return None
 
 
+STOPS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+
+
+def ignore(signum, frame):
+    pass
+
+
 def interrupted(signum, frame):
+    for each in STOPS:
+        signal.signal(each, ignore)
     raise KeyboardInterrupt
 
 
@@ -938,23 +957,26 @@ def activate(args, state_root, home, use_env):
     with redirect_stdout(io.StringIO()):
         change.apply(state, manifest_path, manifest_path.parent / "backups" / uuid.uuid4().hex)
     write_journal(lay.state, dict(journal, phase="verifying"))
-    previous = {signum: signal.signal(signum, interrupted) for signum in (signal.SIGTERM, signal.SIGHUP)}
+    previous = {signum: signal.signal(signum, interrupted) for signum in STOPS}
     try:
-        failed = verify_wiring(lay, args.verify, args.verify_timeout)
-    except KeyboardInterrupt:
-        failed = "verification was interrupted"
+        try:
+            failed = verify_wiring(lay, args.verify, args.verify_timeout)
+        except KeyboardInterrupt:
+            failed = "verification was interrupted"
+        for signum in STOPS:
+            signal.signal(signum, ignore)
+        if failed:
+            say("claude-router: activate: {}".format(failed), sys.stderr)
+            undo_interrupted(lay.state, state, manifest_path)
+            say("undo    {} restored; the router keeps its logins and assignments".format(shown(settings_path)), sys.stderr)
+            say("next    claude-router status", sys.stderr)
+            return 1
+        write_journal(lay.state, dict(journal, phase="active", activated=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
+        say("done    clients connect through the router; undo with claude-router direct")
+        return 0
     finally:
         for signum, handler in previous.items():
             signal.signal(signum, handler)
-    if failed:
-        print("claude-router: activate: {}".format(failed), file=sys.stderr)
-        undo_interrupted(lay.state, state, manifest_path)
-        print("undo    {} restored; the router keeps its logins and assignments".format(shown(settings_path)), file=sys.stderr)
-        print("next    claude-router status", file=sys.stderr)
-        return 1
-    write_journal(lay.state, dict(journal, phase="active", activated=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
-    print("done    clients connect through the router; undo with claude-router direct")
-    return 0
 
 
 def print_identity(args, state_root, home):
