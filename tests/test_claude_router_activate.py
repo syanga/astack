@@ -588,7 +588,8 @@ class ActivationTests(ActivationFixture):
         go.unlink(missing_ok=True)
         first = "while [ ! -e \"{}\" ]; do sleep 0.05; done; fake-client {}".format(go, SESSION)
         process = self.start_activate((SESSION, first), (OTHER, second), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        deadline = threading.Timer(30, process.kill)
+        late = threading.Event()
+        deadline = threading.Timer(30, lambda: (late.set(), go.touch()))
         deadline.start()
         self.addCleanup(deadline.cancel)
         while process.stdout.readline() not in ("undo    claude-router direct\n", ""):
@@ -596,6 +597,7 @@ class ActivationTests(ActivationFixture):
         process.stdout.close()
         go.touch()
         _, stderr = process.communicate(timeout=30)
+        self.assertFalse(late.is_set(), "activation did not print its plan before the first command ran")
         return process.returncode, stderr
 
     def activate_without_a_stdout_reader(self, continuation):
