@@ -124,12 +124,17 @@ The service reads `config.json` and the credentials once, at start. To change
 either, run `claude-router stop`, make the change, and run `claude-router
 start`.
 
+`start` refuses while `auths/` holds a login whose file name is not an
+account in `config.json`. To take an account out of rotation, stop the
+router, remove it from `accounts`, move `auths/<id>.json` out of `auths/`,
+and start again.
+
 ## Activate the router
 
 Activation points Claude Code at the router. It refuses unless an acceptance
 record matches the installed commit, the installed and running binary, the
-pinned SDK, and both clients: the terminal `claude` and the Agent SDK that T3
-runs. `claude_router.py identity` prints that identity for the record; the
+installed helper scripts, the pinned SDK, and both clients: the terminal
+`claude` and the Agent SDK that T3 runs. `claude_router.py identity` prints that identity for the record; the
 acceptance run adds `"result": "pass"`. From the repository root, preview the
 change, then apply it:
 
@@ -138,7 +143,8 @@ python3 scripts/claude_router.py activate --prepare --acceptance acceptance.json
   --claude "$(command -v claude)" --agent-sdk /path/to/node_modules/@anthropic-ai/claude-agent-sdk
 python3 scripts/claude_router.py activate --acceptance acceptance.json \
   --claude "$(command -v claude)" --agent-sdk /path/to/node_modules/@anthropic-ai/claude-agent-sdk \
-  --verify 'claude -p --resume SESSION_ID "Reply with one word."' --verify 'T3_CONTINUATION_COMMAND'
+  --verify SESSION_ID 'claude -p --resume SESSION_ID "Reply with one word."' \
+  --verify T3_SESSION_ID 'T3_CONTINUATION_COMMAND'
 ```
 
 The router must be running with at least one usable account. Activation
@@ -166,8 +172,10 @@ Before it writes, activation backs the settings file up under
 `~/.local/state/astack/backups/activate-*/` and records the change in
 `activation.json` in the state directory. After it writes, it runs each
 `--verify` command. Each must exit 0 and complete at least one request
-through the router; otherwise activation restores the settings file and
-exits 1. To go back to a direct connection later, run `claude-router direct`.
+through the router for the conversation whose session ID precedes it;
+otherwise activation restores the settings file and exits 1. Ctrl-C during
+these commands does the same. Activation prints only each command's program
+name, never its arguments. To go back to a direct connection later, run `claude-router direct`.
 It also undoes an activation that was interrupted. Uninstall refuses until
 then.
 
@@ -182,7 +190,7 @@ then.
 | `claude-router login -account ID` | Logs in again after a revoked login. It refuses while the service runs, because the service would write its old credential back. Run `stop`, `login`, then `start`. |
 | `claude-router move -conversation HASH -to ID` | Moves a conversation, named by the hash that status shows, to another account. A prefix of 4 or more hex digits works if it matches one conversation. |
 | `claude-router direct -prepare` | Lists the client settings that router activation owns and that `direct` would restore, and the backup it would write. Changes nothing. |
-| `claude-router direct` | Stops the service as `stop` does and restores those client settings, backing each file up to the path that `-prepare` printed. It restores the file of an interrupted activation from its backup. Logins, assignments, the binary, and the job stay. A key edited after activation stops it, and the edit is kept. With no client settings to restore, it changes nothing and leaves the service running. A job loaded from another install keeps running, and `direct` does not say the router stopped. |
+| `claude-router direct` | Stops the service as `stop` does and restores those client settings, backing each file up to the path that `-prepare` printed. It restores the file of an interrupted activation from its backup; if that file changed since, it refuses before it stops the service, and the edit is kept. Logins, assignments, the binary, and the job stay. A key edited after activation stops it, and the edit is kept. With no client settings to restore, it changes nothing and leaves the service running. A job loaded from another install keeps running, and `direct` does not say the router stopped. |
 
 Status shows hashes, account names, counters, and times, never a token or a
 prompt. A `direct` backup is a copy of the activated settings file with mode
