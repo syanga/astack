@@ -107,3 +107,80 @@ func TestStatusShowsAConfigThatDoesNotLoad(t *testing.T) {
 		t.Fatalf("status:\n%s\nwant:\n%s", out.String(), want)
 	}
 }
+
+func TestASupervisedStartThatCannotRecordItselfExitsCleanlyWithoutServing(t *testing.T) {
+	state := t.TempDir()
+	config := filepath.Join(state, "config.json")
+	if err := os.WriteFile(config, []byte(`{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(state, supervisionFile, "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	err := serve([]string{"-supervised", "-config", config})
+
+	if err != nil {
+		t.Fatalf("serve: %v, want a clean exit that the service manager does not restart", err)
+	}
+}
+
+func TestASupervisedStartNeedsAnAbsoluteConfigAndCountsNothingWithout(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile("config.json", []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	missing := serve([]string{"-supervised"})
+	relative := serve([]string{"-supervised", "-config", "config.json"})
+
+	if missing == nil || missing.Error() != "-config is required" ||
+		relative == nil || relative.Error() != "-supervised needs an absolute -config path" {
+		t.Fatalf("serve without -config: %v; with a relative one: %v", missing, relative)
+	}
+	if _, err := os.Stat(filepath.Join(dir, supervisionFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a refused start wrote %s: %v", supervisionFile, err)
+	}
+}
+
+func TestStatusNamesAnUnreadableSupervisionRecord(t *testing.T) {
+	state := t.TempDir()
+	record := filepath.Join(state, supervisionFile)
+	if err := os.WriteFile(record, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in := installation{State: state, Manager: "launchd", Config: filepath.Join(state, "config.json")}
+
+	_, err := statusReport(in, sampleNow)
+
+	var n nextError
+	if !errors.As(err, &n) || !strings.HasPrefix(n.err.Error(), record+": ") || n.next != "remove "+record+", then claude-router start" {
+		t.Fatalf("status: %#v, want an error naming %s and a next line", err, record)
+	}
+}
+
+func TestStatusShowsThatTheRouterCannotRecordAStart(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes to any directory")
+	}
+	state := t.TempDir()
+	in := installation{State: state, Manager: "launchd", Config: filepath.Join(state, "config.json")}
+	if err := os.WriteFile(in.Config, []byte(`{"listen": "127.0.0.1:18787"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(state, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(state, 0o700) })
+
+	r, err := statusReport(in, sampleNow)
+	var out bytes.Buffer
+	writeStatus(&out, r, false)
+
+	want := "        last error: cannot record a start in " + filepath.Join(state, supervisionFile) + ": permission denied\n" +
+		"next    fix the error, then claude-router start\n"
+	if err != nil || !strings.HasSuffix(out.String(), want) {
+		t.Fatalf("status %v:\n%s\nwant it to end with:\n%s", err, out.String(), want)
+	}
+}

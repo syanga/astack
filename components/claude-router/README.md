@@ -69,16 +69,24 @@ state directory above. The installer seeds `config.json` with
 `127.0.0.1:18787` and no accounts, and creates `client-token` with mode 0600.
 
 To serve on another port, or to install a second copy beside the first, run the
-helper directly with its own service name and port:
+helper directly with its own service name and port. On macOS, a second copy
+can live in another home:
 
 ```sh
 python3 scripts/claude_router.py install --service dev.example.router --port 28787 --home /path/to/home
 ```
 
+On Linux, a second home does not work: systemd reads user units only from the
+account's own directories, so it never loads a unit installed under another
+`--home`, and `start` refuses with `systemd does not load …`.
+
 Two installs with one service name share one launchd label or systemd unit.
 `start`, `stop`, `direct`, and uninstall act only on the job loaded from their
 own descriptor. They refuse to start, or leave running, a job loaded from the
-other install.
+other install. launchd keeps one on/off switch per label, and the install whose
+plist is in your own `~/Library/LaunchAgents` owns it: the other install's
+`stop` leaves it on, and its `start` refuses while that install has turned it
+off.
 
 ## Enroll accounts and start
 
@@ -107,11 +115,22 @@ other install.
    claude-router start
    ```
 
-4. Point a client at it with `ANTHROPIC_BASE_URL=http://127.0.0.1:18787` and
-   the contents of `client-token` as `ANTHROPIC_AUTH_TOKEN` or
-   `ANTHROPIC_API_KEY`. Set `CLAUDE_CODE_RETRY_WATCHDOG=1` in the client's
-   environment so that it waits out a long reset instead of stopping. The
-   installer does not set these yet.
+4. Point Claude Code at it in its settings file:
+
+   ```json
+   {
+     "apiKeyHelper": "cat ~/.local/state/astack/claude-router/client-token",
+     "env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:18787", "CLAUDE_CODE_RETRY_WATCHDOG": "1"}
+   }
+   ```
+
+   Claude Code runs `apiKeyHelper` with `/bin/sh` and sends its output as both
+   `X-Api-Key` and `Authorization: Bearer`; the router accepts either. The
+   token stays in `client-token`, and no settings file holds it. Remove
+   `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` from the client's settings
+   and environment first: Claude Code uses either one before `apiKeyHelper`.
+   `CLAUDE_CODE_RETRY_WATCHDOG=1` makes the client wait out a long reset
+   instead of stopping. The installer does not write these settings yet.
 
 The service reads `config.json` and the credentials once, at start. To change
 either, run `claude-router stop`, make the change, and run `claude-router
@@ -121,18 +140,18 @@ start`.
 
 | Command | What it does |
 | --- | --- |
-| `claude-router status` | One line for the service, one per account, and one per problem: a conversation that waits, is refused, or is held for login, a recent move, or a quota or paid-overflow reading older than 15 minutes. The last line names the next command to run. |
+| `claude-router status` | One line for the service, one per account, and one per problem: a conversation that waits, is refused, or is held for login, a recent move, or a quota or paid-overflow reading older than 15 minutes. The last line names the next command to run. A stopped service shows its last start error, or that it cannot record a start. |
 | `claude-router status -v` | Every reading with its age, cache counters per account, every assigned conversation, and the migrations, newest first. |
-| `claude-router stop` | Stops the service and unloads the job until the next `start` or login. Assignments stay. |
-| `claude-router start` | Clears the start history and starts the job. |
+| `claude-router stop` | Stops the service and keeps it off, across logins and restarts, until `claude-router start`. Assignments stay. |
+| `claude-router start` | Clears the start history, turns the job back on, and starts it. It also starts at each login until the next `stop`. |
 | `claude-router login -account ID` | Logs in again after a revoked login. It refuses while the service runs, because the service would write its old credential back. Run `stop`, `login`, then `start`. |
 | `claude-router move -conversation HASH -to ID` | Moves a conversation, named by the hash that status shows, to another account. A prefix of 4 or more hex digits works if it matches one conversation. |
 | `claude-router direct -prepare` | Lists the client settings that router activation owns and that `direct` would restore, and the backup it would write. Changes nothing. |
-| `claude-router direct` | Stops the service and restores those client settings, backing each file up to the path that `-prepare` printed. Logins, assignments, the binary, and the job stay. A key edited after activation stops it, and the edit is kept. With no client settings to restore, it changes nothing and leaves the service running. |
+| `claude-router direct` | Stops the service as `stop` does and restores those client settings, backing each file up to the path that `-prepare` printed. Logins, assignments, the binary, and the job stay. A key edited after activation stops it, and the edit is kept. With no client settings to restore, it changes nothing and leaves the service running. A job loaded from another install keeps running, and `direct` does not say the router stopped. |
 
 Status shows hashes, account names, counters, and times, never a token or a
-prompt. A `direct` backup is a copy of the activated settings file, client
-token included, with mode 0600.
+prompt. A `direct` backup is a copy of the activated settings file with mode
+0600. It names the token file, not the token.
 
 The managed job runs `claude-router serve -supervised`. It counts each start
 before it reads `config.json`. After 5 starts within 10 minutes that did not
@@ -140,13 +159,16 @@ end in a clean stop, it records that it gave up and exits 0. launchd
 (`KeepAlive` with `SuccessfulExit` false) and systemd (`Restart=on-failure`)
 do not restart a job that exits 0, so a crash loop ends there, including one
 caused by a mistake in `config.json`. `status` shows `failed` with the last
-start error until the next `start`, and shows `config error:` while
-`config.json` does not load. launchd waits 10 seconds between starts (`ThrottleInterval`) and
-systemd waits 10 seconds (`RestartSec`). launchd has no restart count of its
-own; the limit is the router's.
+start error until the next `start`. A mistake in `config.json` shows as
+`config error:` until supervision gives up, about 50 seconds after the first
+failed start; from then on `failed` takes precedence and the error shows as
+`last error:`. launchd waits 10 seconds between starts (`ThrottleInterval`)
+and systemd waits 10 seconds (`RestartSec`). launchd has no restart count of
+its own; the limit is the router's.
 
-On Linux, the unit starts only through `claude-router start`. To start it at
-login, run `systemctl --user enable dev.astack.claude-router`.
+`stop` turns the job off with `launchctl disable` or `systemctl --user
+disable`, and `start` turns it back on with `enable`. Uninstall stops the job
+and leaves neither manager set to keep a later install from starting at login.
 
 Durability across a power loss or OS crash is not tested. The journal relies
 on `F_FULLFSYNC` on macOS and `fsync` on Linux (CONTRACT.md, PS-5).
@@ -172,10 +194,10 @@ under your own supervisor with `-supervised` to get the same restart limit.
 ./uninstall.sh --component claude-router
 ```
 
-Uninstall stops the job through the installed command, then removes the
-binary, the helper, the job descriptor, and `service.json`. It keeps
-`auths/`, `assignments/`, `client-token`, `events.jsonl`, and an edited
-`config.json`. If router activation owns client settings, uninstall restores
+Uninstall stops the job with the installed `claude-router stop -uninstall`,
+then removes the binary, the helper, the job descriptor, and `service.json`.
+It keeps `auths/`, `assignments/`, `client-token`, `events.jsonl`, and an
+edited `config.json`. If router activation owns client settings, uninstall restores
 them as `direct` does.
 
 ## Build and run by hand

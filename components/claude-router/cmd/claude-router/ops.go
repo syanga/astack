@@ -60,9 +60,20 @@ func status(args []string) error {
 	if err != nil {
 		return err
 	}
-	r := report{Now: time.Now(), Manager: in.Manager, StateShown: tilde(in.State)}
-	if r.Sup, err = loadSupervision(in.supervisionDir()); err != nil {
+	r, err := statusReport(in, time.Now())
+	if err != nil {
 		return err
+	}
+	writeStatus(os.Stdout, r, *verbose)
+	return nil
+}
+
+func statusReport(in installation, now time.Time) (report, error) {
+	r := report{Now: now, Manager: in.Manager, StateShown: tilde(in.State)}
+	dir := in.supervisionDir()
+	var err error
+	if r.Sup, err = loadSupervision(dir); err != nil {
+		return r, nextError{err: err, next: fmt.Sprintf("remove %s, then claude-router start", filepath.Join(dir, supervisionFile))}
 	}
 	cfg, err := in.config()
 	if err != nil {
@@ -73,12 +84,16 @@ func status(args []string) error {
 			r.Running, r.Status = true, st
 		}
 	}
-	if r.Digest, err = readDigest(filepath.Join(in.State, "events.jsonl")); err != nil {
-		return err
+	if !r.Running {
+		if err := syscall.Access(dir, accessWrite); err != nil {
+			r.SaveErr = fmt.Sprintf("cannot record a start in %s: %v", filepath.Join(dir, supervisionFile), err)
+		}
 	}
-	writeStatus(os.Stdout, r, *verbose)
-	return nil
+	r.Digest, err = readDigest(filepath.Join(in.State, "events.jsonl"))
+	return r, err
 }
+
+const accessWrite = 0x2
 
 func tilde(path string) string {
 	home, err := os.UserHomeDir()
@@ -111,8 +126,12 @@ func start(args []string) error {
 	}
 	if err := startService(in); err != nil {
 		var f foreignJob
-		if errors.As(err, &f) {
+		var h labelHeld
+		switch {
+		case errors.As(err, &f):
 			return nextError{err: f, next: "stop the router that installation runs, or install this one with another --service"}
+		case errors.As(err, &h):
+			return nextError{err: h, next: "run claude-router start for that installation, or install this one with another --service"}
 		}
 		return err
 	}
@@ -132,27 +151,37 @@ func start(args []string) error {
 func stop(args []string) error {
 	fs := flag.NewFlagSet("stop", flag.ExitOnError)
 	state := stateFlag(fs)
+	uninstall := fs.Bool("uninstall", false, "stop for removal: leave the job free to load at login after a reinstall")
 	_ = fs.Parse(args)
 	in, err := loadInstallation(*state)
 	if err != nil {
 		return err
 	}
-	return stopOwn(in)
+	mode := keepOff
+	if *uninstall {
+		mode = release
+	}
+	_, err = stopOwn(in, mode)
+	return err
 }
 
-func stopOwn(in installation) error {
+func stopOwn(in installation, mode stopMode) (stopped bool, err error) {
 	var f foreignJob
-	if err := stopService(in); errors.As(err, &f) {
+	if err := stopService(in, mode); errors.As(err, &f) {
 		fmt.Printf("router  not stopped: %v; left running\n", f)
-		return nil
+		return false, nil
 	} else if err != nil {
-		return err
+		return false, err
 	}
 	if err := waitUnlocked(in.State, 40*time.Second); err != nil {
-		return err
+		return false, err
 	}
-	fmt.Println("router  stopped; assignments kept")
-	return nil
+	if mode == keepOff {
+		fmt.Println("router  stopped until claude-router start; assignments kept")
+	} else {
+		fmt.Println("router  stopped; assignments kept")
+	}
+	return true, nil
 }
 
 func move(args []string) error {
@@ -242,10 +271,14 @@ func direct(args []string) error {
 	if in.Manager == "foreground" {
 		return exitWith(runHelper(in, helper))
 	}
-	if err := stopOwn(in); err != nil {
+	stopped, err := stopOwn(in, keepOff)
+	if err != nil {
 		return err
 	}
-	return exitWith(runHelper(in, append(helper, "--stopped")))
+	if stopped {
+		helper = append(helper, "--stopped")
+	}
+	return exitWith(runHelper(in, helper))
 }
 
 const nothingOwned = 3

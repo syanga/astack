@@ -39,11 +39,6 @@ elif args[0] == "build":
     os.chmod(out, 0o755)
 '''
 
-SETTINGS_ROUTER = {"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:18787",
-                           "ANTHROPIC_AUTH_TOKEN": "router-client-token-value-0123456789abcdef",
-                           "CLAUDE_CODE_RETRY_WATCHDOG": "1"}}
-
-
 class ComponentFixture(InstallerFixture):
     def setUp(self):
         super().setUp()
@@ -96,20 +91,23 @@ class ComponentFixture(InstallerFixture):
                 redirect_stdout(io.StringIO()):
             module.main()
 
+    def router(self):
+        spec = importlib.util.spec_from_file_location("router_helper", self.repo / "scripts/claude_router.py")
+        router = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(router)
+        return router
+
     def activate(self, settings_path):
-        """Write the router's client keys and their ownership record, as activation would."""
-        sys.path.insert(0, str(self.repo / "scripts"))
-        try:
-            spec = importlib.util.spec_from_file_location("router_settings", self.repo / "scripts/astack_settings.py")
-            settings = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(settings)
-            state_path = self.home / ".local/state/astack/manifest.json"
-            state = json.loads(state_path.read_text())
-            change, = settings.prepare("claude-router", {}, {str(settings_path): ("json", SETTINGS_ROUTER)})
-            with redirect_stdout(io.StringIO()):
-                change.apply(state, state_path, self.root / "unused backups")
-        finally:
-            sys.path.remove(str(self.repo / "scripts"))
+        """Write the router's client keys and their ownership record, as activation would; return the keys it replaced."""
+        router = self.router()
+        current = json.loads(settings_path.read_text()) if settings_path.exists() else {}
+        values, replaced = router.client_settings(self.state_dir, current)
+        state_path = self.home / ".local/state/astack/manifest.json"
+        state = json.loads(state_path.read_text())
+        change, = router.astack_settings.prepare("claude-router", {}, {str(settings_path): ("json", values)})
+        with redirect_stdout(io.StringIO()):
+            change.apply(state, state_path, self.root / "unused backups")
+        return replaced
 
     def enroll(self):
         """Give the router a login and an assignment, as login and a request would."""
@@ -206,7 +204,7 @@ class ComponentRemovalTests(ComponentFixture):
         config = self.state_dir / "config.json"
         config.write_text(config.read_text().replace('"accounts": []', '"accounts": [{"id": "work", "capacity": 1}]'))
         result = self.component(command="uninstall")
-        self.assertEqual(self.router_log.read_text(), "stop -state {}\n".format(self.state_dir))
+        self.assertEqual(self.router_log.read_text(), "stop -uninstall -state {}\n".format(self.state_dir))
         self.assertFalse(self.data.exists())
         self.assertFalse(self.descriptor.exists())
         self.assertFalse((self.state_dir / "service.json").exists())
@@ -362,7 +360,7 @@ class DirectRecoveryTests(ComponentFixture):
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.splitlines()
         self.assertEqual(lines[:4], [
-            "remove  ~/.claude/settings.json env.ANTHROPIC_AUTH_TOKEN ([redacted])",
+            "remove  ~/.claude/settings.json apiKeyHelper ([redacted])",
             "remove  ~/.claude/settings.json env.ANTHROPIC_BASE_URL (http://127.0.0.1:18787)",
             "remove  ~/.claude/settings.json env.CLAUDE_CODE_RETRY_WATCHDOG (1)",
             "keep    2 other settings keys; router logins work; 2 assignments",
@@ -370,7 +368,6 @@ class DirectRecoveryTests(ComponentFixture):
         self.assertRegex(lines[4], r"^backup  ~/\.local/state/astack/backups/direct-[0-9a-f]{12}/settings\.json$")
         self.assertEqual(lines[5:], ["after   claude needs its own /login", "ready   nothing changed; apply with claude-router direct"])
         self.assertEqual(self.settings_path.read_bytes(), self.activated)
-        self.assertNotIn("router-client-token-value", result.stdout + result.stderr)
 
     def test_apply_restores_the_settings_backs_them_up_and_keeps_router_state(self):
         prepared = self.direct("--prepare").stdout.splitlines()
@@ -413,7 +410,7 @@ class DirectRecoveryTests(ComponentFixture):
         self.assertIn("claude-router", self.manifest()["settings"])
         prepared = self.direct("--prepare")
         self.assertEqual(prepared.stdout.splitlines()[:3], [
-            "skip    ~/.claude/settings.json env.ANTHROPIC_AUTH_TOKEN (already restored)",
+            "skip    ~/.claude/settings.json apiKeyHelper (already restored)",
             "skip    ~/.claude/settings.json env.ANTHROPIC_BASE_URL (already restored)",
             "skip    ~/.claude/settings.json env.CLAUDE_CODE_RETRY_WATCHDOG (already restored)",
         ])
@@ -440,25 +437,30 @@ class SettingsOwnershipTests(ComponentFixture):
     def test_harness_settings_cannot_claim_router_keys(self):
         source = self.repo / "settings/claude.json"
         content = json.loads(source.read_text())
-        content["env"] = {"ANTHROPIC_BASE_URL": "http://127.0.0.1:1"}
-        source.write_text(json.dumps(content))
-        result = self.run_installer("--target", "claude", success=False, env=self.env)
-        self.assertIn("claude-router activation owns: env.ANTHROPIC_BASE_URL", result.stderr)
-        self.assertFalse(self.home.exists())
+        for key, value in (("apiKeyHelper", "cat /x"), ("env", {"ANTHROPIC_BASE_URL": "http://127.0.0.1:1"}),
+                           ("env", {"ANTHROPIC_API_KEY": "x"}), ("env", {"ANTHROPIC_AUTH_TOKEN": "x"})):
+            source.write_text(json.dumps(dict(content, **{key: value})))
+            result = self.run_installer("--target", "claude", success=False, env=self.env)
+            name = key if isinstance(value, str) else "env." + next(iter(value))
+            self.assertIn("claude-router activation owns or overrides: " + name, result.stderr)
+            self.assertFalse(self.home.exists())
 
     def test_harness_reinstall_and_removal_keep_router_keys(self):
         self.run_installer("--target", "claude", env=self.env)
         self.component()
         settings_path = self.home / ".claude/settings.json"
         self.activate(settings_path)
+        activated = json.loads(settings_path.read_text())
+        router_keys = {"apiKeyHelper": activated["apiKeyHelper"], "env": activated["env"]}
         source = self.repo / "settings/claude.json"
         content = json.loads(source.read_text())
         content["autoMemoryEnabled"] = True
         source.write_text(json.dumps(content))
         self.run_installer("--target", "claude", env=self.env)
-        self.assertEqual(json.loads(settings_path.read_text())["env"], SETTINGS_ROUTER["env"])
+        reinstalled = json.loads(settings_path.read_text())
+        self.assertEqual({key: reinstalled[key] for key in router_keys}, router_keys)
         self.run_installer("--target", "claude", command="uninstall", env=self.env)
-        self.assertEqual(json.loads(settings_path.read_text()), SETTINGS_ROUTER)
+        self.assertEqual(json.loads(settings_path.read_text()), router_keys)
 
     def test_a_key_owned_twice_is_refused(self):
         self.run_installer("--target", "claude", env=self.env)
@@ -471,28 +473,82 @@ class SettingsOwnershipTests(ComponentFixture):
         self.assertIn("Targets must own distinct settings keys", result.stderr)
 
 
-class RedactionTests(ComponentFixture):
-    def test_activated_output_and_the_component_record_hold_no_secret(self):
+class ClientTokenTests(ComponentFixture):
+    def test_no_output_settings_file_manifest_or_backup_holds_the_client_token(self):
         outputs = [self.component().stdout]
         self.enroll()
         settings_path = self.home / ".claude/settings.json"
         self.activate(settings_path)
         token = (self.state_dir / "client-token").read_text().strip()
+        manifest = self.home / ".local/state/astack/manifest.json"
 
-        def direct():
-            return subprocess.run([sys.executable, str(self.data / "lib/claude_router.py"), "direct", "--prepare",
-                                   "--state", str(self.state_dir), "--manifest", str(self.home / ".local/state/astack/manifest.json")],
+        def direct(*mode):
+            return subprocess.run([sys.executable, str(self.data / "lib/claude_router.py"), "direct", *mode,
+                                   "--state", str(self.state_dir), "--manifest", str(manifest)],
                                   capture_output=True, text=True, env=dict(self.env, HOME=str(self.home)))
-        prepared = direct()
-        self.assertIn("remove  ~/.claude/settings.json env.ANTHROPIC_AUTH_TOKEN ([redacted])\n", prepared.stdout)
-        content = json.loads(settings_path.read_text())
-        content["env"]["ANTHROPIC_AUTH_TOKEN"] = "edited-secret-value"
+        prepared = direct("--prepare")
+        self.assertIn("remove  ~/.claude/settings.json apiKeyHelper ([redacted])\n", prepared.stdout)
+        activated = settings_path.read_text()
+        content = json.loads(activated)
+        content["apiKeyHelper"] = "echo edited-secret-value"
         settings_path.write_text(json.dumps(content))
-        edited = direct()
+        edited = direct("--prepare")
         self.assertIn("        expected [redacted], found [redacted]\n", edited.stderr)
-        outputs += [prepared.stdout, prepared.stderr, edited.stdout, edited.stderr,
-                    self.component("--dry-run", command="uninstall", success=False).stderr]
-        component = json.dumps(self.manifest()["components"]["claude-router"])
-        for secret in (token, "credential-secret-value", "router-client-token-value", "edited-secret-value"):
-            for text in outputs + [component]:
+        settings_path.write_text(activated)
+        stored = [activated, manifest.read_text()]
+        applied = direct()
+        self.assertEqual(applied.returncode, 0, applied.stderr)
+        backup, = (manifest.parent / "backups").rglob("direct-*/settings.json")
+        self.assertEqual(backup.read_text(), activated)
+        stored += [backup.read_text(), manifest.read_text()]
+        outputs += [prepared.stdout, prepared.stderr, edited.stdout, edited.stderr, applied.stdout, applied.stderr,
+                    self.component("--dry-run", command="uninstall").stdout]
+        for secret in (token, "credential-secret-value", "edited-secret-value"):
+            for text in outputs:
                 self.assertNotIn(secret, text)
+        for text in stored:
+            self.assertNotIn(token, text)
+
+    def test_the_helper_command_prints_the_token_from_a_path_with_a_space_and_a_quote(self):
+        state = self.root / "it's a state"
+        state.mkdir()
+        (state / "client-token").write_text("0123456789abcdef\n")
+        (state / "config.json").write_text(json.dumps({"listen": "127.0.0.1:28787", "client_token_file": str(state / "client-token")}))
+
+        values, replaced = self.router().client_settings(state, {"theme": "dark"})
+
+        printed = subprocess.run(["/bin/sh", "-c", values["apiKeyHelper"]], capture_output=True, text=True)
+        self.assertEqual((printed.returncode, printed.stdout), (0, "0123456789abcdef\n"))
+        self.assertEqual(values["env"], {"ANTHROPIC_BASE_URL": "http://127.0.0.1:28787", "CLAUDE_CODE_RETRY_WATCHDOG": "1"})
+        self.assertEqual(replaced, [])
+
+    def test_activation_refuses_an_env_token_that_claude_code_would_use_instead(self):
+        self.component()
+        router = self.router()
+        for name in ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"):
+            with self.assertRaisesRegex(ValueError, "Client settings set env.{}, which Claude Code uses instead".format(name)):
+                router.client_settings(self.state_dir, {"env": {name: "x"}})
+
+    def test_a_prior_api_key_helper_is_restored_exactly_by_direct_and_by_uninstall(self):
+        self.component()
+        settings_path = self.home / ".claude/settings.json"
+        settings_path.parent.mkdir()
+        settings_path.write_text(json.dumps({"apiKeyHelper": "/opt/vault/print-key --profile 'work'", "theme": "dark"}, indent=2) + "\n")
+        before = settings_path.read_bytes()
+        manifest = self.home / ".local/state/astack/manifest.json"
+
+        self.assertEqual(self.activate(settings_path), ["apiKeyHelper"])
+        prepared = subprocess.run([sys.executable, str(self.data / "lib/claude_router.py"), "direct", "--prepare",
+                                   "--state", str(self.state_dir), "--manifest", str(manifest)],
+                                  capture_output=True, text=True, env=dict(self.env, HOME=str(self.home)))
+        applied = subprocess.run([sys.executable, str(self.data / "lib/claude_router.py"), "direct",
+                                  "--state", str(self.state_dir), "--manifest", str(manifest)],
+                                 capture_output=True, text=True, env=dict(self.env, HOME=str(self.home)))
+        self.assertEqual(applied.returncode, 0, applied.stderr)
+        self.assertEqual(settings_path.read_bytes(), before)
+        self.assertIn("restore ~/.claude/settings.json apiKeyHelper ([redacted])\n", prepared.stdout)
+        self.assertNotIn("after   claude needs its own /login", prepared.stdout)
+
+        self.activate(settings_path)
+        self.component(command="uninstall")
+        self.assertEqual(settings_path.read_bytes(), before)

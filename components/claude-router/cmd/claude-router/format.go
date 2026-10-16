@@ -27,12 +27,18 @@ type report struct {
 	Sup        supervision
 	Digest     digest
 	ConfigErr  string
+	SaveErr    string
 }
 
 func writeStatus(w io.Writer, r report, verbose bool) {
 	r.Now = r.Now.Round(0)
 	clock := r.Now.Format("15:04 MST")
 	switch {
+	case !r.Running && r.SaveErr != "":
+		fmt.Fprintf(w, "%-69s%s\n", fmt.Sprintf("router  stopped  %s  %s", r.Listen, r.Manager), clock)
+		fmt.Fprintf(w, "        last error: %s\n", r.SaveErr)
+		fmt.Fprintln(w, "next    fix the error, then claude-router start")
+		return
 	case !r.Running && !r.Sup.GaveUpAt.IsZero():
 		head := fmt.Sprintf("router  failed  %d starts in %s, gave up %s  %s", crashLimit, shortDuration(crashWindow), when(r.Now, r.Sup.GaveUpAt), r.Manager)
 		fmt.Fprintf(w, "%-69s%s\n", head, clock)

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -36,7 +37,10 @@ func loadSupervision(state string) (supervision, error) {
 	if err != nil {
 		return s, err
 	}
-	return s, json.Unmarshal(data, &s)
+	if err := json.Unmarshal(data, &s); err != nil {
+		return s, fmt.Errorf("%s: %w", filepath.Join(state, supervisionFile), err)
+	}
+	return s, nil
 }
 
 func (s supervision) save(state string) error {

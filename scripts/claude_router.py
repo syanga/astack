@@ -17,6 +17,7 @@ from pathlib import Path
 import platform
 import re
 import secrets
+import shlex
 import shutil
 import stat
 import subprocess
@@ -34,7 +35,8 @@ DEFAULT_SERVICE = "dev.astack.claude-router"
 DEFAULT_PORT = 18787
 MIN_GO = (1, 26, 0)
 MANAGERS = ("launchd", "systemd", "foreground")
-CLIENT_KEYS = ("env.ANTHROPIC_BASE_URL", "env.ANTHROPIC_AUTH_TOKEN", "env.CLAUDE_CODE_RETRY_WATCHDOG")
+CLIENT_KEYS = ("apiKeyHelper", "env.ANTHROPIC_BASE_URL", "env.CLAUDE_CODE_RETRY_WATCHDOG")
+BEFORE_HELPER = ("env.ANTHROPIC_AUTH_TOKEN", "env.ANTHROPIC_API_KEY")
 SECRET_KEY = re.compile(r"TOKEN|KEY|SECRET|PASSWORD", re.IGNORECASE)
 HELPER = ("claude_router.py", "astack_files.py", "astack_settings.py")
 
@@ -301,11 +303,32 @@ def plan(command, state, lay, force=False):
 
 
 def check_harness_settings(harness_values):
-    """Refuse harness settings that name a key the router's activation owns."""
+    """Refuse harness settings that name a key the router's activation owns or that Claude Code uses before apiKeyHelper."""
     names = {".".join(path) for path, _ in astack_settings.leaves(harness_values)}
-    shared = sorted(names & set(CLIENT_KEYS))
+    shared = sorted(names & set(CLIENT_KEYS + BEFORE_HELPER))
     if shared:
-        raise ValueError("Harness settings must not set keys that claude-router activation owns: " + ", ".join(shared))
+        raise ValueError("Harness settings must not set keys that claude-router activation owns or overrides: " + ", ".join(shared))
+
+
+def client_settings(state_dir, current):
+    """Return the values router activation writes into Claude settings, and the owned keys it replaces.
+
+    Refuses settings whose env token Claude Code would use instead of apiKeyHelper.
+    """
+    present = [key for key in BEFORE_HELPER if astack_settings.lookup(current, tuple(key.split(".")))["exists"]]
+    if present:
+        raise ValueError("Client settings set {}, which Claude Code uses instead of the router's apiKeyHelper; remove it first".format(
+            ", ".join(present)))
+    config = json.loads((state_dir / "config.json").read_text(encoding="utf-8"))
+    values = {"apiKeyHelper": "cat " + shlex.quote(config["client_token_file"]),
+              "env": {"ANTHROPIC_BASE_URL": "http://" + config["listen"], "CLAUDE_CODE_RETRY_WATCHDOG": "1"}}
+    replaced = []
+    for key in CLIENT_KEYS:
+        path = tuple(key.split("."))
+        found = astack_settings.lookup(current, path)
+        if found["exists"] and not astack_settings.same(found, astack_settings.lookup(values, path)):
+            replaced.append(key)
+    return values, replaced
 
 
 def stop_service(lay, dry_run):
@@ -315,7 +338,7 @@ def stop_service(lay, dry_run):
     print("STOP {} {}".format(lay.manager, lay.service))
     if dry_run:
         return
-    result = subprocess.run([str(lay.binary), "stop", "-state", str(lay.state)], capture_output=True, text=True)
+    result = subprocess.run([str(lay.binary), "stop", "-uninstall", "-state", str(lay.state)], capture_output=True, text=True)
     if result.returncode != 0:
         raise ValueError("Could not stop the router: {}".format((result.stderr or result.stdout).strip()))
     print(result.stdout, end="")
@@ -440,20 +463,11 @@ NOTHING_OWNED = 3
 
 
 def direct_backup(manifest_path, filename):
-    """Name the backup by the file's content, so prepare and apply print the same path."""
     digest = hashlib.sha256(Path(filename).read_bytes()).hexdigest()[:12]
     return manifest_path.parent / "backups" / ("direct-" + digest) / Path(filename).name
 
 
 def direct(state_dir, manifest_path, mode, stopped=False):
-    """Restore the client settings the router's activation owns.
-
-    mode is "prepare" (print, change nothing), "check" (refuse on a local
-    edit, exit NOTHING_OWNED when nothing is owned, print nothing else), or
-    "apply". A key that already holds its value from before activation, as
-    after a crash between the settings write and the manifest save, is
-    skipped, and apply drops its record.
-    """
     state = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     owned = state.get("settings", {}).get(NAME, {})
     inventory = router_inventory(state_dir)
@@ -482,7 +496,7 @@ def direct(state_dir, manifest_path, mode, stopped=False):
             keys[key] = entry
             verb = "restore" if entry["before"].get("exists") else "remove "
             lines.append("{} {} {} ({})".format(verb, shown(filename), label, redact(label, entry["installed"])))
-            needs_login = needs_login or label in ("env.ANTHROPIC_AUTH_TOKEN", "env.ANTHROPIC_API_KEY")
+            needs_login = needs_login or (label == "apiKeyHelper" and not entry["before"].get("exists"))
         pending[filename] = dict(record, keys=keys)
         others += other_keys(current.data, record["keys"])
     if mode == "check":

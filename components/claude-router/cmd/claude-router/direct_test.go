@@ -80,3 +80,26 @@ func TestDirectNamesAMissingInstallerPython(t *testing.T) {
 		t.Fatal("direct stopped the service although it could not run the helper")
 	}
 }
+
+func TestDirectWithAnotherInstallationsJobDoesNotClaimTheRouterStopped(t *testing.T) {
+	in, jobs, log := directSetup(t, "")
+	t.Setenv("FAKE_CHECK_EXIT", "0")
+	if err := stopService(in, release); err != nil {
+		t.Fatal(err)
+	}
+	other := installationIn(t, "launchd", in.Name)
+	if err := startService(other); err != nil {
+		t.Fatal(err)
+	}
+
+	err := direct([]string{"-state", in.State})
+
+	calls, _ := os.ReadFile(log)
+	apply := strings.ReplaceAll("/lib/claude_router.py direct --state %s --manifest /m.json", "%s", in.State)
+	if err != nil || !strings.HasSuffix(string(calls), "\n"+apply+"\n") {
+		t.Fatalf("direct: %v, helper ran:\n%s\nwant the last run to be %q, without --stopped", err, calls, apply)
+	}
+	if !samePath(loadedFrom(t, jobs, in.Name), other.Descriptor) {
+		t.Fatal("direct stopped the other installation's job")
+	}
+}
