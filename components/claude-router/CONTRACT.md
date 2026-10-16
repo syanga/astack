@@ -1763,11 +1763,11 @@ or `~/.claude/settings.json` without it or with `--home`.
    `claude-router direct`.
 9. Write the settings and their `settings.claude-router` record, as the
    harness targets do, then set the phase to `verifying`.
-10. Run `apiKeyHelper` from the written settings with `/bin/sh` and ask for
-    status with its output. Then run each `--verify` command with `/bin/sh -c`
-    in its own process group, killed after `--verify-timeout` seconds
-    (default 600). Each must exit 0 and add at least one `request` event with
-    status 200 and outcome `completed` to `events.jsonl`.
+10. Run each `--verify` command with `/bin/sh -c` in its own process group,
+    killed after `--verify-timeout` seconds (default 600). Each must exit 0
+    and add at least one `request` event with status 200 and outcome
+    `completed` to `events.jsonl`. A client that sends the wrong token gets the
+    router's 401 and fails this check.
 11. On any failure in step 10, restore the settings file from the backup,
     drop its record and `activation.json`, print `undo    <file> restored;
     the router keeps its logins and assignments`, and exit 1

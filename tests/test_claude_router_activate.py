@@ -176,8 +176,7 @@ class ActivationTests(ActivationFixture):
         result = self.activate()
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[-3:], [
-            "verify  apiKeyHelper prints a token the router accepts",
+        self.assertEqual(result.stdout.splitlines()[-2:], [
             "verify  fake-client: exit 0, 1 routed request",
             "done    clients connect through the router; undo with claude-router direct",
         ])
@@ -377,4 +376,17 @@ class InterruptedActivationTests(ActivationFixture):
             self.assertIn("~/.claude/settings.json changed after an interrupted activation\n", result.stderr)
             self.assertRegex(result.stderr, r"        backup  ~/\.local/state/astack/backups/activate-[0-9a-f]{12}/settings\.json\n")
             self.assertEqual(self.settings_path.read_bytes(), kept)
+        self.assertEqual(self.journal()["phase"], "verifying")
+
+    def test_a_changed_backup_refuses_the_undo_and_keeps_the_settings(self):
+        self.interrupt("verification")
+        activated = self.settings_path.read_bytes()
+        backup = Path(self.journal()["backup"])
+        backup.write_text('{"theme": "tampered"}\n')
+
+        result = self.direct()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("claude-router: direct: the backup of ~/.claude/settings.json changed: ", result.stderr)
+        self.assertEqual(self.settings_path.read_bytes(), activated)
         self.assertEqual(self.journal()["phase"], "verifying")

@@ -780,13 +780,7 @@ def routed_requests(events, offset):
     return count
 
 
-def verify_wiring(lay, listen, helper, commands, timeout):
-    printed = subprocess.run(["/bin/sh", "-c", helper], capture_output=True, text=True, timeout=60)
-    try:
-        fetch_status(listen, printed.stdout.strip())
-    except (OSError, ValueError):
-        return "the router refuses what apiKeyHelper prints"
-    print("verify  apiKeyHelper prints a token the router accepts")
+def verify_wiring(lay, commands, timeout):
     events = lay.state / "events.jsonl"
     for command in commands:
         offset = events.stat().st_size if events.exists() else 0
@@ -875,7 +869,7 @@ def activate(args, state_root, home, use_env):
     with redirect_stdout(io.StringIO()):
         change.apply(state, manifest_path, manifest_path.parent / "backups" / uuid.uuid4().hex)
     write_journal(lay.state, dict(journal, phase="verifying"))
-    failed = verify_wiring(lay, listen, values["apiKeyHelper"], args.verify, args.verify_timeout)
+    failed = verify_wiring(lay, args.verify, args.verify_timeout)
     if failed:
         undo_interrupted(lay.state, state, manifest_path)
         print("claude-router: activate: {}".format(failed), file=sys.stderr)
