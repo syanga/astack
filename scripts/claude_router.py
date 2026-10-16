@@ -303,7 +303,6 @@ def plan(command, state, lay, force=False):
 
 
 def check_harness_settings(harness_values):
-    """Refuse harness settings that name a key the router's activation owns or that Claude Code uses before apiKeyHelper."""
     names = {".".join(path) for path, _ in astack_settings.leaves(harness_values)}
     shared = sorted(names & set(CLIENT_KEYS + BEFORE_HELPER))
     if shared:
@@ -311,16 +310,13 @@ def check_harness_settings(harness_values):
 
 
 def client_settings(state_dir, current):
-    """Return the values router activation writes into Claude settings, and the owned keys it replaces.
-
-    Refuses settings whose env token Claude Code would use instead of apiKeyHelper.
-    """
     present = [key for key in BEFORE_HELPER if astack_settings.lookup(current, tuple(key.split(".")))["exists"]]
     if present:
         raise ValueError("Client settings set {}, which Claude Code uses instead of the router's apiKeyHelper; remove it first".format(
             ", ".join(present)))
     config = json.loads((state_dir / "config.json").read_text(encoding="utf-8"))
-    values = {"apiKeyHelper": "cat " + shlex.quote(config["client_token_file"]),
+    token_file = Path(state_dir).absolute() / config["client_token_file"]
+    values = {"apiKeyHelper": "cat " + shlex.quote(str(token_file)),
               "env": {"ANTHROPIC_BASE_URL": "http://" + config["listen"], "CLAUDE_CODE_RETRY_WATCHDOG": "1"}}
     replaced = []
     for key in CLIENT_KEYS:

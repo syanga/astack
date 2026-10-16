@@ -169,6 +169,9 @@ func stopOwn(in installation, mode stopMode) (stopped bool, err error) {
 	var f foreignJob
 	if err := stopService(in, mode); errors.As(err, &f) {
 		fmt.Printf("router  not stopped: %v; left running\n", f)
+		if f.keptOff {
+			fmt.Println("        this installation stays off until claude-router start")
+		}
 		return false, nil
 	} else if err != nil {
 		return false, err

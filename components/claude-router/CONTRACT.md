@@ -1541,8 +1541,8 @@ claude-router` call it with the default layout. The default targets and
 | Conflicts | An unmanaged or locally modified payload, descriptor, or `service.json` stops install and uninstall; `--force` moves it to `backups/<id>/` first. A component path that a harness target manages is refused. A changed data, state, or descriptor location needs an uninstall first. |
 | Update | A changed binary is replaced. A running service keeps the old binary until `stop` and `start`, and the installer prints that. |
 | Service name | Installs in different homes that use one `--service` name share one launchd label or systemd unit name. `start`, `stop`, `direct`, and uninstall act on a loaded job only when its descriptor is this installation's: launchd's `path` from `launchctl print`, or systemd's `FragmentPath`, compared after resolving symlinks. On a mismatch, `start` refuses and `stop` leaves the other job running and says so (`TestStopAndStartLeaveAJobLoadedFromAnotherHome`, `TestSystemdStopAndStartActOnlyOnTheirOwnUnit`, `TestStopActsOnItsOwnJobLoadedThroughASymlink`). |
-| Off until start | `stop` and `direct` keep the router off until `claude-router start`, across logins and reboots. launchd: `bootout` of this installation's loaded job, then `launchctl disable`, which persists a per-label override, so launchd neither loads the plist at login nor accepts a `bootstrap` (it fails with error 5). `start` runs `launchctl enable` when the label is disabled, then `bootstrap` or `kickstart`. systemd: `stop` then `disable`; `start` runs `enable` then `start`. Uninstall runs `stop -uninstall`: launchd boots the job out and runs `enable` when the label is disabled, which leaves an `enabled` override entry that blocks nothing (launchctl has no verb that deletes the entry); systemd stops and disables the unit, which removes its `default.target.wants` link (`TestStopKeepsTheJobOffAcrossLoginsUntilStart`, `TestSystemdStopDisablesAndStartEnablesOnlyItsOwnUnit`). The systemd side is unit-tested against a fake `systemctl` only, because lane 3 has no Linux host. |
-| Shared label switch | The launchd override is per label, not per plist. The installation whose plist is `<label>.plist` in the account's login directory, `~/Library/LaunchAgents` of the home in the user database (not `$HOME`), owns it. Another installation with that label never disables or enables it: its `stop` boots out only its own loaded job and leaves the label on, and its plist, outside the login directory, never loads at login anyway. Its `start` refuses while the label is disabled, with `<label> is turned off for the installation at <path>` and `next    run claude-router start for that installation, or install this one with another --service`. Its uninstall leaves the label as it is. When no plist for the label is in the login directory, any installation with the label may disable or enable it, which only gates `bootstrap` (`TestStopAndStartLeaveTheLoginSwitchOfAnotherInstallation`). |
+| Off until start | `stop` and `direct` keep the router off until `claude-router start`, across logins and reboots. launchd: `launchctl disable`, which persists a per-label override, so launchd neither loads the plist at login nor accepts a `bootstrap` (it fails with error 5), then `bootout` of this installation's loaded job. A disable leaves a loaded job running until the `bootout`, and it comes first, so a `stop` that fails or is killed between the two calls still leaves the job off at login (`TestAStopWhoseBootoutFailsStillKeepsTheJobOffAtLogin`). `start` runs `launchctl enable` when the label is disabled, then `bootstrap` or `kickstart`. systemd: `disable` then `stop`, for the same reason (`TestASystemdStopWhoseStopFailsStillKeepsTheUnitOffAtLogin`); `start` runs `enable` then `start`. Uninstall runs `stop -uninstall`: launchd boots the job out and runs `enable` when the label is disabled, which leaves an `enabled` override entry that blocks nothing (launchctl has no verb that deletes the entry); systemd stops and disables the unit, which removes its `default.target.wants` link (`TestStopKeepsTheJobOffAcrossLoginsUntilStart`, `TestSystemdStopDisablesAndStartEnablesOnlyItsOwnUnit`). The systemd side is unit-tested against a fake `systemctl` only, because lane 3 has no Linux host. |
+| Shared label switch | The launchd override is per label, not per plist. The installation whose plist is `<label>.plist` in the account's login directory, `~/Library/LaunchAgents` of the home in the user database (not `$HOME`), owns it. Another installation with that label never disables or enables it: its `stop` boots out only its own loaded job and leaves the label on, and its plist, outside the login directory, never loads at login anyway. Its `start` refuses while the label is disabled, with `<label> is turned off for the installation at <path>` and `next    run claude-router start for that installation, or install this one with another --service`. Its uninstall leaves the label as it is. The owner's `stop` and `direct` disable the label even while another installation's job holds it: they leave that job running and print `router  not stopped: <label> is loaded from <path>, not from this installation; left running`, then `        this installation stays off until claude-router start` (`TestTheLoginOwnersStopTurnsItsSwitchOffWhileAnotherHomesJobRuns`). They never boot out that job. When no plist for the label is in the login directory, any installation with the label may disable or enable it, which only gates `bootstrap` (`TestStopAndStartLeaveTheLoginSwitchOfAnotherInstallation`). Only a missing plist counts as none: another error reading it, such as an unsearchable login directory, refuses `stop` and `direct`, and `start` and uninstall when the label is disabled, with `cannot tell which installation turns <label> on and off at login: <error>` before any switch changes (`TestAnUnreadableLoginDirectoryRefusesToTouchTheSwitch`). |
 | Removal | The helper runs the installed `claude-router stop -uninstall`, then removes the payload, descriptor, and `service.json`, and an unedited `config.json`. It keeps `auths/`, `assignments/`, `accounts.json`, `client-token`, `events.jsonl`, and an edited `config.json`. |
 | Known limit: concurrent commands | The ownership check and the action are separate `launchctl` or `systemctl` calls. If another installation that shares the label runs `stop` and `bootstrap` between them, this installation's `stop` can boot out that job. Two installations must run lifecycle commands concurrently for this to happen. launchd and systemd offer no compare-and-act call to close the gap. |
 
@@ -1554,8 +1554,10 @@ settings file for a harness and the component, which must run separately.
 Router activation owns `apiKeyHelper`, `env.ANTHROPIC_BASE_URL`, and
 `env.CLAUDE_CODE_RETRY_WATCHDOG` in the Claude settings file.
 `claude_router.client_settings` returns their values: `apiKeyHelper` is `cat`
-of the `client_token_file` path from `config.json`, quoted for `/bin/sh`, so
-paths with spaces or quotes work. Harness settings that name an owned key, or
+of the `client_token_file` path from `config.json`, resolved against the state
+directory as the service resolves it, and quoted for `/bin/sh`, so relative
+paths and paths with spaces or quotes work
+(`test_a_relative_token_path_is_read_from_the_state_directory`). Harness settings that name an owned key, or
 `env.ANTHROPIC_AUTH_TOKEN` or `env.ANTHROPIC_API_KEY`, are refused, because
 Claude Code uses either env token before `apiKeyHelper`. `client_settings`
 refuses client settings that hold either env token, and returns the owned keys
@@ -1571,15 +1573,29 @@ precedence", and checked in a sandboxed client against a recorder and the
 router, with a token path holding a space and a quote:
 `evidence/PR5/apikeyhelper-r3/`). The router accepts either header.
 
-N8 is closed for the client token: settings files, the manifest's
-`settings.claude-router` record, and `direct` backups hold the helper command,
-not the token, so the token lives only in `client-token`
-(`test_no_output_settings_file_manifest_or_backup_holds_the_client_token`).
-Two remainders stay open. An `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`
-exported in the client's environment, rather than its settings, still takes
-precedence, and no installer can see it. And the harness record format stores
-the settings file's original and last text, so any other secret a user keeps
-in that settings file is copied into the manifest and backups at mode 0600.
+N8 is closed only for stored copies of the client token: the settings file
+activation writes, the manifest's `settings.claude-router` record, and
+`direct` backups hold the helper command, not the token, so the token lives
+only in `client-token`. The test scans those files, the manifest, every backup,
+and every command output for the client token and for the fixtures' login
+credential (`test_no_output_settings_file_manifest_or_backup_holds_the_client_token`).
+These parts stay open:
+
+- Claude Code uses `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` before
+  `apiKeyHelper` wherever it finds one. `client_settings` sees only the
+  settings file it is given. An env token in another settings layer (a
+  project's `.claude/settings.json` or `.claude/settings.local.json`, or
+  managed settings) or exported in the client's process environment still
+  takes precedence, and no installer check sees it.
+- Nothing in PR5 calls `client_settings`. Its env-token refusal and its report
+  of a replaced `apiKeyHelper` reach the user only when PR6 activation calls it
+  and shows the result.
+- That `apiKeyHelper` takes precedence over a credential stored by `/login`
+  rests on the documentation. The client probe ran with no stored login, so it
+  does not show it.
+- The harness record format stores the settings file's original and last text,
+  so any other secret a user keeps in that settings file is copied into the
+  manifest and backups at mode 0600.
 
 ### Supervision
 
@@ -1599,6 +1615,9 @@ that does not load, records its error
 `serve -supervised` without `-config`, or with a relative one, exits 1 and
 records nothing
 (`TestASupervisedStartNeedsAnAbsoluteConfigAndCountsNothingWithout`).
+Each save first removes a leftover `supervision.json.tmp`, so a temporary file
+left with the wrong mode or owner does not stop a start
+(`TestALeftoverUnwritableTemporaryRecordDoesNotStopASupervisedStart`).
 `claude-router start` clears the record, so an explicit start always runs.
 `serve` without `-supervised` says that nothing restarts it.
 
@@ -1612,8 +1631,19 @@ further lines listed in the round-2 verifier receipt, section "N6"
 `router  stopped until claude-router start; assignments kept`, and `direct`
 names `apiKeyHelper` where it named `env.ANTHROPIC_AUTH_TOKEN`. It added the
 `start` refusal for a label another installation turned off, the `status`
-refusal for an unreadable `supervision.json`, and the `status` line for a
-state directory where the router cannot record a start. `cmd/claude-router/testdata/status/`
+refusal for an unreadable `supervision.json`, the `status` line for a
+state directory where the router cannot record a start, the installer's
+refusal `Harness settings must not set keys that claude-router activation owns
+or overrides: <keys>` (it ended in `owns:` before), the `stop -h` help line
+for `-uninstall`, `stop for removal: leave the job free to load at login after
+a reinstall`, and the `client_settings` refusal named under Settings
+ownership. Errors from the new `launchctl print-disabled`, `disable`, and
+`enable` calls and the `systemctl --user enable` and `disable` calls use the
+existing `claude-router: <command>: <error>` format. Round 4 added the line
+`        this installation stays off until claude-router start` after
+`router  not stopped: … left running` when this installation owns the label
+switch, and the refusal `cannot tell which installation turns <label> on and
+off at login: <error>` (Shared label switch, above). `cmd/claude-router/testdata/status/`
 holds the status screens, and `TestStatusMatchesTheSelectedLayout` renders
 each from sample state.
 
@@ -1621,7 +1651,7 @@ each from sample state.
 | --- | --- |
 | `status` | Reads `GET /claude-router/status`, `events.jsonl`, `supervision.json`, and `service.json`. It marks a quota observation or paid-overflow reading older than 15 minutes with a `stale` line. A service that does not answer is `stopped`, or `failed` when supervision gave up. When `config.json` does not load, status prints `config error:` with the error, and `running` or `stopped` from the assignment lock. Once supervision gives up, `failed` takes precedence, and the configuration error shows as `last error:`. A stopped service whose state directory the router cannot write shows `last error: cannot record a start in <file>: <error>` and `next    fix the error, then claude-router start` (`TestStatusShowsThatTheRouterCannotRecordAStart`). An unreadable `supervision.json` makes status exit 1 naming the file, with `next    remove <file>, then claude-router start` (`TestStatusNamesAnUnreadableSupervisionRecord`). |
 | `status -v` | Adds every reading with its age, cache counters per account, each assigned conversation, and the migrations, newest first, at most 20. |
-| `start`, `stop` | launchd: `enable` when disabled, then `bootstrap` or `kickstart`; `bootout`, then `disable`. systemd: `daemon-reload`, `enable`, `reset-failed`, and `start`; `stop`, then `disable`. Each acts only on this installation's job (Service name, Off until start, and Shared label switch, above). `start` waits up to 90 s for status to answer or for a start error; `stop` waits until the assignment lock is free and prints `router  stopped until claude-router start; assignments kept`. Foreground installations refuse both. |
+| `start`, `stop` | launchd: `enable` when disabled, then `bootstrap` or `kickstart`; `disable`, then `bootout`. systemd: `daemon-reload`, `enable`, `reset-failed`, and `start`; `disable`, then `stop`. Each acts only on this installation's job (Service name, Off until start, and Shared label switch, above). `start` waits up to 90 s for status to answer or for a start error; `stop` waits until the assignment lock is free and prints `router  stopped until claude-router start; assignments kept`. Foreground installations refuse both. |
 | `login` | Unchanged flow. It refuses while a process holds the state directory, names that process's pid when status answers, and prints `next    claude-router stop`. |
 | `move` | Takes the 12-hex hash that status shows, a prefix of at least 4 hex digits, or a session ID. A prefix that matches two conversations is answered 409 and nothing moves. |
 | `direct -prepare`, `direct` | Run the installed helper with the Python recorded in `service.json`, and refuse, naming it, when that interpreter is gone. `-prepare` prints each owned key with its installed value, secrets as `[redacted]`, the count of other keys, the router's logins and assignment count, and the backup path, and changes nothing. The backup path is `backups/direct-<first 12 hex of the file's SHA-256>/<file name>`, so `-prepare` and `direct` print the same path while the file is unchanged. `direct` refuses on a key edited after activation, then stops the service, copies each settings file to the backup with mode 0600, and restores the keys. A key that already holds its value from before activation, as after a crash between the settings write and the manifest save, prints `skip` and its record is dropped. With no owned settings, `direct` prints `nothing to change` and stops nothing. In foreground mode, or when another installation's job holds the label and stays running, it does not say the router stopped (`TestDirectWithAnotherInstallationsJobDoesNotClaimTheRouterStopped`). `after   claude needs its own /login` appears when `direct` removes `apiKeyHelper` that had no prior value. Logins, assignments, the binary, and the job stay. |

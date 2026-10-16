@@ -14,6 +14,7 @@ import (
 
 type foreignJob struct {
 	name, path string
+	keptOff    bool
 }
 
 func (e foreignJob) Error() string {
@@ -101,16 +102,29 @@ var loginAgents = func() string {
 	return filepath.Join(u.HomeDir, "Library", "LaunchAgents")
 }
 
-func otherLoginJob(in installation) (string, bool) {
+type switchOwner int
+
+const (
+	noOwner switchOwner = iota
+	thisInstallation
+	otherInstallation
+)
+
+func loginOwner(in installation) (switchOwner, string, error) {
 	dir := loginAgents()
 	if dir == "" {
-		return "", false
+		return noOwner, "", nil
 	}
 	plist := filepath.Join(dir, in.Name+".plist")
-	if _, err := os.Stat(plist); err != nil || samePath(plist, in.Descriptor) {
-		return "", false
+	if _, err := os.Stat(plist); errors.Is(err, os.ErrNotExist) {
+		return noOwner, "", nil
+	} else if err != nil {
+		return noOwner, "", fmt.Errorf("cannot tell which installation turns %s on and off at login: %w", in.Name, err)
 	}
-	return plist, true
+	if samePath(plist, in.Descriptor) {
+		return thisInstallation, plist, nil
+	}
+	return otherInstallation, plist, nil
 }
 
 func launchdDisabled(in installation) (bool, error) {
@@ -127,15 +141,16 @@ func launchdDisabled(in installation) (bool, error) {
 	return false, nil
 }
 
-func enableLaunchd(in installation, mode stopMode) error {
+func enableLaunchd(in installation) error {
 	off, err := launchdDisabled(in)
 	if err != nil || !off {
 		return err
 	}
-	if plist, other := otherLoginJob(in); other {
-		if mode == release {
-			return nil
-		}
+	owner, plist, err := loginOwner(in)
+	if err != nil {
+		return err
+	}
+	if owner == otherInstallation {
 		return labelHeld{name: in.Name, path: plist}
 	}
 	return run("launchctl", "enable", launchdTarget(in))
@@ -148,7 +163,7 @@ func startService(in installation) error {
 		if err != nil {
 			return err
 		}
-		if err := enableLaunchd(in, keepOff); err != nil {
+		if err := enableLaunchd(in); err != nil {
 			return err
 		}
 		if loaded {
@@ -178,33 +193,64 @@ func startService(in installation) error {
 func stopService(in installation, mode stopMode) error {
 	switch in.Manager {
 	case "launchd":
-		loaded, err := ownJob(in)
-		if err != nil {
-			return err
-		}
-		if loaded {
-			if err := run("launchctl", "bootout", launchdTarget(in)); err != nil {
-				return err
-			}
-		}
 		if mode == release {
-			return enableLaunchd(in, release)
+			return releaseLaunchd(in)
 		}
-		if _, other := otherLoginJob(in); other {
-			return nil
-		}
-		return run("launchctl", "disable", launchdTarget(in))
+		return keepOffLaunchd(in)
 	case "systemd":
 		loaded, err := ownJob(in)
 		if err != nil || !loaded {
 			return err
 		}
-		if err := run("systemctl", "--user", "stop", in.Name); err != nil {
+		if err := run("systemctl", "--user", "disable", in.Name); err != nil {
 			return err
 		}
-		return run("systemctl", "--user", "disable", in.Name)
+		return run("systemctl", "--user", "stop", in.Name)
 	}
 	return errors.New("the router runs in the foreground here; stop it with Ctrl-C or SIGTERM")
+}
+
+func keepOffLaunchd(in installation) error {
+	loaded, err := ownJob(in)
+	var foreign foreignJob
+	isForeign := errors.As(err, &foreign)
+	if err != nil && !isForeign {
+		return err
+	}
+	owner, _, err := loginOwner(in)
+	if err != nil {
+		return err
+	}
+	if owner == thisInstallation || owner == noOwner && !isForeign {
+		if err := run("launchctl", "disable", launchdTarget(in)); err != nil {
+			return err
+		}
+		foreign.keptOff = true
+	}
+	if isForeign {
+		return foreign
+	}
+	if loaded {
+		return run("launchctl", "bootout", launchdTarget(in))
+	}
+	return nil
+}
+
+func releaseLaunchd(in installation) error {
+	loaded, err := ownJob(in)
+	if err != nil {
+		return err
+	}
+	if loaded {
+		if err := run("launchctl", "bootout", launchdTarget(in)); err != nil {
+			return err
+		}
+	}
+	var held labelHeld
+	if err := enableLaunchd(in); !errors.As(err, &held) {
+		return err
+	}
+	return nil
 }
 
 func launchdDomain() string { return fmt.Sprintf("gui/%d", os.Getuid()) }

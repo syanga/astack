@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +11,7 @@ import (
 )
 
 const fakeLaunchctl = `#!/bin/sh
+[ "$1" = "$FAKE_FAIL" ] && exit 1
 jobs="$FAKE_JOBS"
 label=${2##*/}
 case "$1" in
@@ -38,6 +41,7 @@ esac
 const fakeSystemctl = `#!/bin/sh
 jobs="$FAKE_JOBS"
 shift
+[ "$1" = "$FAKE_FAIL" ] && exit 1
 case "$1" in
 show)
 	unit="$6"
@@ -265,8 +269,132 @@ func TestSystemdStopDisablesAndStartEnablesOnlyItsOwnUnit(t *testing.T) {
 	enabledAfterForeignStop := enabled()
 	stopA := stopService(a, keepOff)
 
-	if startA != nil || !enabledAfterStart || !enabledAfterForeignStop || stopA != nil || enabled() {
-		t.Fatalf("start A %v (enabled %v), stop B %v (enabled %v), stop A %v (enabled %v); want A enabled by start, kept by B, disabled by its own stop",
+	var f foreignJob
+	if startA != nil || !enabledAfterStart || !errors.As(stopB, &f) || !enabledAfterForeignStop || stopA != nil || enabled() {
+		t.Fatalf("start A %v (enabled %v), stop B %v (enabled %v), stop A %v (enabled %v); want A enabled by start, B refused and the unit kept enabled, A disabled by its own stop",
 			startA, enabledAfterStart, stopB, enabledAfterForeignStop, stopA, enabled())
+	}
+}
+
+func stdoutOf(t *testing.T, f func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := os.Stdout
+	os.Stdout = w
+	f()
+	os.Stdout = saved
+	w.Close()
+	out, _ := io.ReadAll(r)
+	return string(out)
+}
+
+func switchOf(t *testing.T, jobs, name string) string {
+	t.Helper()
+	data, _ := os.ReadFile(filepath.Join(jobs, name+".switch"))
+	return string(data)
+}
+
+func TestTheLoginOwnersStopTurnsItsSwitchOffWhileAnotherHomesJobRuns(t *testing.T) {
+	jobs := fakeManager(t)
+	a := installationIn(t, "launchd", "dev.astack.claude-router.test")
+	b := installationIn(t, "launchd", "dev.astack.claude-router.test")
+	loginAt(t, filepath.Dir(a.Descriptor))
+	if err := startService(b); err != nil {
+		t.Fatal(err)
+	}
+	loadedB := loadedFrom(t, jobs, b.Name)
+
+	var stopA error
+	out := stdoutOf(t, func() { _, stopA = stopOwn(a, keepOff) })
+
+	want := fmt.Sprintf("router  not stopped: %s is loaded from %s, not from this installation; left running\n"+
+		"        this installation stays off until claude-router start\n", a.Name, loadedB)
+	if stopA != nil || out != want {
+		t.Fatalf("home A's stop: %v, printed:\n%s\nwant:\n%s", stopA, out, want)
+	}
+	if loadedFrom(t, jobs, b.Name) != loadedB {
+		t.Fatal("home A's stop touched home B's job")
+	}
+	if err := stopService(b, keepOff); err != nil {
+		t.Fatal(err)
+	}
+	if loginLoad(t, a) {
+		t.Fatal("once home B's job is gone, home A's job loads at login although home A ran stop")
+	}
+	if err := startService(a); err != nil || !samePath(loadedFrom(t, jobs, a.Name), a.Descriptor) {
+		t.Fatalf("home A's start: %v, loaded from %q; want home A's job loaded", err, loadedFrom(t, jobs, a.Name))
+	}
+}
+
+func TestAStopWhoseBootoutFailsStillKeepsTheJobOffAtLogin(t *testing.T) {
+	fakeManager(t)
+	a := installationIn(t, "launchd", "dev.astack.claude-router.test")
+	loginAt(t, filepath.Dir(a.Descriptor))
+	if err := startService(a); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_FAIL", "bootout")
+
+	err := stopService(a, keepOff)
+
+	t.Setenv("FAKE_FAIL", "")
+	if err == nil {
+		t.Fatal("stop with a failing bootout succeeded, want its error")
+	}
+	if err := run("launchctl", "bootout", launchdTarget(a)); err != nil || loginLoad(t, a) {
+		t.Fatalf("after the failed stop and a logout (%v), the job loads at login; want it off until start", err)
+	}
+}
+
+func TestASystemdStopWhoseStopFailsStillKeepsTheUnitOffAtLogin(t *testing.T) {
+	jobs := fakeManager(t)
+	a := installationIn(t, "systemd", "dev.astack.claude-router.test")
+	if err := os.WriteFile(filepath.Join(jobs, a.Name), []byte(a.Descriptor), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := startService(a); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_FAIL", "stop")
+
+	err := stopService(a, keepOff)
+
+	if _, statErr := os.Stat(filepath.Join(jobs, a.Name+".enabled")); err == nil || !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("stop with a failing systemctl stop: %v, unit still enabled %v; want the error and the unit disabled", err, statErr == nil)
+	}
+}
+
+func TestAnUnreadableLoginDirectoryRefusesToTouchTheSwitch(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads any directory")
+	}
+	jobs := fakeManager(t)
+	a := installationIn(t, "launchd", "dev.astack.claude-router.test")
+	b := installationIn(t, "launchd", "dev.astack.claude-router.test")
+	login := filepath.Dir(a.Descriptor)
+	loginAt(t, login)
+	if err := os.Chmod(login, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(login, 0o700) })
+
+	stopB := stopService(b, keepOff)
+	switchAfterStop := switchOf(t, jobs, a.Name)
+	if err := run("launchctl", "disable", launchdTarget(a)); err != nil {
+		t.Fatal(err)
+	}
+	startB := startService(b)
+
+	for _, err := range []error{stopB, startB} {
+		if err == nil || !strings.Contains(err.Error(), "cannot tell which installation turns "+a.Name+" on and off at login: stat "+filepath.Join(login, a.Name+".plist")+": permission denied") {
+			t.Fatalf("home B's stop: %v; start: %v; want both refused naming the unreadable login plist", stopB, startB)
+		}
+	}
+	if switchAfterStop != "" || switchOf(t, jobs, a.Name) != "disabled" || loadedFrom(t, jobs, b.Name) != "" {
+		t.Fatalf("switch %q after home B's stop, %q after its start, loaded from %q; want the switch untouched and nothing loaded",
+			switchAfterStop, switchOf(t, jobs, a.Name), loadedFrom(t, jobs, b.Name))
 	}
 }

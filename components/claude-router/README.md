@@ -86,7 +86,8 @@ own descriptor. They refuse to start, or leave running, a job loaded from the
 other install. launchd keeps one on/off switch per label, and the install whose
 plist is in your own `~/Library/LaunchAgents` owns it: the other install's
 `stop` leaves it on, and its `start` refuses while that install has turned it
-off.
+off. The owning install's `stop` turns the switch off even while the other
+install's job runs, leaves that job running, and says so.
 
 ## Enroll accounts and start
 
@@ -167,7 +168,8 @@ and systemd waits 10 seconds (`RestartSec`). launchd has no restart count of
 its own; the limit is the router's.
 
 `stop` turns the job off with `launchctl disable` or `systemctl --user
-disable`, and `start` turns it back on with `enable`. Uninstall stops the job
+disable` before it stops the job, so a `stop` that fails or is interrupted
+still leaves it off at login. `start` turns it back on with `enable`. Uninstall stops the job
 and leaves neither manager set to keep a later install from starting at login.
 
 Durability across a power loss or OS crash is not tested. The journal relies

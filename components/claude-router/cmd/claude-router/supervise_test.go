@@ -125,6 +125,27 @@ func TestASupervisedStartThatCannotRecordItselfExitsCleanlyWithoutServing(t *tes
 	}
 }
 
+func TestALeftoverUnwritableTemporaryRecordDoesNotStopASupervisedStart(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes any file")
+	}
+	state := t.TempDir()
+	config := filepath.Join(state, "config.json")
+	if err := os.WriteFile(config, []byte(`{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, supervisionFile+".tmp"), nil, 0o400); err != nil {
+		t.Fatal(err)
+	}
+
+	err := serve([]string{"-supervised", "-config", config})
+
+	s, loadErr := loadSupervision(state)
+	if err == nil || loadErr != nil || s.Runs != 1 {
+		t.Fatalf("serve: %v; record %+v (%v); want the start recorded and the config error returned", err, s, loadErr)
+	}
+}
+
 func TestASupervisedStartNeedsAnAbsoluteConfigAndCountsNothingWithout(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

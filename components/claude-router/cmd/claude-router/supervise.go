@@ -49,6 +49,7 @@ func (s supervision) save(state string) error {
 		return err
 	}
 	tmp := filepath.Join(state, supervisionFile+".tmp")
+	_ = os.Remove(tmp)
 	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
 		return err
 	}

@@ -98,7 +98,6 @@ class ComponentFixture(InstallerFixture):
         return router
 
     def activate(self, settings_path):
-        """Write the router's client keys and their ownership record, as activation would; return the keys it replaced."""
         router = self.router()
         current = json.loads(settings_path.read_text()) if settings_path.exists() else {}
         values, replaced = router.client_settings(self.state_dir, current)
@@ -500,14 +499,13 @@ class ClientTokenTests(ComponentFixture):
         self.assertEqual(applied.returncode, 0, applied.stderr)
         backup, = (manifest.parent / "backups").rglob("direct-*/settings.json")
         self.assertEqual(backup.read_text(), activated)
-        stored += [backup.read_text(), manifest.read_text()]
+        stored += [path.read_text() for path in (settings_path, manifest) if path.exists()]
+        stored += [path.read_text() for path in (manifest.parent / "backups").rglob("*") if path.is_file()]
         outputs += [prepared.stdout, prepared.stderr, edited.stdout, edited.stderr, applied.stdout, applied.stderr,
                     self.component("--dry-run", command="uninstall").stdout]
         for secret in (token, "credential-secret-value", "edited-secret-value"):
-            for text in outputs:
+            for text in outputs + stored:
                 self.assertNotIn(secret, text)
-        for text in stored:
-            self.assertNotIn(token, text)
 
     def test_the_helper_command_prints_the_token_from_a_path_with_a_space_and_a_quote(self):
         state = self.root / "it's a state"
@@ -521,6 +519,17 @@ class ClientTokenTests(ComponentFixture):
         self.assertEqual((printed.returncode, printed.stdout), (0, "0123456789abcdef\n"))
         self.assertEqual(values["env"], {"ANTHROPIC_BASE_URL": "http://127.0.0.1:28787", "CLAUDE_CODE_RETRY_WATCHDOG": "1"})
         self.assertEqual(replaced, [])
+
+    def test_a_relative_token_path_is_read_from_the_state_directory(self):
+        state = self.root / "state"
+        state.mkdir()
+        (state / "client-token").write_text("0123456789abcdef\n")
+        (state / "config.json").write_text(json.dumps({"listen": "127.0.0.1:28787", "client_token_file": "client-token"}))
+
+        values, _ = self.router().client_settings(state, {})
+
+        printed = subprocess.run(["/bin/sh", "-c", values["apiKeyHelper"]], capture_output=True, text=True, cwd=self.root)
+        self.assertEqual((printed.returncode, printed.stdout), (0, "0123456789abcdef\n"))
 
     def test_activation_refuses_an_env_token_that_claude_code_would_use_instead(self):
         self.component()
