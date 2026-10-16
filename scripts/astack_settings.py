@@ -34,7 +34,6 @@ class SettingsChange:
 
     @property
     def rendered(self):
-        """The file's text after apply, or None when apply removes the file."""
         return self._rendered
 
     def check_unchanged(self, stage):

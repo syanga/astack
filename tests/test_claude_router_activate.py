@@ -1,11 +1,3 @@
-"""Acceptance-gated activation of the claude-router component in temporary homes.
-
-A loopback fake answers the router's status and messages routes and records a
-completed request as the router's events do. A fake client follows the Claude
-settings file the way Claude Code does. No test starts a service manager, the
-real router, or a real client.
-"""
-
 from contextlib import redirect_stdout
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,8 +35,6 @@ exit 0
 
 
 class FakeRouter:
-    """The router's status and messages routes, with the status the test sets."""
-
     def __init__(self, token, events):
         self.status = {}
         fake = self
@@ -320,7 +310,6 @@ class ActivationTests(ActivationFixture):
 
 class InterruptedActivationTests(ActivationFixture):
     def interrupt(self, during):
-        """Run activation in-process and stop it with KeyboardInterrupt at the named step."""
         spec_path = self.repo / "scripts/claude_router.py"
         sys.path.insert(0, str(spec_path.parent))
         try:

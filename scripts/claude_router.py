@@ -563,8 +563,6 @@ def redact(label, entry):
 
 
 class Refusal(Exception):
-    """A refusal printed as the error line, its detail lines, and a next step."""
-
     def __init__(self, error, details=(), next_step=None):
         super().__init__(error)
         self.details = list(details)
@@ -632,7 +630,6 @@ def client_versions(claude, agent_sdk):
 
 
 def measure(lay, record, status, claude, agent_sdk):
-    """Return the identity that an acceptance record must match."""
     return {"head": record.get("commit"), "binary_sha256": file_sha256(lay.binary),
             "running_binary": status.get("binary"), "running_binary_sha256": status.get("binary_sha256"),
             "sdk": status.get("sdk"), "clients": client_versions(claude, agent_sdk)}
@@ -679,7 +676,6 @@ def usable_accounts(status):
 
 
 def launcher_has(name):
-    """Report the service manager that gives apps the variable, or None."""
     try:
         if sys.platform == "darwin":
             result = subprocess.run(["launchctl", "getenv", name], capture_output=True, text=True, timeout=10)
@@ -692,7 +688,6 @@ def launcher_has(name):
 
 
 def override_warnings(settings_path, projects, managed, environment):
-    """Name every place outside the activated file that Claude Code reads first."""
     lines = []
     layers = [project / ".claude" / name for project in projects for name in ("settings.json", "settings.local.json")]
     for path in layers + ([managed] if managed else []):
@@ -732,7 +727,6 @@ def write_journal(state_dir, journal):
 
 
 def undo_interrupted(state_dir, state, manifest_path):
-    """Restore the settings file an interrupted activation wrote, and drop its ownership record."""
     journal = read_journal(state_dir)
     if not journal or journal["phase"] == "active":
         return None
@@ -787,7 +781,6 @@ def routed_requests(events, offset):
 
 
 def verify_wiring(lay, listen, helper, commands, timeout):
-    """Return the failed check, or None when every check passed."""
     printed = subprocess.run(["/bin/sh", "-c", helper], capture_output=True, text=True, timeout=60)
     try:
         fetch_status(listen, printed.stdout.strip())
