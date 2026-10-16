@@ -48,7 +48,9 @@ func readBuildInfo() (string, string) {
 	return revision, sdk
 }
 
-func executableDigest() string {
+// ExecutableDigest returns the hex SHA-256 of the running executable's file,
+// or "unknown".
+func ExecutableDigest() string {
 	path, err := os.Executable()
 	if err != nil {
 		return "unknown"

@@ -83,6 +83,7 @@ func stateFlag(fs *flag.FlagSet) *string {
 }
 
 func serve(args []string) error {
+	digest := claude.ExecutableDigest()
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	path := fs.String("config", "", "service configuration (JSON)")
 	supervised := fs.Bool("supervised", false, "run under a service manager: bound restarts and record failures in the state directory")
@@ -129,7 +130,7 @@ func serve(args []string) error {
 	log.SetLevel(log.InfoLevel)
 	log.SetOutput(io.Discard)
 	log.AddHook(stderrHook{})
-	svc, err := claude.Start(cfg, claude.Options{})
+	svc, err := claude.Start(cfg, claude.Options{BinarySHA256: digest})
 	if err != nil {
 		return failed(err)
 	}

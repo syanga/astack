@@ -483,18 +483,18 @@ def direct(state_dir, manifest_path, mode, stopped=False):
     done = "done    clients connect directly; the router stays installed" + (" and stopped" if stopped else "")
     journal = read_journal(state_dir)
     if journal and journal["phase"] != "active":
-        if mode == "check":
-            return 0
-        if mode == "prepare":
-            print("restore {} (interrupted activation)".format(shown(Path(journal["settings"]))))
-            print("keep    " + inventory)
-            print("ready   nothing changed; apply with claude-router direct")
-            return 0
         try:
-            settings = undo_interrupted(state_dir, state, manifest_path)
+            settings = undo_interrupted(state_dir, state, manifest_path, check=mode != "apply")
         except Refusal as refusal:
             report("direct", refusal)
             return 1
+        if mode == "check":
+            return 0
+        if mode == "prepare":
+            print("restore {} (interrupted activation)".format(shown(settings)))
+            print("keep    " + inventory)
+            print("ready   nothing changed; apply with claude-router direct")
+            return 0
         print("restore {} (interrupted activation)".format(shown(settings)))
         print("keep    " + inventory)
         print(done)
@@ -629,8 +629,19 @@ def client_versions(claude, agent_sdk):
     return versions
 
 
+def payload_sha256(lib):
+    digest = hashlib.sha256()
+    if not lib.is_dir():
+        return None
+    for path in sorted(lib.rglob("*")):
+        relative = path.relative_to(lib)
+        if path.is_file() and "__pycache__" not in relative.parts and path.suffix not in (".pyc", ".pyo"):
+            digest.update("{}\0{}\n".format(relative.as_posix(), file_sha256(path)).encode())
+    return digest.hexdigest()
+
+
 def measure(lay, record, status, claude, agent_sdk):
-    return {"head": record.get("commit"), "binary_sha256": file_sha256(lay.binary),
+    return {"head": record.get("commit"), "binary_sha256": file_sha256(lay.binary), "helpers_sha256": payload_sha256(lay.lib),
             "running_binary": status.get("binary"), "running_binary_sha256": status.get("binary_sha256"),
             "sdk": status.get("sdk"), "clients": client_versions(claude, agent_sdk)}
 
@@ -655,6 +666,8 @@ def mismatches(accepted, current):
         found.append("binary: accepted {}, installed {}".format(short(binary), short(current["binary_sha256"])))
     elif binary != current["running_binary_sha256"]:
         found.append("binary: accepted {}, running {}".format(short(binary), short(current["running_binary_sha256"])))
+    if accepted.get("helpers_sha256") != current["helpers_sha256"]:
+        found.append("helpers: accepted {}, installed {}".format(short(accepted.get("helpers_sha256")), short(current["helpers_sha256"])))
     if accepted.get("sdk") != current["sdk"]:
         found.append("sdk: accepted {}, running {}".format(accepted.get("sdk"), current["sdk"]))
     clients = accepted.get("clients") if isinstance(accepted.get("clients"), dict) else {}
@@ -726,25 +739,30 @@ def write_journal(state_dir, journal):
     files.atomic_write(state_dir / ACTIVATION, (json.dumps(journal, indent=2) + "\n").encode(), 0o600)
 
 
-def undo_interrupted(state_dir, state, manifest_path):
+def undo_interrupted(state_dir, state, manifest_path, check=False):
     journal = read_journal(state_dir)
     if not journal or journal["phase"] == "active":
         return None
     settings = Path(journal["settings"])
     current = file_sha256(settings)
-    if current == journal["activated_sha256"]:
-        if journal["original_sha256"] is None:
-            settings.unlink()
-        else:
-            backup = Path(journal["backup"])
-            if file_sha256(backup) != journal["original_sha256"]:
-                raise Refusal("the backup of {} changed: {}".format(shown(settings), shown(backup)),
-                              next_step="restore {} by hand, then remove {}".format(shown(settings), shown(state_dir / ACTIVATION)))
-            files.atomic_write(settings, backup.read_bytes(), journal["mode"])
-    elif current != journal["original_sha256"]:
+    if current not in (journal["activated_sha256"], journal["original_sha256"]):
         raise Refusal("{} changed after an interrupted activation".format(shown(settings)),
                       ["backup  {}".format(shown(Path(journal["backup"]))) if journal["backup"] else "before  the file did not exist"],
                       "restore the file or remove the router keys, then remove {} (local edits are kept)".format(shown(state_dir / ACTIVATION)))
+    original = None
+    if current == journal["activated_sha256"] and journal["original_sha256"] is not None:
+        backup = Path(journal["backup"])
+        original = backup.read_bytes() if backup.exists() else None
+        if original is None or hashlib.sha256(original).hexdigest() != journal["original_sha256"]:
+            raise Refusal("the backup of {} changed: {}".format(shown(settings), shown(backup)),
+                          next_step="restore {} by hand, then remove {}".format(shown(settings), shown(state_dir / ACTIVATION)))
+    if check:
+        return settings
+    if current == journal["activated_sha256"]:
+        if original is None:
+            settings.unlink()
+        else:
+            files.atomic_write(settings, original, journal["mode"])
     owned = state.get("settings", {}).get(NAME, {})
     if str(settings) in owned:
         del owned[str(settings)]
@@ -760,12 +778,17 @@ def run_verify(command, timeout):
     try:
         return process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.wait()
         return None
+    finally:
+        if process.returncode is None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait()
 
 
-def routed_requests(events, offset):
+def routed_requests(events, offset, conversation):
     if not events.exists():
         return 0
     with open(events, "rb") as stream:
@@ -776,22 +799,42 @@ def routed_requests(events, offset):
                 event = json.loads(line)
             except ValueError:
                 continue
-            count += event.get("kind") == "request" and event.get("status") == 200 and event.get("outcome") == "completed"
+            count += (event.get("kind") == "request" and event.get("conversation") == conversation
+                      and event.get("status") == 200 and event.get("outcome") == "completed")
     return count
 
 
-def verify_wiring(lay, commands, timeout):
+def conversation_hash(session):
+    return hashlib.sha256(session.strip().encode()).hexdigest()[:12]
+
+
+def program(command):
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        words = command.split()
+    words = [word for word in words if not re.match(r"[A-Za-z_][A-Za-z0-9_]*=", word)]
+    return os.path.basename(words[0]) if words else "command"
+
+
+def verify_wiring(lay, checks, timeout):
     events = lay.state / "events.jsonl"
-    for command in commands:
+    for session, command in checks:
+        conversation = conversation_hash(session)
+        label = "{} (conversation {})".format(program(command), conversation)
         offset = events.stat().st_size if events.exists() else 0
         code = run_verify(command, timeout)
-        routed = routed_requests(events, offset)
+        routed = routed_requests(events, offset, conversation)
         if code != 0:
-            return "{} {}".format(command, "timed out after {} s".format(timeout) if code is None else "exited {}".format(code))
+            return "{} {}".format(label, "timed out after {} s".format(timeout) if code is None else "exited {}".format(code))
         if routed == 0:
-            return "{} completed no request through the router".format(command)
-        print("verify  {}: exit 0, {} routed request{}".format(command, routed, "" if routed == 1 else "s"))
+            return "{} completed no request through the router".format(label)
+        print("verify  {}: exit 0, {} routed request{}".format(label, routed, "" if routed == 1 else "s"))
     return None
+
+
+def interrupted(signum, frame):
+    raise KeyboardInterrupt
 
 
 def activate(args, state_root, home, use_env):
@@ -831,24 +874,26 @@ def activate(args, state_root, home, use_env):
     except ValueError as error:
         raise Refusal(str(error), next_step="remove the key from {}, then run again".format(shown(settings_path))) from None
     change, = astack_settings.prepare(NAME, {}, {str(settings_path): ("json", values)})
-    print("accept  head {}, binary {}, sdk {}, claude {}, agent sdk {}".format(
-        current["head"][:7], short(current["binary_sha256"]), current["sdk"],
+    print("accept  head {}, binary {}, helpers {}, sdk {}, claude {}, agent sdk {}".format(
+        current["head"][:7], short(current["binary_sha256"]), short(current["helpers_sha256"]), current["sdk"],
         current["clients"]["claude_code"], current["clients"]["agent_sdk"]))
     print("ready   router running {}; usable accounts {}".format(listen, ", ".join(usable)))
+    original = settings_path.read_bytes() if settings_path.exists() else None
+    backup = (manifest_path.parent / "backups" / ("activate-" + hashlib.sha256(original).hexdigest()[:12]) / settings_path.name
+              if original is not None else None)
     before = astack_settings.document("json", text)
     for key in CLIENT_KEYS:
         path = tuple(key.split("."))
         installed_value = astack_settings.lookup(values, path)
-        if key in replaced:
+        if key in replaced and SECRET_KEY.search(key.rsplit(".", 1)[-1]):
+            print("replace {} {} (the old value stays in {})".format(shown(settings_path), key, shown(backup)))
+        elif key in replaced:
             print("replace {} {} ({} with {})".format(shown(settings_path), key, redact(key, before.get(path)), redact(key, installed_value)))
         else:
             print("set     {} {} ({})".format(shown(settings_path), key, redact(key, installed_value)))
     for line in override_warnings(settings_path, [p.absolute() for p in args.project],
                                   MANAGED_SETTINGS.get(sys.platform), os.environ):
         print(line)
-    original = settings_path.read_bytes() if settings_path.exists() else None
-    backup = (manifest_path.parent / "backups" / ("activate-" + hashlib.sha256(original).hexdigest()[:12]) / settings_path.name
-              if original is not None else None)
     if backup:
         print("backup  {}".format(shown(backup)))
     print("undo    claude-router direct")
@@ -863,16 +908,22 @@ def activate(args, state_root, home, use_env):
                "original_sha256": hashlib.sha256(original).hexdigest() if original is not None else None,
                "activated_sha256": hashlib.sha256(change.rendered.encode()).hexdigest(),
                "backup": str(backup) if backup else None, "undo": "claude-router direct",
-               "acceptance": {key: accepted.get(key) for key in ("head", "binary_sha256", "sdk", "clients")},
+               "acceptance": {key: accepted.get(key) for key in ("head", "binary_sha256", "helpers_sha256", "sdk", "clients")},
                "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     write_journal(lay.state, journal)
     with redirect_stdout(io.StringIO()):
         change.apply(state, manifest_path, manifest_path.parent / "backups" / uuid.uuid4().hex)
     write_journal(lay.state, dict(journal, phase="verifying"))
-    failed = verify_wiring(lay, args.verify, args.verify_timeout)
+    previous = signal.signal(signal.SIGTERM, interrupted)
+    try:
+        failed = verify_wiring(lay, args.verify, args.verify_timeout)
+    except KeyboardInterrupt:
+        failed = "verification was interrupted"
+    finally:
+        signal.signal(signal.SIGTERM, previous)
     if failed:
-        undo_interrupted(lay.state, state, manifest_path)
         print("claude-router: activate: {}".format(failed), file=sys.stderr)
+        undo_interrupted(lay.state, state, manifest_path)
         print("undo    {} restored; the router keeps its logins and assignments".format(shown(settings_path)), file=sys.stderr)
         print("next    claude-router status", file=sys.stderr)
         return 1
@@ -916,7 +967,8 @@ def main():
     a.add_argument("--acceptance", type=Path, required=True, help="the acceptance record of this installation")
     a.add_argument("--settings", type=Path, help="Claude settings file; default $CLAUDE_CONFIG_DIR or ~/.claude, then settings.json")
     a.add_argument("--project", type=Path, action="append", default=[], help="a project whose .claude settings to check; repeat")
-    a.add_argument("--verify", action="append", default=[], help="a shell command that continues a conversation; repeat per client")
+    a.add_argument("--verify", nargs=2, action="append", default=[], metavar=("SESSION", "COMMAND"),
+                   help="a shell command that continues the conversation with this Claude session ID; repeat per client")
     a.add_argument("--verify-timeout", type=int, default=600, help="seconds each --verify command may take")
     a.add_argument("--prepare", action="store_true", help="show the changes without making them")
     args = parser.parse_args()
