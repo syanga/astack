@@ -340,22 +340,31 @@ class ActivationTests(ActivationFixture):
         self.assertEqual(self.settings_path.read_bytes(), self.before)
 
     def test_uninstall_refuses_to_restore_settings_with_helpers_other_than_the_installed_ones(self):
-        self.assertEqual(self.run_activate().returncode, 0)
-        activated = self.settings_path.read_bytes()
         checkout = self.repo / "scripts/astack_settings.py"
-        checkout.write_bytes(checkout.read_bytes() + b"\n# a local edit\n")
+        original = checkout.read_bytes()
+        for wiring in ("activation", "settings record without activation.json"):
+            with self.subTest(wiring):
+                if wiring == "activation":
+                    self.assertEqual(self.run_activate().returncode, 0)
+                else:
+                    self.activate(self.settings_path)
+                    self.assertIsNone(self.journal())
+                wired = self.settings_path.read_bytes()
+                checkout.write_bytes(original + b"\n# a local edit\n")
 
-        refused = self.component(command="uninstall", success=False)
+                refused = self.component(command="uninstall", success=False)
+                checkout.write_bytes(original)
 
-        self.assertEqual(refused.returncode, 1)
-        self.assertRegex(refused.stderr, r"Uninstall would restore client settings, but the helpers running this command differ from "
-                                         r"the installed ones \(helpers: running [0-9a-f]{12} from .+/scripts, installed [0-9a-f]{12}\); "
-                                         r"run claude-router direct, then uninstall")
-        self.assertEqual(self.settings_path.read_bytes(), activated)
-        self.assertEqual(self.journal()["phase"], "active")
-        self.assertEqual(self.direct().returncode, 0)
+                self.assertEqual(refused.returncode, 1)
+                self.assertRegex(refused.stderr, r"Uninstall would restore client settings, but the helpers running this command differ from "
+                                                 r"the installed ones \(helpers: running [0-9a-f]{12} from .+/scripts, installed [0-9a-f]{12}\); "
+                                                 r"run claude-router direct, then uninstall")
+                self.assertEqual(self.settings_path.read_bytes(), wired)
+                self.assertEqual(self.direct().returncode, 0)
+                self.assertEqual(self.settings_path.read_bytes(), self.before)
+        checkout.write_bytes(original + b"\n# a local edit\n")
         self.component(command="uninstall")
-        self.assertEqual(self.settings_path.read_bytes(), self.before)
+        self.assertFalse((self.data / "lib").exists())
 
     def test_a_router_that_is_not_ready_refuses_before_any_write(self):
         no_account = ("claude-router: activate: the router is not ready\n"
