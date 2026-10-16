@@ -173,9 +173,16 @@ Before it writes, activation backs the settings file up under
 `activation.json` in the state directory. After it writes, it runs each
 `--verify` command. Each must exit 0 and complete at least one request
 through the router for the conversation whose session ID precedes it;
-otherwise activation restores the settings file and exits 1. Ctrl-C during
-these commands does the same. Activation prints only each command's program
-name, never its arguments. To go back to a direct connection later, run `claude-router direct`.
+otherwise activation restores the settings file and exits 1. Ctrl-C, SIGTERM,
+or closing the terminal during these commands does the same. When a command
+ends, activation kills every process it started. Activation prints only each
+command's program name, never its arguments.
+
+Run activation from the checkout that installed the router, or run the
+installed copy, `~/.local/share/astack/claude-router/lib/claude_router.py`.
+Activation, and uninstall while it would restore client settings, refuse when
+the helper scripts they run differ from the installed ones, because the
+acceptance record covers only the installed copy. To go back to a direct connection later, run `claude-router direct`.
 It also undoes an activation that was interrupted. Uninstall refuses until
 then.
 
