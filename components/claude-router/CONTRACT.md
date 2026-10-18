@@ -1540,7 +1540,7 @@ claude-router` call it with the default layout. The default targets and
 | Prerequisites | Go 1.26.0 or later. `go env` must report the host's OS and architecture for both target and host; cross-compilation settings, an older Go, an unsupported OS, or a failed build stop the run before any write. |
 | Payload | `$XDG_DATA_HOME/astack/claude-router/bin/claude-router` and the helper with its imports in `lib/`. Both are copies, so a moved checkout leaves them runnable. |
 | Descriptor | launchd: `~/Library/LaunchAgents/<service>.plist`. systemd: `$XDG_CONFIG_HOME/systemd/user/<service>.service`. Both run `serve -supervised -config <state>/config.json` with `HOME` set to the installer's home and the state directory as working directory. |
-| State | `$XDG_STATE_HOME/astack/claude-router`, mode 0700. `config.json` is created once, when missing, and never rewritten. `client-token` is created when missing, and replaced when it holds fewer than 32 characters, which the service refuses; install prints `REPLACE <path> (fewer than 32 characters)`. The helper writes the token to a temporary file in the state directory at mode 0600, syncs it, and renames it into place, so an interrupted install leaves no partial token (`TokenCreationTests`). `service.json` records the manager, service name, descriptor, configuration, helper, the Python that ran the installer, and astack manifest for the command. |
+| State | `$XDG_STATE_HOME/astack/claude-router`, mode 0700. `config.json` is created once, when missing, and never rewritten. `client-token` is created when missing. The service refuses a client token shorter than 32 characters or with any permission for group or others. Install replaces a shorter `client-token` and prints `REPLACE <path> (fewer than 32 characters)`. It sets any other mode on a token of 32 or more characters to 0600 and prints `CHMOD <path> 0600 (was <mode>)`. The helper writes a new token to a temporary `.client-token-*` file in the state directory at mode 0600, syncs it, and renames it into place, so an interrupted install leaves no partial token. The next install removes leftover temporary files and prints `REMOVE <path>` for each. A `client-token` that is not a regular file stops install before any write, with the step to move it aside (`TokenCreationTests`). `service.json` records the manager, service name, descriptor, configuration, helper, the Python that ran the installer, and astack manifest for the command. |
 | Ownership record | `components.claude-router` in the astack manifest: the layout, a fingerprint per managed file, the fingerprints of created seeds, the commit, and `pending`. It holds no secret. |
 | Interruption | Before each write, the helper records the file's expected fingerprint in `pending` and saves the manifest. A rerun adopts a pending file that holds that fingerprint. Other interruptions leave a file the next run reports as a conflict. The installer is not a transaction. |
 | Conflicts | An unmanaged or locally modified payload, descriptor, or `service.json` stops install and uninstall; `--force` moves it to `backups/<id>/` first. A component path that a harness target manages is refused. A changed data, state, or descriptor location needs an uninstall first. |
@@ -1559,9 +1559,9 @@ settings file for a harness and the component, which must run separately.
 Router activation owns `apiKeyHelper`, `env.ANTHROPIC_BASE_URL`, and
 `env.CLAUDE_CODE_RETRY_WATCHDOG` in the Claude settings file.
 `claude_router.client_settings` returns their values: `apiKeyHelper` is `cat`
-of the `client_token_file` path from `config.json`, resolved against the state
-directory as the service resolves it, and quoted for `/bin/sh`, so relative
-paths and paths with spaces or quotes work
+of the `client_token_file` path from `config.json`, resolved against the
+directory of `config.json` as the service resolves it, and quoted for
+`/bin/sh`, so relative paths and paths with spaces or quotes work
 (`test_a_relative_token_path_is_read_from_the_state_directory`). Harness settings that name an owned key, or
 `env.ANTHROPIC_AUTH_TOKEN` or `env.ANTHROPIC_API_KEY`, are refused, because
 Claude Code uses either env token before `apiKeyHelper`. `client_settings`

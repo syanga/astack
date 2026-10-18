@@ -38,7 +38,6 @@ MANAGERS = ("launchd", "systemd", "foreground")
 CLIENT_KEYS = ("apiKeyHelper", "env.ANTHROPIC_BASE_URL", "env.CLAUDE_CODE_RETRY_WATCHDOG")
 BEFORE_HELPER = ("env.ANTHROPIC_AUTH_TOKEN", "env.ANTHROPIC_API_KEY")
 SECRET_KEY = re.compile(r"TOKEN|KEY|SECRET|PASSWORD", re.IGNORECASE)
-# The service refuses a client token shorter than this (minClientTokenLength in config.go).
 MIN_TOKEN_LENGTH = 32
 HELPER = ("claude_router.py", "astack_files.py", "astack_settings.py")
 
@@ -225,7 +224,6 @@ def token_usable(path):
 
 
 def publish_token(path):
-    """Write a new client token so that readers see either no file or the whole token."""
     data = (secrets.token_hex(32) + "\n").encode()
     fd, temporary = tempfile.mkstemp(prefix=".client-token-", dir=str(path.parent))
     try:
@@ -286,6 +284,8 @@ def plan(command, state, lay, force=False):
     result = Plan(command=command, lay=lay, old=old)
     desired, seeds = {}, {}
     if command == "install":
+        if lay.token.exists() and not lay.token.is_file():
+            raise ValueError("{} is not a file; move it aside, then install again".format(lay.token))
         go = check_go()
         with tempfile.TemporaryDirectory(prefix="astack-claude-router-") as directory:
             binary = build(go, Path(directory))
@@ -425,6 +425,10 @@ def apply(p, state, state_path, backup_root, dry_run=False):
             seeds.pop(str(path), None)
         save()
     if p.command == "install":
+        for stray in sorted(lay.state.glob(".client-token-*")):
+            print("REMOVE {}".format(stray))
+            if not dry_run:
+                stray.unlink()
         if not lay.token.exists():
             print("CREATE {}".format(lay.token))
             if not dry_run:
@@ -433,6 +437,10 @@ def apply(p, state, state_path, backup_root, dry_run=False):
             print("REPLACE {} (fewer than {} characters)".format(lay.token, MIN_TOKEN_LENGTH))
             if not dry_run:
                 publish_token(lay.token)
+        elif (mode := stat.S_IMODE(lay.token.stat().st_mode)) != 0o600:
+            print("CHMOD {} 0600 (was {:04o})".format(lay.token, mode))
+            if not dry_run:
+                lay.token.chmod(0o600)
         if p.binary_changed and router_running(lay):
             print("RESTART needed to run the new binary: claude-router stop; claude-router start")
     for change in p.settings:
