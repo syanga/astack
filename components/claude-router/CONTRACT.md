@@ -573,7 +573,7 @@ from the capacity-only choice for the same request, and `capacity` otherwise.
 | --- | --- | --- |
 | `Rule` | `reset_aware` | Simulator comparison below |
 | `ResetBias` | 8 | Simulator comparison below |
-| `FreshFor` | 15 min | No measurable difference between 5, 15, and 60 min; middle value |
+| `FreshFor` | 15 min | Middle of the swept values 5, 15, and 60 min |
 | `ActiveFor` | 1 h | Not swept; the longest prompt-cache lifetime |
 | `UnknownResetRecheck` | 5 min | Not swept; bounds attempts on an account whose reset is unknown |
 | `OverageFreshFor` | 1 h | Not swept. PR3 sets the final freshness threshold with the check mechanism. |
@@ -582,23 +582,40 @@ from the capacity-only choice for the same request, and `capacity` otherwise.
 The comparison ran 13 variants over two synthetic fixtures and five seeds:
 capacity-only, and reset-aware with bias 1, 2, 4, and 8 at freshness 5, 15,
 and 60 minutes. `evidence/PR2/comparison.json` holds every run and the labeled
-quota and cache assumptions. Means for the chosen default against
-capacity-only:
+quota and cache assumptions.
+
+The selection criterion is the unused weekly share at reset, compared with
+capacity-only on the same fixture and seed. `ResetBias` is the bias with the
+largest mean reduction in that share. Bias 8 has the largest reduction at every
+freshness on both fixtures. `FreshFor` is not chosen by the share. It is the
+middle of the three swept values. At bias 8, 60 minutes had lower mean shares
+than 15 minutes: 0.161 against 0.169 on `weekly-expiry-72h`, and 0.179 against
+0.180 on `mixed-48h`. Both lowered the share against capacity-only in 9 of 10
+seed runs, and 5 minutes in 8 of 10. The criterion does not require a lower
+share in every seed run. Bias 4 at 60 minutes is the only variant that
+lowered it in all 10 runs. Its mean shares are higher than the default's,
+0.173 on `weekly-expiry-72h` and 0.183 on `mixed-48h`, and it writes fewer
+migration cache tokens, 715,800 and 1,112,400 against the default's 846,800
+and 1,358,200.
+
+Means for the chosen default against capacity-only:
 
 | Fixture | Variant | Completed turns | Unused weekly share at reset | Wait minutes | Exhaustion migrations | Migration cache writes (tokens) |
 | --- | --- | --- | --- | --- | --- | --- |
 | `weekly-expiry-72h` | capacity-only | 2593 | 0.197 | 1473 | 63.6 | 663,200 |
-| `weekly-expiry-72h` | bias 8, 15 min | 2590 | 0.169 | 834 | 61.6 | 846,800 |
-| `mixed-48h` | capacity-only | 2975 | 0.189 | 111,080 | 342.8 | 1,058,600 |
-| `mixed-48h` | bias 8, 15 min | 3008 | 0.178 | 108,054 | 353.2 | 1,284,200 |
+| `weekly-expiry-72h` | bias 8, 15 min | 2590 | 0.169 | 836 | 61.6 | 846,800 |
+| `mixed-48h` | capacity-only | 2975 | 0.188 | 111,020 | 383.2 | 1,097,000 |
+| `mixed-48h` | bias 8, 15 min | 2991 | 0.180 | 110,421 | 388.0 | 1,358,200 |
 
-The effect is small. With bias 8, unused weekly allowance at reset was lower
-in each of the five seeds on both fixtures. Completed turns were level on
-`weekly-expiry-72h` and higher in four of five seeds on `mixed-48h`. The cost
-was more cold cache writes from migration, and on `mixed-48h` slightly more
-exhaustion migrations. No run of any variant had a healthy automatic
-migration, counting migrations returned to subagent requests. The comparison
-does not establish a percentage improvement, and none is required.
+The effect is small. With bias 8 at 15 minutes, unused weekly allowance at
+reset was lower than capacity-only in 9 of 10 seed runs. The one miss is
+`mixed-48h` seed 2, where the default left 0.1673 and capacity-only 0.1672.
+Completed turns were higher in 3 of 5 seeds on `mixed-48h`. On
+`weekly-expiry-72h` they were equal in 3 seeds, higher in 1, and lower in 1.
+The cost was more cold cache writes from migration, and on `mixed-48h`
+slightly more exhaustion migrations. No run of any variant had a healthy
+automatic migration, counting migrations returned to subagent requests. The
+comparison does not establish a percentage improvement, and none is required.
 
 ### Quota evidence must come from the attempt
 
