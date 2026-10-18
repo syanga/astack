@@ -6,6 +6,7 @@
     "cost": "Synthetic. One unit is 1000 weighted tokens: uncached input 1, cache write 1.25, cache read 0.1, output 5. These are API price ratios, used only as a stand-in for allowance consumption.",
     "cache": "Synthetic. A prompt prefix stays cached for 5 minutes after its last use, per account and conversation. A request on another account while the old cache is warm counts its prefix as a migration write.",
     "observations": "Every response reports exact utilization and resets.",
+    "subagents": "A subagent request runs after its parent's completed response, and a nested one after its parent subagent. Each goes through the same routing and recovery as a main request. The conversation's next turn starts only after they are served.",
     "external_load": "acct-y loses 5% of its five-hour allowance per hour to clients outside this proxy, so its observations age quickly.",
     "overage": "A settings read finds paid overflow disabled on every account every 15 minutes.",
     "load": "About 70% of the pool's five-hour allowance. acct-w and acct-x hold most of their weekly allowance and reset within the run; acct-y and acct-z reset after it.",
