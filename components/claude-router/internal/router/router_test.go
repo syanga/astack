@@ -85,7 +85,7 @@ func (h *harness) route(now time.Time, req Request) Decision {
 			h.r.ObserveOverage(acct.ID, OverageDisabled, now)
 		}
 	}
-	d, err := h.r.Route(now, req)
+	d, err := h.r.Route(At(now), req)
 	if err != nil {
 		h.t.Fatalf("route %s: %v", req.Conversation, err)
 	}
@@ -610,7 +610,7 @@ func TestMissingIdentityIsRejectedWithoutAssignment(t *testing.T) {
 func TestCrashBeforeCommitLeavesNoAssignmentAndAfterCommitKeepsIt(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
 	h.route(t0, req("other"))
-	decided, err := h.r.Decide(t0, req("before"))
+	decided, err := h.r.Decide(At(t0), req("before"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +629,7 @@ func TestCrashBeforeCommitLeavesNoAssignmentAndAfterCommitKeepsIt(t *testing.T) 
 	}
 
 	h.report(t0, b, "claude-sonnet-4-5", ClassExhausted, rejected(FiveHour, t0.Add(time.Hour)))
-	if _, err := h.r.Route(t0, req("before")); err != nil {
+	if _, err := h.r.Route(At(t0), req("before")); err != nil {
 		t.Fatal(err)
 	}
 	h.restart()
@@ -1072,14 +1072,14 @@ func TestFailedMigrationSyncStopsEveryAnswerUntilReopen(t *testing.T) {
 		h.r.ObserveOverage(acct.ID, OverageDisabled, t0.Add(2*time.Minute))
 	}
 
-	_, errMigrate := h.r.Route(t0.Add(2*time.Minute), req("conv"))
+	_, errMigrate := h.r.Route(At(t0.Add(2*time.Minute)), req("conv"))
 	faulty.failSync = false
 	later := t0.Add(31 * time.Minute)
 	for _, acct := range h.accounts {
 		h.r.ObserveOverage(acct.ID, OverageDisabled, later)
 	}
-	afterReset, errRoute := h.r.Route(later, req("conv"))
-	_, errDecide := h.r.Decide(later, req("conv"))
+	afterReset, errRoute := h.r.Route(At(later), req("conv"))
+	_, errDecide := h.r.Decide(At(later), req("conv"))
 	_, _, errLookup := h.r.Lookup("conv")
 	_, errExisting := h.r.CommitAssignment(later, "other", b, ReasonManual)
 	errServed := h.r.Served(later, "other", b)
@@ -1250,7 +1250,7 @@ func TestCommitHonorsServedAndReloginThatLandAfterTheDecision(t *testing.T) {
 		h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
 		h.route(t0, req("conv"))
 		h.report(t0, a, "claude-sonnet-4-5", ClassAuth)
-		d, err := h.r.Decide(t0, req("conv"))
+		d, err := h.r.Decide(At(t0), req("conv"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1265,7 +1265,7 @@ func TestCommitHonorsServedAndReloginThatLandAfterTheDecision(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		got, err := h.r.Commit(t0, req("conv"), d)
+		got, err := h.r.Commit(At(t0), req("conv"), d)
 
 		if err != nil || got.Kind != Reauth || got.Account != a || h.bound("conv") != a {
 			t.Fatalf("commit after Served got %+v, %v, bound to %s; want reauth with the binding kept on %s", got, err, h.bound("conv"), a)
@@ -1277,7 +1277,7 @@ func TestCommitHonorsServedAndReloginThatLandAfterTheDecision(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		got, err := h.r.Commit(t0, req("conv"), d)
+		got, err := h.r.Commit(At(t0), req("conv"), d)
 
 		if err != nil || got.Kind != Dispatch || got.Account != a || h.bound("conv") != a {
 			t.Fatalf("commit after Relogin got %+v, %v, bound to %s; want dispatch with the binding kept on %s", got, err, h.bound("conv"), a)
@@ -1416,7 +1416,7 @@ func TestLaterEnabledCheckKeepsPaidUseRecorded(t *testing.T) {
 func TestCommitAfterFailStopRefusesEveryDecisionKind(t *testing.T) {
 	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
 	h.route(t0, req("conv"))
-	saved, err := h.r.Decide(t0, req("conv"))
+	saved, err := h.r.Decide(At(t0), req("conv"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1425,7 +1425,7 @@ func TestCommitAfterFailStopRefusesEveryDecisionKind(t *testing.T) {
 		t.Fatal("the commit with a failed sync returned no error")
 	}
 
-	got, errCommit := h.r.Commit(t0, req("conv"), saved)
+	got, errCommit := h.r.Commit(At(t0), req("conv"), saved)
 
 	if saved.Kind != Dispatch || saved.Account != a {
 		t.Fatalf("saved decision %+v, want dispatch on %s", saved, a)

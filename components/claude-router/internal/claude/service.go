@@ -36,8 +36,7 @@ import (
 type Options struct {
 	// Upstream replaces the transport that reaches api.anthropic.com.
 	Upstream http.RoundTripper
-	// Now replaces the clock. The service drops its monotonic reading, as
-	// it does the production clock's, but lets it move backward.
+	// Now replaces the machine's wall clock, which the service clock reads.
 	Now func() time.Time
 	// ReadRetryBase replaces the delay before the first re-read after a
 	// failed settings read.
@@ -48,23 +47,63 @@ type Options struct {
 // monotonic reading, which stops while the machine sleeps: a reading taken
 // before a sleep must age by the sleep's length. It never returns a time
 // before one it already returned, so a backward step of the wall clock
-// cannot order a later reading before an earlier one; the clock stands still
-// until the wall clock catches up.
+// cannot order a later reading before an earlier one. After such a step the
+// clock holds: it stands still until the wall clock passes it.
+//
+// A held clock cannot age a reading, so the clock marks. It marks each time
+// the wall clock steps back, after each markEvery of wall time while it
+// holds, and when it moves again. A mark is later than every time the clock
+// returned before it and no later than any time it returns after it. The
+// clock passes each mark to expire before it returns the mark to anyone, so
+// expire can invalidate every reading stamped before the mark.
 type wallClock struct {
-	read func() time.Time
+	read      func() time.Time
+	markEvery time.Duration
+	expire    func(mark time.Time)
+
 	mu   sync.Mutex
 	last time.Time
+	wall time.Time
+	held bool
+	// markedWall is the wall time of the latest mark while the clock holds.
+	markedWall time.Time
+	mark       time.Time
 }
 
-func (c *wallClock) now() time.Time {
+func (c *wallClock) now() time.Time { return c.instant().Stamp }
+
+func (c *wallClock) instant() router.Instant {
 	t := c.read().Round(0)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if t.Before(c.last) {
-		return c.last
+	stepped := t.Before(c.wall)
+	c.wall = t
+	switch {
+	case t.After(c.last):
+		c.last = t
+		if c.held {
+			c.held = false
+			c.marked()
+		}
+	case t.Equal(c.last):
+	case !c.held || stepped || t.Sub(c.markedWall) >= c.markEvery:
+		c.held, c.markedWall = true, t
+		c.last = c.last.Add(time.Nanosecond)
+		c.marked()
 	}
-	c.last = t
-	return t
+	return router.Instant{Stamp: c.last, Wall: t}
+}
+
+func (c *wallClock) marked() {
+	c.mark = c.last
+	c.expire(c.mark)
+}
+
+// lastMark returns the clock's latest mark, or zero before the first.
+func (c *wallClock) lastMark() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.mark
 }
 
 // Service is a running router: the embedded SDK, the routing policy, and the
@@ -72,6 +111,7 @@ func (c *wallClock) now() time.Time {
 type Service struct {
 	cfg       Config
 	token     string
+	clock     *wallClock
 	now       func() time.Time
 	router    *router.Router
 	store     *router.Store
@@ -127,12 +167,12 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 			TLSHandshakeTimeout: 10 * time.Second,
 		}
 	}
-	now := (&wallClock{read: time.Now}).now
-	if opts.Now != nil {
-		now = func() time.Time { return opts.Now().Round(0) }
+	wall := opts.Now
+	if wall == nil {
+		wall = time.Now
 	}
 
-	s := &Service{cfg: cfg, token: token, now: now, authIDs: map[router.AccountID]string{}, retryBase: opts.ReadRetryBase}
+	s := &Service{cfg: cfg, token: token, authIDs: map[router.AccountID]string{}, retryBase: opts.ReadRetryBase}
 	if s.retryBase <= 0 {
 		s.retryBase = defaultReadRetryBase
 	}
@@ -149,11 +189,13 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	}
 	policy := router.DefaultConfig()
 	policy.OverageFreshFor = time.Duration(cfg.OverageFreshFor)
-	if s.router, err = router.Open(policy, cfg.Accounts, s.store, now()); err != nil {
+	if s.router, err = router.Open(policy, cfg.Accounts, s.store, wall().Round(0)); err != nil {
 		return nil, err
 	}
+	s.clock = &wallClock{read: wall, markEvery: policy.OverageFreshFor, expire: s.router.ExpireOverageChecks}
+	s.now = s.clock.now
 	s.overage = newOverageReader(s)
-	s.transport = newTransport(inner, redirect, cfg.MaxUpstreamAttempts, cfg.Accounts, now, s.observeHeaders)
+	s.transport = newTransport(inner, redirect, cfg.MaxUpstreamAttempts, cfg.Accounts, s.now, s.observeHeaders)
 	if redirect != nil {
 		s.events.emit(Event{Kind: "test_upstream_in_use", Detail: redirect.Host})
 	}

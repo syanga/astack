@@ -152,8 +152,9 @@ func (s *Service) messages(c *gin.Context) {
 
 	s.overage.catchUp(c.Request.Context())
 	for step := 0; step < maxRoutingSteps; step++ {
-		now := s.now()
-		d, err := s.router.Route(now, req)
+		at := s.clock.instant()
+		now := at.Stamp
+		d, err := s.router.Route(at, req)
 		if err != nil {
 			finish("request", "", router.Decision{}, http.StatusServiceUnavailable, nil)
 			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: assignment journal unavailable; restart the router")
@@ -175,7 +176,7 @@ func (s *Service) messages(c *gin.Context) {
 			if d.RecheckOverage && s.recheckOverage(c.Request.Context(), d.Account, rechecked) {
 				continue
 			}
-			s.answerWait(c, now, d.Until, d.ResetKnown, "claude-router: no account can serve this model now")
+			s.answerWait(c, at.Wall, d.Until, d.ResetKnown, "claude-router: no account can serve this model now")
 			finish("request", "", d, http.StatusTooManyRequests, nil)
 			return
 		case router.Reauth, router.Unavailable:

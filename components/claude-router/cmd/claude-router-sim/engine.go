@@ -496,7 +496,7 @@ func (s *sim) turn(c *conversation, at time.Time) error {
 	if !bound && s.fx.Workload.ParallelFirst > 1 {
 		d, err = s.parallelFirst(at, req)
 	} else {
-		d, err = s.r.Route(at, req)
+		d, err = s.r.Route(router.At(at), req)
 	}
 	if err != nil {
 		return err
@@ -605,7 +605,7 @@ func (s *sim) parallelFirst(at time.Time, req router.Request) (router.Decision, 
 			if i > 0 {
 				r.Agent = fmt.Sprintf("parallel-%d", i)
 			}
-			out[i], errs[i] = s.r.Route(at, r)
+			out[i], errs[i] = s.r.Route(router.At(at), r)
 		}()
 	}
 	close(start)
@@ -723,7 +723,7 @@ func (s *sim) subagents(c *conversation, at time.Time, account router.AccountID)
 		agent := fmt.Sprintf("agent-%d", c.agents)
 		req := s.request(c)
 		req.Agent, req.ParentAgent, req.Attempt, req.LastFailure = agent, parent, 1, router.ClassNone
-		d, err := s.r.Route(at, req)
+		d, err := s.r.Route(router.At(at), req)
 		if err != nil {
 			return err
 		}

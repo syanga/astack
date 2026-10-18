@@ -1277,31 +1277,46 @@ was stale by wall time.
   the order of checks and paid use, unknown-reset rechecks, and request
   times. The saved account state already held wall time only, so one rule
   holds before and after a restart. The clock never returns a time earlier
-  than one it returned: after a backward wall-clock step it stands still
-  until the wall clock catches up, so a later reading is never stamped
+  than one it returned. After a backward wall-clock step it holds: it stands
+  still until the wall clock passes it, so a later reading is never stamped
   before an earlier one (`TestThePolicyComparesStampsWithoutAMonotonicReading`,
-  `TestTheServiceClockNeverStepsBack`).
-- **The hold has a bounded cost.** After the wall clock steps back by D, the
-  clock holds for up to D, and every time it returns is up to D ahead of the
-  wall clock. Two effects follow, and each lasts at most D:
-  - A reading counts as up to D younger than it is. A `disabled` reading can
-    then permit dispatch until its true age reaches `overage_fresh_for` plus
-    D. That happens only when every settings read in that time fails,
-    because a successful read replaces the reading.
-  - A rejection whose absolute reset falls inside the hold counts as past.
-    The router can send attempts to the exhausted account until the hold
-    ends. The upstream refuses each one, so they spend no allowance or
-    credit, but the request can end in 503 at its attempt cap instead of
-    moving.
-
-  A raw wall clock avoids both effects and is worse. It can stamp an
-  `enabled` reading taken after the step before a `disabled` check taken
-  before it. `ObserveOverage` then ignores the `enabled` reading, and the
-  router dispatches while paid overflow is on. On macOS, `timed` slews small
-  offsets, so D is usually under a second. It is large only after a manual
-  clock change or a large correction. The verifier's probes S2b, S7, and S8
-  measured both effects and the raw-clock failure
-  (`reports/PR4-verify/38c01d4/probes/`).
+  `TestTheServiceClockNeverStepsBackAndMarksWhileItHolds`). A raw wall clock
+  would let a step reorder readings. It could stamp an `enabled` reading
+  taken after the step before a `disabled` check taken before it, and
+  `ObserveOverage` would then ignore the `enabled` reading.
+- **A hold expires every `disabled` reading.** A held clock cannot age a
+  reading, so the clock marks. It marks at each backward step of the wall
+  clock, after each `overage_fresh_for` of wall time while it holds, and
+  when it moves again. A mark is later than every time the clock returned
+  before it. Before the clock returns a mark to any caller, the router makes
+  every `disabled` check stamped before the mark stale
+  (`Router.ExpireOverageChecks`). The next request to the account reads the
+  setting again, even within 30 s of the last read. It dispatches only on a
+  `disabled` reading from a read or attempt that started after the mark.
+  When that read fails, the request is refused with `overage_stale`. While
+  the router runs, a `disabled` reading therefore never permits dispatch
+  more than `overage_fresh_for` after its read started, during a hold or
+  after it (`TestAfterTheWallClockStepsBackNoRequestDispatchesOnAnOldReading`). Any
+  backward step marks, however small. It costs one settings read for each
+  account the next requests use. On macOS, `timed` slews small offsets
+  without stepping, so a step usually comes from a manual clock change or a
+  large correction.
+- **Resets are compared with the wall clock.** The policy takes both clocks
+  (`router.Instant`). It ages readings and stamps bindings with the service
+  clock, and it compares reset times with the wall clock. An exact reset is
+  the provider's wall time, so a hold cannot make a future reset count as
+  past. The router moves the conversation or waits, as it does without a
+  step (`TestAfterTheWallClockStepsBackAFutureResetStillMovesTheConversation`).
+  A rejection without a reported reset ends `UnknownResetRecheck` after its
+  service-clock stamp. During a hold that stamp is ahead of the wall clock,
+  so the rejection blocks longer, never shorter. The local 429's
+  `retry-after` counts to the reset on the wall clock too.
+- **A step while the router is stopped is not detected.** At the next start,
+  the router drops a saved `disabled` check stamped later than the wall
+  clock. It keeps an earlier one, which then counts as younger than it is by
+  up to the step. The start reads every account, and a successful read
+  replaces the saved check. The error remains only for an account whose
+  start read fails.
 - **Overdue reads come first.** The scheduler's timers also run on the
   monotonic clock, so after a wake the next scheduled settings read can be
   up to `overage_check_every` of awake time away. The scheduler records the

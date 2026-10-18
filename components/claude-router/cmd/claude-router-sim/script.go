@@ -150,7 +150,7 @@ func RunScript(sc Script, cfg router.Config, dir string) (ScriptResult, error) {
 		at := sc.Start.Add(minutes(step.AtMinutes))
 		switch {
 		case step.Route != nil:
-			d, err := r.Route(at, *step.Route)
+			d, err := r.Route(router.At(at), *step.Route)
 			if err != nil {
 				return res, fmt.Errorf("step %d: %w", i, err)
 			}

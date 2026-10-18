@@ -2,6 +2,7 @@ package claude
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -42,22 +43,36 @@ func TestThePolicyComparesStampsWithoutAMonotonicReading(t *testing.T) {
 	}
 }
 
-func TestTheServiceClockNeverStepsBack(t *testing.T) {
-	base := time.Now()
-	reads := []time.Time{base.Add(2 * time.Second), base, base.Add(3 * time.Second)}
-	c := &wallClock{read: func() time.Time {
-		t := reads[0]
-		reads = reads[1:]
-		return t
-	}}
+func TestTheServiceClockNeverStepsBackAndMarksWhileItHolds(t *testing.T) {
+	base := time.Now().Round(0)
+	reads := []time.Duration{2 * time.Minute, 0, 30 * time.Second, 10 * time.Second, 70 * time.Second, 3 * time.Minute}
+	var marks []time.Time
+	c := &wallClock{
+		read: func() time.Time {
+			d := reads[0]
+			reads = reads[1:]
+			return base.Add(d)
+		},
+		markEvery: time.Minute,
+		expire:    func(m time.Time) { marks = append(marks, m) },
+	}
 
-	got := []time.Time{c.now(), c.now(), c.now()}
+	var got []time.Time
+	for range 6 {
+		got = append(got, c.now())
+	}
 
-	want := []time.Time{base.Add(2 * time.Second), base.Add(2 * time.Second), base.Add(3 * time.Second)}
+	m1 := base.Add(2*time.Minute + time.Nanosecond)
+	m2, m3 := m1.Add(time.Nanosecond), m1.Add(2*time.Nanosecond)
+	want := []time.Time{base.Add(2 * time.Minute), m1, m1, m2, m3, base.Add(3 * time.Minute)}
 	for i := range got {
 		if !got[i].Equal(want[i]) || hasMonotonic(got[i]) {
 			t.Fatalf("reading %d is %v, want %v without a monotonic reading", i, got[i], want[i])
 		}
+	}
+	wantMarks := []time.Time{m1, m2, m3, base.Add(3 * time.Minute)}
+	if !slices.EqualFunc(marks, wantMarks, time.Time.Equal) {
+		t.Fatalf("marks %v, want %v: at each step, a minute of wall time after the last mark, and at the end of the hold", marks, wantMarks)
 	}
 }
 
@@ -94,5 +109,80 @@ func TestAfterTheWallClockJumpsTheAccountIsReadBeforeDispatch(t *testing.T) {
 				t.Fatalf("%d inference attempts, want none", n)
 			}
 		})
+	}
+}
+
+// The default overage_fresh_for is 30 minutes. In every case the last
+// successful settings read is 31 minutes old by true time when the final
+// request arrives, and every read after it fails.
+func TestAfterTheWallClockStepsBackNoRequestDispatchesOnAnOldReading(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		step       time.Duration
+		readInHold bool
+	}{
+		{name: "no read succeeds after the step", step: time.Hour},
+		{name: "a read in the hold, then the hold outlasts the reading", step: time.Hour, readInHold: true},
+		{name: "a read in the hold, then the hold ends", step: 20 * time.Minute, readInHold: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, "acct-a")
+			t0 := time.Now().Truncate(time.Second)
+			e.clock.set(t0)
+			e.start()
+			e.send(msg{Session: sessionID(1)})
+			e.clock.set(t0.Add(20 * time.Minute))
+			if r := e.send(msg{Session: sessionID(1)}); r.Status != http.StatusOK {
+				t.Fatalf("before the step: got %d %q, want 200", r.Status, r.ErrMsg)
+			}
+
+			stepped := t0.Add(20*time.Minute - tc.step)
+			e.clock.set(stepped)
+			if tc.readInHold {
+				if r := e.send(msg{Session: sessionID(1)}); r.Status != http.StatusOK {
+					t.Fatalf("after the step: got %d %q, want 200 on a reading taken after the step", r.Status, r.ErrMsg)
+				}
+			}
+			e.upstream.setUsage("acct-a", usageReply{Status: http.StatusInternalServerError})
+			e.clock.set(stepped.Add(31 * time.Minute))
+			inference := len(e.upstream.inference())
+			r := e.send(msg{Session: sessionID(1)})
+
+			if r.Status != http.StatusServiceUnavailable || !strings.Contains(r.ErrMsg, "fresh reading") {
+				t.Fatalf("got %d %q, want 503 naming the missing fresh reading", r.Status, r.ErrMsg)
+			}
+			if n := len(e.upstream.inference()) - inference; n != 0 {
+				t.Fatalf("%d inference attempts, want none", n)
+			}
+		})
+	}
+}
+
+func TestAfterTheWallClockStepsBackAFutureResetStillMovesTheConversation(t *testing.T) {
+	e := newEnv(t, "acct-a", "acct-b")
+	t0 := time.Now().Truncate(time.Second)
+	e.clock.set(t0)
+	e.start()
+	e.send(msg{Session: sessionID(1)})
+	if got := e.binding(sessionID(1)).Account; got != "acct-a" {
+		t.Fatalf("bound to %s, want acct-a", got)
+	}
+	stepped := t0.Add(-time.Hour)
+	e.clock.set(stepped)
+	var exhausted []reply
+	for range 10 {
+		exhausted = append(exhausted, reply{Status: http.StatusTooManyRequests, Header: exhaustedHeaders(stepped.Add(30 * time.Minute))})
+	}
+	e.upstream.script("acct-a", exhausted...)
+	before := len(e.upstream.accountsServed())
+
+	r := e.send(msg{Session: sessionID(1)})
+
+	served := e.upstream.accountsServed()[before:]
+	if r.Status != http.StatusOK || !slices.Equal(served, []string{"acct-a", "acct-b"}) {
+		t.Fatalf("got %d %q with attempts %v, want 200 after one attempt on acct-a and one on acct-b", r.Status, r.ErrMsg, served)
+	}
+	if got := e.binding(sessionID(1)).Account; got != "acct-b" {
+		t.Fatalf("bound to %s, want acct-b", got)
 	}
 }
