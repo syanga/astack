@@ -262,20 +262,25 @@ func direct(args []string) error {
 		return nextError{err: fmt.Errorf("the Python that installed claude-router is gone: %s", in.Python),
 			next: "./install.sh --component claude-router, from the astack checkout, with a Python 3.10 or later"}
 	}
-	helper := []string{in.Helper, "direct", "--state", in.State, "--manifest", in.Manifest}
-	if *prepare {
-		return exitWith(runHelper(in, append(helper, "--prepare")))
+	lock, err := lockActivation(in.State)
+	if err != nil {
+		return err
 	}
-	switch code, err := runHelper(in, append(helper, "--check")); {
+	defer lock.Close()
+	helper := []string{in.Helper, "direct", "--state", in.State, "--manifest", in.Manifest, "--lock-fd", "3"}
+	if *prepare {
+		return exitWith(runHelper(in, append(helper, "--prepare"), lock))
+	}
+	switch code, err := runHelper(in, append(helper, "--check"), lock); {
 	case err != nil:
 		return err
 	case code == nothingOwned:
-		return exitWith(runHelper(in, helper))
+		return exitWith(runHelper(in, helper, lock))
 	case code != 0:
 		os.Exit(code)
 	}
 	if in.Manager == "foreground" {
-		return exitWith(runHelper(in, helper))
+		return exitWith(runHelper(in, helper, lock))
 	}
 	stopped, err := stopOwn(in, keepOff)
 	if err != nil {
@@ -284,15 +289,34 @@ func direct(args []string) error {
 	if stopped {
 		helper = append(helper, "--stopped")
 	}
-	return exitWith(runHelper(in, helper))
+	return exitWith(runHelper(in, helper, lock))
 }
 
 const nothingOwned = 3
 
-func runHelper(in installation, args []string) (int, error) {
+// lockActivation takes the lock that the helper's activate and direct also take, so that neither runs
+// between direct's check and its apply.
+func lockActivation(state string) (*os.File, error) {
+	f, err := os.OpenFile(filepath.Join(state, "activation.lock"), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, nextError{err: errors.New("another claude-router activate or direct is running"),
+				next: "wait for it to finish, then run again"}
+		}
+		return nil, err
+	}
+	return f, nil
+}
+
+func runHelper(in installation, args []string, lock *os.File) (int, error) {
 	cmd := exec.Command(in.Python, args...)
 	cmd.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1")
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.ExtraFiles = []*os.File{lock}
 	err := cmd.Run()
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {

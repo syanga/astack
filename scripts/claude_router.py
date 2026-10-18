@@ -482,36 +482,39 @@ def direct_backup(manifest_path, filename):
     return manifest_path.parent / "backups" / ("direct-" + digest) / Path(filename).name
 
 
-def direct(state_dir, manifest_path, mode, stopped=False):
+def direct(state_dir, manifest_path, mode, stopped=False, lock_fd=None):
+    try:
+        with ActivationLock(state_dir, lock_fd):
+            return restore_direct(state_dir, manifest_path, mode, stopped)
+    except Refusal as refusal:
+        report("direct", refusal)
+        return 1
+
+
+def restore_direct(state_dir, manifest_path, mode, stopped):
     state = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     owned = state.get("settings", {}).get(NAME, {})
     inventory = router_inventory(state_dir)
     done = "done    clients connect directly; the router stays installed" + (" and stopped" if stopped else "")
     journal = read_journal(state_dir)
-    if journal and journal["phase"] != "active":
+    if journal and (journal["phase"] != "active" or not owned):
+        reason = "interrupted activation" if journal["phase"] != "active" else "activation with no settings record"
         try:
-            settings = undo_interrupted(state_dir, state, manifest_path, check=mode != "apply")
+            settings = undo_journal(state_dir, state, manifest_path, check=mode != "apply")
         except Refusal as refusal:
             report("direct", refusal)
             return 1
         if mode == "check":
             return 0
-        if mode == "prepare":
-            print("restore {} (interrupted activation)".format(shown(settings)))
-            print("keep    " + inventory)
-            print("ready   nothing changed; apply with claude-router direct")
-            return 0
-        print("restore {} (interrupted activation)".format(shown(settings)))
+        print("restore {} ({})".format(shown(settings), reason))
         print("keep    " + inventory)
-        print(done)
+        print("ready   nothing changed; apply with claude-router direct" if mode == "prepare" else done)
         return 0
     if not owned:
         if mode == "check":
             return NOTHING_OWNED
         print("keep    no client settings name the router; " + inventory)
         print("ready   nothing to change")
-        if mode == "apply" and journal:
-            (state_dir / ACTIVATION).unlink()
         return 0
     lines, skipped, pending, others, needs_login = [], [], {}, 0, False
     for filename, record in sorted(owned.items()):
@@ -772,14 +775,34 @@ def write_journal(state_dir, journal):
     files.atomic_write(state_dir / ACTIVATION, (json.dumps(journal, indent=2) + "\n").encode(), 0o600)
 
 
-def undo_interrupted(state_dir, state, manifest_path, check=False):
+class ActivationLock:
+    """Serializes activate and direct. A caller that already holds the lock passes its descriptor."""
+
+    def __init__(self, state_dir, fd=None):
+        self.opened = fd is None
+        self.fd = os.open(str(state_dir / "activation.lock"), os.O_RDWR | os.O_CREAT, 0o600) if fd is None else fd
+        try:
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            self.__exit__()
+            raise Refusal("another claude-router activate or direct is running",
+                          next_step="wait for it to finish, then run again") from None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exception):
+        if self.opened:
+            os.close(self.fd)
+
+
+def undo_journal(state_dir, state, manifest_path, check=False):
     journal = read_journal(state_dir)
-    if not journal or journal["phase"] == "active":
-        return None
     settings = Path(journal["settings"])
     current = file_sha256(settings)
     if current not in (journal["activated_sha256"], journal["original_sha256"]):
-        raise Refusal("{} changed after an interrupted activation".format(shown(settings)),
+        when = "activation" if journal["phase"] == "active" else "an interrupted activation"
+        raise Refusal("{} changed after {}".format(shown(settings), when),
                       ["backup  {}".format(shown(Path(journal["backup"]))) if journal["backup"] else "before  the file did not exist"],
                       "restore the file or remove the router keys, then remove {} (local edits are kept)".format(shown(state_dir / ACTIVATION)))
     original = None
@@ -900,17 +923,24 @@ class Stop:
 
 
 def activate(args, state_root, home, use_env):
+    _, state = load_state(state_root)
+    lay, _ = installed_layout(state, state_root, home)
+    with ActivationLock(lay.state):
+        return activate_locked(args, state_root, home, use_env)
+
+
+def activate_locked(args, state_root, home, use_env):
     manifest_path, state = load_state(state_root)
     lay, record = installed_layout(state, state_root, home)
     check_checkout(lay)
     journal = read_journal(lay.state)
     if journal and journal["phase"] != "active":
         if args.prepare:
-            settings = undo_interrupted(lay.state, state, manifest_path, check=True)
+            settings = undo_journal(lay.state, state, manifest_path, check=True)
             print("undo    an interrupted activation of {}; activate restores it first".format(shown(settings)))
             print("ready   nothing changed; activate without --prepare")
             return 0
-        print("undo    {} restored after an interrupted activation".format(shown(undo_interrupted(lay.state, state, manifest_path))))
+        print("undo    {} restored after an interrupted activation".format(shown(undo_journal(lay.state, state, manifest_path))))
     owned = sorted(state.get("settings", {}).get(NAME, {}))
     if owned:
         raise Refusal("router activation already owns {}".format(", ".join(shown(Path(name)) for name in owned)),
@@ -983,7 +1013,7 @@ def activate(args, state_root, home, use_env):
     failed = verify_wiring(lay, args.verify, args.verify_timeout, stop) or (stop.signal and INTERRUPTED)
     if failed:
         say("claude-router: activate: {}".format(failed), sys.stderr)
-        undo_interrupted(lay.state, state, manifest_path)
+        undo_journal(lay.state, state, manifest_path)
         say("undo    {} restored; the router keeps its logins and assignments".format(shown(settings_path)), sys.stderr)
         say("next    claude-router status", sys.stderr)
         return 1
@@ -1018,6 +1048,7 @@ def main():
     mode.add_argument("--prepare", action="store_true")
     mode.add_argument("--check", action="store_true")
     d.add_argument("--stopped", action="store_true", help="the caller stopped the service")
+    d.add_argument("--lock-fd", type=int, help="a descriptor of the activation lock that the caller holds")
     a = sub.add_parser("activate", help="point Claude Code at the router after acceptance passes")
     i = sub.add_parser("identity", help="print the installation's identity for an acceptance record")
     for p in (a, i):
@@ -1033,7 +1064,7 @@ def main():
     a.add_argument("--prepare", action="store_true", help="show the changes without making them")
     args = parser.parse_args()
     if args.command == "direct":
-        return direct(args.state, args.manifest, "prepare" if args.prepare else "check" if args.check else "apply", args.stopped)
+        return direct(args.state, args.manifest, "prepare" if args.prepare else "check" if args.check else "apply", args.stopped, args.lock_fd)
     home = (args.home or Path.home()).expanduser().resolve()
     use_env = args.home is None
     state_root = env_dir("XDG_STATE_HOME", ".local/state", home, use_env) / "astack"

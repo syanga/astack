@@ -1,4 +1,5 @@
 from contextlib import redirect_stderr, redirect_stdout
+import fcntl
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
@@ -229,10 +230,10 @@ class ActivationFixture(ComponentFixture):
         self.addCleanup(lambda: subprocess.run(["kill", "-9", str(pid)], capture_output=True))
         return pid
 
-    def direct(self, *mode):
+    def direct(self, *mode, **options):
         return subprocess.run([sys.executable, str(self.data / "lib/claude_router.py"), "direct", *mode,
                                "--state", str(self.state_dir), "--manifest", str(self.home / ".local/state/astack/manifest.json")],
-                              capture_output=True, text=True, env=dict(self.env, HOME=str(self.home.resolve())))
+                              capture_output=True, text=True, env=dict(self.env, HOME=str(self.home.resolve())), **options)
 
     def journal(self):
         path = self.state_dir / "activation.json"
@@ -797,18 +798,124 @@ class ActivationTests(ActivationFixture):
         self.assertEqual(self.settings_path.read_bytes(), self.before)
         self.assertIsNone(self.journal())
 
-    def test_direct_without_an_owned_settings_record_removes_the_activation_record(self):
+    def activate_then_lose_the_settings_record(self):
         self.assertEqual(self.run_activate().returncode, 0)
         state_path = self.home / ".local/state/astack/manifest.json"
         state = json.loads(state_path.read_text())
         del state["settings"]
         state_path.write_text(json.dumps(state))
 
-        result = self.direct()
+    def test_direct_without_a_settings_record_restores_the_activation_backup(self):
+        self.activate_then_lose_the_settings_record()
+        self.assertEqual(self.direct("--check").returncode, 0)
+        prepared = self.direct("--prepare")
+        self.assertEqual(prepared.stdout, "restore ~/.claude/settings.json (activation with no settings record)\n"
+                                          "keep    router logins work; 2 assignments\n"
+                                          "ready   nothing changed; apply with claude-router direct\n")
+        self.assertEqual(self.base_url(), self.listen)
+
+        result = self.direct("--stopped")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("keep    no client settings name the router; ", result.stdout)
-        self.assertIsNone(self.journal())
+        self.assertEqual(result.stdout, "restore ~/.claude/settings.json (activation with no settings record)\n"
+                                        "keep    router logins work; 2 assignments\n"
+                                        "done    clients connect directly; the router stays installed and stopped\n")
+        self.assert_direct_and_state_kept()
+
+    def test_direct_without_a_settings_record_refuses_an_edited_file_and_keeps_the_activation_record(self):
+        self.activate_then_lose_the_settings_record()
+        edited = json.loads(self.settings_path.read_text())
+        edited["theme"] = "light"
+        self.settings_path.write_text(json.dumps(edited))
+        kept = self.settings_path.read_bytes()
+
+        for result in (self.direct("--check"), self.direct("--prepare"), self.direct()):
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("claude-router: direct: ~/.claude/settings.json changed after activation\n", result.stderr)
+            self.assertRegex(result.stderr, r"        backup  ~/\.local/state/astack/backups/activate-[0-9a-f]{12}/settings\.json\n")
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(self.settings_path.read_bytes(), kept)
+        self.assertEqual(self.journal()["phase"], "active")
+
+
+LOCKED = "another claude-router activate or direct is running\nnext    wait for it to finish, then run again\n"
+
+
+class OverlapTests(ActivationFixture):
+    def wait_for(self, path, process=None):
+        deadline = time.time() + 30
+        while not path.exists() and (process is None or process.poll() is None) and time.time() < deadline:
+            time.sleep(0.05)
+
+    def start_held_activation(self):
+        ready, gate = self.root / "verifying", self.root / "gate"
+        command = "fake-client {}; touch \"{}\"; while [ ! -e \"{}\" ]; do sleep 0.05; done".format(SESSION, ready, gate)
+        process = self.start_activate((SESSION, command), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: process.poll() is None and process.kill())
+        self.wait_for(ready)
+        self.assertTrue(ready.exists(), "the first activation did not reach verification")
+        return process, gate
+
+    def finish(self, process, gate):
+        gate.touch()
+        out, err = process.communicate(timeout=60)
+        self.assertEqual(process.returncode, 0, err)
+        self.assertEqual(out.splitlines()[-1], "done    clients connect through the router; undo with claude-router direct")
+
+    def assert_routed_and_owned(self):
+        self.assertEqual(self.base_url(), self.listen)
+        self.assertIn("claude-router", self.manifest().get("settings", {}))
+        self.assertEqual(self.journal()["phase"], "active")
+        self.assertEqual(self.direct().returncode, 0)
+        self.assert_direct_and_state_kept()
+
+    def test_an_activation_during_another_s_verification_refuses_without_changes(self):
+        first, gate = self.start_held_activation()
+        self.acceptance.unlink()
+
+        second = self.run_activate()
+
+        self.assertEqual((second.returncode, second.stdout, second.stderr), (1, "", "claude-router: activate: " + LOCKED))
+        self.finish(first, gate)
+        self.assert_routed_and_owned()
+
+    def test_direct_during_an_activation_s_verification_refuses_without_changes(self):
+        first, gate = self.start_held_activation()
+
+        results = [self.direct(*mode) for mode in (("--check",), ("--prepare",), ())]
+
+        for result in results:
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (1, "", "claude-router: direct: " + LOCKED))
+        self.finish(first, gate)
+        self.assert_routed_and_owned()
+
+    def test_a_second_activation_whose_verification_fails_refuses_before_it_touches_the_first(self):
+        first, gate = self.start_held_activation()
+        ready, gate2 = self.root / "verifying 2", self.root / "gate 2"
+        failing = "touch \"{}\"; while [ ! -e \"{}\" ]; do sleep 0.05; done; exit 1".format(ready, gate2)
+        second = self.start_activate((OTHER, failing), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: second.poll() is None and second.kill())
+        self.wait_for(ready, second)
+
+        self.finish(first, gate)
+        gate2.touch()
+        out, err = second.communicate(timeout=60)
+
+        self.assertEqual((second.returncode, out, err), (1, "", "claude-router: activate: " + LOCKED))
+        self.assert_routed_and_owned()
+
+    def test_direct_runs_under_the_lock_its_caller_holds_and_hands_down(self):
+        self.assertEqual(self.run_activate().returncode, 0)
+        fd = os.open(str(self.state_dir / "activation.lock"), os.O_RDWR)
+        self.addCleanup(os.close, fd)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        refused = self.direct()
+        restored = self.direct("--lock-fd", str(fd), pass_fds=(fd,))
+
+        self.assertEqual((refused.returncode, refused.stderr), (1, "claude-router: direct: " + LOCKED))
+        self.assertEqual(restored.returncode, 0, restored.stderr)
+        self.assert_direct_and_state_kept()
 
 
 class InterruptedActivationTests(ActivationFixture):

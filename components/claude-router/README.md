@@ -180,7 +180,8 @@ Further signals do not interrupt the restore. When a command
 ends, activation kills every process in the command's process group. A
 process that starts its own session or group, such as a detached Node child,
 keeps running. Activation prints only each command's program name, never its
-arguments.
+arguments. One activation or `claude-router direct` runs at a time; a second
+one refuses and changes nothing.
 
 Run activation from the checkout that installed the router, or run the
 installed copy, `~/.local/share/astack/claude-router/lib/claude_router.py`.
@@ -203,7 +204,7 @@ undoes an activation that was interrupted. Uninstall refuses until then.
 | `claude-router login -account ID` | Logs in again after a revoked login. It refuses while the service runs, because the service would write its old credential back. Run `stop`, `login`, then `start`. |
 | `claude-router move -conversation HASH -to ID` | Moves a conversation, named by the hash that status shows, to another account. A prefix of 4 or more hex digits works if it matches one conversation. |
 | `claude-router direct -prepare` | Lists the client settings that router activation owns and that `direct` would restore, and the backup it would write. Changes nothing. |
-| `claude-router direct` | Stops the service as `stop` does and restores those client settings, backing each file up to the path that `-prepare` printed. It restores the file of an interrupted activation from its backup; if that file changed since, it refuses before it stops the service, and the edit is kept. Logins, assignments, the binary, and the job stay. A key edited after activation stops it, and the edit is kept. With no client settings to restore, it changes nothing and leaves the service running. A job loaded from another install keeps running, and `direct` does not say the router stopped. |
+| `claude-router direct` | Stops the service as `stop` does and restores those client settings, backing each file up to the path that `-prepare` printed. It restores the file of an interrupted activation, or of an activation whose settings record is gone, from its backup; if that file changed since, it refuses before it stops the service, and the edit is kept. Logins, assignments, the binary, and the job stay. A key edited after activation stops it, and the edit is kept. With no client settings to restore, it changes nothing and leaves the service running. A job loaded from another install keeps running, and `direct` does not say the router stopped. |
 
 Status shows hashes, account names, counters, and times, never a token or a
 prompt. A `direct` backup is a copy of the activated settings file with mode
