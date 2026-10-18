@@ -38,6 +38,8 @@ MANAGERS = ("launchd", "systemd", "foreground")
 CLIENT_KEYS = ("apiKeyHelper", "env.ANTHROPIC_BASE_URL", "env.CLAUDE_CODE_RETRY_WATCHDOG")
 BEFORE_HELPER = ("env.ANTHROPIC_AUTH_TOKEN", "env.ANTHROPIC_API_KEY")
 SECRET_KEY = re.compile(r"TOKEN|KEY|SECRET|PASSWORD", re.IGNORECASE)
+# The service refuses a client token shorter than this (minClientTokenLength in config.go).
+MIN_TOKEN_LENGTH = 32
 HELPER = ("claude_router.py", "astack_files.py", "astack_settings.py")
 
 
@@ -216,6 +218,30 @@ def seed_files(lay):
     config = {"listen": "127.0.0.1:{}".format(lay.port), "state_dir": str(lay.state),
               "client_token_file": str(lay.token), "accounts": []}
     return {str(lay.config): ((json.dumps(config, indent=2) + "\n").encode(), 0o600)}
+
+
+def token_usable(path):
+    return len(path.read_bytes().strip()) >= MIN_TOKEN_LENGTH
+
+
+def publish_token(path):
+    """Write a new client token so that readers see either no file or the whole token."""
+    data = (secrets.token_hex(32) + "\n").encode()
+    fd, temporary = tempfile.mkstemp(prefix=".client-token-", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, str(path))
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    directory = os.open(str(path.parent), os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 def router_running(lay):
@@ -402,9 +428,11 @@ def apply(p, state, state_path, backup_root, dry_run=False):
         if not lay.token.exists():
             print("CREATE {}".format(lay.token))
             if not dry_run:
-                fd = os.open(str(lay.token), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                with os.fdopen(fd, "w") as stream:
-                    stream.write(secrets.token_hex(32) + "\n")
+                publish_token(lay.token)
+        elif not token_usable(lay.token):
+            print("REPLACE {} (fewer than {} characters)".format(lay.token, MIN_TOKEN_LENGTH))
+            if not dry_run:
+                publish_token(lay.token)
         if p.binary_changed and router_running(lay):
             print("RESTART needed to run the new binary: claude-router stop; claude-router start")
     for change in p.settings:

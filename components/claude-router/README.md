@@ -67,6 +67,8 @@ on Linux. It never changes client settings. From the repository root:
 they do for the rest of astack. The commands below default `-state` to the
 state directory above. The installer seeds `config.json` with
 `127.0.0.1:18787` and no accounts, and creates `client-token` with mode 0600.
+It replaces a `client-token` that holds fewer than 32 characters, which the
+router refuses.
 
 To serve on another port, or to install a second copy beside the first, run the
 helper directly with its own service name and port. On macOS, a second copy

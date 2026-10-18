@@ -196,6 +196,45 @@ class ComponentSelectionTests(ComponentFixture):
         self.assertTrue((self.state_dir / "auths/work.json").exists())
 
 
+class TokenCreationTests(ComponentFixture):
+    def test_an_install_interrupted_while_making_the_token_leaves_none_and_the_next_one_makes_it(self):
+        token = self.state_dir / "client-token"
+        module = self.module()
+
+        def interrupted(_nbytes=None):
+            raise KeyboardInterrupt("interrupted while making the token")
+
+        with patch("secrets.token_hex", side_effect=interrupted), self.assertRaises(KeyboardInterrupt):
+            self.run_module(module, {}, "install", "--home", str(self.home), "--component", "claude-router")
+        left = token.exists()
+        result = self.component()
+
+        self.assertFalse(left)
+        self.assertIn("CREATE {}".format(token), result.stdout)
+        self.assertRegex(token.read_text(), r"^[0-9a-f]{64}\n$")
+        self.assertEqual(stat.S_IMODE(token.stat().st_mode), 0o600)
+
+    def test_install_replaces_a_token_the_router_would_refuse(self):
+        token = self.state_dir / "client-token"
+        self.component()
+        for unusable in ("", "  \n", "x" * 31 + "\n"):
+            with self.subTest(unusable=unusable):
+                token.write_text(unusable)
+                token.chmod(0o644)
+                result = self.component()
+                self.assertIn("REPLACE {} (fewer than 32 characters)".format(token), result.stdout)
+                self.assertRegex(token.read_text(), r"^[0-9a-f]{64}\n$")
+                self.assertEqual(stat.S_IMODE(token.stat().st_mode), 0o600)
+
+    def test_install_keeps_a_usable_token_the_user_chose(self):
+        token = self.state_dir / "client-token"
+        self.component()
+        token.write_text("x" * 32 + "\n")
+        result = self.component()
+        self.assertNotIn("REPLACE", result.stdout)
+        self.assertEqual(token.read_text(), "x" * 32 + "\n")
+
+
 class ComponentRemovalTests(ComponentFixture):
     def test_uninstall_stops_the_service_removes_payloads_and_keeps_state(self):
         self.component()

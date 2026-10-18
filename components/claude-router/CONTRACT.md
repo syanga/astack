@@ -782,6 +782,11 @@ PR3 adds the client-facing service in `internal/claude` and the
 
 1. Validate the configuration. `listen` must be a loopback IP and port. The
    client token file must be mode 0600 and hold at least 32 characters.
+   `LoadConfig` resolves a relative `client_token_file` against the
+   directory of the configuration file, so the service and the commands read
+   the same file from any working directory
+   (`TestTheServiceReadsARelativeTokenPathBesideItsConfig`,
+   `TestStatusFromAnotherDirectoryReadsARelativeTokenPathBesideTheConfig`).
 2. Check every enrolled credential, `auths/<id>.json` in the state directory.
    It must be a Claude credential with an access token and mode 0600. After
    `coreauth.NormalizeCredentialMetadata` rewrites aliases such as `proxy-url`,
@@ -1535,7 +1540,7 @@ claude-router` call it with the default layout. The default targets and
 | Prerequisites | Go 1.26.0 or later. `go env` must report the host's OS and architecture for both target and host; cross-compilation settings, an older Go, an unsupported OS, or a failed build stop the run before any write. |
 | Payload | `$XDG_DATA_HOME/astack/claude-router/bin/claude-router` and the helper with its imports in `lib/`. Both are copies, so a moved checkout leaves them runnable. |
 | Descriptor | launchd: `~/Library/LaunchAgents/<service>.plist`. systemd: `$XDG_CONFIG_HOME/systemd/user/<service>.service`. Both run `serve -supervised -config <state>/config.json` with `HOME` set to the installer's home and the state directory as working directory. |
-| State | `$XDG_STATE_HOME/astack/claude-router`, mode 0700. `config.json` and `client-token` are created once, when missing, and never rewritten. `service.json` records the manager, service name, descriptor, configuration, helper, the Python that ran the installer, and astack manifest for the command. |
+| State | `$XDG_STATE_HOME/astack/claude-router`, mode 0700. `config.json` is created once, when missing, and never rewritten. `client-token` is created when missing, and replaced when it holds fewer than 32 characters, which the service refuses; install prints `REPLACE <path> (fewer than 32 characters)`. The helper writes the token to a temporary file in the state directory at mode 0600, syncs it, and renames it into place, so an interrupted install leaves no partial token (`TokenCreationTests`). `service.json` records the manager, service name, descriptor, configuration, helper, the Python that ran the installer, and astack manifest for the command. |
 | Ownership record | `components.claude-router` in the astack manifest: the layout, a fingerprint per managed file, the fingerprints of created seeds, the commit, and `pending`. It holds no secret. |
 | Interruption | Before each write, the helper records the file's expected fingerprint in `pending` and saves the manifest. A rerun adopts a pending file that holds that fingerprint. Other interruptions leave a file the next run reports as a conflict. The installer is not a transaction. |
 | Conflicts | An unmanaged or locally modified payload, descriptor, or `service.json` stops install and uninstall; `--force` moves it to `backups/<id>/` first. A component path that a harness target manages is refused. A changed data, state, or descriptor location needs an uninstall first. |
