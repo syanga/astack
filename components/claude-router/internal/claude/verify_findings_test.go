@@ -202,11 +202,11 @@ func (c *countingRT) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func TestTransportCapsAttemptsAndRefusesAnotherAccount(t *testing.T) {
 	inner := &countingRT{}
-	tr := newTransport(inner, nil, defaultMaxAttempts, []router.Account{{ID: "acct-a", Capacity: 1}, {ID: "acct-b", Capacity: 1}}, time.Now, nil)
+	tr := newTransport(inner, nil, defaultMaxAttempts, []router.Account{{ID: "acct-a", Capacity: 1}, {ID: "acct-b", Capacity: 1}}, time.Now, nil, nil)
 	budget := &atomic.Int32{}
 	u, _ := url.Parse("https://api.anthropic.com/v1/messages")
 	send := func(account router.AccountID) error {
-		ctx := withCall(t.Context(), "c1", "acct-a", budget)
+		ctx := withCall(t.Context(), "c1", "acct-a", "claude-sonnet-4-5-20250929", budget)
 		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), nil)
 		_, err := tr.roundTrip(account, req)
 		return err

@@ -361,6 +361,23 @@ func (r *Router) ObserveOverage(account AccountID, state Overage, at time.Time) 
 	}
 }
 
+// Admit returns why an inference attempt for model must not be sent to
+// account now, or "" when it may be. It refuses what Decide would not
+// dispatch to on the account: a needed login, paid use, a rejection that
+// applies to the model, and paid overflow not verified disabled within
+// OverageFreshFor. It reads under the lock that Observe, ObserveOverage, and
+// Report write under, so an attempt admitted after one of them recorded a
+// blocking observation is refused.
+func (r *Router) Admit(now time.Time, account AccountID, model string) Reason {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	idx, ok := r.index[account]
+	if !ok {
+		return ReasonNotEnrolled
+	}
+	return admissionBar(r.cfg, now, r.accounts[idx], model)
+}
+
 // BlockedUntil reports whether a known rejection blocks the model on an
 // account, and until when. Known is false when the reset is only a recheck
 // time for a rejection without a reported reset.

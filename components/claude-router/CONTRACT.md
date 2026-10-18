@@ -126,7 +126,9 @@ Limits of this posture:
   settings say (`conductor_stream.go:253-263`, `conductor_execution.go:606-612`
   and `:818-824`, gated by `conductor_refresh.go:514-532`). Proxy-owned OAuth
   logins have refresh tokens. One attempt per call holds only for credentials
-  without one (rows RP-5 and RP-5b). Pinning holds either way.
+  without one (rows RP-5 and RP-5b). Pinning holds either way, and the
+  redispatch passes the router's admission check like any other attempt
+  (Routing loop).
 - **Credentials can override the posture.** Credential metadata can override
   the global retry and cooling settings (`sdk/cliproxy/auth/types.go:466-483`
   and `:503-526`). PR3 refuses to enroll a credential file that carries such
@@ -436,7 +438,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | ID | Contract behavior | Status | Evidence | Owner |
 | --- | --- | --- | --- | --- |
 | IO-5 | The remaining guarantee limit is stated | passed | `included-only.json`, `guarantee_limit`; "Included-only: the documented limit is accepted" above | PR1 |
-| IO-6 | The router refuses unknown or stale overage state and stops routing on observed paid use | passed | `TestUnknownOverageStateRefusesDispatch`, `TestAnAccountWithUnknownStateIsSkippedForPlacement`, `TestEnabledOverflowRefusesDispatch`, `TestStaleReadingIsRecheckedBeforeDispatch`, `TestResponseHeadersRefreshTheReading`, `TestPaidUseStopsRoutingToTheAccount`, `TestPaidUseWithoutAnotherAccountRefuses`. Paid-use detection needs every attempt to pass the router's transport: `TestCredentialsThatChangeTheUpstreamPathAreRefused` refuses a credential proxy or header override, and `TestTransportCapsAttemptsAndRefusesAnotherAccount` refuses an off-pin attempt; lane 2 `unsafe_account_not_placed`, `paid_use_stops_routing` (`evidence/PR3/lane-2/controls.json`). Controlled upstream only; the real usage endpoint is IO-4. | PR3 |
+| IO-6 | The router refuses unknown or stale overage state and stops routing on observed paid use | passed | `TestUnknownOverageStateRefusesDispatch`, `TestAnAccountWithUnknownStateIsSkippedForPlacement`, `TestEnabledOverflowRefusesDispatch`, `TestStaleReadingIsRecheckedBeforeDispatch`, `TestResponseHeadersRefreshTheReading`, `TestPaidUseStopsRoutingToTheAccount`, `TestPaidUseWithoutAnotherAccountRefuses`, `TestRefreshRedispatchIsRefusedAfterABlockingObservation`. Paid-use detection needs every attempt to pass the router's transport: `TestCredentialsThatChangeTheUpstreamPathAreRefused` refuses a credential proxy or header override, and `TestTransportCapsAttemptsAndRefusesAnotherAccount` refuses an off-pin attempt; lane 2 `unsafe_account_not_placed`, `paid_use_stops_routing` (`evidence/PR3/lane-2/controls.json`). Controlled upstream only; the real usage endpoint is IO-4. | PR3 |
 
 ### Waiting and cancellation
 
@@ -632,7 +634,9 @@ the check or response.
   `overage_observed` when another account is eligible. If none is, it waits
   for the earliest usable reset elsewhere or is refused with
   `paid_use_observed`, and keeps its assignment. New conversations skip the
-  account. A migrated conversation does not return.
+  account. A migrated conversation does not return. While recorded paid use
+  is in force, the transport sends the account no attempt, including the
+  SDK's redispatch of a request that was waiting on a refresh.
 - **Ordering.** The router records the latest check (`disabled` or
   `enabled`) and, separately, the latest paid use, each with its time. A
   check stamped before the latest recorded check is ignored. Of two checks
@@ -867,6 +871,19 @@ the call, all on the pinned account, and otherwise answers 502.
 `max_upstream_attempts` lowers the cap to 1, 2, or 3. With 1 the router
 never retries, so upstream attempts equal client requests; the live lane
 uses this (`TestASingleAttemptCapNeverRetries`).
+
+The transport also refuses any attempt, the SDK's refresh redispatch
+included, on an account the router would not dispatch to at that moment
+(`Router.Admit`): the account needs a login, showed paid use, has a rejection
+that applies to the model, or has no `disabled` check within
+`OverageFreshFor`. `Admit` reads under the lock that records observations.
+An attempt that reaches the transport after a blocking observation is
+recorded is refused, and one admitted before it is in flight. After the
+refusal the service logs `attempt_refused`, reports no failure to the router,
+and decides again, so the client gets the answer from the table above: a
+migration, the local 429, or the 503 that names paid use
+(`TestRefreshRedispatchIsRefusedAfterABlockingObservation`,
+`TestRefusedRedispatchMovesTheConversationAfterPaidUse`).
 
 The cap is per client HTTP request. Every router-made HTTP failure answer
 carries `x-should-retry: false`, which a client honors. Two answers do not
@@ -1207,7 +1224,7 @@ tested offline. PR1 lane 4 (CC-1) measures cache reads with real requests.
 ### Events and status
 
 `events.jsonl` in the state directory holds one JSON object per event:
-`request`, `attempt_failed`, `migrated`, `served`, `paid_use_observed`,
+`request`, `attempt_failed`, `attempt_refused`, `migrated`, `served`, `paid_use_observed`,
 `overage_read`, `client_auth_rejected`, `request_rejected`, `started`,
 `stopped`, `test_upstream_in_use`, and `refresh_guard_replaced`. Events carry account IDs, the first 12
 hex digits of the SHA-256 of the conversation key, statuses, classes,

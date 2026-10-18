@@ -26,18 +26,20 @@ type attempt struct {
 	Header  http.Header
 	Err     error
 	Refused string
+	Bar     router.Reason
 }
 
 type callInfo struct {
 	id      string
 	account router.AccountID
+	model   string
 	budget  *atomic.Int32
 }
 
 type callKey struct{}
 
-func withCall(ctx context.Context, id string, account router.AccountID, budget *atomic.Int32) context.Context {
-	return context.WithValue(ctx, callKey{}, callInfo{id: id, account: account, budget: budget})
+func withCall(ctx context.Context, id string, account router.AccountID, model string, budget *atomic.Int32) context.Context {
+	return context.WithValue(ctx, callKey{}, callInfo{id: id, account: account, model: model, budget: budget})
 }
 
 // transport is the round tripper the SDK uses for every upstream request.
@@ -50,6 +52,7 @@ type transport struct {
 	redirect *url.URL
 	limit    int32
 	accounts map[string]router.AccountID
+	admit    func(account router.AccountID, model string) router.Reason
 	onHeader func(account router.AccountID, h http.Header, start, at time.Time)
 	now      func() time.Time
 
@@ -57,8 +60,8 @@ type transport struct {
 	calls map[string][]attempt
 }
 
-func newTransport(inner http.RoundTripper, redirect *url.URL, limit int, accounts []router.Account, now func() time.Time, onHeader func(router.AccountID, http.Header, time.Time, time.Time)) *transport {
-	t := &transport{inner: inner, redirect: redirect, limit: int32(limit), accounts: map[string]router.AccountID{}, now: now, onHeader: onHeader, calls: map[string][]attempt{}}
+func newTransport(inner http.RoundTripper, redirect *url.URL, limit int, accounts []router.Account, now func() time.Time, admit func(router.AccountID, string) router.Reason, onHeader func(router.AccountID, http.Header, time.Time, time.Time)) *transport {
+	t := &transport{inner: inner, redirect: redirect, limit: int32(limit), accounts: map[string]router.AccountID{}, now: now, admit: admit, onHeader: onHeader, calls: map[string][]attempt{}}
 	for _, a := range accounts {
 		t.accounts[string(a.ID)+".json"] = a.ID
 	}
@@ -115,10 +118,15 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 	info, _ := req.Context().Value(callKey{}).(callInfo)
 	call := info.id
 	a := attempt{Account: account, Path: req.URL.Path, Start: t.now()}
-	switch {
-	case info.account != "" && info.account != account:
+	if info.account != "" && info.account != account {
 		a.Refused = "account"
-	case info.budget != nil && info.budget.Add(1) > t.limit:
+	}
+	if a.Refused == "" && call != "" && t.admit != nil {
+		if a.Bar = t.admit(account, info.model); a.Bar != "" {
+			a.Refused = "ineligible"
+		}
+	}
+	if a.Refused == "" && info.budget != nil && info.budget.Add(1) > t.limit {
 		a.Refused = "budget"
 	}
 	if a.Refused != "" {

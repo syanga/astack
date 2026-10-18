@@ -99,6 +99,7 @@ type outcome struct {
 	Delivered    bool
 	ClientGone   bool
 	Violation    string
+	Ineligible   router.Reason
 	ServedFailed bool
 	Status       int
 	Err          error
@@ -220,6 +221,9 @@ func (s *Service) messages(c *gin.Context) {
 			finish("request", account, d, http.StatusServiceUnavailable, &out)
 			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: assignment journal unavailable; restart the router")
 			return
+		case out.Ineligible != "":
+			s.events.emit(Event{Kind: "attempt_refused", Conversation: conv, Account: account, Reason: string(out.Ineligible)})
+			continue
 		}
 		if budget.Load() > s.transport.limit {
 			finish("request", account, router.Decision{Kind: router.Fail, Reason: router.ReasonRetryBudget}, http.StatusServiceUnavailable, &out)
@@ -361,7 +365,7 @@ func (s *Service) dispatch(c *gin.Context, call, authID string, account router.A
 	api := claudehandlers.NewClaudeCodeAPIHandler(s.base)
 	ctx, cancel := s.base.GetContextWithCancel(api, c, context.Background())
 	ctx = handlers.WithPinnedAuthID(ctx, authID)
-	ctx = withCall(ctx, call, account, budget)
+	ctx = withCall(ctx, call, account, id.Model, budget)
 	defer s.transport.forget(call)
 	var out outcome
 	if id.Stream {
@@ -374,6 +378,9 @@ func (s *Service) dispatch(c *gin.Context, call, authID string, account router.A
 	for _, a := range s.transport.attempts(call) {
 		if a.Refused == "account" && out.Violation == "" {
 			out.Violation = "the SDK attempted another account than the pinned one"
+		}
+		if a.Refused == "ineligible" {
+			out.Ineligible = a.Bar
 		}
 		if a.Refused == "" {
 			sent = append(sent, a)
