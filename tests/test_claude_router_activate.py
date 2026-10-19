@@ -271,6 +271,14 @@ class ActivationFixture(ComponentFixture):
         self.addCleanup(lambda: subprocess.run(["kill", "-9", str(pid)], capture_output=True))
         return pid
 
+    def gone(self, pid):
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip() in ("", "Z"):
+                return True
+            time.sleep(0.05)
+        return False
+
     def direct(self, *mode, **options):
         return subprocess.run([sys.executable, str(self.data / "lib/claude_router.py"), "direct", *mode,
                                "--state", str(self.state_dir), "--manifest", str(self.home / ".local/state/astack/manifest.json")],
@@ -405,6 +413,18 @@ class ActivationTests(ActivationFixture):
                 self.assertIn(line + "\ncheck     failed\n", result.stdout)
                 self.assertEqual(result.stderr, UNDONE)
                 self.assert_direct_and_state_kept()
+
+    def test_a_check_that_cannot_read_the_events_restores_the_direct_settings(self):
+        self.events.touch()
+        self.events.chmod(0o200)
+        self.addCleanup(self.events.chmod, 0o600)
+
+        result = self.run_activate(verify=())
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertRegex(result.stderr, r"^claude-router: activate: the check could not finish: \[Errno 13\] Permission denied: '[^']*events\.jsonl'\n")
+        self.assertTrue(result.stderr.endswith(UNDONE), result.stderr)
+        self.assert_direct_and_state_kept()
 
     def test_activation_on_another_platform_than_the_record_s_names_both(self):
         host = "{}/{}".format(*self.router().host_platform())
@@ -601,14 +621,6 @@ class ActivationTests(ActivationFixture):
                 if expected_exit == 0:
                     self.assertEqual(self.direct().returncode, 0)
                 self.assert_direct_and_state_kept()
-
-    def gone(self, pid):
-        deadline = time.time() + 5
-        while time.time() < deadline:
-            if subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip() in ("", "Z"):
-                return True
-            time.sleep(0.05)
-        return False
 
     def sleeper(self, name):
         pidfile = self.root / "{}.pid".format(name)
@@ -1363,3 +1375,53 @@ class UpdateOverActivationTests(ActivationFixture):
         self.assertIn("astack: the updated router failed its check; Claude Code connects directly\n", result.stderr)
         self.assertEqual(self.router_log.read_text(), "stop -state {0}\nstart -state {0}\nstop -state {0}\n".format(self.state_dir))
         self.assert_direct_and_state_kept()
+
+    def prepare_update(self, check_passes=True):
+        self.fake_router.status["binary_sha256"] = self.binary_sha256
+        self.assertEqual(self.run_activate().returncode, 0)
+        self.router_log.write_text("")
+        (self.repo / "components/claude-router/accepted.json").write_text(self.acceptance.read_text())
+        if check_passes:
+            self.fake_router.status["binary_sha256"] = hashlib.sha256(
+                b"#!/bin/sh\n# build 2\nprintf '%s\\n' \"$*\" >> \"$FAKE_ROUTER_LOG\"\n").hexdigest()
+
+    def test_an_update_that_fails_to_stop_start_or_check_the_router_connects_clients_directly(self):
+        for step in ("stop", "start", "check", "stop after a failed check"):
+            with self.subTest(step):
+                self.prepare_update(check_passes=step != "stop after a failed check")
+                module = self.module()
+                helper = module.claude_router
+                service_command, stops = helper.service_command, []
+
+                def failing_command(lay, *arguments):
+                    stops.append(arguments[0])
+                    if (step, arguments[0]) in (("stop", "stop"), ("start", "start")) or (
+                            step == "stop after a failed check" and stops.count("stop") == 2):
+                        raise ValueError("claude-router {} failed: injected".format(arguments[0]))
+                    service_command(lay, *arguments)
+
+                def failing_check(*arguments):
+                    raise OSError("events.jsonl unreadable")
+
+                with patch.object(helper, "service_command", failing_command), \
+                        patch.object(helper, "run_check", failing_check if step == "check" else helper.run_check), \
+                        self.assertRaisesRegex(ValueError, "Claude Code connects directly$"):
+                    self.run_module(module, {"FAKE_BUILD": "2", "HOME": str(self.home.resolve())},
+                                    "install", "--home", str(self.home), "--component", "claude-router")
+
+                self.assert_direct_and_state_kept()
+                self.component()
+
+    def test_a_dry_run_over_an_activated_router_prints_what_the_install_then_does(self):
+        self.prepare_update()
+
+        preview = self.component("--dry-run", FAKE_BUILD="2")
+        self.assertEqual(self.router_log.read_text(), "")
+        result = self.component(FAKE_BUILD="2")
+
+        lines = preview.stdout.splitlines()
+        self.assertEqual(lines[-3:], ["RESTART {} dev.astack.claude-router".format(self.manager_name),
+                                      "CHECK claude-router check; claude-router direct if it fails",
+                                      "Preview complete for claude-router."])
+        self.assertEqual(result.stdout.splitlines()[:len(lines) - 1], lines[:-1])
+        self.assertIn("check     passed\n", result.stdout)

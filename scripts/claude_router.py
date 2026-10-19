@@ -531,7 +531,7 @@ def apply(p, state, state_path, backup_root, dry_run=False):
             print("CHMOD {} 0600 (was {:04o})".format(lay.token, mode))
             if not dry_run:
                 lay.token.chmod(0o600)
-    activated = p.command == "install" and not dry_run and is_activated(lay.state, state)
+    activated = p.command == "install" and is_activated(lay.state, state)
     if p.command == "install" and p.binary_changed and router_running(lay) and not activated:
         print("RESTART needed to run the new binary: claude-router stop; claude-router start")
     for change in p.settings:
@@ -554,7 +554,11 @@ def apply(p, state, state_path, backup_root, dry_run=False):
         record["go"] = p.go
     save()
     if activated and any(action == "write" for _, action, *_ in p.operations):
-        recheck(p, state, state_path)
+        if p.binary_changed and lay.manager != "foreground":
+            print("RESTART {} {}".format(lay.manager, lay.service))
+        print("CHECK claude-router check; claude-router direct if it fails")
+        if not dry_run:
+            recheck(p, state, state_path)
 
 
 def is_activated(state_dir, state):
@@ -570,19 +574,42 @@ def service_command(lay, *arguments):
 
 def recheck(p, state, state_path):
     lay = p.lay
-    if p.binary_changed and lay.manager != "foreground":
-        service_command(lay, "stop")
-        service_command(lay, "start")
-    journal = read_journal(lay.state)
-    record_path = lay.data / ACCEPTED
-    if run_check(lay, state, Path(journal["settings"]), read_record(record_path), record_path, "claude", CHECK_TIMEOUT, Stop()) is None:
+    supervised = lay.manager != "foreground"
+    stop = Stop()
+    stop.install()
+    try:
+        failure = recheck_failure(p, state, stop)
+    finally:
+        stop.uninstall()
+    if failure is None:
         return
-    if lay.manager != "foreground":
-        service_command(lay, "stop")
-    if direct(lay.state, state_path, "apply", stopped=lay.manager != "foreground") != 0:
-        raise ValueError("the updated router failed its check, and claude-router direct did not finish; run claude-router direct")
+    stopped = False
+    if supervised:
+        try:
+            service_command(lay, "stop")
+            stopped = True
+        except (OSError, ValueError) as error:
+            say("claude-router: {}".format(error), sys.stderr)
+    if direct(lay.state, state_path, "apply", stopped=stopped) != 0:
+        raise ValueError(failure + ", and claude-router direct did not finish; run claude-router direct")
     say(CHECK_LINE.format("next", "claude-router check"))
-    raise ValueError("the updated router failed its check; Claude Code connects directly")
+    raise ValueError(failure + "; Claude Code connects directly")
+
+
+def recheck_failure(p, state, stop):
+    lay = p.lay
+    try:
+        if p.binary_changed and lay.manager != "foreground":
+            service_command(lay, "stop")
+            service_command(lay, "start")
+        journal = read_journal(lay.state)
+        record_path = lay.data / ACCEPTED
+        result = run_check(lay, state, Path(journal["settings"]), read_record(record_path), record_path, "claude", CHECK_TIMEOUT, stop)
+    except (OSError, ValueError, KeyError) as error:
+        return "the update could not check the router ({})".format(error)
+    if result is None:
+        return None
+    return "the update was interrupted" if result == INTERRUPTED else "the updated router failed its check"
 
 
 def shown(path):
@@ -901,9 +928,14 @@ def run_check(lay, state, settings_path, accepted, record_path, claude, timeout,
         line("ok", "router running on {} ({})".format(listen, lay.manager))
     names = [account["id"] for account in config.get("accounts") or []]
     seen = {account.get("id"): account for account in (status or {}).get("accounts") or []}
-    if status is not None and not names:
+    stopped = "not read while the router is stopped"
+    if status is None:
+        line("skip", "accounts, " + stopped)
+        line("skip", "paid overflow, " + stopped)
+    elif not names:
         line("fail", "no accounts in config.json", next_step="claude-router setup")
-    elif status is not None:
+        line("skip", "paid overflow, no accounts to read")
+    else:
         unready = [name for name in names if not seen.get(name, {}).get("registered") or seen[name].get("needs_login")]
         if unready:
             line("fail", "{} not signed in".format(joined(unready)), next_step="claude-router status")
@@ -928,7 +960,9 @@ def run_check(lay, state, settings_path, accepted, record_path, claude, timeout,
     if accepted is None:
         line("fail", "no accepted record at {}".format(shown(record_path)),
              next_step="install a checkout whose accepted.json matches its code")
-    elif status is not None:
+    elif status is None:
+        line("skip", "accepted record, not compared while the router is stopped")
+    else:
         found = mismatches(accepted, measure(lay, state.get("components", {}).get(NAME, {}), status))
         where = " ({})".format(accepted["platform"]) if isinstance(accepted.get("platform"), str) else ""
         if found:
@@ -1176,6 +1210,7 @@ def verify_wiring(lay, checks, timeout, stop):
 
 STOPS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 INTERRUPTED = "verification was interrupted"
+CHECK_FAILED = "the check failed"
 
 
 class Stop:
@@ -1196,9 +1231,14 @@ class Stop:
                 pass
 
     def install(self):
-        for signum in STOPS:
-            if signal.getsignal(signum) is not signal.SIG_IGN:
+        self.saved = {signum: signal.getsignal(signum) for signum in STOPS}
+        for signum, handler in self.saved.items():
+            if handler is not signal.SIG_IGN:
                 signal.signal(signum, self)
+
+    def uninstall(self):
+        for signum, handler in self.saved.items():
+            signal.signal(signum, handler)
 
 
 def activate(args, state_root, home, use_env):
@@ -1294,16 +1334,15 @@ def activate_locked(args, state_root, home, use_env):
     with redirect_stdout(io.StringIO()):
         change.apply(state, manifest_path, manifest_path.parent / "backups" / uuid.uuid4().hex)
     write_journal(lay.state, dict(journal, phase="verifying"))
-    failed = verify_wiring(lay, args.verify, args.verify_timeout, stop) or (stop.signal and INTERRUPTED)
-    if not failed and run_check(lay, state, settings_path, accepted, acceptance, str(args.claude), CHECK_TIMEOUT, stop) is not None:
-        failed = INTERRUPTED if stop.signal else "the check failed"
-    if failed == "the check failed":
-        undo_journal(lay.state, state, manifest_path)
-        say("undo    {} restored; the router keeps its logins and assignments".format(shown(settings_path)), sys.stderr)
-        say("next    claude-router status", sys.stderr)
-        return 1
+    try:
+        failed = verify_wiring(lay, args.verify, args.verify_timeout, stop) or (stop.signal and INTERRUPTED)
+        if not failed and run_check(lay, state, settings_path, accepted, acceptance, str(args.claude), CHECK_TIMEOUT, stop) is not None:
+            failed = INTERRUPTED if stop.signal else CHECK_FAILED
+    except (OSError, ValueError, KeyError) as error:
+        failed = "the check could not finish: {}".format(error)
     if failed:
-        say("claude-router: activate: {}".format(failed), sys.stderr)
+        if failed != CHECK_FAILED:
+            say("claude-router: activate: {}".format(failed), sys.stderr)
         undo_journal(lay.state, state, manifest_path)
         say("undo    {} restored; the router keeps its logins and assignments".format(shown(settings_path)), sys.stderr)
         say("next    claude-router status", sys.stderr)
@@ -1336,9 +1375,13 @@ def check(args, state_root, home, use_env):
     journal = read_journal(lay.state)
     settings_path = args.settings or (Path(journal["settings"]) if journal else default_settings(home, use_env))
     record_path = args.acceptance or lay.data / ACCEPTED
+    stop = Stop()
+    stop.install()
     next_step = run_check(lay, state, settings_path.absolute(), read_record(record_path), record_path, str(args.claude),
-                          args.timeout, Stop())
-    if next_step:
+                          args.timeout, stop)
+    if next_step == INTERRUPTED:
+        say(CHECK_LINE.format("check", "interrupted"))
+    elif next_step:
         say(CHECK_LINE.format("next", next_step))
     return 0 if next_step is None else 1
 
@@ -1370,14 +1413,14 @@ def main():
     a = sub.add_parser("activate", help="point Claude Code at the router after acceptance passes")
     i = sub.add_parser("identity", help="print the installation's identity for an acceptance record")
     c = sub.add_parser("check", help="check that Claude Code routes through the router and send one test message")
-    for p in (a, i, c):
-        p.add_argument("--home", type=Path, help="alternate home; ignores configuration environment overrides")
+    i.add_argument("--home", type=Path, help="alternate home; ignores configuration environment overrides")
     for p in (a, c):
+        where = p.add_mutually_exclusive_group()
+        where.add_argument("--home", type=Path, help="alternate home; ignores configuration environment overrides")
+        where.add_argument("--manifest", type=Path, help="the astack manifest that records the installation; default from --home")
         p.add_argument("--claude", type=Path, default=Path("claude"), help="the Claude Code command that sends the test message")
         p.add_argument("--acceptance", type=Path, help="the acceptance record; default the installed accepted.json")
         p.add_argument("--settings", type=Path, help="Claude settings file; default $CLAUDE_CONFIG_DIR or ~/.claude, then settings.json")
-    for p in (a, c):
-        p.add_argument("--manifest", type=Path, help="the astack manifest that records the installation; default from --home")
     c.add_argument("--timeout", type=int, default=CHECK_TIMEOUT, help="seconds the test message may take")
     i.add_argument("--claude", type=Path, help="the terminal Claude Code executable to record")
     i.add_argument("--agent-sdk", type=Path, help="the installed @anthropic-ai/claude-agent-sdk package directory")

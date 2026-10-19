@@ -1863,7 +1863,7 @@ claude-router` call it with the default layout. The default targets and
 | Ownership record | `components.claude-router` in the astack manifest: the layout, a fingerprint per managed file, the fingerprints of created seeds, the commit, the router code digest as `code_sha256`, the Go version as `go`, and `pending`. It holds no secret. |
 | Interruption | Before each write, the helper records the file's expected fingerprint in `pending` and saves the manifest. A rerun adopts a pending file that holds that fingerprint. Other interruptions leave a file the next run reports as a conflict. The installer is not a transaction. |
 | Conflicts | An unmanaged or locally modified payload, descriptor, or `service.json` stops install and uninstall; `--force` moves it to `backups/<id>/` first. A component path that a harness target manages is refused. A changed data, state, or descriptor location needs an uninstall first. |
-| Update | A changed binary is replaced. A running service keeps the old binary until `stop` and `start`, and the installer prints that. When router activation is `active` and the install writes any managed file, the installer instead runs the installed `claude-router stop` and `start` when the binary changed, then `check`. When `check` fails, it runs `stop` and the helper's `direct`, prints `next      claude-router check` after the check lines, which name the record mismatch, and exits 1 with `astack: the updated router failed its check; Claude Code connects directly` (`test_an_update_restarts_an_activated_router_and_keeps_it_active_when_check_passes`, `test_an_update_whose_check_fails_connects_clients_directly`). |
+| Update | A changed binary is replaced. A running service keeps the old binary until `stop` and `start`, and the installer prints that. When router activation is `active` and the install writes any managed file, the installer instead prints `RESTART <manager> <label>` when the binary changed and `CHECK claude-router check; claude-router direct if it fails`, then runs the installed `claude-router stop` and `start` when the binary changed, then `check` with the signal handling of activation. A preview prints the same lines and runs nothing (`test_a_dry_run_over_an_activated_router_prints_what_the_install_then_does`). When `check` fails, or `stop`, `start`, or `check` raises, it runs `stop` and the helper's `direct`, prints `next      claude-router check`, and exits 1 with `astack: <reason>; Claude Code connects directly`. The reason is `the updated router failed its check`, after check lines that name the record mismatch; `the update was interrupted`; or `the update could not check the router (<error>)`. A `stop` that fails before `direct` prints its error and `direct` runs without claiming the router stopped (`test_an_update_restarts_an_activated_router_and_keeps_it_active_when_check_passes`, `test_an_update_whose_check_fails_connects_clients_directly`, `test_an_update_that_fails_to_stop_start_or_check_the_router_connects_clients_directly`). |
 | Service name | Installs in different homes that use one `--service` name share one launchd label or systemd unit name. `start`, `stop`, `direct`, and uninstall act on a loaded job only when its descriptor is this installation's: launchd's `path` from `launchctl print`, or systemd's `FragmentPath`, compared after resolving symlinks. On a mismatch, `start` refuses and `stop` leaves the other job running and says so (`TestStopAndStartLeaveAJobLoadedFromAnotherHome`, `TestSystemdStopAndStartActOnlyOnTheirOwnUnit`, `TestStopActsOnItsOwnJobLoadedThroughASymlink`). |
 | Off until start | `stop` and `direct` keep the router off until `claude-router start`, across logins and reboots. launchd: `launchctl disable`, which persists a per-label override, so launchd neither loads the plist at login nor accepts a `bootstrap` (it fails with error 5), then `bootout` of this installation's loaded job. A disable leaves a loaded job running until the `bootout`, and it comes first, so a `stop` that fails or is killed between the two calls still leaves the job off at login (`TestAStopWhoseBootoutFailsStillKeepsTheJobOffAtLogin`). `start` runs `launchctl enable` when the label is disabled, then `bootstrap` or `kickstart`. systemd: `disable` then `stop`, for the same reason (`TestASystemdStopWhoseStopFailsStillKeepsTheUnitOffAtLogin`); `start` runs `enable` then `start`. When the router already answers, as after such a failed `stop`, `start` still turns the switch on before it prints `router  running` (`TestStartTurnsTheSwitchOnWhenTheRouterStillRunsAfterAFailedStop`). Uninstall runs `stop -uninstall`: launchd boots out this installation's job and runs `enable` when the label is disabled, also while another home's job holds the label, which leaves an `enabled` override entry that blocks nothing (launchctl has no verb that deletes the entry); systemd stops and disables the unit, which removes its `default.target.wants` link (`TestStopKeepsTheJobOffAcrossLoginsUntilStart`, `TestSystemdStopDisablesAndStartEnablesOnlyItsOwnUnit`). `start` and uninstall leave a switch that another installation owns as it is (Shared label switch, below). The systemd side is unit-tested against a fake `systemctl` only, in Go and in Python (`TestAccountAddOnSystemdStopsAndStartsItsOwnUnit`, `test_systemd_install_writes_a_user_unit_and_uninstall_stops_it`, `test_on_linux_activation_reads_the_systemd_user_environment`). Linux is not yet tested on real Linux. |
 | Shared label switch | The launchd override is per label, not per plist. The installation whose plist is `<label>.plist` in the account's login directory, `~/Library/LaunchAgents` of the home in the user database (not `$HOME`), owns it. Another installation with that label never disables or enables it: its `stop` boots out only its own loaded job and leaves the label on, and its plist, outside the login directory, never loads at login anyway. Its `start` refuses while the label is disabled, with `<label> is turned off for the installation at <path>` and `next    run claude-router start for that installation, or install this one with another --service`; when its router already answers, `start` prints `router  running` and leaves the label off (`TestStartOfAnotherInstallationsRunningRouterLeavesTheOwnersSwitchOff`). Its uninstall leaves the label as it is (`TestStopAndStartLeaveTheLoginSwitchOfAnotherInstallation`, `TestAnotherInstallationsUninstallLeavesTheOwnersSwitchOn`). The owner's `stop` and `direct` disable the label even while another installation's job holds it: they leave that job running and print `router  not stopped: <label> is loaded from <path>, not from this installation; left running`, then `        this installation stays off until claude-router start` (`TestTheLoginOwnersStopTurnsItsSwitchOffWhileAnotherHomesJobRuns`). The owner's uninstall in that case turns the label back on and prints only the first of those lines (`TestTheLoginOwnersUninstallBesideAnotherHomesJobTurnsTheSwitchBackOn`). None of them boots out that job. When no plist for the label is in the login directory, the switch only gates `bootstrap`. Any installation with the label may then enable it, and may disable it unless another installation's job holds the label: a `stop` beside that job leaves the label on and prints only the first line (`TestAStopBesideAnotherHomesJobWithNoLoginOwnerLeavesTheSwitchOn`). Only a missing plist counts as none: another error reading it, such as an unsearchable login directory, refuses `stop` and `direct`, and `start` and uninstall when the label is disabled, with `cannot tell which installation turns <label> on and off at login: <error>` before any switch changes (`TestAnUnreadableLoginDirectoryRefusesToTouchTheSwitch`). |
@@ -2093,15 +2093,17 @@ needs a new acceptance run and record.
 
 `claude_router.py check [--home DIR | --manifest FILE] [--claude PATH]
 [--settings FILE] [--acceptance FILE] [--timeout 120]` prints one line per
-check, with a 9-column label of `ok`, `fail`, or `skip`:
+check, with a 9-column label of `ok`, `fail`, or `skip`. `--home` and
+`--manifest` exclude each other, and `activate` takes them the same way
+(`test_home_and_manifest_together_are_refused`):
 
 1. The router answers `GET /claude-router/status` at the configured
    `listen`, named with the manager.
 2. Every account in `config.json` is registered and needs no login.
 3. Every account's paid-overflow reading is `disabled`. `enabled` or
    `paid_use` fails with `paid overflow on for NAME` and `next      turn off
-   NAME paid overflow on claude.ai; claude-router check`. No reading fails
-   with `paid overflow not read yet for NAME`.
+   NAME paid overflow on claude.ai; claude-router check`. A missing reading
+   fails with `paid overflow not read yet for NAME`.
 4. The settings file holds the three keys of `client_settings` with the
    router's values. The default file is the one `activation.json` names,
    then `$CLAUDE_CONFIG_DIR/settings.json` or `~/.claude/settings.json`.
@@ -2122,6 +2124,19 @@ check, with a 9-column label of `ok`, `fail`, or `skip`:
    Otherwise the line is `skip      test message, not sent while a check
    fails`, and no message is sent
    (`test_check_fails_and_sends_no_message_while_paid_overflow_is_on`).
+
+When the router does not answer, `check` still prints every line of the
+layout. Lines 2, 3, and 5 print `skip` with `accounts, not read while the
+router is stopped`, `paid overflow, not read while the router is stopped`, and
+`accepted record, not compared while the router is stopped`
+(`test_with_the_router_stopped_check_prints_every_line_and_skips_what_it_cannot_read`).
+With no accounts in `config.json`, line 3 is `skip      paid overflow, no
+accounts to read`.
+
+`check` installs the signal handlers of activation's verification. SIGINT,
+SIGTERM, or SIGHUP kills the test message's process group, prints
+`check     interrupted`, and exits 1
+(`test_a_signal_ends_the_test_message_client_with_check`).
 
 The last line is `check     passed` or `check     failed`. A failure adds
 `next      <step>` for the first failed check and exits 1. `check` never
@@ -2345,8 +2360,12 @@ no state directory at <dir>` with no next step
     check prints the check lines, undoes the write, prints `undo    <file>
     restored; the router keeps its logins and assignments` and `next
     claude-router status` on stderr, and exits 1
-    (`test_a_failed_check_restores_the_direct_settings`). The check runs
-    inside the signal handling of step 12.
+    (`test_a_failed_check_restores_the_direct_settings`). A `--verify`
+    command or a check that raises an `OSError`, `ValueError`, or `KeyError`,
+    such as an unreadable `events.jsonl`, prints `claude-router: activate: the
+    check could not finish: <error>` and undoes the write the same way
+    (`test_a_check_that_cannot_read_the_events_restores_the_direct_settings`).
+    The check runs inside the signal handling of step 12.
 16. Otherwise set the phase to `active`, print `done    clients connect
     through the router; undo with claude-router direct`, and exit 0.
 

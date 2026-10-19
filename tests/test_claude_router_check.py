@@ -1,5 +1,6 @@
 import json
 import re
+import signal
 import subprocess
 import sys
 
@@ -27,8 +28,8 @@ class CheckFixture(ActivationFixture):
             {"id": name, "registered": True, "needs_login": False, "overage": {"state": "enabled" if name in enabled else "disabled"}}
             for name in names]
 
-    def check(self, **env):
-        return self.helper("check", **env)
+    def check(self, *arguments, **env):
+        return self.helper("check", *arguments, **env)
 
     def shown(self, result):
         text = timed(result.stdout).replace("127.0.0.1:{}".format(self.fake_router.port), "127.0.0.1:18787")
@@ -114,3 +115,52 @@ class SetupActivationTests(CheckFixture):
         self.assertEqual(self.shown(result), self.golden("passed.txt").replace("check     passed\n", "check     passed\n"
                                                                                "activated Claude Code routes through the router\n"))
         self.assertEqual(self.base_url(), self.listen)
+
+
+SLEEPY_CLAUDE = r'''#!/bin/sh
+echo $$ > "$SLEEPY_PIDFILE"
+exec sleep 30
+'''
+
+
+class CheckEdgeTests(CheckFixture):
+    def test_with_the_router_stopped_check_prints_every_line_and_skips_what_it_cannot_read(self):
+        self.fake_router.close()
+
+        result = self.check()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.shown(result), "\n".join([
+            "fail      router not answering on 127.0.0.1:18787",
+            "skip      accounts, not read while the router is stopped",
+            "skip      paid overflow, not read while the router is stopped",
+            "ok        Claude Code settings point at the router",
+            "skip      accepted record, not compared while the router is stopped",
+            "skip      test message, not sent while a check fails",
+            "check     failed",
+            "next      claude-router start; claude-router check",
+        ]) + "\n")
+
+    def test_a_signal_ends_the_test_message_client_with_check(self):
+        sleepy = self.root / "sleepy-claude"
+        sleepy.write_text(SLEEPY_CLAUDE)
+        sleepy.chmod(0o755)
+        for sent in (signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(sent):
+                pidfile = self.root / "sleepy-{}.pid".format(int(sent))
+                command = [sys.executable, "-c", HELPER_WITH_MANAGED_SETTINGS, "check", "--home", str(self.home), "--claude", str(sleepy)]
+                process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                           env=dict(self.activate_env(), SLEEPY_PIDFILE=str(pidfile)))
+                pid = self.wait_for_pid(pidfile)
+                process.send_signal(sent)
+                stdout, _ = process.communicate(timeout=30)
+
+                self.assertEqual(process.returncode, 1)
+                self.assertEqual(stdout.splitlines()[-1], "check     interrupted")
+                self.assertTrue(self.gone(pid), "the test message client {} still runs".format(pid))
+
+    def test_home_and_manifest_together_are_refused(self):
+        result = self.check("--manifest", str(self.home / ".local/state/astack/manifest.json"))
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("argument --manifest: not allowed with argument --home", result.stderr)
