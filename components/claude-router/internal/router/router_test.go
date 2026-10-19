@@ -1665,3 +1665,20 @@ func TestAConversationOnAnAccountNoLongerEnrolledIsPlacedAgain(t *testing.T) {
 		t.Fatalf("got %+v bound to %s, want a not_enrolled migration from %s to %s", moved, h.bound("conv"), a, b)
 	}
 }
+
+func TestAConversationOnAnAccountNoLongerEnrolledKeepsItsAssignmentWhenNoAccountCanTakeIt(t *testing.T) {
+	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
+	h.route(t0, req("conv"))
+	if err := h.r.Served(t0, "conv", a); err != nil {
+		t.Fatal(err)
+	}
+	h.accounts = accts(b, 1.0)
+	h.restart()
+	h.observe(b, Observation{At: t0, Windows: []Window{rejected(Weekly, t0.Add(72*time.Hour))}})
+
+	waiting := h.route(t0.Add(time.Minute), req("conv"))
+
+	if waiting.Kind != Wait || h.bound("conv") != a {
+		t.Fatalf("got %+v bound to %s, want a wait with the conversation kept on %s", waiting, h.bound("conv"), a)
+	}
+}

@@ -346,12 +346,8 @@ func runHelper(in installation, args []string, lock *os.File) (int, error) {
 	return runHelperTo(in, args, lock, os.Stdout)
 }
 
-// relayed are the signals that setup and check pass to the helper, whose
-// check ends its test message and restores direct settings on them.
 var relayed = []os.Signal{syscall.SIGTERM, syscall.SIGHUP}
 
-// runHelperTo runs the helper and waits for it. Each signal in relay that
-// this process receives meanwhile goes to the helper instead.
 func runHelperTo(in installation, args []string, lock *os.File, out io.Writer, relay ...os.Signal) (int, error) {
 	cmd := exec.Command(in.Python, args...)
 	cmd.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1")

@@ -238,7 +238,6 @@ class ActivationFixture(ComponentFixture):
         return process
 
     def waits_for(self, gate):
-        """A shell loop that waits for gate. It ends when the test ends, whatever its result."""
         self.gates.append(gate)
         return 'while [ ! -e "{}" ] && [ -d "{}" ]; do sleep 0.05; done'.format(gate, self.root)
 

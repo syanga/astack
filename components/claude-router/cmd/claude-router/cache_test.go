@@ -107,6 +107,17 @@ func TestAPolicyMoveCostsTheCacheWriteOfItsFirstRequestOnTheNewAccount(t *testin
 		"reasons   exhausted 1")
 }
 
+func TestAMoveOffARemovedAccountCountsAsAMove(t *testing.T) {
+	got := cacheLines(t,
+		served(ago(3*time.Hour), "aaaaaaaaaaaa", "school", counters(100, 6000, 0))+
+			movedEvent(ago(2*time.Hour), "aaaaaaaaaaaa", "school", "alumni", "not_enrolled")+
+			served(ago(2*time.Hour), "aaaaaaaaaaaa", "alumni", counters(100, 3000, 0)))
+
+	wantLines(t, got,
+		"moves     1  cost 3k  of 9k writes  share 33.3%",
+		"reasons   not_enrolled 1")
+}
+
 func TestAManualMoveShowsTheReasonOfItsMigratedEvent(t *testing.T) {
 	got := cacheLines(t,
 		served(ago(3*time.Hour), "aaaaaaaaaaaa", "work", counters(100, 6000, 0))+

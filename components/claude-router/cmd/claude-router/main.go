@@ -50,9 +50,6 @@ func main() {
 	}
 }
 
-// reportError prints err with its detail and next step. setup, account, and
-// check print their steps under 10-column labels, and the other commands
-// under 8-column ones, so each refusal lines up with its command's lines.
 func reportError(w io.Writer, command string, err error) {
 	var n nextError
 	if !errors.As(err, &n) {
@@ -224,8 +221,6 @@ func login(args []string) error {
 	return nil
 }
 
-// signIn reports published once auths/ACCOUNT.json holds the new login,
-// including when a later step fails.
 var signIn = func(state, account string, noBrowser bool) (published bool, err error) {
 	_, published, err = enroll(state, account, noBrowser)
 	return published, err
@@ -233,8 +228,7 @@ var signIn = func(state, account string, noBrowser bool) (published bool, err er
 
 // enroll refuses while a service holds the state directory, because the
 // SDK's running service writes its in-memory credentials back to disk and
-// would overwrite the new one. published reports that auths/ACCOUNT.json
-// holds the new login.
+// would overwrite the new one.
 func enroll(state, account string, noBrowser bool) (kept int, published bool, err error) {
 	lock, err := router.OpenStore(filepath.Join(state, "assignments"))
 	if errors.Is(err, router.ErrLocked) {

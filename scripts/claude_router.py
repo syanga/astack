@@ -378,11 +378,7 @@ class Plan:
 
 
 def plan(command, state, lay, force=False):
-    """Compute the component's changes without writing anything.
-
-    An install over a recorded layout first takes activation.lock and keeps it in the plan until apply ends,
-    so no account change, activation, or direct runs while it replaces the binary and checks the router.
-    """
+    """Compute the component's changes without writing anything."""
     old = state.get("components", {}).get(NAME, {})
     if command == "install" and old.get("layout") and old["layout"] != lay.record():
         raise ValueError("{} destination changed; uninstall the component before reinstalling".format(NAME))
@@ -810,7 +806,6 @@ def say(line, stream=None):
 
 
 def report(command, refusal, width=8):
-    """Print a refusal with labels width columns wide: 10 under the check lines of check and setup."""
     say("claude-router: {}: {}".format(command, refusal), sys.stderr)
     for line in refusal.details:
         say(" " * width + line, sys.stderr)

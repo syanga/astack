@@ -117,8 +117,6 @@ func restoreRunning(in installation, ran bool, out io.Writer, err error) error {
 	return err
 }
 
-// dropCredentials deletes the logins of names, which config.json does not
-// list, so that auths/ holds no login outside config.json.
 func dropCredentials(state string, names []string, err error) error {
 	for _, name := range names {
 		if rerr := os.Remove(filepath.Join(state, "auths", name+".json")); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
@@ -128,8 +126,6 @@ func dropCredentials(state string, names []string, err error) error {
 	return err
 }
 
-// signInNew signs in name, which config.json does not list. A sign-in that
-// fails after it wrote auths/NAME.json deletes that login.
 func signInNew(in installation, name string, noBrowser bool) error {
 	published, err := signIn(in.State, name, noBrowser)
 	if err != nil && published {
@@ -282,8 +278,6 @@ func removeAccount(in installation, name string, force bool, now time.Time, out 
 	return err
 }
 
-// putBack adds a, whose login account remove could not delete, back to
-// config.json at index at, so that config.json lists the login again.
 func putBack(in installation, a router.Account, at int, out io.Writer, err error) error {
 	published, perr := editConfig(in.Config, func(c *claude.Config) error {
 		c.Accounts = slices.Insert(c.Accounts, min(at, len(c.Accounts)), a)

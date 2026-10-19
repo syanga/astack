@@ -146,9 +146,6 @@ func runSetup(in installation, names []string, noBrowser bool, out io.Writer) er
 	return nil
 }
 
-// addToConfig adds names, whose logins are in auths/, to config.json with
-// capacity 1. When config.json keeps its old accounts, it deletes those
-// logins.
 func addToConfig(in installation, names []string, out io.Writer) error {
 	if len(names) == 0 {
 		return nil

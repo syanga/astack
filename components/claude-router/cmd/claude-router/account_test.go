@@ -17,21 +17,20 @@ import (
 )
 
 type lane struct {
-	t       *testing.T
-	in      installation
-	jobs    string
-	listen  string
-	overage map[string]string
-	refuse  map[string]bool
-	// unclear names accounts whose sign-in writes the login and then fails to clear its login requirement.
-	unclear map[string]bool
-	signed  []string
-	queried func()
+	t          *testing.T
+	in         installation
+	jobs       string
+	listen     string
+	overage    map[string]string
+	refuse     map[string]bool
+	clearFails map[string]bool
+	signed     []string
+	queried    func()
 }
 
 func newLane(t *testing.T, manager string, accounts ...string) *lane {
 	t.Helper()
-	l := &lane{t: t, jobs: fakeManager(t), overage: map[string]string{}, refuse: map[string]bool{}, unclear: map[string]bool{}}
+	l := &lane{t: t, jobs: fakeManager(t), overage: map[string]string{}, refuse: map[string]bool{}, clearFails: map[string]bool{}}
 	l.in = installationIn(t, manager, "dev.astack.claude-router.test")
 	if err := os.MkdirAll(filepath.Join(l.in.State, "auths"), 0o700); err != nil {
 		t.Fatal(err)
@@ -89,7 +88,7 @@ func newLane(t *testing.T, manager string, accounts ...string) *lane {
 		if err := os.WriteFile(filepath.Join(state, "auths", account+".json"), []byte("{}\n"), 0o600); err != nil {
 			return false, err
 		}
-		if l.unclear[account] {
+		if l.clearFails[account] {
 			return true, fmt.Errorf("enrolled %s, but could not clear its login requirement: disk full", account)
 		}
 		return true, nil
@@ -450,8 +449,7 @@ func TestAccountRejectsTheFlagOfTheOtherSubcommand(t *testing.T) {
 	}
 }
 
-// unsyncedState lets config.json be replaced but not reopened, so EditConfig fails after its rename.
-func (l *lane) unsyncedState() {
+func (l *lane) stateWritableButUnreadable() {
 	l.t.Helper()
 	if err := os.Chmod(l.in.State, 0o300); err != nil {
 		l.t.Fatal(err)
@@ -463,7 +461,7 @@ func TestAConfigWriteThatFailsAfterItsRenameKeepsTheLoginsOfTheAccountsItAdded(t
 	t.Run("account add", func(t *testing.T) {
 		l := newLane(t, "launchd", "work")
 		l.start()
-		l.unsyncedState()
+		l.stateWritableButUnreadable()
 
 		var err error
 		stdoutOf(t, func() { err = addAccount(l.in, "school", false, os.Stdout) })
@@ -477,7 +475,7 @@ func TestAConfigWriteThatFailsAfterItsRenameKeepsTheLoginsOfTheAccountsItAdded(t
 	})
 	t.Run("setup", func(t *testing.T) {
 		l := setupLane(t)
-		l.unsyncedState()
+		l.stateWritableButUnreadable()
 
 		var err error
 		stdoutOf(t, func() { err = runSetup(l.in, []string{"work", "alumni"}, false, os.Stdout) })
@@ -494,7 +492,7 @@ func TestAConfigWriteThatFailsAfterItsRenameKeepsTheLoginsOfTheAccountsItAdded(t
 func TestAConfigWriteThatFailsAfterItsRenameStillDeletesTheRemovedLogin(t *testing.T) {
 	l := newLane(t, "launchd", "work", "school")
 	l.start()
-	l.unsyncedState()
+	l.stateWritableButUnreadable()
 
 	var err error
 	stdoutOf(t, func() { err = removeAccount(l.in, "school", true, time.Now(), os.Stdout) })
@@ -581,7 +579,7 @@ func TestASignInThatFailsAfterWritingTheLoginRemovesIt(t *testing.T) {
 	t.Run("account add", func(t *testing.T) {
 		l := newLane(t, "launchd", "work")
 		l.start()
-		l.unclear["school"] = true
+		l.clearFails["school"] = true
 		before := l.read("config.json")
 
 		var err error
@@ -597,7 +595,7 @@ func TestASignInThatFailsAfterWritingTheLoginRemovesIt(t *testing.T) {
 	})
 	t.Run("setup", func(t *testing.T) {
 		l := setupLane(t)
-		l.unclear["alumni"] = true
+		l.clearFails["alumni"] = true
 
 		var err error
 		stdoutOf(t, func() { err = runSetup(l.in, []string{"work", "alumni"}, false, os.Stdout) })

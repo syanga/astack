@@ -140,8 +140,9 @@ claude-router account remove school
 These commands rewrite `config.json`. They keep every value but not the
 formatting: keys come back in a fixed order, and a duration such as `30m`
 comes back as `30m0s`. They refuse a file with a key the router does not
-know. You can also edit `config.json` by hand while the router is stopped. `capacity` is the
-account's relative allowance, such as 1 for Pro and 5 for Max 5x:
+know. You can also edit `config.json` by hand while the router is stopped.
+`capacity` is the account's relative allowance, such as 1 for Pro and 5 for
+Max 5x:
 
 ```json
 "accounts": [{"id": "work", "capacity": 5}, {"id": "alumni", "capacity": 1}]
@@ -228,8 +229,9 @@ Further signals do not interrupt the restore. When a command
 ends, activation kills every process in the command's process group. A
 process that starts its own session or group, such as a detached Node child,
 keeps running. Activation prints only each command's program name, never its
-arguments. Activation, `claude-router direct`, and the component's uninstall
-run one at a time. A second one refuses and changes nothing.
+arguments. Activation, `claude-router direct`, `setup`, `account`, and the
+component's install and uninstall run one at a time. A second one refuses
+and changes nothing.
 
 Run activation from the checkout that installed the router, or run the
 installed copy, `~/.local/share/astack/claude-router/lib/claude_router.py`.
@@ -264,11 +266,12 @@ check     passed
 
 When a check fails, `check` skips the test message, exits 1, and prints the
 next step. With the router stopped, it marks the checks that need the router
-`skip`. When `./install.sh --component claude-router` replaces the code of
-an activated router, it restarts the service and runs `check`. If the
-restart or the check fails, it runs `claude-router direct` and prints
-`next      claude-router check`. `--dry-run` prints the restart and the check
-that the install would run.
+`skip`. When `./install.sh --component claude-router` replaces the code of an
+activated router, it restarts the service and runs `check`. It refuses, and
+changes nothing, while `setup`, `account`, activation, or `claude-router
+direct` runs. If the restart or the check fails, it runs `claude-router
+direct` and prints `next      claude-router check`. `--dry-run` prints the
+restart and the check that the install would run.
 
 ## Operate the service
 
