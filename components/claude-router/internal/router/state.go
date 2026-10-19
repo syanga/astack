@@ -124,10 +124,6 @@ func clamp(t, now time.Time) time.Time {
 	return t
 }
 
-// persist writes the account state when it changed since the last write,
-// with the saved records of accounts that are not enrolled. Callers hold
-// r.mu. A failed write stops the store, as a failed journal write does, so no
-// later decision relies on state a restart would lose.
 func (r *Router) persist() {
 	if r.saved == nil {
 		return

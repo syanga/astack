@@ -39,10 +39,7 @@ type Router struct {
 	active   map[ConversationID]time.Time
 	// saved is the account state last written by persist, or nil for a
 	// router whose account state lives in memory only (New).
-	saved map[AccountID]AccountState
-	// unenrolled holds the loaded records of accounts that are not in the
-	// configuration. persist writes them back, so an account removed for a
-	// while keeps its rejections and login state when it returns.
+	saved      map[AccountID]AccountState
 	unenrolled []AccountState
 	expiry     Instant
 }
