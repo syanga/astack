@@ -361,9 +361,15 @@ func (r *Router) ObserveOverage(account AccountID, state Overage, at time.Time) 
 	}
 }
 
+// Admit returns why the router would not send an inference attempt to the
+// account now, or "" when it would. After a journal write or sync failure it
+// returns ReasonJournalFailed for every account.
 func (r *Router) Admit(now time.Time, account AccountID, model string) Reason {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if r.store.Err() != nil {
+		return ReasonJournalFailed
+	}
 	idx, ok := r.index[account]
 	if !ok {
 		return ReasonNotEnrolled
