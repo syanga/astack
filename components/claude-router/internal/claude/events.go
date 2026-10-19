@@ -67,7 +67,7 @@ func (u Usage) known() bool {
 	return u.InputTokens != nil || u.OutputTokens != nil || u.CacheCreationInputTokens != nil || u.CacheReadInputTokens != nil
 }
 
-func conversationHash(c router.ConversationID) string {
+func ConversationHash(c router.ConversationID) string {
 	if c == "" {
 		return ""
 	}

@@ -158,8 +158,6 @@ func (s *Store) replay() error {
 	return err
 }
 
-// applyAll applies each complete record in data and returns the length of
-// the complete records.
 func (s *Store) applyAll(data []byte) (int, error) {
 	good := 0
 	for good < len(data) {

@@ -1086,7 +1086,7 @@ class ActivationLock:
             fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             self.__exit__()
-            raise Refusal("another claude-router activate, direct, or uninstall is running",
+            raise Refusal("another claude-router setup, account, activate, direct, or uninstall is running",
                           next_step="wait for it to finish, then run again") from None
 
     def __enter__(self):
@@ -1244,7 +1244,7 @@ class Stop:
 def activate(args, state_root, home, use_env):
     _, state = load_state(state_root)
     lay, _ = installed_layout(state, state_root, home)
-    with ActivationLock(lay.state):
+    with ActivationLock(lay.state, args.lock_fd):
         return activate_locked(args, state_root, home, use_env)
 
 
@@ -1432,6 +1432,7 @@ def main():
                    help="a shell command that continues the conversation with this Claude session ID; repeat per client")
     a.add_argument("--verify-timeout", type=int, default=600, help="seconds each --verify command may take")
     a.add_argument("--prepare", action="store_true", help="show the changes without making them")
+    a.add_argument("--lock-fd", type=int, help="a descriptor of the activation lock that the caller holds")
     args = parser.parse_args()
     if args.command == "direct":
         return direct(args.state, args.manifest, "prepare" if args.prepare else "check" if args.check else "apply", args.stopped, args.lock_fd)

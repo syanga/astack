@@ -7,38 +7,23 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	log "github.com/sirupsen/logrus"
 )
 
-const fakeActivate = `#!/bin/sh
-echo "$*" >> "$FAKE_HELPER_LOG"
-cat "$FAKE_CHECK_LINES"
-exit "${FAKE_ACTIVATE_EXIT:-0}"
+const fakeHelper = `#!/bin/sh
+echo "helper    $*"
 `
 
-const checkLines = `ok        router running on 127.0.0.1:18787 (launchd)
-ok        work, alumni ready
-ok        paid overflow off on both accounts
-ok        Claude Code settings point at the router
-ok        code matches the accepted record (darwin/arm64)
-ok        test message answered 200 on work in 5.8s
-activated Claude Code routes through the router
-`
-
-func setupLane(t *testing.T) (*lane, string) {
+func setupLane(t *testing.T) *lane {
 	t.Helper()
 	l := newLane(t, "launchd")
-	dir := t.TempDir()
-	python, lines, log := filepath.Join(dir, "python3"), filepath.Join(dir, "check.txt"), filepath.Join(dir, "helper.log")
-	if err := os.WriteFile(python, []byte(fakeActivate), 0o755); err != nil {
+	python := filepath.Join(t.TempDir(), "python3")
+	if err := os.WriteFile(python, []byte(fakeHelper), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(lines, []byte(checkLines), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("FAKE_CHECK_LINES", lines)
-	t.Setenv("FAKE_HELPER_LOG", log)
 	l.in.Python, l.in.Helper, l.in.Manifest = python, "/lib/claude_router.py", "/state/manifest.json"
-	return l, log
+	return l
 }
 
 func golden(t *testing.T, name string) string {
@@ -51,7 +36,7 @@ func golden(t *testing.T, name string) string {
 }
 
 func TestSetupSignsInEachAccountStartsTheRouterAndActivates(t *testing.T) {
-	l, log := setupLane(t)
+	l := setupLane(t)
 
 	var err error
 	out := stdoutOf(t, func() { err = runSetup(l.in, []string{"work", "alumni"}, false, os.Stdout) })
@@ -65,14 +50,10 @@ func TestSetupSignsInEachAccountStartsTheRouterAndActivates(t *testing.T) {
 	if got := strings.Join(l.accounts(), " "); got != "work:1 alumni:1" {
 		t.Fatalf("accounts %s, want work:1 alumni:1", got)
 	}
-	helper, _ := os.ReadFile(log)
-	if string(helper) != "/lib/claude_router.py activate --brief --manifest /state/manifest.json\n" {
-		t.Fatalf("helper ran with %q, want activate --brief with the recorded manifest", helper)
-	}
 }
 
 func TestSetupRefusesWithTheAccountNameWhenPaidOverflowIsOn(t *testing.T) {
-	l, log := setupLane(t)
+	l := setupLane(t)
 	l.overage["alumni"] = "enabled"
 
 	var err error
@@ -85,13 +66,10 @@ func TestSetupRefusesWithTheAccountNameWhenPaidOverflowIsOn(t *testing.T) {
 	if got, want := l.shown(out), golden(t, "refused.txt"); got != want {
 		t.Fatalf("setup output\n%s\nwant\n%s", got, want)
 	}
-	if _, err := os.Stat(log); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("setup ran activation after the refusal")
-	}
 }
 
 func TestSetupRefusesWhenTheRouterIsAlreadyActivated(t *testing.T) {
-	l, _ := setupLane(t)
+	l := setupLane(t)
 	journal, _ := json.Marshal(map[string]string{"phase": "active", "settings": "/home/.claude/settings.json"})
 	l.write("activation.json", string(journal))
 	before := l.read("config.json")
@@ -108,14 +86,19 @@ func TestSetupRefusesWhenTheRouterIsAlreadyActivated(t *testing.T) {
 }
 
 func TestSetupLinesFitEightyColumnsForEightCharacterAccounts(t *testing.T) {
-	l, _ := setupLane(t)
+	l := setupLane(t)
 	names := []string{"abcdefgh", "ijklmnop", "qrstuvwx"}
-	l.overage["qrstuvwx"] = "enabled"
+	for _, name := range names {
+		l.overage[name] = "enabled"
+	}
 
 	out := stdoutOf(t, func() { _ = runSetup(l.in, names, true, os.Stdout) })
 
-	if !strings.Contains(out, "refuse    qrstuvwx has paid overflow on") {
-		t.Fatalf("output\n%s\nwant the refusal for qrstuvwx", out)
+	if !strings.HasSuffix(out, `refuse    abcdefgh, ijklmnop, and qrstuvwx have paid overflow on
+          Claude Code stays direct
+next      turn off their paid overflow on claude.ai; claude-router setup
+`) {
+		t.Fatalf("output\n%s\nwant the refusal for all three accounts", out)
 	}
 	for _, line := range strings.Split(strings.TrimSpace(l.shown(out)), "\n") {
 		if len(line) > 80 {
@@ -124,7 +107,7 @@ func TestSetupLinesFitEightyColumnsForEightCharacterAccounts(t *testing.T) {
 	}
 }
 
-func TestLoginShowsOnlyTheSignInURLFromTheSDK(t *testing.T) {
+func TestCopySignInURLsKeepsOnlyTheURLLines(t *testing.T) {
 	sdk := `Opening browser for Claude authentication
 To authenticate from a remote machine, an SSH tunnel may be required.
 ================================================================================
@@ -148,7 +131,7 @@ Claude authentication successful
 }
 
 func TestSetupKeepsTheAccountsSignedInBeforeAFailedSignIn(t *testing.T) {
-	l, _ := setupLane(t)
+	l := setupLane(t)
 	l.refuse["alumni"] = true
 
 	var err error
@@ -162,5 +145,42 @@ func TestSetupKeepsTheAccountsSignedInBeforeAFailedSignIn(t *testing.T) {
 	}
 	if !strings.HasSuffix(out, "config    added work, capacity 1\n") {
 		t.Fatalf("output\n%s\nwant it to end with the config line for work", out)
+	}
+}
+
+func TestShowingOnlySignInURLsRestoresTheLogOutputItFound(t *testing.T) {
+	var logged strings.Builder
+	saved := log.StandardLogger().Out
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(saved) })
+
+	stdoutOf(t, func() {
+		_ = showingOnlySignInURLs(func() error {
+			log.Info("during the sign-in")
+			return nil
+		})
+	})
+	log.Info("after the sign-in")
+
+	if got := logged.String(); strings.Contains(got, "during the sign-in") || !strings.Contains(got, "after the sign-in") {
+		t.Fatalf("log output %q, want only the line logged after the sign-in", got)
+	}
+}
+
+func TestSetupRemovesTheNewLoginsWhenTheConfigWriteFails(t *testing.T) {
+	l := setupLane(t)
+	l.write("auths/work.json", "{}\n")
+	l.write("config.json", strings.Replace(l.read("config.json"), `"accounts": []`, `"accounts": [{"id": "work", "capacity": 1}]`, 1))
+	l.start()
+	failingConfigEdit(t)
+
+	var err error
+	stdoutOf(t, func() { err = runSetup(l.in, []string{"alumni", "school"}, false, os.Stdout) })
+
+	if err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("setup: %v, want the config write error", err)
+	}
+	if got := strings.Join(l.logins(), " "); got != "work.json" || !l.running() {
+		t.Fatalf("logins %s, running %v; want only work.json and the router running", got, l.running())
 	}
 }

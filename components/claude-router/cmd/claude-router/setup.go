@@ -59,6 +59,11 @@ func activated(state string) (bool, error) {
 }
 
 func runSetup(in installation, names []string, noBrowser bool, out io.Writer) error {
+	lock, err := lockActivation(in.State)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	if on, err := activated(in.State); err != nil {
 		return err
 	} else if on {
@@ -90,20 +95,15 @@ func runSetup(in installation, names []string, noBrowser bool, out io.Writer) er
 			signInLines(out, name, noBrowser)
 			if err := signIn(in.State, name, noBrowser); err != nil {
 				if aerr := addToConfig(in, signed, out); aerr != nil {
-					return fmt.Errorf("%w; adding %s to config.json also failed: %v", err, joined(signed), aerr)
+					err = dropCredentials(in.State, signed, fmt.Errorf("%w; adding %s to config.json also failed: %v", err, joined(signed), aerr))
 				}
-				if ran {
-					if serr := startAgain(in, out); serr != nil {
-						return fmt.Errorf("%w; starting the router again also failed: %v", err, serr)
-					}
-				}
-				return err
+				return restoreRunning(in, ran, out, err)
 			}
 			line(out, "login", name+" signed in")
 			signed = append(signed, name)
 		}
 		if err := addToConfig(in, signed, out); err != nil {
-			return err
+			return restoreRunning(in, ran, out, dropCredentials(in.State, signed, err))
 		}
 	}
 	if err := startAgain(in, out); err != nil {
@@ -125,12 +125,17 @@ func runSetup(in installation, names []string, noBrowser bool, out io.Writer) er
 		if len(overflow) > 1 {
 			verb, whose = "have", "their"
 		}
-		line(out, "refuse", fmt.Sprintf("%s %s paid overflow on; Claude Code stays direct", joined(overflow), verb))
+		if len(overflow) > 2 {
+			line(out, "refuse", fmt.Sprintf("%s have paid overflow on", joined(overflow)))
+			line(out, "", "Claude Code stays direct")
+		} else {
+			line(out, "refuse", fmt.Sprintf("%s %s paid overflow on; Claude Code stays direct", joined(overflow), verb))
+		}
 		line(out, "next", "turn off "+whose+" paid overflow on claude.ai; claude-router setup")
 		return silentExit(1)
 	}
 	line(out, "ready", strings.Join(all, ", ")+" ready")
-	code, err := runHelperTo(in, []string{in.Helper, "activate", "--brief", "--manifest", in.Manifest}, nil, out)
+	code, err := runHelperTo(in, []string{in.Helper, "activate", "--brief", "--manifest", in.Manifest, "--lock-fd", "3"}, lock, out)
 	if err != nil {
 		return err
 	}
@@ -145,7 +150,7 @@ func addToConfig(in installation, names []string, out io.Writer) error {
 	if len(names) == 0 {
 		return nil
 	}
-	if err := claude.EditConfig(in.Config, func(c *claude.Config) error {
+	if err := editConfig(in.Config, func(c *claude.Config) error {
 		for _, name := range names {
 			c.Accounts = append(c.Accounts, router.Account{ID: router.AccountID(name), Capacity: 1})
 		}

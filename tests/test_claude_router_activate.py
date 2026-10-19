@@ -961,7 +961,7 @@ class ActivationTests(ActivationFixture):
                          (1, "", "claude-router: direct: no state directory at {}\n".format(missing)))
 
 
-LOCKED = "another claude-router activate, direct, or uninstall is running\nnext    wait for it to finish, then run again\n"
+LOCKED = "another claude-router setup, account, activate, direct, or uninstall is running\nnext    wait for it to finish, then run again\n"
 
 
 class OverlapTests(ActivationFixture):
@@ -1032,7 +1032,7 @@ class OverlapTests(ActivationFixture):
 
         refused = self.component(command="uninstall", success=False)
 
-        self.assertIn("astack: another claude-router activate, direct, or uninstall is running; wait for it to finish, then run again",
+        self.assertIn("astack: another claude-router setup, account, activate, direct, or uninstall is running; wait for it to finish, then run again",
                       refused.stderr)
         self.finish(first, gate)
         self.assert_routed_and_owned()
@@ -1048,7 +1048,7 @@ class OverlapTests(ActivationFixture):
 
         for result in results:
             self.assertEqual(result.returncode, 1, result.stdout)
-            self.assertIn("astack: another claude-router activate, direct, or uninstall is running; wait for it to finish, then run again\n",
+            self.assertIn("astack: another claude-router setup, account, activate, direct, or uninstall is running; wait for it to finish, then run again\n",
                           result.stderr)
         self.assertEqual(self.inventory(), files)
         self.assertEqual(self.manifest(), manifest)
@@ -1077,6 +1077,19 @@ class OverlapTests(ActivationFixture):
         self.assertEqual((refused.returncode, refused.stderr), (1, "claude-router: direct: " + LOCKED))
         self.assertEqual(restored.returncode, 0, restored.stderr)
         self.assert_direct_and_state_kept()
+
+    def test_activation_runs_under_the_lock_its_caller_holds_and_hands_down(self):
+        fd = os.open(str(self.state_dir / "activation.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, fd)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        refused = self.run_activate()
+        command = self.activate_command((SESSION, "fake-client " + SESSION)) + ["--lock-fd", str(fd)]
+        activated = subprocess.run(command, env=self.activate_env(), capture_output=True, text=True, pass_fds=(fd,))
+
+        self.assertEqual((refused.returncode, refused.stderr), (1, "claude-router: activate: " + LOCKED))
+        self.assertEqual(activated.returncode, 0, activated.stderr)
+        self.assertEqual(self.base_url(), self.listen)
 
 
 class InterruptedActivationTests(ActivationFixture):

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/syanga/astack/components/claude-router/internal/claude"
 )
 
 type lane struct {
@@ -21,6 +24,7 @@ type lane struct {
 	overage map[string]string
 	refuse  map[string]bool
 	signed  []string
+	queried func()
 }
 
 func newLane(t *testing.T, manager string, accounts ...string) *lane {
@@ -32,6 +36,9 @@ func newLane(t *testing.T, manager string, accounts ...string) *lane {
 	}
 	token := strings.Repeat("fake-client-token-", 2)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if l.queried != nil {
+			l.queried()
+		}
 		if r.Header.Get("Authorization") != "Bearer "+token || !l.running() {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
@@ -216,7 +223,7 @@ func TestAccountRemoveRefusesWithTheCountOfRecentConversationsUnlessForced(t *te
 			journalLine("assign", "conv-moved", "school", now.Add(-2*time.Hour))+
 			`{"op":"migrate","c":"conv-moved","a":"work","from":"school","why":"manual","t":"`+now.Add(-90*time.Minute).UTC().Format(time.RFC3339)+`"}`+"\n")
 	l.write("events.jsonl", fmt.Sprintf(`{"at":%q,"kind":"request","conversation":%q,"account":"school","status":200,"outcome":"completed"}`+"\n",
-		now.Add(-2*time.Hour).UTC().Format(time.RFC3339Nano), conversationHash("conv-old-used")))
+		now.Add(-2*time.Hour).UTC().Format(time.RFC3339Nano), claude.ConversationHash("conv-old-used")))
 	before := l.read("config.json")
 
 	err := removeAccount(l.in, "school", false, now, os.Stdout)
@@ -264,5 +271,173 @@ func TestAccountRemoveRefusesTheLastAccount(t *testing.T) {
 	}
 	if got := strings.Join(l.accounts(), " "); got != "work:1" {
 		t.Fatalf("accounts %s, want work:1", got)
+	}
+}
+
+func failingConfigEdit(t *testing.T) {
+	saved := editConfig
+	editConfig = func(string, func(*claude.Config) error) error { return errors.New("disk full") }
+	t.Cleanup(func() { editConfig = saved })
+}
+
+func (l *lane) logins() []string {
+	l.t.Helper()
+	entries, err := os.ReadDir(filepath.Join(l.in.State, "auths"))
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+func TestAFailedConfigWriteAfterSignInRemovesTheNewLoginAndStartsTheRouterAgain(t *testing.T) {
+	l := newLane(t, "launchd", "work")
+	l.start()
+	failingConfigEdit(t)
+
+	var err error
+	stdoutOf(t, func() { err = addAccount(l.in, "school", false, os.Stdout) })
+
+	if err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("account add: %v, want the config write error", err)
+	}
+	if got := strings.Join(l.logins(), " "); got != "work.json" || !l.running() {
+		t.Fatalf("logins %s, running %v; want only work.json and the router running", got, l.running())
+	}
+}
+
+func TestAFailedConfigWriteDuringRemoveKeepsTheLoginAndStartsTheRouterAgain(t *testing.T) {
+	l := newLane(t, "launchd", "work", "school")
+	l.start()
+	failingConfigEdit(t)
+
+	var err error
+	stdoutOf(t, func() { err = removeAccount(l.in, "school", true, time.Now(), os.Stdout) })
+
+	if err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("account remove: %v, want the config write error", err)
+	}
+	if got := strings.Join(l.logins(), " "); got != "school.json work.json" || !l.running() {
+		t.Fatalf("logins %s, running %v; want both logins and the router running", got, l.running())
+	}
+	if got := strings.Join(l.accounts(), " "); got != "work:1 school:1" {
+		t.Fatalf("accounts %s, want work:1 school:1", got)
+	}
+}
+
+func TestAccountRemoveThatCannotMoveTheLoginLeavesTheConfigAndStartsTheRouterAgain(t *testing.T) {
+	l := newLane(t, "launchd", "work", "school")
+	l.start()
+	auths := filepath.Join(l.in.State, "auths")
+	if err := os.Chmod(auths, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(auths, 0o700) })
+
+	var err error
+	stdoutOf(t, func() { err = removeAccount(l.in, "school", true, time.Now(), os.Stdout) })
+
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("account remove: %v, want the permission error", err)
+	}
+	if got := strings.Join(l.accounts(), " "); got != "work:1 school:1" || !l.running() {
+		t.Fatalf("accounts %s, running %v; want both accounts and the router running", got, l.running())
+	}
+}
+
+func TestAccountChangesRefuseWhileAnotherChangeHoldsTheLock(t *testing.T) {
+	l := newLane(t, "launchd", "work", "alumni")
+	l.start()
+	held, err := lockActivation(l.in.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	before := l.read("config.json")
+
+	errs := map[string]error{
+		"add":    addAccount(l.in, "school", false, io.Discard),
+		"remove": removeAccount(l.in, "alumni", true, time.Now(), io.Discard),
+		"setup":  runSetup(l.in, []string{"school"}, false, io.Discard),
+	}
+
+	for command, err := range errs {
+		var n nextError
+		if !errors.As(err, &n) || n.err.Error() != "another claude-router setup, account, activate, direct, or uninstall is running" {
+			t.Errorf("%s: %v, want the lock refusal", command, err)
+		}
+	}
+	if l.read("config.json") != before || len(l.signed) != 0 || !l.running() {
+		t.Fatalf("config changed, signed in %v, or router stopped (running %v)", l.signed, l.running())
+	}
+}
+
+func TestAccountRemoveRefusesAConversationAssignedBeforeTheRouterStopped(t *testing.T) {
+	l := newLane(t, "launchd", "work", "school")
+	l.start()
+	now := time.Now()
+	if err := os.MkdirAll(filepath.Join(l.in.State, "assignments"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	l.write("assignments/assignments.jsonl", journalLine("assign", "conv-work", "work", now.Add(-time.Hour)))
+	l.queried = func() {
+		l.write("assignments/assignments.jsonl", journalLine("assign", "conv-work", "work", now.Add(-time.Hour))+
+			journalLine("assign", "conv-late", "school", now.Add(-time.Second)))
+	}
+	before := l.read("config.json")
+
+	var err error
+	stdoutOf(t, func() { err = removeAccount(l.in, "school", false, now, os.Stdout) })
+
+	var n nextError
+	if !errors.As(err, &n) || n.err.Error() != "school has 1 conversation from the last 5 hours" {
+		t.Fatalf("account remove: %v, want the refusal for the conversation assigned before the stop", err)
+	}
+	if l.read("config.json") != before || strings.Join(l.logins(), " ") != "school.json work.json" || !l.running() {
+		t.Fatalf("config or logins changed, or the router stayed stopped (running %v)", l.running())
+	}
+}
+
+func TestAccountAddAndRemoveLeaveAStoppedRouterStopped(t *testing.T) {
+	l := newLane(t, "launchd", "work")
+
+	var addErr, removeErr error
+	added := stdoutOf(t, func() { addErr = addAccount(l.in, "school", false, os.Stdout) })
+	removed := stdoutOf(t, func() { removeErr = removeAccount(l.in, "school", true, time.Now(), os.Stdout) })
+
+	if addErr != nil || removeErr != nil {
+		t.Fatalf("account add: %v; account remove: %v", addErr, removeErr)
+	}
+	if l.running() {
+		t.Fatal("account add or remove started a router that was stopped")
+	}
+	want := `login     school: sign in in the browser window that opened
+login     school signed in
+config    added school, capacity 1
+next      claude-router start
+`
+	if added != want {
+		t.Fatalf("account add output\n%s\nwant\n%s", added, want)
+	}
+	want = `config    removed school
+remove    auths/school.json
+note      school stays signed in on claude.ai until you sign it out there
+`
+	if removed != want {
+		t.Fatalf("account remove output\n%s\nwant\n%s", removed, want)
+	}
+}
+
+func TestAccountRejectsTheFlagOfTheOtherSubcommand(t *testing.T) {
+	state := t.TempDir()
+	for _, args := range [][]string{{"add", "school", "-state", state, "-force"}, {"remove", "school", "-state", state, "-no-browser"}} {
+		err := account(args)
+
+		if err != silentExit(2) {
+			t.Errorf("account %v: %v, want exit 2 for the flag", args, err)
+		}
 	}
 }

@@ -2,8 +2,6 @@ package main
 
 import (
 	"bufio"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -24,6 +22,8 @@ const (
 	recentWindow = 5 * time.Hour
 )
 
+var editConfig = claude.EditConfig
+
 func line(out io.Writer, label, text string) {
 	fmt.Fprintf(out, "%-9s %s\n", label, text)
 }
@@ -42,15 +42,23 @@ func account(args []string) error {
 	if len(args) == 0 || args[0] != "add" && args[0] != "remove" {
 		usage()
 	}
-	fs := flag.NewFlagSet("account "+args[0], flag.ExitOnError)
+	fs := flag.NewFlagSet("account "+args[0], flag.ContinueOnError)
 	state := stateFlag(fs)
-	noBrowser := fs.Bool("no-browser", false, "print the sign-in URL instead of opening a browser")
-	force := fs.Bool("force", false, "remove an account that has conversations from the last 5 hours")
+	var noBrowser, force bool
+	if args[0] == "add" {
+		fs.BoolVar(&noBrowser, "no-browser", false, "print the sign-in URL instead of opening a browser")
+	} else {
+		fs.BoolVar(&force, "force", false, "remove an account that has conversations from the last 5 hours")
+	}
 	name, rest := "", args[1:]
 	if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
 		name, rest = rest[0], rest[1:]
 	}
-	_ = fs.Parse(rest)
+	if err := fs.Parse(rest); errors.Is(err, flag.ErrHelp) {
+		return silentExit(0)
+	} else if err != nil {
+		return silentExit(2)
+	}
 	if name == "" && fs.NArg() == 1 {
 		name = fs.Arg(0)
 	}
@@ -62,9 +70,9 @@ func account(args []string) error {
 		return err
 	}
 	if args[0] == "add" {
-		return addAccount(in, name, *noBrowser, os.Stdout)
+		return addAccount(in, name, noBrowser, os.Stdout)
 	}
-	return removeAccount(in, name, *force, time.Now(), os.Stdout)
+	return removeAccount(in, name, force, time.Now(), os.Stdout)
 }
 
 func stopForChange(in installation, out io.Writer) (bool, error) {
@@ -97,6 +105,25 @@ func startAgain(in installation, out io.Writer) error {
 	}
 	line(out, "start", fmt.Sprintf("router running on %s (%s)", cfg.Listen, in.Manager))
 	return nil
+}
+
+func restoreRunning(in installation, ran bool, out io.Writer, err error) error {
+	if !ran {
+		return err
+	}
+	if serr := startAgain(in, out); serr != nil {
+		return fmt.Errorf("%w; starting the router again also failed: %v", err, serr)
+	}
+	return err
+}
+
+func dropCredentials(state string, names []string, err error) error {
+	for _, name := range names {
+		if rerr := os.Remove(filepath.Join(state, "auths", name+".json")); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
+			err = fmt.Errorf("%w; removing the new login of %s also failed: %v", err, name, rerr)
+		}
+	}
+	return err
 }
 
 func signInLines(out io.Writer, name string, noBrowser bool) {
@@ -138,6 +165,11 @@ func addAccount(in installation, name string, noBrowser bool, out io.Writer) err
 	if !claude.ValidAccountID(name) {
 		return fmt.Errorf("%q is not a valid account ID (letters, digits, '-', '_', '.')", name)
 	}
+	lock, err := lockActivation(in.State)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	cfg, err := in.config()
 	if err != nil {
 		return err
@@ -146,24 +178,22 @@ func addAccount(in installation, name string, noBrowser bool, out io.Writer) err
 		return nextError{err: fmt.Errorf("%s is already an account", name),
 			next: fmt.Sprintf("to sign it in again: claude-router stop; claude-router login -account %s; claude-router start", name)}
 	}
-	if _, err := stopForChange(in, out); err != nil {
+	ran, err := stopForChange(in, out)
+	if err != nil {
 		return err
 	}
 	signInLines(out, name, noBrowser)
 	if err := signIn(in.State, name, noBrowser); err != nil {
-		if serr := startAgain(in, out); serr != nil {
-			return fmt.Errorf("%w; starting the router again also failed: %v", err, serr)
-		}
-		return err
+		return restoreRunning(in, ran, out, err)
 	}
 	line(out, "login", name+" signed in")
-	if err := claude.EditConfig(in.Config, func(c *claude.Config) error {
-		c.Accounts = append(c.Accounts, router.Account{ID: router.AccountID(name), Capacity: 1})
-		return nil
-	}); err != nil {
-		return err
+	if err := addToConfig(in, []string{name}, out); err != nil {
+		return restoreRunning(in, ran, out, dropCredentials(in.State, []string{name}, err))
 	}
-	line(out, "config", fmt.Sprintf("added %s, capacity 1", name))
+	if !ran {
+		line(out, "next", "claude-router start")
+		return nil
+	}
 	if err := startAgain(in, out); err != nil {
 		return err
 	}
@@ -181,6 +211,11 @@ func addAccount(in installation, name string, noBrowser bool, out io.Writer) err
 }
 
 func removeAccount(in installation, name string, force bool, now time.Time, out io.Writer) error {
+	lock, err := lockActivation(in.State)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	cfg, err := in.config()
 	if err != nil {
 		return err
@@ -192,40 +227,66 @@ func removeAccount(in installation, name string, force bool, now time.Time, out 
 		return nextError{err: fmt.Errorf("%s is the only account", name), next: fmt.Sprintf("claude-router account add NAME, then remove %s", name)}
 	}
 	if !force {
-		recent, err := recentConversations(in.State, router.AccountID(name), now.Add(-recentWindow))
-		if err != nil {
+		if err := refuseRecent(in.State, name, now); err != nil {
 			return err
 		}
-		if recent > 0 {
-			noun := "conversations"
-			if recent == 1 {
-				noun = "conversation"
-			}
-			return nextError{err: fmt.Errorf("%s has %d %s from the last 5 hours", name, recent, noun),
-				next: fmt.Sprintf("claude-router account remove %s -force, and they move to another account", name)}
-		}
 	}
-	if _, err := stopForChange(in, out); err != nil {
+	ran, err := stopForChange(in, out)
+	if err != nil {
 		return err
 	}
-	if err := claude.EditConfig(in.Config, func(c *claude.Config) error {
+	if !force {
+		if err := refuseRecent(in.State, name, now); err != nil {
+			return restoreRunning(in, ran, out, err)
+		}
+	}
+	credential := filepath.Join("auths", name+".json")
+	aside, err := os.MkdirTemp(in.State, ".remove-")
+	if err != nil {
+		return restoreRunning(in, ran, out, err)
+	}
+	defer os.RemoveAll(aside)
+	moved := true
+	if err := os.Rename(filepath.Join(in.State, credential), filepath.Join(aside, name+".json")); errors.Is(err, os.ErrNotExist) {
+		moved = false
+	} else if err != nil {
+		return restoreRunning(in, ran, out, err)
+	}
+	if err := editConfig(in.Config, func(c *claude.Config) error {
 		c.Accounts = slices.DeleteFunc(c.Accounts, func(a router.Account) bool { return string(a.ID) == name })
 		return nil
 	}); err != nil {
-		return err
+		if moved {
+			if rerr := os.Rename(filepath.Join(aside, name+".json"), filepath.Join(in.State, credential)); rerr != nil {
+				err = fmt.Errorf("%w; putting %s back also failed: %v", err, credential, rerr)
+			}
+		}
+		return restoreRunning(in, ran, out, err)
 	}
 	line(out, "config", "removed "+name)
-	credential := filepath.Join("auths", name+".json")
-	if err := os.Remove(filepath.Join(in.State, credential)); err == nil {
+	if moved {
 		line(out, "remove", credential)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
 	}
-	if err := startAgain(in, out); err != nil {
-		return err
+	if ran {
+		if err := startAgain(in, out); err != nil {
+			return err
+		}
 	}
 	line(out, "note", name+" stays signed in on claude.ai until you sign it out there")
 	return nil
+}
+
+func refuseRecent(state, name string, now time.Time) error {
+	recent, err := recentConversations(state, router.AccountID(name), now.Add(-recentWindow))
+	if err != nil || recent == 0 {
+		return err
+	}
+	noun := "conversations"
+	if recent == 1 {
+		noun = "conversation"
+	}
+	return nextError{err: fmt.Errorf("%s has %d %s from the last 5 hours", name, recent, noun),
+		next: fmt.Sprintf("claude-router account remove %s -force, and they move to another account", name)}
 }
 
 func recentConversations(state string, account router.AccountID, since time.Time) (int, error) {
@@ -239,16 +300,11 @@ func recentConversations(state string, account router.AccountID, since time.Time
 	}
 	n := 0
 	for conv, b := range bindings {
-		if b.Account == account && (!b.Since.Before(since) || used[conversationHash(conv)]) {
+		if b.Account == account && (!b.Since.Before(since) || used[claude.ConversationHash(conv)]) {
 			n++
 		}
 	}
 	return n, nil
-}
-
-func conversationHash(c router.ConversationID) string {
-	sum := sha256.Sum256([]byte(c))
-	return hex.EncodeToString(sum[:])[:12]
 }
 
 func requestsSince(path string, account router.AccountID, since time.Time) (map[string]bool, error) {

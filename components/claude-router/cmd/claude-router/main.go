@@ -181,8 +181,6 @@ func (stderrHook) Fire(e *log.Entry) error {
 	return err
 }
 
-// login runs the SDK's Claude OAuth login and installs the credential as
-// auths/<account>.json.
 func login(args []string) error {
 	fs := flag.NewFlagSet("login", flag.ExitOnError)
 	state := stateFlag(fs)
@@ -220,11 +218,9 @@ var signIn = func(state, account string, noBrowser bool) error {
 	return err
 }
 
-// enroll runs the SDK's Claude OAuth login into a staging directory and
-// installs the credential as auths/<account>.json. It refuses while a
-// service holds the state directory: a running service writes its
-// in-memory credentials back to disk and would overwrite the new one. It
-// returns the number of conversations assigned to the account.
+// enroll refuses while a service holds the state directory, because the
+// SDK's running service writes its in-memory credentials back to disk and
+// would overwrite the new one.
 func enroll(state, account string, noBrowser bool) (int, error) {
 	lock, err := router.OpenStore(filepath.Join(state, "assignments"))
 	if errors.Is(err, router.ErrLocked) {
@@ -299,15 +295,14 @@ func enroll(state, account string, noBrowser bool) (int, error) {
 	return kept, nil
 }
 
-// showingOnlySignInURLs runs f with standard output and the SDK log filtered
-// down to the sign-in URL. The SDK prints its progress and SSH tunnel
-// instructions for remote servers to standard output.
+// The SDK prints its progress and SSH tunnel instructions for remote servers
+// to standard output.
 func showingOnlySignInURLs(f func() error) error {
 	r, w, err := os.Pipe()
 	if err != nil {
 		return err
 	}
-	saved := os.Stdout
+	saved, savedLog := os.Stdout, log.StandardLogger().Out
 	os.Stdout = w
 	log.SetOutput(io.Discard)
 	done := make(chan struct{})
@@ -317,7 +312,7 @@ func showingOnlySignInURLs(f func() error) error {
 	}()
 	err = f()
 	os.Stdout = saved
-	log.SetOutput(os.Stderr)
+	log.SetOutput(savedLog)
 	w.Close()
 	<-done
 	r.Close()
