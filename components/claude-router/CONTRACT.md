@@ -847,7 +847,7 @@ refresh redispatch (RP-5b).
 | `place`, `dispatch`, `retry`, and `migrate` for `overage_observed` or `never_served_relogin` | Dispatch on the bound account |
 | `migrate` for `exhausted` | Local 429. This build does not move a conversation on exhaustion. The reset is the assigned account's (`Router.BlockedUntil`). |
 | `wait` | Local 429 `rate_limit_error` with `anthropic-ratelimit-unified-status: rejected`, `anthropic-ratelimit-unified-reset`, and `retry-after` for the same delay. An unknown reset omits the reset header and sends `retry-after: 300`. |
-| `refuse` or `wait` with `RecheckOverage` | Read the setting once, of the decision's account or, when it names none, of every account, then decide again (`TestWaitRechecksAStaleAccountThatCouldServe`) |
+| `refuse` or `wait` with `RecheckOverage` | Read the setting of the decision's account, or of every account when the decision names none, and decide again. A request does this at most once (`TestWaitRechecksAStaleAccountThatCouldServe`) |
 | `refuse` | 503 `api_error`, `x-should-retry: false`, naming the account and the reason |
 | `reauth`, `unavailable` | 503 `api_error`, `x-should-retry: false`, naming `claude-router login`. An upstream 401 never reaches the client as 401. |
 | `fail` | 503 `api_error`, `x-should-retry: false` |
@@ -910,8 +910,9 @@ table above gives for that decision. For each reason `Admit` returns:
   account is eligible, a local 429 until the earliest usable reset elsewhere,
   or a 503 that names paid use. When another account's check is unknown or
   stale, the refusal sets `RecheckOverage`, and the service first reads the
-  paid-use account's setting once. A `disabled` answer, stamped after the
-  paid use, clears it, and the request goes out on the same account
+  paid-use account's setting once. If the read returns `disabled` stamped
+  after the paid use, the paid use is no longer in force, and the request
+  goes out on the same account
   (`TestPaidUseRecheckClearedByADisabledReadingServesOnTheSameAccount`).
 - `exhausted`, which also covers a model-limit rejection: the local 429, or
   a 503 when the paid-overflow state bars every logged-in account.
