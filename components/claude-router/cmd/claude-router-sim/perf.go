@@ -117,7 +117,7 @@ func cmdPerf(args []string, stdout io.Writer) error {
 	var decide, commit []time.Duration
 	serve := func(now time.Time, req router.Request) error {
 		t := time.Now()
-		d, err := r.Decide(now, req)
+		d, err := r.Decide(router.At(now), req)
 		decide = append(decide, time.Since(t))
 		if err != nil {
 			return err
@@ -125,7 +125,7 @@ func cmdPerf(args []string, stdout io.Writer) error {
 		switch d.Kind {
 		case router.Place, router.Migrate:
 			t = time.Now()
-			got, err := r.Commit(now, req, d)
+			got, err := r.Commit(router.At(now), req, d)
 			commit = append(commit, time.Since(t))
 			if err != nil {
 				return err

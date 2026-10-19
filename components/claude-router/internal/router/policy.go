@@ -34,7 +34,7 @@ func (rj rejection) end(cfg Config) time.Time {
 	return rj.ResetsAt
 }
 
-func overageBar(cfg Config, now time.Time, a accountView) Reason {
+func overageBar(cfg Config, now, checksFrom time.Time, a accountView) Reason {
 	switch {
 	case a.paidUse():
 		return ReasonPaidUse
@@ -42,10 +42,23 @@ func overageBar(cfg Config, now time.Time, a accountView) Reason {
 		return ReasonOverageEnabled
 	case a.check != OverageDisabled:
 		return ReasonOverageUnknown
-	case now.Sub(a.checkAt) > cfg.OverageFreshFor:
+	case a.checkAt.Before(checksFrom), now.Sub(a.checkAt) > cfg.OverageFreshFor:
 		return ReasonOverageStale
 	}
 	return ""
+}
+
+func admissionBar(cfg Config, now Instant, checksFrom time.Time, a accountView, model string) Reason {
+	switch {
+	case a.needsLogin:
+		return ReasonNeedsLogin
+	case a.paidUse():
+		return ReasonPaidUse
+	}
+	if _, _, blocked := usableReset(cfg, now.Wall, a.rejections, model); blocked {
+		return ReasonExhausted
+	}
+	return overageBar(cfg, now.Stamp, checksFrom, a)
 }
 
 func recheck(bar Reason) bool {
@@ -53,14 +66,15 @@ func recheck(bar Reason) bool {
 }
 
 type view struct {
-	accounts []accountView
-	index    map[AccountID]int
-	loads    func() []int
-	binding  Binding
-	bound    bool
+	accounts   []accountView
+	index      map[AccountID]int
+	loads      func() []int
+	binding    Binding
+	bound      bool
+	checksFrom time.Time
 }
 
-func decide(cfg Config, now time.Time, v view, req Request) Decision {
+func decide(cfg Config, now Instant, v view, req Request) Decision {
 	if req.Conversation == "" {
 		return Decision{Kind: Reject, Reason: ReasonMissingIdentity}
 	}
@@ -96,14 +110,14 @@ func decide(cfg Config, now time.Time, v view, req Request) Decision {
 		}
 		return Decision{Kind: Refuse, Account: current, Reason: ReasonPaidUse, RecheckOverage: d.RecheckOverage}
 	}
-	if _, _, blocked := usableReset(cfg, now, acct.rejections, req.Model); blocked {
+	if _, _, blocked := usableReset(cfg, now.Wall, acct.rejections, req.Model); blocked {
 		d := place(cfg, now, v, req.Model)
 		if d.Kind == Place {
 			d.Kind, d.From, d.Reason = Migrate, current, ReasonExhausted
 		}
 		return d
 	}
-	if bar := overageBar(cfg, now, acct); bar != "" {
+	if bar := overageBar(cfg, now.Stamp, v.checksFrom, acct); bar != "" {
 		return Decision{Kind: Refuse, Account: current, Reason: bar, RecheckOverage: recheck(bar)}
 	}
 	switch req.LastFailure {
@@ -116,7 +130,7 @@ func decide(cfg Config, now time.Time, v view, req Request) Decision {
 	return Decision{Kind: Dispatch, Account: current, Reason: ReasonAssigned}
 }
 
-func place(cfg Config, now time.Time, v view, model string) Decision {
+func place(cfg Config, now Instant, v view, model string) Decision {
 	best, bestCapacity := -1, -1
 	var bestScore, bestCapacityScore float64
 	loggedIn, barred, stale := false, false, false
@@ -128,8 +142,8 @@ func place(cfg Config, now time.Time, v view, model string) Decision {
 			continue
 		}
 		loggedIn = true
-		until, known, blocked := usableReset(cfg, now, a.rejections, model)
-		if bar := overageBar(cfg, now, a); bar != "" {
+		until, known, blocked := usableReset(cfg, now.Wall, a.rejections, model)
+		if bar := overageBar(cfg, now.Stamp, v.checksFrom, a); bar != "" {
 			// An account blocked until a reset waits for it even when its
 			// check is unknown or stale: the check is read again by then.
 			if blocked && recheck(bar) {
@@ -173,7 +187,7 @@ func place(cfg Config, now time.Time, v view, model string) Decision {
 		Kind:        Place,
 		Account:     v.accounts[best].ID,
 		Reason:      reason,
-		Observation: freshness(cfg, now, v.accounts[best].observation),
+		Observation: freshness(cfg, now.Stamp, v.accounts[best].observation),
 	}
 }
 
@@ -187,14 +201,14 @@ func earlier(cur time.Time, curKnown bool, t time.Time, known bool) (time.Time, 
 	return cur, curKnown
 }
 
-func usableReset(cfg Config, now time.Time, rejections []rejection, model string) (until time.Time, known bool, blocked bool) {
+func usableReset(cfg Config, wall time.Time, rejections []rejection, model string) (until time.Time, known bool, blocked bool) {
 	known = true
 	for _, rj := range rejections {
 		if !rj.appliesTo(model) {
 			continue
 		}
 		end, exact := rj.end(cfg), !rj.ResetsAt.IsZero()
-		if !end.After(now) {
+		if !end.After(wall) {
 			continue
 		}
 		blocked = true
@@ -219,17 +233,17 @@ func freshness(cfg Config, now time.Time, obs Observation) Freshness {
 	return Fresh
 }
 
-func slack(cfg Config, now time.Time, obs Observation, model string) float64 {
-	if freshness(cfg, now, obs) != Fresh {
+func slack(cfg Config, now Instant, obs Observation, model string) float64 {
+	if freshness(cfg, now.Stamp, obs) != Fresh {
 		return 0
 	}
 	best := 0.0
 	for _, w := range obs.Windows {
 		period := w.Kind.Period()
-		if period == 0 || w.Utilization == nil || w.ResetsAt.IsZero() || !w.ResetsAt.After(now) || !w.appliesTo(model) {
+		if period == 0 || w.Utilization == nil || w.ResetsAt.IsZero() || !w.ResetsAt.After(now.Wall) || !w.appliesTo(model) {
 			continue
 		}
-		elapsed := 1 - float64(w.ResetsAt.Sub(now))/float64(period)
+		elapsed := 1 - float64(w.ResetsAt.Sub(now.Wall))/float64(period)
 		best = max(best, min(1, elapsed-*w.Utilization))
 	}
 	return best

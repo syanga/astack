@@ -5,7 +5,8 @@
     "windows": "Synthetic. Five-hour and weekly windows reset on a fixed schedule from the fixture start; real five-hour windows start at first use.",
     "cost": "Synthetic. One unit is 1000 weighted tokens: uncached input 1, cache write 1.25, cache read 0.1, output 5. These are API price ratios, used only as a stand-in for allowance consumption.",
     "cache": "Synthetic. A prompt prefix stays cached for 5 minutes after its last use, per account and conversation. A request on another account while the old cache is warm counts its prefix as a migration write.",
-    "observations": "Every response reports exact utilization and resets, except acct-e, whose responses carry no quota headers.",
+    "observations": "Every response reports exact utilization and resets, except acct-e, whose responses carry no quota headers. A quota rejection on acct-e therefore names no window and no reset, and the router records an unspecified rejected window.",
+    "subagents": "A subagent request runs after its parent's completed response, and a nested one after its parent subagent. Each goes through the same routing and recovery as a main request. The conversation's next turn starts only after they are served.",
     "external_load": "acct-c loses 10% of its five-hour allowance per hour to clients outside this proxy.",
     "overage": "A settings read finds paid overflow disabled on every account every 15 minutes, except acct-d between hours 4 and 8: a response shows paid use at hour 4, and a check at hour 8 finds overflow disabled again.",
     "faults": "2% transient failures before output, 1% partial streams, 1% cancellations; acct-b logs out at hour 20 and logs in again at hour 26, and stalled conversations move manually after 30 minutes; the proxy restarts at hours 12, 21, and 30. The restart at hour 21 loses the logout, so new conversations placed on acct-b fail their first request."

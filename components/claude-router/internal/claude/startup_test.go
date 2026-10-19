@@ -1,7 +1,10 @@
 package claude
 
 import (
+	"encoding/json"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -54,5 +57,28 @@ func TestDataOnlyStreamErrorBeforeOutputRetries(t *testing.T) {
 
 	if r.Status != 200 || r.Text != served("acct-a") || len(e.upstream.inference()) != 2 {
 		t.Fatalf("got %d %q after %d attempts, want 200 from acct-a after a retry", r.Status, r.Text, len(e.upstream.inference()))
+	}
+}
+
+func TestTheServiceReadsARelativeTokenPathBesideItsConfig(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	path := filepath.Join(e.dir, "config.json")
+	config, _ := json.Marshal(map[string]any{"listen": "127.0.0.1:0", "state_dir": e.dir,
+		"client_token_file": "client-token", "accounts": []map[string]any{{"id": "acct-a", "capacity": 1}}})
+	if err := os.WriteFile(path, config, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.cfg = cfg
+	e.start()
+	r := e.send(msg{Session: sessionID(1)})
+
+	if r.Status != 200 {
+		t.Fatalf("request with the client token served %d, want 200", r.Status)
 	}
 }

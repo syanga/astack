@@ -11,6 +11,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import sys
@@ -37,6 +38,18 @@ elif args[0] == "build":
     with open(out, "w") as stream:
         stream.write("#!/bin/sh\n# build {}\nprintf '%s\\n' \"$*\" >> \"$FAKE_ROUTER_LOG\"\n".format(os.environ.get("FAKE_BUILD", "1")))
     os.chmod(out, 0o755)
+'''
+
+KILLED_AT_TOKEN_RENAME = r'''
+import os, runpy, sys
+rename = os.replace
+def replace(source, destination, **options):
+    if os.path.basename(str(destination)) == "client-token":
+        os._exit(137)
+    rename(source, destination, **options)
+os.replace = replace
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
 '''
 
 class ComponentFixture(InstallerFixture):
@@ -194,6 +207,84 @@ class ComponentSelectionTests(ComponentFixture):
         self.assertEqual(json.loads(config.read_text())["accounts"], [{"id": "work", "capacity": 5}])
         self.assertEqual((self.state_dir / "client-token").read_text(), token)
         self.assertTrue((self.state_dir / "auths/work.json").exists())
+
+
+class TokenCreationTests(ComponentFixture):
+    def test_an_install_killed_before_the_token_rename_leaves_none_and_the_next_one_cleans_up(self):
+        token = self.state_dir / "client-token"
+        killed = subprocess.run(
+            [sys.executable, "-c", KILLED_AT_TOKEN_RENAME, str(self.repo / "scripts/manage.py"),
+             "install", "--home", str(self.home), "--component", "claude-router"],
+            cwd=str(self.root), capture_output=True, text=True, env=self.env)
+        left = token.exists()
+        strays = sorted(path.name for path in self.state_dir.glob(".client-token-*"))
+        result = self.component()
+
+        self.assertFalse(left)
+        self.assertEqual(killed.returncode, 137, killed.stderr)
+        self.assertEqual(len(strays), 1)
+        self.assertIn("REMOVE {}".format(self.state_dir / strays[0]), result.stdout)
+        self.assertIn("CREATE {}".format(token), result.stdout)
+        self.assertRegex(token.read_text(), r"^[0-9a-f]{64}\n$")
+        self.assertEqual(stat.S_IMODE(token.stat().st_mode), 0o600)
+        self.assertEqual(list(self.state_dir.glob(".client-token-*")), [])
+
+    def test_install_keeps_exactly_the_tokens_the_service_accepts(self):
+        config_go = (self.repo / "components/claude-router/internal/claude/config.go").read_text()
+        service_minimum = int(re.search(r"minClientTokenLength\s*=\s*(\d+)", config_go).group(1))
+        token = self.state_dir / "client-token"
+        self.component()
+
+        token.write_text("x" * (service_minimum - 1) + "\n")
+        refused = self.component()
+        token.write_text("x" * service_minimum + "\n")
+        accepted = self.component()
+
+        self.assertIn("REPLACE {}".format(token), refused.stdout)
+        self.assertNotIn("REPLACE", accepted.stdout)
+        self.assertEqual(token.read_text(), "x" * service_minimum + "\n")
+
+    def test_install_makes_a_usable_token_private(self):
+        token = self.state_dir / "client-token"
+        self.component()
+        token.write_text("x" * 32 + "\n")
+        token.chmod(0o644)
+
+        result = self.component()
+
+        self.assertIn("CHMOD {} 0600 (was 0644)".format(token), result.stdout)
+        self.assertEqual(stat.S_IMODE(token.stat().st_mode), 0o600)
+        self.assertEqual(token.read_text(), "x" * 32 + "\n")
+
+    def test_install_refuses_a_token_path_that_is_a_directory_before_writing(self):
+        token = self.state_dir / "client-token"
+        token.mkdir(parents=True)
+
+        result = self.component(success=False)
+
+        self.assertIn("astack: {} is not a file; move it aside, then install again".format(token), result.stderr)
+        self.assertTrue(token.is_dir())
+        self.assertFalse((self.data / "bin/claude-router").exists())
+
+    def test_install_replaces_a_token_the_router_would_refuse(self):
+        token = self.state_dir / "client-token"
+        self.component()
+        for unusable in ("", "  \n", "x" * 31 + "\n"):
+            with self.subTest(unusable=unusable):
+                token.write_text(unusable)
+                token.chmod(0o644)
+                result = self.component()
+                self.assertIn("REPLACE {} (fewer than 32 characters)".format(token), result.stdout)
+                self.assertRegex(token.read_text(), r"^[0-9a-f]{64}\n$")
+                self.assertEqual(stat.S_IMODE(token.stat().st_mode), 0o600)
+
+    def test_install_keeps_a_usable_token_the_user_chose(self):
+        token = self.state_dir / "client-token"
+        self.component()
+        token.write_text("x" * 32 + "\n")
+        result = self.component()
+        self.assertNotIn("REPLACE", result.stdout)
+        self.assertEqual(token.read_text(), "x" * 32 + "\n")
 
 
 class ComponentRemovalTests(ComponentFixture):

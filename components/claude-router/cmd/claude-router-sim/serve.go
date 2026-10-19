@@ -73,7 +73,7 @@ func (sv *server) route(at time.Time, req router.Request) error {
 	if n == sv.killBefore {
 		syscall.Kill(os.Getpid(), syscall.SIGKILL)
 	}
-	d, err := sv.r.Route(at, req)
+	d, err := sv.r.Route(router.At(at), req)
 	if err != nil {
 		return err
 	}

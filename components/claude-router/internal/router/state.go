@@ -12,9 +12,10 @@ import (
 )
 
 // AccountState is the part of an account's state that survives a restart:
-// the login requirement, known rejections, the latest paid-overflow check,
-// and the latest observed paid use. Quota utilization is not kept, because
-// it informs only reset preference and goes stale within FreshFor. Allowed
+// the login requirement, known rejections, the latest paid-overflow check
+// that a restart can age (see Router.ExpireOverageChecks), and the latest
+// observed paid use. Quota utilization is not kept, because it informs only
+// reset preference and goes stale within FreshFor. Allowed
 // window reports are not kept either: without them a delayed rejection
 // stamped before an allowed report is recorded after a restart, which blocks
 // the account longer, never shorter.
@@ -41,9 +42,12 @@ const checkPersistEvery = time.Minute
 
 const accountsName = "accounts.json"
 
-func (a accountView) state() AccountState {
+func (a accountView) state(expiry Instant) AccountState {
 	st := AccountState{ID: a.ID, NeedsLogin: a.needsLogin, NeedsLoginAt: a.needsLoginAt,
 		Check: a.check, CheckAt: a.checkAt, PaidUseAt: a.paidUseAt}
+	if a.check == OverageDisabled && (expiry.Held() || a.checkAt.Before(expiry.Stamp)) {
+		st.Check, st.CheckAt = "", time.Time{}
+	}
 	for _, rj := range a.rejections {
 		st.Rejections = append(st.Rejections, Rejection{Window: rj.Window, At: rj.at})
 	}
@@ -105,7 +109,7 @@ func Open(cfg Config, accounts []Account, store *Store, now time.Time) (*Router,
 		}
 	}
 	for _, a := range r.accounts {
-		r.saved[a.ID] = a.state()
+		r.saved[a.ID] = a.state(r.expiry)
 	}
 	return r, nil
 }
@@ -128,7 +132,7 @@ func (r *Router) persist() {
 	states := make([]AccountState, len(r.accounts), len(r.accounts)+len(r.unenrolled))
 	dirty := false
 	for i, a := range r.accounts {
-		states[i] = a.state()
+		states[i] = a.state(r.expiry)
 		dirty = dirty || needsWrite(r.saved[a.ID], states[i])
 	}
 	if !dirty {
@@ -148,7 +152,7 @@ func (r *Router) AccountStates() []AccountState {
 	defer r.mu.RUnlock()
 	out := make([]AccountState, len(r.accounts))
 	for i, a := range r.accounts {
-		out[i] = a.state()
+		out[i] = a.state(r.expiry)
 	}
 	return out
 }
@@ -249,7 +253,7 @@ func (r *Router) Accounts() []AccountView {
 	for i, a := range r.accounts {
 		obs := a.observation
 		obs.Windows = slices.Clone(obs.Windows)
-		out[i] = AccountView{AccountState: a.state(), Capacity: a.Capacity, Observation: obs}
+		out[i] = AccountView{AccountState: a.state(r.expiry), Capacity: a.Capacity, Observation: obs}
 	}
 	return out
 }
