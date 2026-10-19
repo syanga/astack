@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -55,10 +56,32 @@ const (
 
 // net/http can call these hooks after RoundTrip returns.
 type writeTrace struct {
-	mu     sync.Mutex
-	conn   bool
-	wrote  bool
-	failed bool
+	mu       sync.Mutex
+	conn     bool
+	wrote    bool
+	failed   bool
+	expired  bool
+	returned bool
+}
+
+var errUnwritten = errors.New("claude-router: the request was not written within the network retry time")
+
+func (w *writeTrace) cancelUnwritten(req *http.Request, d time.Duration) (*http.Request, func()) {
+	ctx, cancel := context.WithCancelCause(req.Context())
+	timer := time.AfterFunc(d, func() {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if !w.wrote && !w.returned {
+			w.expired = true
+			cancel(errUnwritten)
+		}
+	})
+	return req.WithContext(ctx), func() {
+		w.mu.Lock()
+		w.returned = true
+		w.mu.Unlock()
+		timer.Stop()
+	}
 }
 
 func (w *writeTrace) hooks() *httptrace.ClientTrace {
@@ -82,10 +105,11 @@ func (w *writeTrace) hooks() *httptrace.ClientTrace {
 
 // net/http's HTTP/2 transport calls no WroteRequest hook when writing the
 // headers fails, so a connection without a write report counts as written.
+// After a cancel it can return before it calls the hook.
 func (w *writeTrace) phase() phase {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if !w.wrote && (!w.conn || w.failed) {
+	if !w.wrote && (!w.conn || w.failed || w.expired) {
 		return beforeWrite
 	}
 	return afterWrite
@@ -135,7 +159,13 @@ type budget struct {
 	netUntil time.Time
 }
 
-func (b *budget) netRetry(now time.Time, window time.Duration) (time.Duration, bool) {
+func (b *budget) charge(limit int32) bool { return b.attempts.Add(1) <= limit }
+
+func (b *budget) refund() { b.attempts.Add(-1) }
+
+func (b *budget) spent() int32 { return b.attempts.Load() }
+
+func (b *budget) netRetry(now time.Time, window time.Duration) (time.Duration, time.Time, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.netFails == 0 {
@@ -143,7 +173,7 @@ func (b *budget) netRetry(now time.Time, window time.Duration) (time.Duration, b
 	}
 	b.netFails++
 	wait := retryBackoff(b.netFails + 1)
-	return wait, !now.Add(wait).After(b.netUntil)
+	return wait, b.netUntil, !now.Add(wait).After(b.netUntil)
 }
 
 type upstream struct {
@@ -243,6 +273,7 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 		return nil, fmt.Errorf("claude-router transport: request for an account that is not enrolled")
 	}
 	info, _ := req.Context().Value(callKey{}).(callInfo)
+	var until time.Time
 	for try := 0; ; try++ {
 		out, trace, err := t.prepare(req, try)
 		if err != nil {
@@ -255,8 +286,13 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 			t.record(info.id, a)
 			return nil, a.Refused
 		}
+		settle := func() {}
+		if try > 0 {
+			out, settle = trace.cancelUnwritten(out, until.Sub(a.Start))
+		}
 		rt := t.upstream.get()
 		resp, err := rt.RoundTrip(out)
+		settle()
 		a.End = t.now()
 		if err == nil {
 			a.Status = resp.StatusCode
@@ -267,6 +303,9 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 			t.record(info.id, a)
 			return resp, nil
 		}
+		if errors.Is(context.Cause(out.Context()), errUnwritten) {
+			err = errUnwritten
+		}
 		a.Err = err
 		if req.Context().Err() == nil {
 			a.Phase = trace.phase()
@@ -275,15 +314,15 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 		var wait time.Duration
 		retry := false
 		if a.Phase == beforeWrite && info.budget != nil {
-			info.budget.attempts.Add(-1)
-			wait, retry = info.budget.netRetry(time.Now(), t.netRetryFor)
+			info.budget.refund()
+			wait, until, retry = info.budget.netRetry(a.End, t.netRetryFor)
 			retry = retry && req.GetBody != nil
 		}
 		t.record(info.id, a)
 		if a.Phase != "" && info.id != "" && t.onNetwork != nil {
 			t.onNetwork(info, a)
 		}
-		if !retry || !sleepCtx(req.Context(), wait) {
+		if !retry || !sleepCtx(req.Context(), wait) || t.now().After(until) {
 			return nil, err
 		}
 	}
@@ -330,7 +369,7 @@ func (t *transport) refuse(call string, account router.AccountID, info callInfo)
 			return ineligible{reason}
 		}
 	}
-	if info.budget != nil && info.budget.attempts.Add(1) > t.limit {
+	if info.budget != nil && !info.budget.charge(t.limit) {
 		return overCap{}
 	}
 	return nil

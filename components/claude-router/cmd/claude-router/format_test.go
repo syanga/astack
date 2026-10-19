@@ -139,6 +139,19 @@ func needsLoginReport() report {
 	return r
 }
 
+func unreachableReport() report {
+	r := healthyReport()
+	r.Status.Bindings = []claude.BindingStatus{
+		binding("e91f675b4f8a", "work", router.ReasonCapacity, at(0, 13, 2), at(0, 14, 15), true),
+		binding("a833c9b837a0", "alumni", router.ReasonCapacity, at(0, 13, 40), at(0, 14, 12), true),
+	}
+	r.Digest.Conversations = map[string]*conversationDigest{
+		"e91f675b4f8a": {Last: at(0, 14, 15), Since: at(0, 14, 15), Decision: router.Fail, Reason: string(router.ReasonUnreachable), Context: 47_000},
+		"a833c9b837a0": {Last: at(0, 14, 12), Since: at(0, 14, 12), Decision: router.Fail, Reason: string(router.ReasonRetryBudget), Context: 31_000},
+	}
+	return r
+}
+
 func TestStatusMatchesTheSelectedLayout(t *testing.T) {
 	stopped := report{Now: sampleNow, Manager: "launchd", Listen: "127.0.0.1:18787"}
 	gaveUp := stopped
@@ -153,6 +166,8 @@ func TestStatusMatchesTheSelectedLayout(t *testing.T) {
 		{"waiting-verbose", waitingReport(), true},
 		{"overflow-stale", overflowStaleReport(), false},
 		{"needs-login", needsLoginReport(), false},
+		{"unreachable", unreachableReport(), false},
+		{"unreachable-verbose", unreachableReport(), true},
 		{"stopped", stopped, false},
 		{"gave-up", gaveUp, false},
 	} {

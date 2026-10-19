@@ -83,9 +83,11 @@ func writeError(c *gin.Context, status int, kind, message string) {
 
 // Claude Code 2.1.300 and Agent SDK 0.3.300 retry a 503 with their own
 // backoff unless x-should-retry is false.
-func answerUnreached(c *gin.Context, message string) {
-	writeErrorRetry(c, http.StatusServiceUnavailable, "api_error", message, true)
+func answerRetriesSpent(c *gin.Context, upstream int, message string) {
+	writeErrorRetry(c, http.StatusServiceUnavailable, "api_error", message, upstream == 0)
 }
+
+const capMessage = "claude-router: request reached the router's upstream attempt cap"
 
 func writeErrorRetry(c *gin.Context, status int, kind, message string, retry bool) {
 	c.Header("X-Should-Retry", strconv.FormatBool(retry))
@@ -209,7 +211,7 @@ func (s *Service) messages(c *gin.Context) {
 			return
 		}
 
-		if spend.attempts.Load() >= s.transport.limit {
+		if spend.spent() >= s.transport.limit {
 			// The conversation moved since this request's last attempt, by
 			// this request's migration or a concurrent one: the client sends
 			// again, and its resend goes to the new account.
@@ -219,7 +221,7 @@ func (s *Service) messages(c *gin.Context) {
 				return
 			}
 			finish("request", account, router.Decision{Kind: router.Fail, Reason: router.ReasonRetryBudget}, http.StatusServiceUnavailable, nil)
-			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: request reached the router's upstream attempt cap")
+			answerRetriesSpent(c, upstream, capMessage)
 			return
 		}
 		tried = account
@@ -248,14 +250,14 @@ func (s *Service) messages(c *gin.Context) {
 			s.events.emit(Event{Kind: "attempt_refused", Conversation: conv, Account: account, Reason: string(r.reason)})
 			continue
 		}
-		if spend.attempts.Load() > s.transport.limit {
+		if spend.spent() > s.transport.limit {
 			finish("request", account, router.Decision{Kind: router.Fail, Reason: router.ReasonRetryBudget}, http.StatusServiceUnavailable, &out)
-			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: request reached the router's upstream attempt cap")
+			answerRetriesSpent(c, upstream, capMessage)
 			return
 		}
 		if out.Phase == beforeWrite {
-			finish("request", account, router.Decision{Kind: router.Fail, Reason: router.ReasonRetryBudget}, http.StatusServiceUnavailable, &out)
-			answerUnreached(c, fmt.Sprintf("claude-router: the connection to the provider failed before the request was sent, for %s (last error: %v)", s.transport.netRetryFor, out.Err))
+			finish("request", account, router.Decision{Kind: router.Fail, Reason: router.ReasonUnreachable}, http.StatusServiceUnavailable, &out)
+			answerRetriesSpent(c, upstream, fmt.Sprintf("claude-router: the provider could not be reached for %s (last error: %v)", s.transport.netRetryFor, out.Err))
 			return
 		}
 		if out.Attempts == 0 {

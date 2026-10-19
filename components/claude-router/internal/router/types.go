@@ -189,6 +189,7 @@ const (
 	ReasonManual          Reason = "manual"
 	ReasonTransient       Reason = "transient_retry"
 	ReasonRetryBudget     Reason = "retry_budget_spent"
+	ReasonUnreachable     Reason = "provider_unreachable"
 	ReasonNeedsLogin      Reason = "needs_login"
 	ReasonNotEnrolled     Reason = "not_enrolled"
 	ReasonMissingIdentity Reason = "missing_identity"
