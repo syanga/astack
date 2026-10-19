@@ -67,35 +67,46 @@ type writeTrace struct {
 	wrote     bool
 	failed    bool
 	responded bool
-	expired   bool
+	fired     bool
 	returned  bool
 }
 
-var errUnwritten = errors.New("claude-router: the request was not written within the network retry time")
+var (
+	errUnwritten    = errors.New("claude-router: the request was not written within the network retry time")
+	errMaybeWritten = errors.New("claude-router: the request may have been written when the network retry time ended")
+)
 
-func (w *writeTrace) cancelUnwritten(req *http.Request, left func() time.Duration) (*http.Request, func()) {
+func (w *writeTrace) cancelUnwritten(req *http.Request, left func() time.Duration) (out *http.Request, disarm func() (fired bool)) {
 	ctx, cancel := context.WithCancelCause(req.Context())
-	disarmed := make(chan struct{})
-	go func() {
-		for d := left(); d > 0; d = left() {
-			select {
-			case <-disarmed:
-				return
-			case <-time.After(min(d, wallCheckEvery)):
-			}
-		}
+	expire := func() {
 		w.mu.Lock()
 		defer w.mu.Unlock()
 		if !w.wrote && !w.responded && !w.returned {
-			w.expired = true
+			w.fired = true
 			cancel(errUnwritten)
 		}
-	}()
-	return req.WithContext(ctx), func() {
+	}
+	disarmed := make(chan struct{})
+	if d := left(); d <= 0 {
+		expire()
+	} else {
+		go func() {
+			for ; d > 0; d = left() {
+				select {
+				case <-disarmed:
+					return
+				case <-time.After(min(d, wallCheckEvery)):
+				}
+			}
+			expire()
+		}()
+	}
+	return req.WithContext(ctx), func() bool {
 		w.mu.Lock()
+		defer w.mu.Unlock()
 		w.returned = true
-		w.mu.Unlock()
 		close(disarmed)
+		return w.fired
 	}
 }
 
@@ -143,7 +154,7 @@ func (w *writeTrace) hooks() *httptrace.ClientTrace {
 // After a cancel it can return before it calls the hook, even when it sent
 // the last byte, so a canceled request whose body net/http read to the end
 // counts as written.
-func (w *writeTrace) phase() phase {
+func (w *writeTrace) phase(canceled bool) phase {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	switch {
@@ -151,7 +162,7 @@ func (w *writeTrace) phase() phase {
 		return afterWrite
 	case !w.conn:
 		return beforeWrite
-	case w.expired:
+	case canceled:
 		if w.bodyRead {
 			return afterWrite
 		}
@@ -356,13 +367,13 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 			t.record(info.id, a)
 			return nil, a.Refused
 		}
-		disarm := func() {}
+		disarm := func() bool { return false }
 		if _, started := info.budget.netLeft(t.read(), t.netRetryFor); started {
 			out, disarm = trace.cancelUnwritten(out, left)
 		}
 		rt := t.upstream.get()
 		resp, err := rt.RoundTrip(out)
-		disarm()
+		fired := disarm()
 		a.End = t.clock.now()
 		if err == nil {
 			a.Status = resp.StatusCode
@@ -373,14 +384,20 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 			t.record(info.id, a)
 			return resp, nil
 		}
-		if errors.Is(context.Cause(out.Context()), errUnwritten) {
-			err = errUnwritten
-		}
-		a.Err = err
+		// net/http reports a cancel as the context's cause or, over HTTP/2,
+		// as context.Canceled.
+		canceled := fired && (errors.Is(err, errUnwritten) || errors.Is(err, context.Canceled))
 		if req.Context().Err() == nil {
-			a.Phase = trace.phase()
+			a.Phase = trace.phase(canceled)
 			t.upstream.replace(rt)
 		}
+		if canceled {
+			err = errUnwritten
+			if a.Phase == afterWrite {
+				err = errMaybeWritten
+			}
+		}
+		a.Err = err
 		var wait time.Duration
 		retry := false
 		if a.Phase == beforeWrite && info.budget != nil {

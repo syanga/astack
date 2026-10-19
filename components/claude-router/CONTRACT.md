@@ -1046,19 +1046,23 @@ granting no flow-control window. The transport cancels at the end of the
 time. When the machine sleeps or the wall clock steps forward past the end,
 it cancels within 1 s of the wake or the step. After the end, the next
 `before_write` failure ends the request. A canceled try is that failure
-unless it counts as `after_write`, as the next paragraph describes. Then the
-routing loop retries it if the cap allows, and the transport cancels that
-try as it starts.
+unless it counts as `after_write`, as the next paragraph describes. The
+routing loop retries an `after_write` try if the cap allows, and the
+transport cancels each later try of the request before net/http starts it.
+A try that fails with its own error just as the time ends is not a canceled
+try. It keeps its error and its phase.
 
 net/http's HTTP/2 transport can return from a cancel before it reports a
 write, even after it sent the last byte. The transport therefore counts a
 canceled try as `after_write` and charges it when net/http had read the
 whole request body. This charge is conservative. It also charges a try whose
 last bytes were still waiting for flow-control window, so the provider never
-received the whole request. In the other direction, a cancel can reach a
-request whose last byte was sent before net/http reported the write. The
-provider may then run a request that the transport canceled. That request is
-charged, and the routing loop retries it as an `after_write` failure.
+received the whole request. A cancel can also reach a request whose last
+byte was sent before net/http reported the write. That request is charged,
+and the routing loop retries it as an `after_write` failure, so the provider
+may run it twice. The error text of an uncharged canceled try says that the
+request was not written, and that of a charged one says that the request may
+have been written.
 
 The transport never cancels a try that net/http reported written or whose
 response began. Such a try waits for the provider or for a network failure,
@@ -1120,11 +1124,14 @@ times per request (`MaxAttempts`), so a run of `after_write` failures usually
 ends after 3 attempts, 33 for 11 requests. Only the SDK's redispatch after a
 401 adds a fourth.
 
-Tests in `internal/claude/network_test.go`. Four of them replace the
-upstream with a round tripper that refuses, holds, or reads the request:
+Tests in `internal/claude/network_test.go`. Six of them replace the
+upstream with a round tripper that refuses, holds, reads, or fails the
+request:
 `TestANetworkRetryThatWakesAfterTheRetryTimeIsNotSent`,
 `TestTheNetworkRetryTimeEndsByWhicheverClockPassesItFirst`,
-`TestARetryCanceledAtTheNetworkRetryTimeIsChargedOnlyIfItsBodyWasRead`, and
+`TestARetryCanceledAtTheNetworkRetryTimeIsChargedOnlyIfItsBodyWasRead`,
+`TestARoutingLoopRetryThatStartsAfterTheNetworkRetryTimeIsCanceledBeforeItWrites`,
+`TestATryWhoseOwnFailureMeetsTheEndOfTheNetworkRetryTimeKeepsItsError`, and
 `TestAClientThatLeavesStopsTheNetworkRetries`. The others run against a real
 HTTP/2 server without TLS:
 
@@ -1151,21 +1158,32 @@ HTTP/2 server without TLS:
 - `TestTheNetworkRetryTimeEndsByWhicheverClockPassesItFirst`: a wall clock
   that steps back 1 h after the first refused connection leaves the four
   tries of a 3 s retry time. A wall clock that jumps 1 h forward during a
-  stalled retry of a 20 s retry time cancels it within 4 s.
+  stalled retry of a 20 s retry time cancels it as unwritten within 4 s, and
+  no try follows.
 - `TestARetryWhoseBodyWriteStallsEndsAtTheNetworkRetryTime`: a retry whose
   1 MiB body the server never reads is canceled at the end of the network
   retry time.
 - `TestARoutingLoopRetryWhoseBodyWriteStallsEndsAtTheNetworkRetryTime`: a
   reset before the body is read, then a reset after it, then a routing-loop
-  retry whose body the server never reads, end with the retryable 503 within
-  5 s of a 1 s retry time.
+  retry whose body the server never reads, end with the retryable 503. The
+  network retry time is 1 s, and the answer comes within 5 s.
 - `TestAResponseThatBeginsBeforeTheNetworkRetryTimeEndsIsNotCanceled`: a
   retry that the server answers with 103 and then holds unread past the end
   of a 1 s retry time is served.
+- `TestAResetAfterTheResponseBeganIsCharged`: with a cap of 1, a reset after
+  the server answered 103 and before it read the body is `after_write` and
+  ends with the retryable 503 after one attempt.
 - `TestARetryCanceledAtTheNetworkRetryTimeIsChargedOnlyIfItsBodyWasRead`: a
-  canceled retry with no write report is `before_write` and uncharged when
-  net/http read part of its body, and `after_write` and charged when it read
-  all of it.
+  canceled retry with no write report is `before_write`, uncharged, and
+  reported as not written when the round tripper read part of its body. It is
+  `after_write`, charged, and reported as possibly written when the round
+  tripper read all of it.
+- `TestARoutingLoopRetryThatStartsAfterTheNetworkRetryTimeIsCanceledBeforeItWrites`:
+  a routing-loop retry that starts after the time ended is canceled before
+  the round tripper can report a write, and is uncharged.
+- `TestATryWhoseOwnFailureMeetsTheEndOfTheNetworkRetryTimeKeepsItsError`: a
+  retry that fails with its own header-write error as the time ends keeps
+  that error and is `after_write` and charged.
 - `TestANetworkRetryTimeThatEndsAfterAChargedAttemptAsksTheClientToRetry`:
   an `after_write` failure, then `before_write` failures until the time ends,
   answer the retryable 503.

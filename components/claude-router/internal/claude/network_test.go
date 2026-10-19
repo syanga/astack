@@ -32,6 +32,7 @@ const (
 	stallBody
 	abortThenIgnore
 	hintThenPass
+	hintThenReset
 )
 
 const hintHold = 2 * time.Second
@@ -117,6 +118,11 @@ func (u *netUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case hintThenPass:
 		w.WriteHeader(http.StatusEarlyHints)
 		time.Sleep(hintHold)
+	case hintThenReset:
+		w.WriteHeader(http.StatusEarlyHints)
+		time.Sleep(200 * time.Millisecond)
+		u.reset(conn)
+		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -698,8 +704,11 @@ func TestTheNetworkRetryTimeEndsByWhicheverClockPassesItFirst(t *testing.T) {
 
 		err := sendOne(ctx, tr, &budget{}, "{}")
 
-		if took := time.Since(start); took > 4*time.Second || ctx.Err() != nil {
-			t.Fatalf("returned after %s (%v), want the stalled retry canceled soon after the wall clock passed the 20 s retry time", took, err)
+		if took := time.Since(start); took > 4*time.Second || !errors.Is(err, errUnwritten) {
+			t.Fatalf("returned after %s with %v, want the stalled retry canceled as unwritten soon after the wall clock passed the 20 s retry time", took, err)
+		}
+		if n := up.calls.Load(); n != 2 {
+			t.Fatalf("upstream saw %d calls, want 2: no retry after the time ended", n)
 		}
 	})
 }
@@ -734,9 +743,10 @@ func TestARetryCanceledAtTheNetworkRetryTimeIsChargedOnlyIfItsBodyWasRead(t *tes
 		whole  bool
 		phase  phase
 		charge int32
+		err    error
 	}{
-		{"part of the body read", false, beforeWrite, 0},
-		{"the whole body read", true, afterWrite, 1},
+		{"part of the body read", false, beforeWrite, 0, errUnwritten},
+		{"the whole body read", true, afterWrite, 1, errMaybeWritten},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			up := &readingUpstream{whole: tc.whole}
@@ -753,8 +763,8 @@ func TestARetryCanceledAtTheNetworkRetryTimeIsChargedOnlyIfItsBodyWasRead(t *tes
 
 			err := sendOne(ctx, tr, spend, strings.Repeat("a", 64<<10))
 
-			if err == nil || ctx.Err() != nil {
-				t.Fatalf("got %v with the test context %v, want the retry canceled at the 1 s retry time", err, ctx.Err())
+			if !errors.Is(err, tc.err) {
+				t.Fatalf("got %v, want %v: the retry canceled at the 1 s retry time", err, tc.err)
 			}
 			mu.Lock()
 			defer mu.Unlock()
@@ -765,6 +775,94 @@ func TestARetryCanceledAtTheNetworkRetryTimeIsChargedOnlyIfItsBodyWasRead(t *tes
 				t.Fatalf("charged %d attempts, want %d", n, tc.charge)
 			}
 		})
+	}
+}
+
+// net/http starts no request whose context is already done.
+type writingUpstream struct {
+	calls  atomic.Int32
+	writes atomic.Int32
+}
+
+func (u *writingUpstream) RoundTrip(req *http.Request) (*http.Response, error) {
+	closeBody(req)
+	if u.calls.Add(1) == 1 {
+		return nil, errors.New("dial tcp: connect: connection refused")
+	}
+	if req.Context().Err() != nil {
+		return nil, context.Cause(req.Context())
+	}
+	trace := httptrace.ContextClientTrace(req.Context())
+	trace.GotConn(httptrace.GotConnInfo{})
+	trace.WroteRequest(httptrace.WroteRequestInfo{})
+	u.writes.Add(1)
+	<-req.Context().Done()
+	return nil, context.Cause(req.Context())
+}
+
+func TestARoutingLoopRetryThatStartsAfterTheNetworkRetryTimeIsCanceledBeforeItWrites(t *testing.T) {
+	clk := &offsetClock{}
+	up := &writingUpstream{}
+	tr := newClockedTransport(up, time.Second, clk.now, func(callInfo, attempt) { clk.offset.Store(int64(time.Hour)) })
+	spend := &budget{}
+	if err := sendOne(context.Background(), tr, spend, "{}"); err == nil {
+		t.Fatal("first round trip succeeded, want the refused connection's error")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err := sendOne(ctx, tr, spend, "{}")
+
+	if !errors.Is(err, errUnwritten) {
+		t.Fatalf("routing-loop retry got %v, want %v at once: the 1 s retry time ended an hour ago", err, errUnwritten)
+	}
+	if n := up.writes.Load(); n != 0 {
+		t.Fatalf("upstream reported %d writes, want 0", n)
+	}
+	if n := spend.spent(); n != 0 {
+		t.Fatalf("charged %d attempts, want 0", n)
+	}
+}
+
+type failingUpstream struct{ calls atomic.Int32 }
+
+var errHeaderWrite = errors.New("http2: write headers: broken pipe")
+
+func (u *failingUpstream) RoundTrip(req *http.Request) (*http.Response, error) {
+	closeBody(req)
+	if u.calls.Add(1) == 1 {
+		return nil, errors.New("dial tcp: connect: connection refused")
+	}
+	httptrace.ContextClientTrace(req.Context()).GotConn(httptrace.GotConnInfo{})
+	<-req.Context().Done()
+	return nil, errHeaderWrite
+}
+
+func TestATryWhoseOwnFailureMeetsTheEndOfTheNetworkRetryTimeKeepsItsError(t *testing.T) {
+	up := &failingUpstream{}
+	var mu sync.Mutex
+	var phases []phase
+	tr := newClockedTransport(up, time.Second, time.Now, func(_ callInfo, a attempt) {
+		mu.Lock()
+		phases = append(phases, a.Phase)
+		mu.Unlock()
+	})
+	spend := &budget{}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	err := sendOne(ctx, tr, spend, "{}")
+
+	if !errors.Is(err, errHeaderWrite) {
+		t.Fatalf("got %v, want the try's own error %v", err, errHeaderWrite)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if want := []phase{beforeWrite, afterWrite}; !reflect.DeepEqual(phases, want) {
+		t.Fatalf("failure phases %v, want %v: a header-write failure with no write report counts as written", phases, want)
+	}
+	if n := spend.spent(); n != 1 {
+		t.Fatalf("charged %d attempts, want 1", n)
 	}
 }
 
@@ -824,5 +922,29 @@ func TestAResponseThatBeginsBeforeTheNetworkRetryTimeEndsIsNotCanceled(t *testin
 	}
 	if attempts := e.requestAttempts(); !reflect.DeepEqual(attempts, []int{1}) {
 		t.Fatalf("request upstream_attempts %v, want [1]", attempts)
+	}
+}
+
+func TestAResetAfterTheResponseBeganIsCharged(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	e.cfg.MaxUpstreamAttempts = 1
+	u := newNetUpstream(t, e.upstream, func(n int) netAction {
+		if n == 1 {
+			return hintThenReset
+		}
+		return pass
+	})
+	e.startNet(u, Options{})
+
+	r := e.send(msg{Session: sessionID(1), Body: largeBody(e, sessionID(1))})
+
+	if r.Status != http.StatusServiceUnavailable || r.Header.Get("X-Should-Retry") != "true" {
+		t.Fatalf("got %d with x-should-retry %q, want the attempt-cap 503 the client retries: the server answered 103 before the reset", r.Status, r.Header.Get("X-Should-Retry"))
+	}
+	if seen := u.seen(); len(seen) != 1 {
+		t.Fatalf("upstream saw %d requests, want 1", len(seen))
+	}
+	if got := e.failures(); !reflect.DeepEqual(got, []string{"network/after_write"}) {
+		t.Fatalf("attempt_failed events %v, want [network/after_write]", got)
 	}
 }
