@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/syanga/astack/components/claude-router/internal/router"
 )
@@ -119,7 +120,117 @@ func TestSimulationKeepsHealthyConversationsAndRecoversEveryBinding(t *testing.T
 	if m.ParallelFirstGroups == 0 || m.ParallelDisagreements != 0 {
 		t.Fatalf("%d parallel first-request groups with %d disagreements, want groups and no disagreement", m.ParallelFirstGroups, m.ParallelDisagreements)
 	}
-	if m.SubagentRequests == 0 || m.SubagentNotInherited != 0 {
-		t.Fatalf("%d subagent requests with %d not inherited, want requests and all inherited", m.SubagentRequests, m.SubagentNotInherited)
+	if m.SubagentRequests == 0 || m.SubagentNotInherited != 0 || m.SubagentServed != m.SubagentRequests {
+		t.Fatalf("%d subagent requests with %d not inherited and %d served, want requests, all inherited and all served",
+			m.SubagentRequests, m.SubagentNotInherited, m.SubagentServed)
+	}
+}
+
+func oneConversation(turns int, accounts ...SimAccount) Fixture {
+	return Fixture{
+		Name: "one-conversation", Start: serveStart, Hours: 3, FiveHourUnits: 10, WeeklyUnits: 1000, OverageCheckMinutes: 15,
+		Accounts: accounts,
+		Workload: Workload{Conversations: 1, ArrivalMeanMinutes: 0.001, TurnsMin: turns, TurnsMax: turns, GapMeanMinutes: 0.001,
+			InitialContext: 1000, SubagentContext: 1000, Models: []string{"claude-sonnet-4-5"}, ParallelFirst: 1},
+		Cache: CacheModel{TTLMinutes: 5, WriteWeight: 1},
+	}
+}
+
+func TestHeaderlessExhaustionWaitsWithoutAKnownReset(t *testing.T) {
+	fx := oneConversation(1, SimAccount{ID: "acct-e", Capacity: 1, FiveHourUsed: 1, FiveHourResetHours: 2, WeeklyResetHours: 100, HideHeaders: true})
+	cfg := router.DefaultConfig()
+	cfg.UnknownResetRecheck = 7 * time.Minute
+
+	m, tr, err := Simulate(fx, 1, cfg, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	waits := 0
+	for _, e := range tr {
+		if e.Event != "wait" {
+			continue
+		}
+		waits++
+		if *e.ResetKnown || !e.Until.Equal(e.At.Add(7*time.Minute)) {
+			t.Fatalf("wait at %s until %s with reset_known=%v, want an unknown reset rechecked at %s",
+				e.At.Format(time.RFC3339), e.Until.Format(time.RFC3339), *e.ResetKnown, e.At.Add(7*time.Minute).Format(time.RFC3339))
+		}
+	}
+	if waits != 18 || m.CompletedTurns != 1 {
+		t.Fatalf("%d waits and %d completed turns, want 18 rechecks before the hidden reset at 11:00 and then the turn", waits, m.CompletedTurns)
+	}
+}
+
+func TestSubagentMigrationServesOnADestinationWhoseWindowHasReset(t *testing.T) {
+	fx := oneConversation(2,
+		SimAccount{ID: "acct-a", Capacity: 1, FiveHourUsed: 0.7, FiveHourResetHours: 5, WeeklyResetHours: 100},
+		SimAccount{ID: "acct-b", Capacity: 0.5, FiveHourUsed: 1, FiveHourResetHours: 0.5, WeeklyResetHours: 100})
+	fx.Workload.SubagentProbability = 1
+	fx.Workload.IdleProbability, fx.Workload.IdleMinutes = 1, 60
+
+	m, tr, err := Simulate(fx, 1, router.DefaultConfig(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var moved []string
+	for _, e := range tr {
+		if e.Event == "migrate" {
+			moved = append(moved, string(e.Agent)+":"+string(e.From)+"->"+string(e.Account))
+		}
+	}
+	if len(moved) != 1 || moved[0] != "agent-2:acct-a->acct-b" {
+		t.Fatalf("migrations %v, want the second turn's subagent moved from exhausted acct-a to acct-b", moved)
+	}
+	if m.SubagentRequests != 2 || m.SubagentServed != 2 {
+		t.Fatalf("%d of %d subagent requests served, want both, the second on acct-b after its 09:30 reset", m.SubagentServed, m.SubagentRequests)
+	}
+}
+
+func TestSubagentBlockedAfterItsParentWaitsAndThenRuns(t *testing.T) {
+	cfg := router.DefaultConfig()
+	cfg.UnknownResetRecheck = 7 * time.Minute
+	reset := serveStart.Add(time.Hour)
+	for _, tc := range []struct {
+		name      string
+		hide      bool
+		wantKnown bool
+	}{
+		{"visible exhaustion", false, true},
+		{"headerless exhaustion", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := oneConversation(1, SimAccount{ID: "acct-a", Capacity: 1, FiveHourUsed: 0.9, FiveHourResetHours: 1, WeeklyResetHours: 100, HideHeaders: tc.hide})
+			fx.Workload.SubagentProbability = 1
+
+			m, tr, err := Simulate(fx, 1, cfg, t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var first *Event
+			for i, e := range tr {
+				if e.Event == "wait" && e.Agent == "agent-1" {
+					first = &tr[i]
+					break
+				}
+			}
+			if first == nil {
+				t.Fatalf("no wait traced for the subagent whose parent exhausted acct-a; trace %+v", tr)
+			}
+			wantUntil := reset
+			if !tc.wantKnown {
+				wantUntil = first.At.Add(7 * time.Minute)
+			}
+			if *first.ResetKnown != tc.wantKnown || !first.Until.Equal(wantUntil) {
+				t.Fatalf("subagent waited until %s with reset_known=%v, want %s with reset_known=%v",
+					first.Until.Format(time.RFC3339), *first.ResetKnown, wantUntil.Format(time.RFC3339), tc.wantKnown)
+			}
+			if m.SubagentRequests != 1 || m.SubagentServed != 1 || m.UnfinishedConversations != 0 {
+				t.Fatalf("%d of %d subagent requests served with %d unfinished conversations, want the subagent served after the 10:00 reset",
+					m.SubagentServed, m.SubagentRequests, m.UnfinishedConversations)
+			}
+		})
 	}
 }

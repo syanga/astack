@@ -45,6 +45,7 @@ type Router struct {
 	// removed for a while keeps its rejections and login state when it
 	// returns.
 	unenrolled []AccountState
+	expiry     Instant
 }
 
 // New returns a router over the enrolled accounts, in tie-break order, and an
@@ -75,7 +76,7 @@ func New(cfg Config, accounts []Account, store *Store) (*Router, error) {
 func (r *Router) Config() Config { return r.cfg }
 
 // Decide returns the policy outcome for a request without changing state.
-func (r *Router) Decide(now time.Time, req Request) (Decision, error) {
+func (r *Router) Decide(now Instant, req Request) (Decision, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	b, bound, err := r.store.Lookup(req.Conversation)
@@ -84,12 +85,13 @@ func (r *Router) Decide(now time.Time, req Request) (Decision, error) {
 	}
 	var loadErr error
 	v := view{
-		accounts: r.accounts,
-		index:    r.index,
-		binding:  b,
-		bound:    bound,
+		accounts:   r.accounts,
+		index:      r.index,
+		binding:    b,
+		bound:      bound,
+		checksFrom: r.expiry.Stamp,
 		loads: func() []int {
-			l, err := r.loads(now, req.Conversation)
+			l, err := r.loads(now.Stamp, req.Conversation)
 			loadErr = err
 			return l
 		},
@@ -123,7 +125,7 @@ func (r *Router) loads(now time.Time, skip ConversationID) ([]int, error) {
 // the commit lock and commits that fresh decision, so a Served or Relogin
 // call that landed after d was made is honored. It returns the fresh
 // decision, which may differ from d. Any other kind is returned unchanged.
-func (r *Router) Commit(now time.Time, req Request, d Decision) (Decision, error) {
+func (r *Router) Commit(now Instant, req Request, d Decision) (Decision, error) {
 	if err := r.store.Err(); err != nil {
 		return Decision{}, err
 	}
@@ -139,9 +141,9 @@ func (r *Router) Commit(now time.Time, req Request, d Decision) (Decision, error
 	var b Binding
 	switch fresh.Kind {
 	case Place:
-		b, err = r.store.Assign(req.Conversation, fresh.Account, fresh.Reason, now)
+		b, err = r.store.Assign(req.Conversation, fresh.Account, fresh.Reason, now.Stamp)
 	case Migrate:
-		b, err = r.store.Migrate(req.Conversation, fresh.From, fresh.Account, fresh.Reason, now)
+		b, err = r.store.Migrate(req.Conversation, fresh.From, fresh.Account, fresh.Reason, now.Stamp)
 	default:
 		return fresh, nil
 	}
@@ -151,7 +153,7 @@ func (r *Router) Commit(now time.Time, req Request, d Decision) (Decision, error
 	if b.Account != fresh.Account {
 		return Decision{}, ErrUnsettled
 	}
-	r.touch(req.Conversation, now)
+	r.touch(req.Conversation, now.Stamp)
 	return fresh, nil
 }
 
@@ -171,7 +173,7 @@ func (r *Router) CommitAssignment(now time.Time, conv ConversationID, account Ac
 
 // Route decides a request and commits a placement or migration before
 // returning it. The returned account is the one to pin the request to.
-func (r *Router) Route(now time.Time, req Request) (Decision, error) {
+func (r *Router) Route(now Instant, req Request) (Decision, error) {
 	for range maxRouteAttempts {
 		d, err := r.Decide(now, req)
 		if err != nil {
@@ -188,7 +190,7 @@ func (r *Router) Route(now time.Time, req Request) (Decision, error) {
 			}
 		}
 		if d.Kind == Dispatch || d.Kind == Retry {
-			r.touch(req.Conversation, now)
+			r.touch(req.Conversation, now.Stamp)
 		}
 		return d, nil
 	}
@@ -385,6 +387,32 @@ func (r *Router) ObserveOverage(account AccountID, state Overage, at time.Time) 
 		a.check, a.checkAt = state, at
 	}
 	r.persist()
+}
+
+// ExpireOverageChecks makes every disabled check stamped before at.Stamp
+// stale, so the policy dispatches to an account only on a disabled check
+// stamped at or after it. A caller calls it when its clock can no longer
+// measure the age of earlier checks. Because a restart ages a saved check by
+// the wall clock, the saved account state keeps no disabled check stamped
+// before at.Stamp, and none at all while at is held.
+func (r *Router) ExpireOverageChecks(at Instant) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !at.Stamp.After(r.expiry.Stamp) {
+		return
+	}
+	r.expiry = at
+	r.persist()
+}
+
+func (r *Router) Admit(now Instant, account AccountID, model string) Reason {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	idx, ok := r.index[account]
+	if !ok {
+		return ReasonNotEnrolled
+	}
+	return admissionBar(r.cfg, now, r.expiry.Stamp, r.accounts[idx], model)
 }
 
 // Relogin marks an account as logged in again.

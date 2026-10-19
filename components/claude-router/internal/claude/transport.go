@@ -25,19 +25,41 @@ type attempt struct {
 	Status  int
 	Header  http.Header
 	Err     error
-	Refused string
+	Refused refusal
 }
+
+type refusal interface {
+	error
+	refusal()
+}
+
+type offPin struct{}
+
+type ineligible struct{ reason router.Reason }
+
+type overCap struct{}
+
+func (offPin) refusal()     {}
+func (ineligible) refusal() {}
+func (overCap) refusal()    {}
+
+func (offPin) Error() string { return "claude-router transport refused the attempt: account" }
+func (r ineligible) Error() string {
+	return "claude-router transport refused the attempt: ineligible (" + string(r.reason) + ")"
+}
+func (overCap) Error() string { return "claude-router transport refused the attempt: budget" }
 
 type callInfo struct {
 	id      string
 	account router.AccountID
+	model   string
 	budget  *atomic.Int32
 }
 
 type callKey struct{}
 
-func withCall(ctx context.Context, id string, account router.AccountID, budget *atomic.Int32) context.Context {
-	return context.WithValue(ctx, callKey{}, callInfo{id: id, account: account, budget: budget})
+func withCall(ctx context.Context, id string, account router.AccountID, model string, budget *atomic.Int32) context.Context {
+	return context.WithValue(ctx, callKey{}, callInfo{id: id, account: account, model: model, budget: budget})
 }
 
 // transport is the round tripper the SDK uses for every upstream request.
@@ -50,6 +72,7 @@ type transport struct {
 	redirect *url.URL
 	limit    int32
 	accounts map[string]router.AccountID
+	admit    func(account router.AccountID, model string) router.Reason
 	onHeader func(account router.AccountID, h http.Header, start, at time.Time)
 	now      func() time.Time
 
@@ -57,8 +80,8 @@ type transport struct {
 	calls map[string][]attempt
 }
 
-func newTransport(inner http.RoundTripper, redirect *url.URL, limit int, accounts []router.Account, now func() time.Time, onHeader func(router.AccountID, http.Header, time.Time, time.Time)) *transport {
-	t := &transport{inner: inner, redirect: redirect, limit: int32(limit), accounts: map[string]router.AccountID{}, now: now, onHeader: onHeader, calls: map[string][]attempt{}}
+func newTransport(inner http.RoundTripper, redirect *url.URL, limit int, accounts []router.Account, now func() time.Time, admit func(router.AccountID, string) router.Reason, onHeader func(router.AccountID, http.Header, time.Time, time.Time)) *transport {
+	t := &transport{inner: inner, redirect: redirect, limit: int32(limit), accounts: map[string]router.AccountID{}, now: now, admit: admit, onHeader: onHeader, calls: map[string][]attempt{}}
 	for _, a := range accounts {
 		t.accounts[string(a.ID)+".json"] = a.ID
 	}
@@ -115,22 +138,15 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 	info, _ := req.Context().Value(callKey{}).(callInfo)
 	call := info.id
 	a := attempt{Account: account, Path: req.URL.Path, Start: t.now()}
-	switch {
-	case info.account != "" && info.account != account:
-		a.Refused = "account"
-	case info.budget != nil && info.budget.Add(1) > t.limit:
-		a.Refused = "budget"
-	}
-	if a.Refused != "" {
+	if a.Refused = t.refuse(call, account, info); a.Refused != nil {
 		if req.Body != nil {
 			_ = req.Body.Close()
 		}
 		a.End = a.Start
-		a.Err = fmt.Errorf("claude-router transport refused the attempt: %s", a.Refused)
 		t.mu.Lock()
 		t.calls[call] = append(t.calls[call], a)
 		t.mu.Unlock()
-		return nil, a.Err
+		return nil, a.Refused
 	}
 	resp, err := t.inner.RoundTrip(out)
 	a.End = t.now()
@@ -149,6 +165,21 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 		t.mu.Unlock()
 	}
 	return resp, err
+}
+
+func (t *transport) refuse(call string, account router.AccountID, info callInfo) refusal {
+	if info.account != "" && info.account != account {
+		return offPin{}
+	}
+	if call != "" && t.admit != nil {
+		if reason := t.admit(account, info.model); reason != "" {
+			return ineligible{reason}
+		}
+	}
+	if info.budget != nil && info.budget.Add(1) > t.limit {
+		return overCap{}
+	}
+	return nil
 }
 
 func (t *transport) attempts(call string) []attempt {

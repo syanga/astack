@@ -111,6 +111,26 @@ const (
 	OveragePaidUse  Overage = "paid_use"
 )
 
+// Instant is the time of a routing call on the two clocks the policy reads.
+// After the machine's wall clock steps back, the service clock stands still
+// until the wall clock passes it, so Stamp can be ahead of Wall.
+type Instant struct {
+	// Stamp is the service clock, which never steps back. The policy ages
+	// readings by it and stamps bindings with it.
+	Stamp time.Time
+	// Wall is the machine's wall clock. The policy compares reset times
+	// with it, because a provider reports an exact reset in its own wall
+	// time.
+	Wall time.Time
+}
+
+// Held reports whether Stamp is ahead of Wall, as it is while the service
+// clock stands still after a backward step of the wall clock.
+func (i Instant) Held() bool { return i.Stamp.After(i.Wall) }
+
+// At is the instant of a caller with a single clock.
+func At(t time.Time) Instant { return Instant{Stamp: t, Wall: t} }
+
 // Request is one inference attempt. Attempt counts from 1. LastFailure is the
 // class of the previous attempt of the same request, or ClassNone.
 type Request struct {

@@ -148,7 +148,9 @@ Limits of this posture:
   settings say (`conductor_stream.go:253-263`, `conductor_execution.go:606-612`
   and `:818-824`, gated by `conductor_refresh.go:514-532`). Proxy-owned OAuth
   logins have refresh tokens. One attempt per call holds only for credentials
-  without one (rows RP-5 and RP-5b). Pinning holds either way.
+  without one (rows RP-5 and RP-5b). Pinning holds either way, and the
+  redispatch passes the router's admission check like any other attempt
+  (Routing loop).
 - **Credentials can override the posture.** Credential metadata can override
   the global retry and cooling settings (`sdk/cliproxy/auth/types.go:466-483`
   and `:503-526`). PR3 refuses to enroll a credential file that carries such
@@ -425,7 +427,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | RP-3 | Bootstrap 401 and 403 do not fail over to another account | passed | `TestBootstrapAuthErrorsDoNotFailOver` | PR1 |
 | RP-4 | A pin to an unknown or cooling-down auth fails with 503 and selects no account | passed | `TestPinToUnknownAuthSelectsNothing`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover` | PR1 |
 | RP-5 | Single-attempt posture makes one upstream attempt per call, for credentials without a refresh token | passed | `TestPinnedExecutorPostureMakesOneAttemptPerCall` | PR1 |
-| RP-5b | Single-attempt posture for credentials with a refresh token | blocked | A 401 triggers refresh and a same-auth redispatch (`conductor_stream.go:253-263`). The refresh dials `platform.claude.com`, so no offline probe can serve it. The PR3 service also reads the paid-overflow setting with the account's credential before dispatch. A forced invalid token fails that read with 401; the service then refreshes the credential once and reads again, so the inference that follows runs on the refreshed token and does not take the redispatch path. The path runs only when a token expires between the reading and a request. | Live observation when a token expires in service, or an SDK seam for the refresh client. The PR4 live session had no attempt that failed with 401 (`evidence/PR4/live-2-cc2.1.300/events.jsonl`). The PR4 runbook's steps do not force it: each step starts the router, which reads and renews a due credential before any inference. The PR5 lanes use fake credentials without a refresh token against a controlled upstream, so they cannot reach the path (`evidence/PR5/lane-2/macos.json`). Next chance: PR6's live acceptance |
+| RP-5b | Single-attempt posture for credentials with a refresh token | blocked | A 401 triggers refresh and a same-auth redispatch (`conductor_stream.go:253-263`). Offline tests drive that path through the SDK's own refresh, with only the token exchange replaced: a 401 makes the SDK refresh and resend on the same account, and the router's transport refuses the resend after a blocking observation, on the streaming and non-streaming paths (`TestRefreshRedispatchIsRefusedAfterABlockingObservation`, `TestRefusedRedispatchMovesTheConversationAfterPaidUse`). No offline test lets the resend reach the upstream. The PR3 service also reads the paid-overflow setting with the account's credential before dispatch. A forced invalid token fails that read with 401; the service then refreshes the credential once and reads again, so the inference that follows runs on the refreshed token and does not take the redispatch path. The path runs only when a token expires between the reading and a request. | Live observation when a token expires in service, or an offline test that lets the resend reach the upstream. The PR4 live session had no attempt that failed with 401 (`evidence/PR4/live-2-cc2.1.300/events.jsonl`). The PR4 runbook's steps do not force it: each step starts the router, which reads and renews a due credential before any inference. The PR5 lanes use fake credentials without a refresh token against a controlled upstream, so they cannot reach the path (`evidence/PR5/lane-2/macos.json`). Next chance: PR6's live acceptance |
 | RP-6 | A rotated credential reloaded from the auth directory keeps its account and auth ID, after a quiet period | passed | `TestRotatedCredentialKeepsAccount` | PR1 |
 | RP-7 | SDK-initiated OAuth refresh keeps the account | passed | Live lane 1 rerun at `9b7e059` under `-race` (`evidence/PR3/lane-1-rerun/`): both accounts were due at start, the SDK refreshed them, the start reads logged `credential_refresh` `expiring` `sdk_refreshed` and read the setting, `refresh_sha256_12` and `last_refresh` changed for `work` (`rp7-before.json`, `rp7-after.json`), and step R8 served both accounts on their pinned conversations. The verifier ruled that `c95ae72` runs the same branches on that path (`reports/PR3-verify/c95ae72/receipt.md`, "Live equivalence"). The refresh guard adds no branch to it: a credential with a refresh pending at start is waited for, and the SDK's refresh passes the guard. Offline, a refresh through the SDK's own refresh path, with only the token exchange replaced, keeps the account (`TestReadOfADueCredentialWaitsForTheSDKRefresh`, `TestUnauthorizedSettingsReadRefreshesOnceAndReadsAgain`), and so does a credential renewed by restart (`TestRotatedCredentialAppliesAtRestartOnTheSameAccount`, lane 2 `renewal_keeps_account`). | PR3 |
 | RP-8 | Configuration applied at startup does not change pinned selection | passed | `TestConfigApplyKeepsPinnedSelection`, six configurations | PR1 |
@@ -459,7 +461,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | ID | Contract behavior | Status | Evidence | Owner |
 | --- | --- | --- | --- | --- |
 | IO-5 | The remaining guarantee limit is stated | passed | `included-only.json`, `guarantee_limit`; "Included-only: the documented limit is accepted" above | PR1 |
-| IO-6 | The router refuses unknown or stale overage state and stops routing on observed paid use | passed | `TestUnknownOverageStateRefusesDispatch`, `TestAnAccountWithUnknownStateIsSkippedForPlacement`, `TestEnabledOverflowRefusesDispatch`, `TestStaleReadingIsRecheckedBeforeDispatch`, `TestResponseHeadersRefreshTheReading`, `TestPaidUseStopsRoutingToTheAccount`, `TestPaidUseWithoutAnotherAccountRefuses`. Paid-use detection needs every attempt to pass the router's transport: `TestCredentialsThatChangeTheUpstreamPathAreRefused` refuses a credential proxy or header override, and `TestTransportCapsAttemptsAndRefusesAnotherAccount` refuses an off-pin attempt; lane 2 `unsafe_account_not_placed`, `paid_use_stops_routing` (`evidence/PR3/lane-2/controls.json`). Controlled upstream only; the real usage endpoint is IO-4. | PR3 |
+| IO-6 | The router refuses unknown or stale overage state and stops routing on observed paid use | passed | `TestUnknownOverageStateRefusesDispatch`, `TestAnAccountWithUnknownStateIsSkippedForPlacement`, `TestEnabledOverflowRefusesDispatch`, `TestStaleReadingIsRecheckedBeforeDispatch`, `TestResponseHeadersRefreshTheReading`, `TestPaidUseStopsRoutingToTheAccount`, `TestPaidUseWithoutAnotherAccountRefuses`, `TestRefreshRedispatchIsRefusedAfterABlockingObservation`. Paid-use detection needs every attempt to pass the router's transport: `TestCredentialsThatChangeTheUpstreamPathAreRefused` refuses a credential proxy or header override, and `TestTransportCapsAttemptsAndRefusesAnotherAccount` refuses an off-pin attempt; lane 2 `unsafe_account_not_placed`, `paid_use_stops_routing` (`evidence/PR3/lane-2/controls.json`). Controlled upstream only; the real usage endpoint is IO-4. | PR3 |
 
 ### Waiting and cancellation
 
@@ -597,7 +599,7 @@ from the capacity-only choice for the same request, and `capacity` otherwise.
 | --- | --- | --- |
 | `Rule` | `reset_aware` | Simulator comparison below |
 | `ResetBias` | 8 | Simulator comparison below |
-| `FreshFor` | 15 min | No measurable difference between 5, 15, and 60 min; middle value |
+| `FreshFor` | 15 min | Middle of the swept values 5, 15, and 60 min |
 | `ActiveFor` | 1 h | Not swept; the longest prompt-cache lifetime |
 | `UnknownResetRecheck` | 5 min | Not swept; bounds attempts on an account whose reset is unknown |
 | `OverageFreshFor` | 1 h | Not swept. PR3 sets the final freshness threshold with the check mechanism. |
@@ -606,23 +608,40 @@ from the capacity-only choice for the same request, and `capacity` otherwise.
 The comparison ran 13 variants over two synthetic fixtures and five seeds:
 capacity-only, and reset-aware with bias 1, 2, 4, and 8 at freshness 5, 15,
 and 60 minutes. `evidence/PR2/comparison.json` holds every run and the labeled
-quota and cache assumptions. Means for the chosen default against
-capacity-only:
+quota and cache assumptions.
+
+The selection criterion is the unused weekly share at reset, compared with
+capacity-only on the same fixture and seed. `ResetBias` is the bias with the
+largest mean reduction in that share. Bias 8 has the largest reduction at every
+freshness on both fixtures. `FreshFor` is not chosen by the share. It is the
+middle of the three swept values. At bias 8, 60 minutes had lower mean shares
+than 15 minutes: 0.161 against 0.169 on `weekly-expiry-72h`, and 0.179 against
+0.180 on `mixed-48h`. Both lowered the share against capacity-only in 9 of 10
+seed runs, and 5 minutes in 8 of 10. The criterion does not require a lower
+share in every seed run. Bias 4 at 60 minutes is the only variant that
+lowered it in all 10 runs. Its mean shares are higher than the default's,
+0.173 on `weekly-expiry-72h` and 0.183 on `mixed-48h`, and it writes fewer
+migration cache tokens, 715,800 and 1,112,400 against the default's 846,800
+and 1,358,200.
+
+Means for the chosen default against capacity-only:
 
 | Fixture | Variant | Completed turns | Unused weekly share at reset | Wait minutes | Exhaustion migrations | Migration cache writes (tokens) |
 | --- | --- | --- | --- | --- | --- | --- |
 | `weekly-expiry-72h` | capacity-only | 2593 | 0.197 | 1473 | 63.6 | 663,200 |
-| `weekly-expiry-72h` | bias 8, 15 min | 2590 | 0.169 | 834 | 61.6 | 846,800 |
-| `mixed-48h` | capacity-only | 2975 | 0.189 | 111,080 | 342.8 | 1,058,600 |
-| `mixed-48h` | bias 8, 15 min | 3008 | 0.178 | 108,054 | 353.2 | 1,284,200 |
+| `weekly-expiry-72h` | bias 8, 15 min | 2590 | 0.169 | 836 | 61.6 | 846,800 |
+| `mixed-48h` | capacity-only | 2975 | 0.188 | 111,020 | 383.2 | 1,097,000 |
+| `mixed-48h` | bias 8, 15 min | 2991 | 0.180 | 110,421 | 388.0 | 1,358,200 |
 
-The effect is small. With bias 8, unused weekly allowance at reset was lower
-in each of the five seeds on both fixtures. Completed turns were level on
-`weekly-expiry-72h` and higher in four of five seeds on `mixed-48h`. The cost
-was more cold cache writes from migration, and on `mixed-48h` slightly more
-exhaustion migrations. No run of any variant had a healthy automatic
-migration, counting migrations returned to subagent requests. The comparison
-does not establish a percentage improvement, and none is required.
+The effect is small. With bias 8 at 15 minutes, unused weekly allowance at
+reset was lower than capacity-only in 9 of 10 seed runs. The one miss is
+`mixed-48h` seed 2, where the default left 0.1673 and capacity-only 0.1672.
+Completed turns were higher in 3 of 5 seeds on `mixed-48h`. On
+`weekly-expiry-72h` they were equal in 3 seeds, higher in 1, and lower in 1.
+The cost was more cold cache writes from migration, and on `mixed-48h`
+slightly more exhaustion migrations. No run of any variant had a healthy
+automatic migration, counting migrations returned to subagent requests. The
+comparison does not establish a percentage improvement, and none is required.
 
 ### Quota evidence must come from the attempt
 
@@ -655,7 +674,9 @@ the check or response.
   `overage_observed` when another account is eligible. If none is, it waits
   for the earliest usable reset elsewhere or is refused with
   `paid_use_observed`, and keeps its assignment. New conversations skip the
-  account. A migrated conversation does not return.
+  account. A migrated conversation does not return. While recorded paid use
+  is in force, the transport sends the account no attempt, including the
+  SDK's redispatch of a request that was waiting on a refresh.
 - **Ordering.** The router records the latest check (`disabled` or
   `enabled`) and, separately, the latest paid use, each with its time. A
   check stamped before the latest recorded check is ignored. Of two checks
@@ -892,6 +913,44 @@ the call, all on the pinned account, and otherwise answers 502.
 `max_upstream_attempts` lowers the cap to 1, 2, or 3. With 1 the router
 never retries, so upstream attempts equal client requests; the live lane
 uses this (`TestASingleAttemptCapNeverRetries`).
+
+The transport also refuses an inference attempt, the SDK's refresh
+redispatch included, when the router would not dispatch to its account at
+that moment (`Router.Admit`). That is the case when the account needs a
+login, showed paid use, has a rejection that applies to the model, or has no
+`disabled` check within `OverageFreshFor`. The transport does not check
+settings reads. `Admit` takes the lock under which the router records
+observations, so each check falls wholly before or wholly after each
+observation. The transport refuses an attempt whose check comes after a
+blocking observation. An attempt whose check came first is sent, even if the
+observation is recorded while it is in flight. A refused attempt reaches no
+upstream and does not count toward the cap.
+
+After a refusal the service logs `attempt_refused` with the reason, reports
+no failure to the router, and decides again. The client gets the answer the
+table above gives for that decision. For each reason `Admit` returns:
+
+- `paid_use_observed`: a migration for `overage_observed` when another
+  account is eligible, a local 429 until the earliest usable reset elsewhere,
+  or a 503 that names paid use.
+- `exhausted`, which also covers a model-limit rejection: the local 429, or
+  a 503 when the paid-overflow state bars every logged-in account.
+- `needs_login`: a migration for `never_served_relogin` when the
+  conversation was never served and another account is eligible, otherwise a
+  503 that names `claude-router login`.
+- `overage_unknown` or `overage_stale`: one read of the setting, then
+  another decision. The request dispatches if the read returns `disabled`
+  and otherwise answers 503. A request reads the setting at most once.
+- `overage_enabled`: a 503 that names the account and paid overflow.
+
+`TestRefreshRedispatchIsRefusedAfterABlockingObservation` covers paid use
+and exhaustion on the streaming and non-streaming paths, and
+`TestRefusedRedispatchMovesTheConversationAfterPaidUse` covers the
+migration. The admission check reads both clocks as the policy does, so the
+two agree during a hold (`TestAdmitAgreesWithDecideDuringAHold`). A resend
+after a backward step of the wall clock is refused with `overage_stale` and
+reaches no upstream
+(`TestRefreshRedispatchAfterABackwardClockStepIsRefusedAsStale`).
 
 The cap is per client HTTP request. Every router-made HTTP failure answer
 carries `x-should-retry: false`, which a client honors. Two answers do not
@@ -1246,12 +1305,14 @@ tested offline. PR1 lane 4 (CC-1) measures cache reads with real requests.
 ### Events and status
 
 `events.jsonl` in the state directory holds one JSON object per event:
-`request`, `attempt_failed`, `migrated`, `served`, `paid_use_observed`,
-`overage_read`, `client_auth_rejected`, `request_rejected`, `started`,
-`stopped`, `test_upstream_in_use`, `refresh_guard_replaced`, and, since PR4,
-`login_confirmed`. Events carry account IDs, the first 12
-hex digits of the SHA-256 of the conversation key, statuses, classes,
-decisions, durations, and, on `request`, the usage counters the upstream
+`request`, `attempt_failed`, `attempt_refused`, `pin_violation`, `migrated`,
+`served`, `served_mark_failed`, `paid_use_observed`, `overage_read`,
+`stamp_bounded`, `credential_refresh`, `client_auth_rejected`,
+`request_rejected`, `started`, `stopped`, `test_upstream_in_use`,
+`refresh_guard_replaced`, and, since PR4, `login_confirmed`. Events carry
+account IDs, the first 12 hex digits of the SHA-256 of the conversation key,
+statuses, classes, decisions, durations, and, on `request`, the usage
+counters the upstream
 reported. A counter the upstream did not report is `null`, not 0.
 `TestNoSecretInStatusEventsOrLogs` and lane 2 search events, status, logs,
 the journal, and the SDK configuration for every token.
@@ -1281,32 +1342,63 @@ was stale by wall time.
   every `now` the policy compares against is wall time: overage freshness,
   the order of checks and paid use, unknown-reset rechecks, and request
   times. The saved account state already held wall time only, so one rule
-  holds before and after a restart. The clock never returns a time earlier
-  than one it returned: after a backward wall-clock step it stands still
-  until the wall clock catches up, so a later reading is never stamped
-  before an earlier one (`TestThePolicyComparesStampsWithoutAMonotonicReading`,
-  `TestTheServiceClockNeverStepsBack`).
-- **The hold has a bounded cost.** After the wall clock steps back by D, the
-  clock holds for up to D, and every time it returns is up to D ahead of the
-  wall clock. Two effects follow, and each lasts at most D:
-  - A reading counts as up to D younger than it is. A `disabled` reading can
-    then permit dispatch until its true age reaches `overage_fresh_for` plus
-    D. That happens only when every settings read in that time fails,
-    because a successful read replaces the reading.
-  - A rejection whose absolute reset falls inside the hold counts as past.
-    The router can send attempts to the exhausted account until the hold
-    ends. The upstream refuses each one, so they spend no allowance or
-    credit, but the request can end in 503 at its attempt cap instead of
-    moving.
-
-  A raw wall clock avoids both effects and is worse. It can stamp an
-  `enabled` reading taken after the step before a `disabled` check taken
-  before it. `ObserveOverage` then ignores the `enabled` reading, and the
-  router dispatches while paid overflow is on. On macOS, `timed` slews small
-  offsets, so D is usually under a second. It is large only after a manual
-  clock change or a large correction. The verifier's probes S2b, S7, and S8
-  measured both effects and the raw-clock failure
-  (`reports/PR4-verify/38c01d4/probes/`).
+  applies before and after a restart. The clock never returns a time earlier
+  than one it returned. After a backward wall-clock step, it stands still
+  until the wall clock passes the last time it returned, so a later reading
+  is never stamped before an earlier one
+  (`TestThePolicyComparesStampsWithoutAMonotonicReading`,
+  `TestTheServiceClockNeverStepsBackAndExpiresOldChecksWhileItHolds`). The
+  rest of this section calls that period a hold. A raw wall clock would let
+  a step reorder readings. It could stamp an `enabled` reading taken after
+  the step before a `disabled` check taken before it, and `ObserveOverage`
+  would then ignore the `enabled` reading.
+- **A hold expires every `disabled` reading.** A clock that stands still
+  cannot age a reading. The clock therefore calls
+  `Router.ExpireOverageChecks` at each backward step of the wall clock,
+  after each `overage_fresh_for` of wall time in a hold, and when the hold
+  ends. It passes a time later than every time it returned before, and it
+  makes the call before it returns that time to any caller. The router then
+  counts every `disabled` check stamped before that time as stale. The next
+  request to the account reads the setting again, even within 30 s of the
+  last read. It dispatches only on a `disabled` reading from a read or
+  attempt that started after the call. When that read fails, the request is
+  refused with `overage_stale`
+  (`TestAfterTheWallClockStepsBackNoRequestDispatchesOnAnOldReading`). Any
+  backward step expires the readings, however small. It costs one settings
+  read for each account the next requests use. On macOS, `timed` slews
+  small offsets without stepping, so a step usually comes from a manual
+  clock change or a large correction. Requests that read the clock at the
+  same time never see a step that the wall clock did not take
+  (`TestConcurrentCallersOfAForwardWallClockNeverExpireChecks`).
+- **A restart keeps only a `disabled` check it can age.** After a restart,
+  the router ages a saved check by the wall clock. `accounts.json`
+  therefore holds no `disabled` check during a hold, and none stamped
+  before the time of the last `ExpireOverageChecks` call. Each call removes
+  those checks from the file before the clock returns its time. The next
+  start then reads the setting before it dispatches to the account. A
+  restart without a step keeps the saved check
+  (`TestAfterARestartNoRequestDispatchesOnAReadingOlderThanItsFreshness`).
+  A `disabled` reading therefore never permits dispatch more than
+  `overage_fresh_for` after its read started, during a hold, after it, or
+  across a restart, unless the wall clock steps back while the router is
+  stopped.
+- **Resets are compared with the wall clock.** The policy takes both clocks
+  (`router.Instant`). It ages readings and stamps bindings with the service
+  clock, and it compares reset times with the wall clock. An exact reset is
+  the provider's wall time, so a hold cannot make a future reset count as
+  past. The router moves the conversation or waits, as it does without a
+  step (`TestAfterTheWallClockStepsBackAFutureResetStillMovesTheConversation`).
+  A rejection without a reported reset ends `UnknownResetRecheck` after its
+  service-clock stamp. During a hold that stamp is ahead of the wall clock,
+  so the rejection blocks longer, never shorter. The local 429's
+  `retry-after` counts to the reset on the wall clock too
+  (`TestAfterTheWallClockStepsBackTheLocalWaitCountsToTheResetOnTheWallClock`).
+- **A step while the router is stopped is not detected.** At the next start,
+  the router drops a saved `disabled` check stamped later than the wall
+  clock. It keeps an earlier one, which then counts as younger than it is by
+  up to the step. The start reads every account, and a successful read
+  replaces the saved check. The error remains only for an account whose
+  start read fails.
 - **Overdue reads come first.** The scheduler's timers also run on the
   monotonic clock, so after a wake the next scheduled settings read can be
   up to `overage_check_every` of awake time away. The scheduler records the
@@ -1494,7 +1586,8 @@ a temporary file is synced and renamed, and the directory is synced. A
 disabled check that only advanced by less than a minute, and a rejection
 with a known reset that was observed again, are not rewritten; the saved
 copy is older and therefore more conservative. A failed write stops the
-store, like a failed journal write.
+store, like a failed journal write. The file holds no `disabled` check
+that a backward clock step made stale (see "Wall time across sleep").
 
 On load, a stamp later than the clock is clamped as live readings are:
 blocking evidence is kept and stamped now, and a disabled check is

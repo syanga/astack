@@ -47,7 +47,7 @@ func newDurable(t *testing.T, accounts ...Account) *harness {
 
 func (h *harness) decide(now time.Time, conv string) Decision {
 	h.t.Helper()
-	d, err := h.r.Decide(now, req(conv))
+	d, err := h.r.Decide(At(now), req(conv))
 	if err != nil {
 		h.t.Fatalf("decide %s: %v", conv, err)
 	}
@@ -201,7 +201,7 @@ func TestFailedAccountStateWriteStopsTheRouterUntilReopen(t *testing.T) {
 
 	h.report(t0, a, "claude-sonnet-4-5", ClassAuth)
 
-	if _, err := h.r.Decide(t0, req("conv")); err == nil || !strings.Contains(err.Error(), "reopen") {
+	if _, err := h.r.Decide(At(t0), req("conv")); err == nil || !strings.Contains(err.Error(), "reopen") {
 		t.Fatalf("decide after a failed account state write: %v, want the store's fail-stop error", err)
 	}
 }

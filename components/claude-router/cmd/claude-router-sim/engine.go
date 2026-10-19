@@ -48,6 +48,7 @@ type Metrics struct {
 	ParallelFirstGroups   int     `json:"parallel_first_groups"`
 	ParallelDisagreements int     `json:"parallel_first_disagreements"`
 	SubagentRequests      int     `json:"subagent_requests"`
+	SubagentServed        int     `json:"subagent_requests_served"`
 	SubagentNotInherited  int     `json:"subagent_requests_not_inherited"`
 }
 
@@ -109,6 +110,11 @@ type conversation struct {
 	done        bool
 	cacheKey    map[string]cacheState
 	servedOn    router.AccountID
+	children    []child
+}
+
+type child struct {
+	agent, parent string
 }
 
 type cacheState struct {
@@ -326,6 +332,13 @@ func (s *sim) blocked(q *quota, model string) bool {
 	return false
 }
 
+func (s *sim) rejection(q *quota, at time.Time) router.Observation {
+	if q.hide {
+		return router.Observation{At: at, Windows: []router.Window{{Kind: router.Unspecified, Rejected: true}}}
+	}
+	return s.observation(q, at)
+}
+
 func (s *sim) observation(q *quota, at time.Time) router.Observation {
 	obs := router.Observation{At: at}
 	for _, w := range q.windows {
@@ -481,7 +494,11 @@ func abs(x int) int {
 }
 
 func (s *sim) request(c *conversation) router.Request {
-	return router.Request{Conversation: c.id, Model: c.model, Attempt: c.attempt, LastFailure: c.lastFailure}
+	req := router.Request{Conversation: c.id, Model: c.model, Attempt: c.attempt, LastFailure: c.lastFailure}
+	if len(c.children) > 0 {
+		req.Agent, req.ParentAgent = c.children[0].agent, c.children[0].parent
+	}
+	return req
 }
 
 func (s *sim) turn(c *conversation, at time.Time) error {
@@ -489,52 +506,56 @@ func (s *sim) turn(c *conversation, at time.Time) error {
 	req := s.request(c)
 	var d router.Decision
 	var err error
-	_, bound, err := s.r.Lookup(c.id)
+	b, bound, err := s.r.Lookup(c.id)
 	if err != nil {
 		return err
 	}
 	if !bound && s.fx.Workload.ParallelFirst > 1 {
 		d, err = s.parallelFirst(at, req)
 	} else {
-		d, err = s.r.Route(at, req)
+		d, err = s.r.Route(router.At(at), req)
 	}
 	if err != nil {
 		return err
 	}
+	agent := req.Agent
+	if agent != "" && (d.Kind == router.Place || d.Kind == router.Dispatch && d.Account != b.Account) {
+		s.m.SubagentNotInherited++
+	}
 	switch d.Kind {
 	case router.Place:
 		s.placed[d.Account]++
-		s.trace = append(s.trace, Event{At: at, Event: "place", Conversation: c.id, Model: c.model, Account: d.Account,
+		s.trace = append(s.trace, Event{At: at, Event: "place", Conversation: c.id, Agent: agent, Model: c.model, Account: d.Account,
 			Reason: d.Reason, Observation: d.Observation, Parallel: max(0, s.fx.Workload.ParallelFirst)})
 		return s.attempt(c, at, d.Account)
 	case router.Migrate:
-		s.audit(c, at, d, "")
+		s.audit(c, at, d, agent)
 		return s.attempt(c, at, d.Account)
 	case router.Dispatch:
 		return s.attempt(c, at, d.Account)
 	case router.Retry:
-		s.trace = append(s.trace, Event{At: at, Event: "retry", Conversation: c.id, Account: d.Account, Reason: d.Reason})
+		s.trace = append(s.trace, Event{At: at, Event: "retry", Conversation: c.id, Agent: agent, Account: d.Account, Reason: d.Reason})
 		return s.attempt(c, at, d.Account)
 	case router.Wait:
 		known := d.ResetKnown
 		s.m.Waits++
 		s.m.WaitMinutes += earliest(d.Until, s.end).Sub(at).Minutes()
-		s.trace = append(s.trace, Event{At: at, Event: "wait", Conversation: c.id, Model: c.model, Until: d.Until, ResetKnown: &known, Reason: d.Reason})
+		s.trace = append(s.trace, Event{At: at, Event: "wait", Conversation: c.id, Agent: agent, Model: c.model, Until: d.Until, ResetKnown: &known, Reason: d.Reason})
 		s.resume(c, d.Until)
 	case router.Reauth:
 		s.m.ReauthStalls++
-		s.trace = append(s.trace, Event{At: at, Event: "reauth", Conversation: c.id, Account: d.Account, Reason: d.Reason})
+		s.trace = append(s.trace, Event{At: at, Event: "reauth", Conversation: c.id, Agent: agent, Account: d.Account, Reason: d.Reason})
 		return s.stall(c, at, d.Account)
 	case router.Fail:
 		s.m.FailedTurns++
-		s.trace = append(s.trace, Event{At: at, Event: "fail", Conversation: c.id, Account: d.Account, Reason: d.Reason})
+		s.trace = append(s.trace, Event{At: at, Event: "fail", Conversation: c.id, Agent: agent, Account: d.Account, Reason: d.Reason})
 		s.resume(c, at.Add(time.Minute))
 	case router.Refuse:
 		s.m.Refusals++
-		s.trace = append(s.trace, Event{At: at, Event: "refuse", Conversation: c.id, Account: d.Account, Reason: d.Reason})
+		s.trace = append(s.trace, Event{At: at, Event: "refuse", Conversation: c.id, Agent: agent, Account: d.Account, Reason: d.Reason})
 		s.resume(c, at.Add(minutes(s.fx.OverageCheckMinutes)))
 	case router.Unavailable:
-		s.trace = append(s.trace, Event{At: at, Event: "unavailable", Conversation: c.id, Reason: d.Reason})
+		s.trace = append(s.trace, Event{At: at, Event: "unavailable", Conversation: c.id, Agent: agent, Reason: d.Reason})
 		s.resume(c, at.Add(10*time.Minute))
 	default:
 		return fmt.Errorf("unexpected decision %+v", d)
@@ -605,7 +626,7 @@ func (s *sim) parallelFirst(at time.Time, req router.Request) (router.Decision, 
 			if i > 0 {
 				r.Agent = fmt.Sprintf("parallel-%d", i)
 			}
-			out[i], errs[i] = s.r.Route(at, r)
+			out[i], errs[i] = s.r.Route(router.At(at), r)
 		}()
 	}
 	close(start)
@@ -639,11 +660,21 @@ func (s *sim) attempt(c *conversation, at time.Time, account router.AccountID) e
 	if s.blocked(q, c.model) {
 		s.m.ExhaustedAttempts++
 		class := s.r.Report(router.Failure{Account: account, Model: c.model, Class: router.ClassExhausted,
-			AttemptStart: at, Observation: s.observation(q, at)})
+			AttemptStart: at, Observation: s.rejection(q, at)})
 		c.attempt, c.lastFailure = c.attempt+1, class
 		return s.turn(c, at)
 	}
 	w := s.fx.Workload
+	if len(c.children) > 0 {
+		s.spend(q, c, c.children[0].agent, at, account, w.SubagentContext, w.OutputPerTurn/2)
+		if err := s.r.Served(at, c.id, account); err != nil {
+			return err
+		}
+		c.servedOn = account
+		s.m.SubagentServed++
+		c.children = c.children[1:]
+		return s.proceed(c, at)
+	}
 	c.sends++
 	if s.roll(drawTransient, c.idx, c.turn, c.sends) < w.TransientRate {
 		c.attempt, c.lastFailure = c.attempt+1, router.ClassTransient
@@ -675,11 +706,9 @@ func (s *sim) attempt(c *conversation, at time.Time, account router.AccountID) e
 			return err
 		}
 		c.servedOn = account
-		if err := s.subagents(c, at, account); err != nil {
-			return err
-		}
+		s.subagents(c)
 	}
-	return s.next(c, at)
+	return s.proceed(c, at)
 }
 
 func (s *sim) spend(q *quota, c *conversation, key string, at time.Time, account router.AccountID, ctx, output int) {
@@ -709,45 +738,30 @@ func (s *sim) spend(q *quota, c *conversation, key string, at time.Time, account
 	}
 }
 
-func (s *sim) subagents(c *conversation, at time.Time, account router.AccountID) error {
+func (s *sim) subagents(c *conversation) {
 	w := s.fx.Workload
 	if s.roll(drawSubagents, c.idx, c.turn) >= w.SubagentProbability {
-		return nil
+		return
 	}
-	parent, current := "", account
+	parent := ""
 	for depth := range 2 {
 		if depth == 1 && s.roll(drawNested, c.idx, c.turn) >= w.NestedProbability {
 			break
 		}
 		c.agents++
 		agent := fmt.Sprintf("agent-%d", c.agents)
-		req := s.request(c)
-		req.Agent, req.ParentAgent, req.Attempt, req.LastFailure = agent, parent, 1, router.ClassNone
-		d, err := s.r.Route(at, req)
-		if err != nil {
-			return err
-		}
+		c.children = append(c.children, child{agent: agent, parent: parent})
 		s.m.SubagentRequests++
-		if d.Kind == router.Place || d.Kind == router.Dispatch && d.Account != current {
-			s.m.SubagentNotInherited++
-		}
-		if d.Kind == router.Migrate {
-			s.audit(c, at, d, agent)
-			current = d.Account
-		}
-		if d.Kind == router.Dispatch || d.Kind == router.Migrate {
-			q := s.quotas[d.Account]
-			if !q.loggedOut && !s.blocked(q, c.model) {
-				s.spend(q, c, agent, at, d.Account, w.SubagentContext, w.OutputPerTurn/2)
-				if err := s.r.Served(at, c.id, d.Account); err != nil {
-					return err
-				}
-				c.servedOn = d.Account
-			}
-		}
 		parent = agent
 	}
-	return nil
+}
+
+func (s *sim) proceed(c *conversation, at time.Time) error {
+	if len(c.children) == 0 {
+		return s.next(c, at)
+	}
+	c.attempt, c.lastFailure = 1, router.ClassNone
+	return s.turn(c, at)
 }
 
 func (s *sim) next(c *conversation, at time.Time) error {

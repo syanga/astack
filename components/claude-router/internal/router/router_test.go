@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -85,7 +86,7 @@ func (h *harness) route(now time.Time, req Request) Decision {
 			h.r.ObserveOverage(acct.ID, OverageDisabled, now)
 		}
 	}
-	d, err := h.r.Route(now, req)
+	d, err := h.r.Route(At(now), req)
 	if err != nil {
 		h.t.Fatalf("route %s: %v", req.Conversation, err)
 	}
@@ -610,7 +611,7 @@ func TestMissingIdentityIsRejectedWithoutAssignment(t *testing.T) {
 func TestCrashBeforeCommitLeavesNoAssignmentAndAfterCommitKeepsIt(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
 	h.route(t0, req("other"))
-	decided, err := h.r.Decide(t0, req("before"))
+	decided, err := h.r.Decide(At(t0), req("before"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +630,7 @@ func TestCrashBeforeCommitLeavesNoAssignmentAndAfterCommitKeepsIt(t *testing.T) 
 	}
 
 	h.report(t0, b, "claude-sonnet-4-5", ClassExhausted, rejected(FiveHour, t0.Add(time.Hour)))
-	if _, err := h.r.Route(t0, req("before")); err != nil {
+	if _, err := h.r.Route(At(t0), req("before")); err != nil {
 		t.Fatal(err)
 	}
 	h.restart()
@@ -1072,14 +1073,14 @@ func TestFailedMigrationSyncStopsEveryAnswerUntilReopen(t *testing.T) {
 		h.r.ObserveOverage(acct.ID, OverageDisabled, t0.Add(2*time.Minute))
 	}
 
-	_, errMigrate := h.r.Route(t0.Add(2*time.Minute), req("conv"))
+	_, errMigrate := h.r.Route(At(t0.Add(2*time.Minute)), req("conv"))
 	faulty.failSync = false
 	later := t0.Add(31 * time.Minute)
 	for _, acct := range h.accounts {
 		h.r.ObserveOverage(acct.ID, OverageDisabled, later)
 	}
-	afterReset, errRoute := h.r.Route(later, req("conv"))
-	_, errDecide := h.r.Decide(later, req("conv"))
+	afterReset, errRoute := h.r.Route(At(later), req("conv"))
+	_, errDecide := h.r.Decide(At(later), req("conv"))
 	_, _, errLookup := h.r.Lookup("conv")
 	_, errExisting := h.r.CommitAssignment(later, "other", b, ReasonManual)
 	errServed := h.r.Served(later, "other", b)
@@ -1250,7 +1251,7 @@ func TestCommitHonorsServedAndReloginThatLandAfterTheDecision(t *testing.T) {
 		h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
 		h.route(t0, req("conv"))
 		h.report(t0, a, "claude-sonnet-4-5", ClassAuth)
-		d, err := h.r.Decide(t0, req("conv"))
+		d, err := h.r.Decide(At(t0), req("conv"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1265,7 +1266,7 @@ func TestCommitHonorsServedAndReloginThatLandAfterTheDecision(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		got, err := h.r.Commit(t0, req("conv"), d)
+		got, err := h.r.Commit(At(t0), req("conv"), d)
 
 		if err != nil || got.Kind != Reauth || got.Account != a || h.bound("conv") != a {
 			t.Fatalf("commit after Served got %+v, %v, bound to %s; want reauth with the binding kept on %s", got, err, h.bound("conv"), a)
@@ -1277,7 +1278,7 @@ func TestCommitHonorsServedAndReloginThatLandAfterTheDecision(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		got, err := h.r.Commit(t0, req("conv"), d)
+		got, err := h.r.Commit(At(t0), req("conv"), d)
 
 		if err != nil || got.Kind != Dispatch || got.Account != a || h.bound("conv") != a {
 			t.Fatalf("commit after Relogin got %+v, %v, bound to %s; want dispatch with the binding kept on %s", got, err, h.bound("conv"), a)
@@ -1416,7 +1417,7 @@ func TestLaterEnabledCheckKeepsPaidUseRecorded(t *testing.T) {
 func TestCommitAfterFailStopRefusesEveryDecisionKind(t *testing.T) {
 	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
 	h.route(t0, req("conv"))
-	saved, err := h.r.Decide(t0, req("conv"))
+	saved, err := h.r.Decide(At(t0), req("conv"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1425,7 +1426,7 @@ func TestCommitAfterFailStopRefusesEveryDecisionKind(t *testing.T) {
 		t.Fatal("the commit with a failed sync returned no error")
 	}
 
-	got, errCommit := h.r.Commit(t0, req("conv"), saved)
+	got, errCommit := h.r.Commit(At(t0), req("conv"), saved)
 
 	if saved.Kind != Dispatch || saved.Account != a {
 		t.Fatalf("saved decision %+v, want dispatch on %s", saved, a)
@@ -1577,5 +1578,74 @@ func TestWindowRecordsOlderThanAWeeklyPeriodArePruned(t *testing.T) {
 
 	if kept != 1 {
 		t.Fatalf("a weekly period after 50 model windows were reported, %d window records remain, want 1 for the live five-hour window", kept)
+	}
+}
+
+func TestAdmitRefusesWhatDecideWouldNotDispatchTo(t *testing.T) {
+	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0, c, 1.0)...)
+	for _, acct := range []AccountID{a, b, c} {
+		h.r.ObserveOverage(acct, OverageDisabled, t0)
+	}
+	model := "claude-sonnet-4-5"
+
+	before := h.r.Admit(At(t0), a, model)
+	h.r.ObserveOverage(a, OveragePaidUse, t0.Add(time.Second))
+	h.observe(b, Observation{At: t0.Add(time.Second), Windows: []Window{rejected(FiveHour, t0.Add(2*time.Hour))}})
+	h.report(t0.Add(time.Second), c, model, ClassAuth)
+	now := t0.Add(2 * time.Second)
+
+	got := map[string]Reason{
+		"a before paid use":                before,
+		"a after paid use":                 h.r.Admit(At(now), a, model),
+		"b with a rejection":               h.r.Admit(At(now), b, model),
+		"b after the reset, check 2 h old": h.r.Admit(At(t0.Add(2*time.Hour+time.Second)), b, model),
+		"c after an auth failure":          h.r.Admit(At(now), c, model),
+		"not enrolled":                     h.r.Admit(At(now), "acct-x", model),
+	}
+	want := map[string]Reason{
+		"a before paid use":                "",
+		"a after paid use":                 ReasonPaidUse,
+		"b with a rejection":               ReasonExhausted,
+		"b after the reset, check 2 h old": ReasonOverageStale,
+		"c after an auth failure":          ReasonNeedsLogin,
+		"not enrolled":                     ReasonNotEnrolled,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Admit reasons %v, want %v", got, want)
+	}
+}
+
+func TestAdmitAgreesWithDecideDuringAHold(t *testing.T) {
+	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0)...)
+	if got := h.route(t0, req("conv-1")); got.Kind != Place || got.Account != a {
+		t.Fatalf("first route %+v, want a placement on %s", got, a)
+	}
+	h.observe(a, Observation{At: t0, Windows: []Window{rejected(FiveHour, t0.Add(30*time.Minute))}})
+	model := req("conv-1").Model
+
+	held := Instant{Stamp: t0.Add(40 * time.Minute), Wall: t0.Add(10 * time.Minute)}
+	heldAdmit := h.r.Admit(held, a, model)
+	heldDecide, err := h.r.Decide(held, req("conv-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.r.ExpireOverageChecks(held)
+	marked := Instant{Stamp: t0.Add(41 * time.Minute), Wall: t0.Add(31 * time.Minute)}
+	markedAdmit := h.r.Admit(marked, a, model)
+	markedDecide, err := h.r.Decide(marked, req("conv-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := []string{
+		string(heldAdmit), string(heldDecide.Kind) + " " + string(heldDecide.Reason),
+		string(markedAdmit), string(markedDecide.Kind) + " " + string(markedDecide.Reason),
+	}
+	want := []string{
+		string(ReasonExhausted), string(Wait) + " " + string(ReasonAllBlocked),
+		string(ReasonOverageStale), string(Refuse) + " " + string(ReasonOverageStale),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Admit and Decide during a hold %q, want %q: a reset not yet passed on the wall clock blocks, and a check stamped before the mark is stale", got, want)
 	}
 }

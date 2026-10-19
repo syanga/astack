@@ -117,8 +117,9 @@ func (o *overageReader) recheck(ctx context.Context, account router.AccountID) b
 	m.Lock()
 	defer m.Unlock()
 	o.mu.Lock()
-	recent := o.s.now().Sub(o.last[account]) < minRecheckInterval
+	last := o.last[account]
 	o.mu.Unlock()
+	recent := o.s.now().Sub(last) < minRecheckInterval && !last.Before(o.s.clock.lastMark())
 	if recent {
 		return false
 	}
