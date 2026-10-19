@@ -116,9 +116,10 @@ describes. `setup` refuses when Claude Code already routes through the
 router.
 
 To add an account later, run `account add`. It stops the router, signs in,
-adds the account with capacity 1, starts the router, and waits for the
-account to be ready. A failed sign-in leaves `config.json` unchanged and
-starts the router again:
+adds the account with capacity 1, starts the router again, and waits for the
+account to be ready. A router that was stopped stays stopped. A failed
+sign-in leaves `config.json` unchanged and starts the router again if it
+ran:
 
 ```sh
 claude-router account add school
@@ -127,17 +128,19 @@ claude-router account add school
 To remove an account, run `account remove`. It refuses for the last account,
 and for an account with conversations from the last 5 hours, unless you pass
 `-force`. It stops the router, removes the account from `config.json`,
-deletes `auths/<id>.json`, and starts the router. The account's conversations
-move to another account on their next request, and `claude-router cache`
-counts each as a move. The claude.ai session stays signed in until you sign
-it out on claude.ai:
+deletes `auths/<id>.json`, and starts the router again if it ran. The
+account's conversations move to another account on their next request, and
+`claude-router cache` counts each as a move. The claude.ai session stays
+signed in until you sign it out on claude.ai:
 
 ```sh
 claude-router account remove school
 ```
 
-These commands rewrite `config.json`, and they keep every other field. You
-can also edit it by hand while the router is stopped. `capacity` is the
+These commands rewrite `config.json`. They keep every value but not the
+formatting: keys come back in a fixed order, and a duration such as `30m`
+comes back as `30m0s`. They refuse a file with a key the router does not
+know. You can also edit `config.json` by hand while the router is stopped. `capacity` is the
 account's relative allowance, such as 1 for Pro and 5 for Max 5x:
 
 ```json
@@ -260,15 +263,21 @@ check     passed
 ```
 
 When a check fails, `check` skips the test message, exits 1, and prints the
-next step. When `./install.sh --component claude-router` replaces the code of
-an activated router, it restarts the service and runs `check`. If the check
-fails, it runs `claude-router direct` and prints `next      claude-router
-check`.
+next step. With the router stopped, it marks the checks that need the router
+`skip`. When `./install.sh --component claude-router` replaces the code of
+an activated router, it restarts the service and runs `check`. If the
+restart or the check fails, it runs `claude-router direct` and prints
+`next      claude-router check`. `--dry-run` prints the restart and the check
+that the install would run.
 
 ## Operate the service
 
 | Command | What it does |
 | --- | --- |
+| `claude-router setup -account NAME ...` | Signs in each new account, adds it to `config.json`, starts the router, and activates it after `check` passes ([Enroll accounts and start](#enroll-accounts-and-start)). |
+| `claude-router check` | Checks the router, the accounts, paid overflow, the Claude Code settings, and the accepted record, then sends one test message ([Check the router](#check-the-router)). |
+| `claude-router account add NAME` | Signs in one more account and adds it to `config.json`. |
+| `claude-router account remove NAME [-force]` | Removes an account and its login. Its conversations move to another account on their next request. |
 | `claude-router status` | One line for the service, one per account, and one per problem. A problem is a recent move, a quota or paid-overflow reading older than 15 minutes, or a conversation that waits, is refused, is held for login, or could not reach the provider. A `cache` line warns when account moves caused more than `move_cache_warn_percent` of the last 24 hours' cache writes, also while the service is stopped. The last line names the next command to run. A stopped service shows its last start error, or that it cannot record a start. |
 | `claude-router status -v` | Every reading with its age, cache counters per account, every assigned conversation, and the migrations, newest first. |
 | `claude-router cache [-since 24h]` | For the window, each account's cache hit rate and token counters, then the number of account moves, the cache writes those moves caused, their share of all cache writes, and the moves per reason. It reads only `events.jsonl` and `config.json`, so it works while the service is stopped. |

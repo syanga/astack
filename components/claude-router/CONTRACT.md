@@ -1991,23 +1991,36 @@ each from sample state.
 | `status` | Reads `GET /claude-router/status`, `events.jsonl`, `supervision.json`, `service.json`, and the `config.json` that `service.json` names, or the state directory's `config.json` when there is no `service.json`. It marks a quota observation or paid-overflow reading older than 15 minutes with a `stale` line. A service that does not answer is `stopped`, or `failed` when supervision gave up. When `config.json` does not load, status prints `config error:` with the error, and `running` or `stopped` from the assignment lock. Once supervision gives up, `failed` takes precedence, and the configuration error shows as `last error:`. A stopped service whose state directory the router cannot write shows `last error: cannot record a start in <file>: <error>` and `next    fix the error, then claude-router start` (`TestStatusShowsThatTheRouterCannotRecordAStart`). An unreadable `supervision.json` makes status exit 1 naming the file, with `next    remove <file>, then claude-router start` (`TestStatusNamesAnUnreadableSupervisionRecord`). |
 | `status -v` | Adds every reading with its age, cache counters per account, each assigned conversation, and the migrations, newest first, at most 20. |
 | `start`, `stop` | launchd: `enable` when disabled, then `bootstrap` or `kickstart`; `disable`, then `bootout`. systemd: `daemon-reload`, `enable`, `reset-failed`, and `start`; `disable`, then `stop`. When status already answers, `start` only turns the switch on and prints `router  running  <listen>  <manager>`. Each acts only on this installation's job (Service name, Off until start, and Shared label switch, above). `start` waits up to 90 s for status to answer or for a start error; `stop` waits until the assignment lock is free and prints `router  stopped until claude-router start; assignments kept`. Foreground installations refuse both. |
-| `login` | Unchanged flow. It refuses while a process holds the state directory, names that process's pid when status answers, and prints `next    claude-router stop`. Of the SDK's output during the sign-in, it shows only lines that start with `https://`, the sign-in URL; the SDK's progress lines and its SSH tunnel instructions for remote servers are dropped, and the SDK log is silent (`TestLoginShowsOnlyTheSignInURLFromTheSDK`). |
-| `setup [-account NAME ...] [-no-browser]` | Refuses when `activation.json` is in phase `active`, with `Claude Code already routes through the router` and `next    claude-router account add NAME`, before any sign-in (`TestSetupRefusesWhenTheRouterIsAlreadyActivated`). Otherwise, for each `-account` not in `config.json`, it stops a running router, signs in as `login` does, and prints `login     NAME: sign in in the browser window that opened` (with `-no-browser`, `NAME: open the URL below and sign in`) and `login     NAME signed in`. It adds the signed-in accounts to `config.json` with capacity 1, also when a later sign-in fails, so that `auths/` holds no login outside `config.json`; a failed sign-in then starts a router that ran and exits 1 (`TestSetupKeepsTheAccountsSignedInBeforeAFailedSignIn`). After every sign-in succeeds, it starts the router and waits up to 90 s until every configured account is registered, needs no login, and has a paid-overflow reading. A reading of `enabled` or `paid_use` refuses with `refuse    NAME has paid overflow on; Claude Code stays direct` and `next      turn off NAME paid overflow on claude.ai; claude-router setup`, exit 1 (`TestSetupRefusesWithTheAccountNameWhenPaidOverflowIsOn`). Otherwise it runs the installed helper's `activate --brief --manifest <manifest>`, which reads the installed `accepted.json` and runs `check`, and prints `next      claude-router status` (`TestSetupSignsInEachAccountStartsTheRouterAndActivates`). The layout is the user's pick, setup A: one line per step, a 9-column label, and every line within 80 columns for account names of up to 8 characters (`testdata/setup/`, `TestSetupLinesFitEightyColumnsForEightCharacterAccounts`). |
+| `login` | Unchanged flow. It refuses while a process holds the state directory, names that process's pid when status answers, and prints `next    claude-router stop`. Of the SDK's output during the sign-in, `login` shows only lines that start with `https://`, the sign-in URL. `login` drops the SDK's progress lines and its SSH tunnel instructions for remote servers, discards the SDK log until the sign-in ends, and then restores the log output it found (`TestCopySignInURLsKeepsOnlyTheURLLines`, `TestShowingOnlySignInURLsRestoresTheLogOutputItFound`). |
+| `setup [-account NAME ...] [-no-browser]` | Refuses when `activation.json` is in phase `active`, with `Claude Code already routes through the router` and `next    claude-router account add NAME`, before any sign-in (`TestSetupRefusesWhenTheRouterIsAlreadyActivated`). Otherwise, for each `-account` not in `config.json`, it stops a running router, signs in as `login` does, and prints `login     NAME: sign in in the browser window that opened` (with `-no-browser`, `NAME: open the URL below and sign in`) and `login     NAME signed in`. It adds the signed-in accounts to `config.json` with capacity 1, also when a later sign-in fails, so that `auths/` holds no login outside `config.json`; a failed sign-in then starts a router that ran and exits 1 (`TestSetupKeepsTheAccountsSignedInBeforeAFailedSignIn`). When the `config.json` write fails, setup deletes the logins it just wrote, starts a router that ran, and exits 1 with the error (`TestSetupRemovesTheNewLoginsWhenTheConfigWriteFails`). After every sign-in succeeds, it starts the router and waits up to 90 s until every configured account is registered, needs no login, and has a paid-overflow reading. A reading of `enabled` or `paid_use` refuses with `refuse    NAME has paid overflow on; Claude Code stays direct` and `next      turn off NAME paid overflow on claude.ai; claude-router setup`, exit 1 (`TestSetupRefusesWithTheAccountNameWhenPaidOverflowIsOn`). For two accounts the line reads `NAME and NAME have`, and the `next` line says `their`. For three or more, `refuse` names the accounts with `have paid overflow on`, and `Claude Code stays direct` follows on its own line under a blank label. Otherwise it runs the installed helper's `activate --brief --manifest <manifest> --lock-fd 3`, which reads the installed `accepted.json`, runs `check`, and prints the check lines and `activated Claude Code routes through the router`. Then setup prints `next      claude-router status` (`TestSetupSignsInEachAccountStartsTheRouterAndActivates`). The layout is the user's pick, setup A: one line per step, a 9-column label, and every line within 80 columns for up to three account names of up to 8 characters (`TestSetupLinesFitEightyColumnsForEightCharacterAccounts`, which refuses three such accounts for paid overflow). `testdata/setup/` holds the lines setup prints itself, with the helper's output replaced by one `helper` line that names its arguments; `testdata/check/` and the Python tests cover the check lines. |
 | `check` | Runs the installed helper's `check` with the Python recorded in `service.json`, and exits with its status (Check, under Activation, below). |
-| `account add NAME [-no-browser]` | Refuses an account already in `config.json`. Stops a running router, signs in, adds the account with capacity 1, starts the router, and waits for it to be ready. A failed sign-in leaves `config.json` unchanged and starts the router again (`TestAccountAddSignsInAddsTheAccountAndStartsTheRouterAgain`, `TestAFailedSignInLeavesTheConfigUnchangedAndStartsTheRouterAgain`). An account whose reading shows paid overflow on gets a `warn` line; the router sends it nothing. |
-| `account remove NAME [-force]` | Refuses the last account, with `next    claude-router account add NAME, then remove NAME` (`TestAccountRemoveRefusesTheLastAccount`). Without `-force`, refuses when conversations assigned to NAME were assigned in the last 5 hours or had a request on NAME in `events.jsonl` in that time, and prints their count and `-force`. It reads the assignment journal without its lock and skips a torn final record. Then it stops the router, removes the account from `config.json`, deletes `auths/NAME.json`, starts the router, and prints that the claude.ai session stays signed in. The account's assignments are placed again on their next request, with reason `not_enrolled`, and `cache` counts each as a move (`TestAccountRemoveRefusesWithTheCountOfRecentConversationsUnlessForced`). |
-
-`setup`, `account add`, and `account remove` write `config.json` through
-the `Config` struct: they decode it with unknown fields refused, apply the
-edit, validate the result with defaults applied, write a temporary file in
-the same directory with mode 0600, sync it, rename it into place, and sync
-the directory. A failed edit or an invalid result leaves the file and the
-directory unchanged (`TestEditConfigWritesTheEditAndKeepsEveryOtherField`,
-`TestEditConfigLeavesTheFileUnchangedWhenTheEditIsInvalidOrFails`,
-`TestEditConfigRefusesAFileWithAnUnknownField`). A relative
-`client_token_file` stays relative.
+| `account add NAME [-no-browser]` | Refuses an account already in `config.json`. Stops a running router, signs in, adds the account with capacity 1, starts the router again, and waits for it to be ready (`TestAccountAddSignsInAddsTheAccountAndStartsTheRouterAgain`). A router that was stopped stays stopped, and the last line is `next      claude-router start` (`TestAccountAddAndRemoveLeaveAStoppedRouterStopped`). A failed sign-in leaves `config.json` unchanged and starts a router that ran (`TestAFailedSignInLeavesTheConfigUnchangedAndStartsTheRouterAgain`). A failed `config.json` write deletes the new login and starts a router that ran (`TestAFailedConfigWriteAfterSignInRemovesTheNewLoginAndStartsTheRouterAgain`). An account whose reading shows paid overflow on gets a `warn` line; the router sends it nothing. `-force` exits 2 as an unknown flag (`TestAccountRejectsTheFlagOfTheOtherSubcommand`). |
+| `account remove NAME [-force]` | Refuses the last account, with `next    claude-router account add NAME, then remove NAME` (`TestAccountRemoveRefusesTheLastAccount`). Without `-force`, refuses when conversations assigned to NAME were assigned in the last 5 hours or had a request on NAME in `events.jsonl` in that time, and prints their count and `-force`. It reads the assignment journal without its lock and skips a torn final record. Then it stops a running router and, without `-force`, counts again, so a conversation assigned before the stop also refuses, and a router that ran starts again (`TestAccountRemoveRefusesAConversationAssignedBeforeTheRouterStopped`). It moves `auths/NAME.json` to a temporary directory in the state directory, removes the account from `config.json`, deletes the moved login, starts a router that ran, and prints that the claude.ai session stays signed in. A failed `config.json` write moves the login back, and a login that cannot move leaves `config.json` unchanged; either way a router that ran starts again (`TestAFailedConfigWriteDuringRemoveKeepsTheLoginAndStartsTheRouterAgain`, `TestAccountRemoveThatCannotMoveTheLoginLeavesTheConfigAndStartsTheRouterAgain`). A router that was stopped stays stopped. The account's assignments are placed again on their next request, with reason `not_enrolled`, and `cache` counts each as a move (`TestAccountRemoveRefusesWithTheCountOfRecentConversationsUnlessForced`, `TestAConversationOnAnAccountNoLongerEnrolledIsPlacedAgain`). `-no-browser` exits 2 as an unknown flag. |
 | `move` | Takes the 12-hex hash that status shows, a prefix of at least 4 hex digits, or a session ID. A prefix that matches two conversations is answered 409 and nothing moves. |
 | `direct -prepare`, `direct` | Run the installed helper with the Python recorded in `service.json`, and refuse, naming it, when that interpreter is gone. `-prepare` prints each owned key with its installed value, secrets as `[redacted]`, the count of other keys, the router's logins and assignment count, and the backup path, and changes nothing. The backup path is `backups/direct-<first 12 hex of the file's SHA-256>/<file name>`, so `-prepare` and `direct` print the same path while the file is unchanged. `direct` refuses on a key edited after activation, then stops the service, copies each settings file to the backup with mode 0600, and restores the keys. A key that already holds its value from before activation, as after a crash between the settings write and the manifest save, prints `skip` and its record is dropped. With no owned settings, `direct` prints `nothing to change` and stops nothing. In foreground mode, or when another installation's job holds the label and stays running, it does not say the router stopped (`TestDirectWithAnotherInstallationsJobDoesNotClaimTheRouterStopped`). `after   claude needs its own /login` appears when `direct` removes `apiKeyHelper` that had no prior value. Logins, assignments, the binary, and the job stay. |
+
+`setup`, `account add`, and `account remove` write `config.json` through
+the `Config` struct. They decode it, refusing a file with a key the struct
+does not have, apply the edit, validate the result with defaults applied,
+write a temporary file in the same directory with mode 0600, sync it, rename
+it into place, and sync the directory. A failed edit or an invalid result
+leaves the file and the directory unchanged
+(`TestEditConfigLeavesTheFileUnchangedWhenTheEditIsInvalidOrFails`,
+`TestEditConfigRefusesAFileWithAnUnknownField`). The write keeps every value,
+and an optional field that the file omits stays omitted. It does not keep the
+formatting: the file comes back as JSON indented by two spaces, with keys in
+the order of the struct, and a duration in Go's form, so `30m` becomes
+`30m0s` (`TestEditConfigWritesTheEditAndKeepsEveryOtherField`). A relative
+`client_token_file` stays relative.
+
+`setup`, `account add`, and `account remove` hold `activation.lock` from
+before they read `config.json` until they return, across the config edit,
+the login change, and the restart. `activate`, `direct`, and uninstall take
+the same lock, so a second of these commands refuses with `another
+claude-router setup, account, activate, direct, or uninstall is running`
+and changes nothing (`TestAccountChangesRefuseWhileAnotherChangeHoldsTheLock`).
+`setup` passes its lock to `activate` with `--lock-fd 3`
+(`test_activation_runs_under_the_lock_its_caller_holds_and_hands_down`).
 
 The status endpoint adds `capacity`, `quota` (the newest observation, kept in
 memory only), `bound` and `active` counts, `needs_login_at`, a `bindings`
@@ -2194,7 +2207,7 @@ These paths run without that check:
 
 `claude_router.py activate [--acceptance FILE] [--claude PATH] [--verify
 SESSION COMMAND]... [--settings FILE] [--project DIR]... [--prepare]
-[--brief] [--home DIR | --manifest FILE]` runs these steps.
+[--brief] [--home DIR | --manifest FILE] [--lock-fd FD]` runs these steps.
 `--acceptance` defaults to the installed `accepted.json`. `--claude`
 defaults to `claude` on `PATH` and runs the check's test message.
 `--settings` defaults to `$CLAUDE_CONFIG_DIR/settings.json`, or
@@ -2206,12 +2219,15 @@ lines.
 `activate` and `direct`, in every mode, hold an exclusive `flock` on
 `activation.lock` in the state directory for the whole run, including
 verification. The component's uninstall holds it too, except with
-`--dry-run`. A second caller refuses before it reads `activation.json` or
+`--dry-run`, and so do `setup`, `account add`, and `account remove`
+(Commands, under Operation). With `--lock-fd`, `activate` and `direct` lock
+the descriptor their caller passes, which already holds the lock. A second caller refuses before it reads `activation.json` or
 changes anything. `activate` and uninstall read the manifest once before the
 lock, to find the state directory, and read it again under the lock.
 `direct` reads it only under the lock. The refusal prints `claude-router:
-<command>: another claude-router activate, direct, or uninstall is running`
-and `next    wait for it to finish, then run again`, and exits 1. Uninstall
+<command>: another claude-router setup, account, activate, direct, or
+uninstall is running` and `next    wait for it to finish, then run again`,
+and exits 1. Uninstall
 prints `astack:` and the same two parts on one line. `claude-router direct`
 takes the lock before its check, holds it through the service stop and the
 apply, and passes it to the helper as an open descriptor. With no state
@@ -2491,12 +2507,10 @@ so the retirement requirement stays blocked (Verification, below).
 
 - A client update after activation is not checked. Claude Code and T3 update
   themselves, and the acceptance record then names an older client.
-- An install after activation is not checked either. `./install.sh` can
-  replace the binary and the helpers while `activation.json` is `active`,
-  and after the next `start` the activated clients route through a build no
-  acceptance run covered. Nothing refuses or warns. Run `claude-router
-  direct` before installing another head, then activate against its own
-  record.
+- During `login`, `setup`, and `account add` with `-no-browser`, or when the
+  browser does not open, the SDK prints SSH tunnel instructions and looks
+  up this machine's public IP address over the network to fill them in. The
+  router hides the instructions but cannot stop the lookup.
 - `--agent-sdk DIR` is the caller's choice. Activation compares the version
   in its `package.json` with the record and does not check that it is T3's
   bundled SDK. The runbook's `t3-check` step compares the SDK version that
