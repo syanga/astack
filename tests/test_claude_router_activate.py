@@ -1116,7 +1116,7 @@ class InterruptedActivationTests(ActivationFixture):
     def activate_in_process(self, helper, command="fake-client " + SESSION, timeout=60):
         args = helper.argparse.Namespace(acceptance=self.acceptance, claude=self.claude, agent_sdk=self.sdk, settings=None,
                                          project=[], verify=[(SESSION, command)], verify_timeout=timeout, prepare=False,
-                                         brief=False)
+                                         brief=False, lock_fd=None)
         stderr = io.StringIO()
         with patch.dict(os.environ, dict(self.env, HOME=str(self.home.resolve())), clear=True), \
                 patch.object(helper, "MANAGED_SETTINGS", {sys.platform: self.managed}), \
