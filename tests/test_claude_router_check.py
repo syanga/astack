@@ -1,8 +1,12 @@
 import json
+import os
+from pathlib import Path
 import re
 import signal
 import subprocess
 import sys
+import tempfile
+import unittest
 
 from test_claude_router_activate import HELPER_WITH_MANAGED_SETTINGS, SDK, SLEEPY_CLAUDE, ActivationFixture, timed
 
@@ -181,3 +185,19 @@ class CheckEdgeTests(CheckFixture):
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("argument --manifest: not allowed with argument --home", result.stderr)
+
+
+class CheckRefusalTests(unittest.TestCase):
+    def test_a_check_refusal_pads_its_next_label_to_ten_columns(self):
+        with tempfile.TemporaryDirectory(prefix="astack check ") as root:
+            manifest = Path(root) / "manifest.json"
+            manifest.write_text('{"version": 3, "targets": {}}\n')
+            script = Path(__file__).resolve().parent.parent / "scripts/claude_router.py"
+
+            result = subprocess.run([sys.executable, str(script), "check", "--manifest", str(manifest)],
+                                    capture_output=True, text=True, env=dict(os.environ, HOME=root))
+
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (1, "", "\n".join([
+            "claude-router: check: claude-router is not installed",
+            "next      ./install.sh --component claude-router",
+        ]) + "\n"))
