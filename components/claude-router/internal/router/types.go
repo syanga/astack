@@ -195,6 +195,7 @@ const (
 	ReasonOverageEnabled  Reason = "overage_enabled"
 	ReasonPaidUse         Reason = "paid_use_observed"
 	ReasonNoVerified      Reason = "no_included_only_account"
+	ReasonJournalFailed   Reason = "journal_failed"
 )
 
 // Freshness describes the observation behind a placement.
