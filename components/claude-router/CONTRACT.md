@@ -1500,9 +1500,9 @@ waits in the router only for settings reads (overdue reads and rereads) and
 for the backoff between upstream attempts. A client that goes away ends
 the request, and a settings read it cancels counts as a failed read.
 
-PR4 changes two things:
+Two things changed after PR2:
 
-- **Stale checks during a wait.** PR2's placement left an account whose
+- **Stale checks during a wait (PR4).** PR2's placement left an account whose
   paid-overflow check was unknown or stale out of the reset computation.
   When every account was blocked and its check had aged past
   `overage_fresh_for`, the router refused with `no_included_only_account`
@@ -1514,10 +1514,11 @@ PR4 changes two things:
   (`TestAWaitThatOutlivesTheCheckReadsItAgainAtTheResetBeforeDispatch`;
   `TestConfirmedExhaustionMigratesDespiteAStaleSourceCheck` was updated to
   expect the wait).
-- **Rereads before a wait.** PR2 sets `RecheckOverage` on a `wait` when an
-  unblocked account is held back only by an unknown or stale check. The
-  service now reads those settings, once per account per request, and
-  decides again before it answers (`TestAWaitRereadsAStaleAccountThatCouldServeBeforeTheReset`).
+- **Rereads before a wait (PR3).** PR2 sets `RecheckOverage` on a `wait`
+  when an unblocked account is held back only by an unknown or stale check.
+  The service reads those settings, once per account per request, and
+  decides again before it answers (`TestWaitRechecksAStaleAccountThatCouldServe`,
+  `TestAWaitRereadsAStaleAccountThatCouldServeBeforeTheReset`).
 
 An unknown reset is answered without a reset header and with
 `retry-after: 300`; the account is tried again `UnknownResetRecheck` after
