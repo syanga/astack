@@ -847,7 +847,7 @@ def lock_activation_until_exit(state_path):
     try:
         ActivationLock(Path(recorded["state"]))
     except Refusal as refusal:
-        raise ValueError("{}; {}".format(refusal, refusal.next_step)) from None
+        raise ValueError("; ".join(filter(None, (str(refusal), refusal.next_step)))) from None
 
 
 def undo_journal(state_dir, state, manifest_path, check=False):

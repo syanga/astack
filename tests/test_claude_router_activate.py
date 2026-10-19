@@ -970,6 +970,17 @@ class OverlapTests(ActivationFixture):
         self.assertEqual(self.manifest(), manifest)
         self.assertEqual(self.router_log.read_text() if self.router_log.exists() else "", calls)
 
+    def test_uninstall_that_cannot_open_the_lock_names_no_next_step(self):
+        lock = self.state_dir / "activation.lock"
+        lock.unlink(missing_ok=True)
+        lock.symlink_to(self.root / "removed state" / "activation.lock")
+
+        results = [self.component(command="uninstall", success=False), self.helper("uninstall")]
+
+        for result, shown in zip(results, (self.state_dir, "~/.local/state/astack/claude-router")):
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertEqual(result.stderr.splitlines()[-1], "astack: no state directory at {}".format(shown))
+
     def test_direct_runs_under_the_lock_its_caller_holds_and_hands_down(self):
         self.assertEqual(self.run_activate().returncode, 0)
         fd = os.open(str(self.state_dir / "activation.lock"), os.O_RDWR)
