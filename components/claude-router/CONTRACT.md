@@ -1910,14 +1910,20 @@ and `next    wait for it to finish, then run again`, and exits 1. Uninstall
 prints `astack:` and the same two parts on one line. `claude-router direct`
 takes the lock before its check, holds it through the service stop and the
 apply, and passes it to the helper as an open descriptor. With no state
-directory, `activate` and `direct` print `no state directory at <dir>` and
-exit 1
+directory, the helper's `activate` and `direct` print `no state directory at
+<dir>` and exit 1. The Go `claude-router direct` finds no `service.json`
+there and prints `claude-router: direct: no astack installation records this
+state directory; direct recovery needs one`, exits 1, and creates nothing.
+Uninstall with the lock held refuses before it stops the service or removes
+a file, also when no `activation.json` exists yet
 (`test_an_activation_during_another_s_verification_refuses_without_changes`,
 `test_direct_during_an_activation_s_verification_refuses_without_changes`,
 `test_a_second_activation_whose_verification_fails_refuses_before_it_touches_the_first`,
 `test_uninstall_during_an_activation_s_verification_refuses_without_changes`,
 `test_direct_runs_under_the_lock_its_caller_holds_and_hands_down`,
+`test_uninstall_while_the_lock_is_held_before_any_activation_record_removes_nothing`,
 `test_direct_with_a_missing_state_directory_refuses`,
+`TestDirectWithAMissingStateDirectorySaysNoInstallationRecordsIt`,
 `TestDirectRefusesWhileAnotherActivateOrDirectHoldsTheLock`,
 `TestDirectHoldsTheLockAcrossTheCheckTheStopAndTheApplyAndHandsItToTheHelper`).
 
@@ -1926,7 +1932,13 @@ exit 1
    run only the undo's checks. A refusal exits 1, as `direct -prepare` does.
    Otherwise print `undo    an interrupted activation of <file>; activate
    restores it first` and `ready   nothing changed; activate without
-   --prepare`, and exit 0 before step 2.
+   --prepare`, and exit 0 before step 2. Without `--prepare`, the undo
+   prints `undo    <file> restored after an interrupted activation`. When
+   the file already holds the original SHA-256, both modes print
+   `skip    <file> (already the original; interrupted activation)` in place
+   of the `undo` line, as `direct` does
+   (`test_the_next_activation_undoes_an_interrupted_verification_first`,
+   `test_the_next_activation_says_it_skips_a_settings_file_the_interruption_left_unchanged`).
 2. Refuse when `settings.claude-router` already owns a file: `claude-router
    direct` comes first.
 3. Read the record, ask the running service for its status with the client
@@ -2094,6 +2106,57 @@ removes. Its message ends `run claude-router direct, then uninstall`
 `test_a_settings_file_that_did_not_exist_is_removed_again_after_a_failed_continuation`).
 Uninstall removes an `active` journal after it restores the settings
 (`test_uninstall_after_activation_restores_the_settings_and_removes_the_record`).
+
+### Legacy account switcher
+
+The spec retires the legacy account switcher (`claude-accts`) only where it
+shares credentials or client configuration with the router. This section
+states the router's side. Nobody inspected the switcher, because a standing
+order forbids reading it or `~/.claude-accounts`.
+
+The router reads and writes these files and keys, and no others that its
+code names:
+
+- Its own files. These are the payload in
+  `$XDG_DATA_HOME/astack/claude-router/`, the launchd or systemd descriptor
+  and the label's login switch (Installation, above), and the state
+  directory `$XDG_STATE_HOME/astack/claude-router/`. The state directory
+  includes `config.json`, `client-token`, `service.json`,
+  `supervision.json`, `accounts.json`, `events.jsonl`, `assignments/`,
+  `activation.json`, `activation.lock`, and `auths/`.
+- Its own credentials. These are the logins in `auths/<account>.json`,
+  which `claude-router login` writes from its own OAuth sign-in. The service
+  points the SDK's `auth-dir` at `auths/`. Neither the Go code nor the
+  helper names Claude Code's stored login, in the macOS keychain or in
+  `.credentials.json`, or `~/.claude.json`.
+- Its records in the astack manifest, `components.claude-router` and
+  `settings.claude-router`, and the backups under
+  `$XDG_STATE_HOME/astack/backups/`.
+- Three keys in the Claude settings file that `activate` targets:
+  `apiKeyHelper`, `env.ANTHROPIC_BASE_URL`, and
+  `env.CLAUDE_CODE_RETRY_WATCHDOG`. `activate` writes them, and `direct`
+  and uninstall restore them. `activate` also reads
+  `env.ANTHROPIC_AUTH_TOKEN` and `env.ANTHROPIC_API_KEY` in that file.
+
+Without writing, `activate` reads the owned keys and the two env tokens in
+each `--project` settings file and in the managed settings file.
+It reads the two env tokens in its own environment and in the output of
+`launchctl getenv` or `systemctl --user show-environment`. It runs `--claude
+PATH --version` and reads `--agent-sdk DIR/package.json`.
+
+None of these files or keys belongs to the switcher. The Claude settings
+file is shared, and the router owns only its three keys there. If the
+switcher writes one of them, activation prints `replace` for it, and
+`direct` refuses on a key edited after activation and keeps the edit. While
+activated, Claude Code sends the client token from `apiKeyHelper` instead of
+its stored login (Settings ownership, above), so a change to the stored login
+does not change the account that serves a routed request.
+
+From the router's side, no coupling needs a coordinated retirement, and PR6
+leaves the switcher as it is. Whether the switcher writes one of the owned
+keys, an env token, or the router's files is unverified. Settling it needs
+an inspection of the switcher, which the standing order does not allow
+here.
 
 ### Known limits
 

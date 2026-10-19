@@ -83,6 +83,19 @@ func TestDirectNamesAMissingInstallerPython(t *testing.T) {
 	}
 }
 
+func TestDirectWithAMissingStateDirectorySaysNoInstallationRecordsIt(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "no-such-state")
+
+	err := direct([]string{"-state", state})
+
+	if err == nil || err.Error() != "no astack installation records this state directory; direct recovery needs one" {
+		t.Fatalf("direct: %v, want the missing installation named", err)
+	}
+	if _, err := os.Stat(state); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("direct created the state directory: %v", err)
+	}
+}
+
 func TestDirectWithAnotherInstallationsJobDoesNotClaimTheRouterStopped(t *testing.T) {
 	for _, owner := range []string{"no installation", "this installation"} {
 		t.Run(owner+" owns the login switch", func(t *testing.T) {
