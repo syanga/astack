@@ -96,9 +96,10 @@ class ComponentFixture(InstallerFixture):
         return self.home.resolve() / ".config/systemd/user/dev.astack.claude-router.service"
 
     def inventory(self):
-        """Every file under the home except the astack manifest, which each run saves."""
+        """Every file under the home except the astack manifest, which each run saves, and the empty
+        activation.lock, which a run over an installed router creates to lock it."""
         return {str(p.relative_to(self.home)): (p.read_bytes(), stat.S_IMODE(p.stat().st_mode), p.stat().st_mtime_ns)
-                for p in self.home.rglob("*") if p.is_file() and p.name != "manifest.json"}
+                for p in self.home.rglob("*") if p.is_file() and p.name not in ("manifest.json", "activation.lock")}
 
     def module(self):
         sys.modules.pop("claude_router", None)

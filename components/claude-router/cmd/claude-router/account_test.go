@@ -366,7 +366,7 @@ func TestAccountChangesRefuseWhileAnotherChangeHoldsTheLock(t *testing.T) {
 
 	for command, err := range errs {
 		var n nextError
-		if !errors.As(err, &n) || n.err.Error() != "another claude-router setup, account, activate, direct, or uninstall is running" {
+		if !errors.As(err, &n) || n.err.Error() != "another claude-router setup, account, activate, direct, install, or uninstall is running" {
 			t.Errorf("%s: %v, want the lock refusal", command, err)
 		}
 	}

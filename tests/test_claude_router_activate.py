@@ -966,7 +966,8 @@ class ActivationTests(ActivationFixture):
                          (1, "", "claude-router: direct: no state directory at {}\n".format(missing)))
 
 
-LOCKED = "another claude-router setup, account, activate, direct, or uninstall is running\nnext    wait for it to finish, then run again\n"
+HOLDERS = "another claude-router setup, account, activate, direct, install, or uninstall is running"
+LOCKED = HOLDERS + "\nnext    wait for it to finish, then run again\n"
 
 
 class OverlapTests(ActivationFixture):
@@ -1037,7 +1038,7 @@ class OverlapTests(ActivationFixture):
 
         refused = self.component(command="uninstall", success=False)
 
-        self.assertIn("astack: another claude-router setup, account, activate, direct, or uninstall is running; wait for it to finish, then run again",
+        self.assertIn("astack: " + HOLDERS + "; wait for it to finish, then run again",
                       refused.stderr)
         self.finish(first, gate)
         self.assert_routed_and_owned()
@@ -1053,7 +1054,7 @@ class OverlapTests(ActivationFixture):
 
         for result in results:
             self.assertEqual(result.returncode, 1, result.stdout)
-            self.assertIn("astack: another claude-router setup, account, activate, direct, or uninstall is running; wait for it to finish, then run again\n",
+            self.assertIn("astack: " + HOLDERS + "; wait for it to finish, then run again\n",
                           result.stderr)
         self.assertEqual(self.inventory(), files)
         self.assertEqual(self.manifest(), manifest)
@@ -1458,4 +1459,81 @@ class UpdateOverActivationTests(ActivationFixture):
         self.assertEqual(process.returncode, 1, stderr)
         self.assertTrue(stderr.endswith("astack: the update was interrupted; Claude Code connects directly\n"), stderr)
         self.assertTrue(self.gone(pid), "the test message client {} still runs".format(pid))
+        self.assert_direct_and_state_kept()
+
+    def hold_the_lock(self):
+        fd = os.open(str(self.state_dir / "activation.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, fd)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def lock_is_free(self):
+        fd = os.open(str(self.state_dir / "activation.lock"), os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except BlockingIOError:
+            return False
+        finally:
+            os.close(fd)
+
+    def test_an_update_while_an_account_change_holds_the_lock_refuses_and_changes_nothing(self):
+        self.prepare_update()
+        self.hold_the_lock()
+        files, manifest = self.inventory(), self.manifest()
+
+        result = self.component(FAKE_BUILD="2", success=False)
+
+        self.assertEqual(result.stderr, "astack: " + HOLDERS + "; wait for it to finish, then run again\n")
+        self.assertEqual(self.inventory(), files)
+        self.assertEqual(self.manifest(), manifest)
+        self.assertEqual(self.router_log.read_text(), "")
+
+    def test_an_update_holds_the_lock_through_its_restart_check_and_recovery(self):
+        self.prepare_update(check_passes=False)
+        module = self.module()
+        helper = module.claude_router
+        service_command, run_check, direct, free = helper.service_command, helper.run_check, helper.direct, []
+
+        def probed_command(lay, *arguments):
+            free.append((arguments[0], self.lock_is_free()))
+            service_command(lay, *arguments)
+
+        def probed_check(*arguments):
+            free.append(("check", self.lock_is_free()))
+            return run_check(*arguments)
+
+        def probed_direct(*arguments, **options):
+            free.append(("direct", self.lock_is_free()))
+            return direct(*arguments, **options)
+        with patch.object(helper, "service_command", probed_command), patch.object(helper, "run_check", probed_check), \
+                patch.object(helper, "direct", probed_direct), \
+                self.assertRaisesRegex(ValueError, "the updated router failed its check; Claude Code connects directly$"):
+            self.run_module(module, {"FAKE_BUILD": "2", "HOME": str(self.home.resolve())},
+                            "install", "--home", str(self.home), "--component", "claude-router")
+
+        self.assertEqual(free, [("stop", False), ("start", False), ("check", False), ("stop", False), ("direct", False)])
+        self.assertTrue(self.lock_is_free())
+        self.assert_direct_and_state_kept()
+
+    def test_a_signal_during_the_rollback_stop_still_connects_clients_directly(self):
+        self.prepare_update(check_passes=False)
+        module = self.module()
+        helper = module.claude_router
+        for signum in STOPS:
+            self.addCleanup(signal.signal, signum, signal.getsignal(signum))
+        self.addCleanup(signal.pthread_sigmask, signal.SIG_SETMASK, signal.pthread_sigmask(signal.SIG_BLOCK, []))
+        signal.signal(signal.SIGTERM, raise_killed)
+        service_command, stops = helper.service_command, []
+
+        def signaled_stop(lay, *arguments):
+            service_command(lay, *arguments)
+            stops.append(arguments[0])
+            if stops.count("stop") == 2:
+                signal.raise_signal(signal.SIGTERM)
+        with patch.object(helper, "service_command", signaled_stop), \
+                self.assertRaisesRegex(ValueError, "the updated router failed its check; Claude Code connects directly$"):
+            self.run_module(module, {"FAKE_BUILD": "2", "HOME": str(self.home.resolve())},
+                            "install", "--home", str(self.home), "--component", "claude-router")
+
+        self.assertEqual(stops, ["stop", "start", "stop"])
         self.assert_direct_and_state_kept()

@@ -333,7 +333,7 @@ func lockActivation(state string) (*os.File, error) {
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, nextError{err: errors.New("another claude-router setup, account, activate, direct, or uninstall is running"),
+			return nil, nextError{err: errors.New("another claude-router setup, account, activate, direct, install, or uninstall is running"),
 				next: "wait for it to finish, then run again"}
 		}
 		return nil, err

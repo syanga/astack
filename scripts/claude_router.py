@@ -331,6 +331,34 @@ def router_running(lay):
     return False
 
 
+class ActivationLock:
+    def __init__(self, state_dir, fd=None):
+        self.opened = fd is None
+        if fd is None:
+            try:
+                fd = os.open(str(state_dir / "activation.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+            except FileNotFoundError:
+                raise Refusal("no state directory at {}".format(shown(state_dir))) from None
+        self.fd = fd
+        try:
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            self.__exit__()
+            raise Refusal("another claude-router setup, account, activate, direct, install, or uninstall is running",
+                          next_step="wait for it to finish, then run again") from None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exception):
+        self.close()
+
+    def close(self):
+        if self.opened:
+            os.close(self.fd)
+            self.opened = False
+
+
 @dataclass
 class Plan:
     command: str
@@ -343,13 +371,18 @@ class Plan:
     binary_changed: bool = False
     code_sha256: str | None = None
     go: str | None = None
+    lock: ActivationLock | None = None
 
     def paths(self):
         return [path for path, *_ in self.operations] + [path for path, *_ in self.seeds]
 
 
 def plan(command, state, lay, force=False):
-    """Compute the component's changes without writing anything."""
+    """Compute the component's changes without writing anything.
+
+    An install over a recorded layout first takes activation.lock and keeps it in the plan until apply ends,
+    so no account change, activation, or direct runs while it replaces the binary and checks the router.
+    """
     old = state.get("components", {}).get(NAME, {})
     if command == "install" and old.get("layout") and old["layout"] != lay.record():
         raise ValueError("{} destination changed; uninstall the component before reinstalling".format(NAME))
@@ -358,6 +391,17 @@ def plan(command, state, lay, force=False):
         lay = Layout(home=lay.home, data=Path(recorded["data"]), state=Path(recorded["state"]), manifest=lay.manifest,
                      manager=recorded["manager"], service=recorded["service"],
                      descriptor=Path(recorded["descriptor"]) if recorded["descriptor"] else None, port=lay.port)
+    lock = hold_activation(lay.state) if command == "install" and old.get("layout") and lay.state.is_dir() else None
+    try:
+        return planned(Plan(command=command, lay=lay, old=old, lock=lock), state, force)
+    except BaseException:
+        if lock:
+            lock.close()
+        raise
+
+
+def planned(result, state, force):
+    command, lay, old = result.command, result.lay, result.old
     journal = read_journal(lay.state) if command == "uninstall" and old else None
     if journal and journal["phase"] != "active":
         raise ValueError("An activation of claude-router was interrupted; run claude-router direct, then uninstall")
@@ -369,7 +413,6 @@ def plan(command, state, lay, force=False):
         except Refusal as refusal:
             raise ValueError("Uninstall would restore client settings, but {} ({}); run claude-router direct, then uninstall".format(
                 refusal, refusal.details[0])) from None
-    result = Plan(command=command, lay=lay, old=old)
     desired, seeds = {}, {}
     if command == "install":
         if lay.token.exists() and not lay.token.is_file():
@@ -458,6 +501,14 @@ def stop_service(lay, dry_run):
 
 def apply(p, state, state_path, backup_root, dry_run=False):
     """Apply a plan, recording each completed write in the manifest."""
+    try:
+        apply_locked(p, state, state_path, backup_root, dry_run)
+    finally:
+        if p.lock:
+            p.lock.close()
+
+
+def apply_locked(p, state, state_path, backup_root, dry_run):
     lay = p.lay
     if p.command == "uninstall" and not p.old and not p.settings:
         return
@@ -574,26 +625,25 @@ def service_command(lay, *arguments):
 
 def recheck(p, state, state_path):
     lay = p.lay
-    supervised = lay.manager != "foreground"
     stop = Stop()
     stop.install()
     try:
         failure = recheck_failure(p, state, stop)
+        if failure is None:
+            return
+        stopped = False
+        if lay.manager != "foreground":
+            try:
+                service_command(lay, "stop")
+                stopped = True
+            except (OSError, ValueError) as error:
+                say("claude-router: {}".format(error), sys.stderr)
+        if direct(lay.state, state_path, "apply", stopped=stopped, lock_fd=p.lock.fd if p.lock else None) != 0:
+            raise ValueError(failure + ", and claude-router direct did not finish; run claude-router direct")
+        say(CHECK_LINE.format("next", "claude-router check"))
+        raise ValueError(failure + "; Claude Code connects directly")
     finally:
         stop.uninstall()
-    if failure is None:
-        return
-    stopped = False
-    if supervised:
-        try:
-            service_command(lay, "stop")
-            stopped = True
-        except (OSError, ValueError) as error:
-            say("claude-router: {}".format(error), sys.stderr)
-    if direct(lay.state, state_path, "apply", stopped=stopped) != 0:
-        raise ValueError(failure + ", and claude-router direct did not finish; run claude-router direct")
-    say(CHECK_LINE.format("next", "claude-router check"))
-    raise ValueError(failure + "; Claude Code connects directly")
 
 
 def recheck_failure(p, state, stop):
@@ -1073,39 +1123,18 @@ def write_journal(state_dir, journal):
     files.atomic_write(state_dir / ACTIVATION, (json.dumps(journal, indent=2) + "\n").encode(), 0o600)
 
 
-class ActivationLock:
-    def __init__(self, state_dir, fd=None):
-        self.opened = fd is None
-        if fd is None:
-            try:
-                fd = os.open(str(state_dir / "activation.lock"), os.O_RDWR | os.O_CREAT, 0o600)
-            except FileNotFoundError:
-                raise Refusal("no state directory at {}".format(shown(state_dir))) from None
-        self.fd = fd
-        try:
-            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            self.__exit__()
-            raise Refusal("another claude-router setup, account, activate, direct, or uninstall is running",
-                          next_step="wait for it to finish, then run again") from None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exception):
-        if self.opened:
-            os.close(self.fd)
+def hold_activation(state_dir):
+    try:
+        return ActivationLock(state_dir)
+    except Refusal as refusal:
+        raise ValueError("; ".join(filter(None, (str(refusal), refusal.next_step)))) from None
 
 
 def lock_activation_until_exit(state_path):
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
     recorded = state.get("components", {}).get(NAME, {}).get("layout")
-    if not recorded or not Path(recorded["state"]).is_dir():
-        return
-    try:
-        ActivationLock(Path(recorded["state"]))
-    except Refusal as refusal:
-        raise ValueError("; ".join(filter(None, (str(refusal), refusal.next_step)))) from None
+    if recorded and Path(recorded["state"]).is_dir():
+        hold_activation(Path(recorded["state"]))
 
 
 def undo_journal(state_dir, state, manifest_path, check=False):
