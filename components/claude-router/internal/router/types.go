@@ -124,6 +124,10 @@ type Instant struct {
 	Wall time.Time
 }
 
+// Held reports whether Stamp is ahead of Wall, as it is while the service
+// clock stands still after a backward step of the wall clock.
+func (i Instant) Held() bool { return i.Stamp.After(i.Wall) }
+
 // At is the instant of a caller with a single clock.
 func At(t time.Time) Instant { return Instant{Stamp: t, Wall: t} }
 

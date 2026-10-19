@@ -45,7 +45,7 @@ type Router struct {
 	// removed for a while keeps its rejections and login state when it
 	// returns.
 	unenrolled []AccountState
-	checksFrom time.Time
+	expiry     Instant
 }
 
 // New returns a router over the enrolled accounts, in tie-break order, and an
@@ -89,7 +89,7 @@ func (r *Router) Decide(now Instant, req Request) (Decision, error) {
 		index:      r.index,
 		binding:    b,
 		bound:      bound,
-		checksFrom: r.checksFrom,
+		checksFrom: r.expiry.Stamp,
 		loads: func() []int {
 			l, err := r.loads(now.Stamp, req.Conversation)
 			loadErr = err
@@ -389,16 +389,20 @@ func (r *Router) ObserveOverage(account AccountID, state Overage, at time.Time) 
 	r.persist()
 }
 
-// ExpireOverageChecks makes every disabled check stamped before at stale, so
-// the policy dispatches to an account only on a disabled check stamped at or
-// after at. A caller calls it when its clock can no longer measure the age
-// of earlier checks.
-func (r *Router) ExpireOverageChecks(at time.Time) {
+// ExpireOverageChecks makes every disabled check stamped before at.Stamp
+// stale, so the policy dispatches to an account only on a disabled check
+// stamped at or after it. A caller calls it when its clock can no longer
+// measure the age of earlier checks. Because a restart ages a saved check by
+// the wall clock, the saved account state keeps no disabled check stamped
+// before at.Stamp, and none at all while at is held.
+func (r *Router) ExpireOverageChecks(at Instant) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if at.After(r.checksFrom) {
-		r.checksFrom = at
+	if !at.Stamp.After(r.expiry.Stamp) {
+		return
 	}
+	r.expiry = at
+	r.persist()
 }
 
 // Relogin marks an account as logged in again.

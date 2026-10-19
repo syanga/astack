@@ -43,67 +43,48 @@ type Options struct {
 	ReadRetryBase time.Duration
 }
 
-// wallClock is the service clock. It returns wall time without Go's
-// monotonic reading, which stops while the machine sleeps: a reading taken
-// before a sleep must age by the sleep's length. It never returns a time
-// before one it already returned, so a backward step of the wall clock
-// cannot order a later reading before an earlier one. After such a step the
-// clock holds: it stands still until the wall clock passes it.
-//
-// A held clock cannot age a reading, so the clock marks. It marks each time
-// the wall clock steps back, after each markEvery of wall time while it
-// holds, and when it moves again. A mark is later than every time the clock
-// returned before it and no later than any time it returns after it. The
-// clock passes each mark to expire before it returns the mark to anyone, so
-// expire can invalidate every reading stamped before the mark.
 type wallClock struct {
 	read      func() time.Time
 	markEvery time.Duration
-	expire    func(mark time.Time)
+	expire    func(mark router.Instant)
 
 	mu   sync.Mutex
 	last time.Time
 	wall time.Time
-	held bool
-	// markedWall is the wall time of the latest mark while the clock holds.
-	markedWall time.Time
-	mark       time.Time
+	mark router.Instant
 }
 
 func (c *wallClock) now() time.Time { return c.instant().Stamp }
 
 func (c *wallClock) instant() router.Instant {
-	t := c.read().Round(0)
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	t := c.read().Round(0)
 	stepped := t.Before(c.wall)
 	c.wall = t
 	switch {
 	case t.After(c.last):
 		c.last = t
-		if c.held {
-			c.held = false
-			c.marked()
+		if c.mark.Held() {
+			c.marked(t)
 		}
 	case t.Equal(c.last):
-	case !c.held || stepped || t.Sub(c.markedWall) >= c.markEvery:
-		c.held, c.markedWall = true, t
+	case !c.mark.Held() || stepped || t.Sub(c.mark.Wall) >= c.markEvery:
 		c.last = c.last.Add(time.Nanosecond)
-		c.marked()
+		c.marked(t)
 	}
 	return router.Instant{Stamp: c.last, Wall: t}
 }
 
-func (c *wallClock) marked() {
-	c.mark = c.last
+func (c *wallClock) marked(wall time.Time) {
+	c.mark = router.Instant{Stamp: c.last, Wall: wall}
 	c.expire(c.mark)
 }
 
-// lastMark returns the clock's latest mark, or zero before the first.
 func (c *wallClock) lastMark() time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.mark
+	return c.mark.Stamp
 }
 
 // Service is a running router: the embedded SDK, the routing policy, and the
