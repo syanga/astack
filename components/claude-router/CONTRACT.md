@@ -2427,43 +2427,49 @@ so the retirement requirement stays blocked (Verification, below).
 ## Cache cost of account moves (PR7)
 
 `claude-router cache` reports how much of the cache writes in a window come
-from conversations that changed accounts. `claude-router status` warns when
-that share for the last 24 hours exceeds `move_cache_warn_percent`. Both read
-only `events.jsonl` and `config.json`, so they work while the router is
-stopped.
+from conversations that changed accounts. It reads only `events.jsonl` and
+`config.json`, so it works while the router is stopped and with a missing or
+malformed `service.json`. `claude-router status` warns when that share for
+the last 24 hours exceeds `move_cache_warn_percent`. It computes the share
+from `events.jsonl`, so the warning also shows while the router is stopped.
 
 ### Definitions
 
 - **Move.** A `request` event with status 200 on an account other than the
   account of the same conversation's previous `request` event with status
-  200, at any earlier point in the log. The digest reads the whole log to
-  find the previous account and counts a move only when its own `at` falls in
-  the window. A request that fails on another account is not a move, and
-  neither is a `request` event without an account, such as a wait.
+  200, at any earlier point in the log. The move is that status-200 request
+  itself. A request that fails on the new account first is not a move, and
+  neither is a `request` event without an account, such as a wait. The
+  digest reads the whole log to find the previous account and counts a move
+  only when its own `at` falls in the window.
 - **Placement.** The first status-200 request of a conversation. It is not a
   move, even after a `migrated` event with reason `never_served_relogin`.
-- **Move cost.** The `cache_creation_input_tokens` of the first `request`
-  event with usage on the new account, starting with the move itself. If the
-  move's request reported no usage, the next request on that account with
-  usage sets the cost. Later requests, and cold starts after the cache
-  expires, do not count.
-- **Unknown cost.** The cost of a move is unknown when that request reported
-  `cache_creation_input_tokens` as `null`, or when no request on the new
-  account reported usage before the conversation moved again or the log
-  ended.
+- **Counted request.** A `request` event with an account, in the window,
+  whose usage reports the input, cache write, and cache read counters, none of
+  them `null`. Every sum below uses counted requests only. The move cost and
+  all cache writes therefore come from the same requests, and the move share
+  cannot exceed 100%.
+- **Move cost.** The `cache_creation_input_tokens` of the move's own request,
+  when that request is a counted request. Later requests, and cold starts
+  after the cache expires, do not count.
+- **Unknown cost.** A move whose request is not a counted request has an
+  unknown cost. Its request reported no usage, or a `null` input, cache
+  write, or cache read counter. A later request on the new account does not
+  set the cost.
 - **Reason.** The reason of the conversation's latest `migrated` event since
   its previous status-200 request, for example `exhausted` or `manual`. A move
   without one takes the `reason` of its own `request` event.
-- **Window counters.** For each account, the `request` events in the window
-  whose input, cache write, and cache read counters are all known. A status-200
-  event without usage, or an event whose usage has a `null` among those
-  three, is an unknown request. It adds nothing to the sums and is counted
-  apart.
-- **Hit rate.** read / (input + write + read) over the window counters,
-  rounded down, as `status` computes its lifetime cache rate.
-- **All cache writes.** The sum of the window counters' writes over every
-  account.
-- **Move share.** Known move cost / all cache writes.
+- **Unknown request.** A `request` event with an account, in the window, that
+  is not a counted request. It adds nothing to the sums, and `cache` shows the
+  account's count as `+ N unknown`. A failed request without usage is not an
+  unknown request. It counts nowhere and adds no account line.
+- **Hit rate.** read / (input + write + read) over the account's counted
+  requests, rounded down, as `status` computes its lifetime cache rate. With
+  no counted request, or counted requests that sum to 0 tokens, the hit rate
+  is `--`.
+- **All cache writes.** The sum of the cache writes of the counted requests
+  on every account.
+- **Move share.** The sum of the known move costs divided by all cache writes.
 
 `status` keeps its per-account `cache` rate over the whole log. Only the move
 share in `status` and every number in `cache` use the window.
@@ -2485,38 +2491,54 @@ reasons   exhausted 3, manual 2
 ```
 
 - `cache` lists the accounts in `config.json` in order, then any other
-  account with a request in the window. An account without a known request
-  shows `hit --`.
+  account with a counted or unknown request in the window.
 - `+ N unknown` on an account line counts its unknown requests. On the
   `moves` line it counts the moves with an unknown cost, and the share then
-  ends in `or more`. The share uses known counters only.
+  ends in `or more`. The share counts known move costs only.
 - With no cache write in the window, the share is `--`. The `reasons` line
   appears only when there is a move.
 - `-since` takes a Go duration, default `24h`, and must be positive.
 
-`status` adds this line to its problem lines, after the recent moves, when
-`move_cache_warn_percent` is above 0, all cache writes in the last 24 hours
-are above 0, and the move share exceeds the setting. A share equal to the
-setting does not warn.
+`status` shows the warning line when all of these hold:
+
+- `config.json` loads.
+- `move_cache_warn_percent` is above 0.
+- All cache writes in the last 24 hours are above 0.
+- The move share exceeds the setting. A share equal to the setting does not
+  warn.
+
+When a move in the last 24 hours has an unknown cost, the share in the line
+ends in `or more`, as in `cache`. On a running router the line follows the
+recent moves, as the last problem line. On a stopped router it follows the
+`router  stopped` line and any `last error:` line. Three screens do not show
+it: a configuration error, a start that status cannot record, and
+`router  failed`. `status -v` does not show it either.
 
 ```text
 cache   account moves wrote 14.0% of all cache writes in 24h, over 10%
 next    claude-router cache
 ```
 
+```text
+router  stopped  127.0.0.1:18787  launchd                            14:20 PDT
+cache   account moves wrote 14.0% of all cache writes in 24h, over 10%
+next    claude-router start
+```
+
 The `next` line names `claude-router cache` only when no other next step
-applies. `status -v` does not show the warning.
+applies. On a stopped router the next step stays `claude-router start`.
 
 ### Setting
 
 | Field | Contract |
 | --- | --- |
-| `move_cache_warn_percent` | An integer from 0 to 100, default 10. 0 turns the warning off. `status` shows `config error: move_cache_warn_percent: <value> is outside 0 to 100` for any other value, and `serve` refuses to start with the same error. |
+| `move_cache_warn_percent` | An integer from 0 to 100. Absent or `null` means 10. 0 turns the warning off. For an integer outside 0 to 100, `status` shows `config error: move_cache_warn_percent: <value> is outside 0 to 100`, and `serve` refuses to start with the same error. A value that is not an integer does not decode. For `1.5`, `status` shows `config error: <config.json path>: json: cannot unmarshal number 1.5 into Go struct field Config.move_cache_warn_percent of type int`, and `serve` refuses with the same error. `cache` does not use the setting. |
 
 ### Verification
 
 | Check | Tests |
 | --- | --- |
-| Moves and costs | `TestTheFirstRequestOfAConversationIsAPlacementNotAMove`, `TestAPolicyMoveCostsTheCacheWriteOfItsFirstRequestOnTheNewAccount`, `TestAManualMoveShowsTheReasonOfItsMigratedEvent`, `TestAMoveWhoseFirstRequestHasNoUsageCostsTheNextRequestWithUsage`, `TestAMoveWithNoUsageAfterItHasAnUnknownCost`, `TestOnlyMovesWhoseRequestFallsInTheWindowCount`, `TestTwoConversationsThatMoveAtTheSameTimeEachCountTheirOwnCost`, `TestAFailedRequestOnAnotherAccountIsNotAMove`, `TestCacheOfAnEmptyLogShowsEachAccountWithoutAShare` |
-| Layout | `TestCacheMatchesTheSelectedLayout`; `TestStatusMatchesTheSelectedLayout` cases `cache-warning` and `cache-warning-off` |
-| Setting | `TestStatusWarnsAboveTheDefaultMoveShareOfTenPercent`, `TestAMoveCacheWarnPercentOfZeroTurnsTheWarningOff`, `TestStatusAndServeRefuseAMoveCacheWarnPercentOutsideZeroToHundred` |
+| Moves and costs | `TestTheFirstRequestOfAConversationIsAPlacementNotAMove`, `TestAPolicyMoveCostsTheCacheWriteOfItsFirstRequestOnTheNewAccount`, `TestAManualMoveShowsTheReasonOfItsMigratedEvent`, `TestAMoveWhoseRequestHasNoUsageKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWhoseRequestHasANullCacheWriteKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWithNoUsageAfterItHasAnUnknownCost`, `TestAMoveCountsItsCostOnlyWhenItsRequestCountsTowardAllWrites`, `TestOnlyMovesWhoseRequestFallsInTheWindowCount`, `TestTwoConversationsThatMoveAtTheSameTimeEachCountTheirOwnCost`, `TestAFailedRequestOnAnotherAccountIsNotAMove`, `TestAFailedRequestWithoutUsageAddsNoAccountLine`, `TestCacheOfAnEmptyLogShowsEachAccountWithoutAShare` |
+| Inputs | `TestCacheIgnoresAMalformedServiceRecord` |
+| Layout | `TestCacheMatchesTheSelectedLayout`; `TestStatusMatchesTheSelectedLayout` cases `cache-warning`, `cache-warning-off`, and `stopped-cache-warning` |
+| Setting and warning | `TestStatusWarnsAboveTheDefaultMoveShareOfTenPercent`, `TestTheStatusWarningSaysOrMoreWhenAMoveCostIsUnknown`, `TestAMoveCacheWarnPercentOfZeroTurnsTheWarningOff`, `TestStatusAndServeRefuseAMoveCacheWarnPercentOutsideZeroToHundred` |

@@ -208,9 +208,9 @@ Uninstall refuses until then.
 
 | Command | What it does |
 | --- | --- |
-| `claude-router status` | One line for the service, one per account, and one per problem: a recent move, a quota or paid-overflow reading older than 15 minutes, a conversation that waits, is refused, is held for login, or could not reach the provider, or account moves that caused more than `move_cache_warn_percent` of the last 24 hours' cache writes. The last line names the next command to run. A stopped service shows its last start error, or that it cannot record a start. |
+| `claude-router status` | One line for the service, one per account, and one per problem. A problem is a recent move, a quota or paid-overflow reading older than 15 minutes, or a conversation that waits, is refused, is held for login, or could not reach the provider. A `cache` line warns when account moves caused more than `move_cache_warn_percent` of the last 24 hours' cache writes, also while the service is stopped. The last line names the next command to run. A stopped service shows its last start error, or that it cannot record a start. |
 | `claude-router status -v` | Every reading with its age, cache counters per account, every assigned conversation, and the migrations, newest first. |
-| `claude-router cache [-since 24h]` | For the window, each account's cache hit rate and token counters, then the number of account moves, the cache writes those moves caused, and their share of all cache writes. It reads `events.jsonl` and `config.json` and works while the service is stopped. |
+| `claude-router cache [-since 24h]` | For the window, each account's cache hit rate and token counters, then the number of account moves, the cache writes those moves caused, their share of all cache writes, and the moves per reason. It reads only `events.jsonl` and `config.json`, so it works while the service is stopped. |
 | `claude-router stop` | Stops the service and keeps it off, across logins and restarts, until `claude-router start`. Assignments stay. |
 | `claude-router start` | Clears the start history, turns the job back on, and starts it. It also starts at each login until the next `stop`. |
 | `claude-router login -account ID` | Logs in again after a revoked login. It refuses while the service runs, because the service would write its old credential back. Run `stop`, `login`, then `start`. |
