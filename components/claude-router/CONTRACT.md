@@ -1120,8 +1120,13 @@ times per request (`MaxAttempts`), so a run of `after_write` failures usually
 ends after 3 attempts, 33 for 11 requests. Only the SDK's redispatch after a
 401 adds a fourth.
 
-Tests, each against a real HTTP/2 server without TLS
-(`internal/claude/network_test.go`):
+Tests in `internal/claude/network_test.go`. Four of them replace the
+upstream with a round tripper that refuses, holds, or reads the request:
+`TestANetworkRetryThatWakesAfterTheRetryTimeIsNotSent`,
+`TestTheNetworkRetryTimeEndsByWhicheverClockPassesItFirst`,
+`TestARetryCanceledAtTheNetworkRetryTimeIsChargedOnlyIfItsBodyWasRead`, and
+`TestAClientThatLeavesStopsTheNetworkRetries`. The others run against a real
+HTTP/2 server without TLS:
 
 - `TestAConnectionResetBeforeTheBodyIsReadIsRetriedWithoutCharge`: with a cap
   of 1, a reset before the server reads a 1 MiB body is retried on a new
