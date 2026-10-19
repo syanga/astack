@@ -186,6 +186,9 @@ class ActivationFixture(ComponentFixture):
 
     def setUp(self):
         super().setUp()
+        self.addCleanup(self.assert_no_process_outlives_the_test)
+        self.gates, self.started = [], []
+        self.addCleanup(self.end_started)
         self.component()
         self.enroll()
         self.set_commit()
@@ -229,6 +232,38 @@ class ActivationFixture(ComponentFixture):
         self.acceptance = self.root / "acceptance.json"
         self.accept()
 
+    def popen(self, *arguments, **options):
+        process = subprocess.Popen(*arguments, **options)
+        self.started.append(process)
+        return process
+
+    def waits_for(self, gate):
+        """A shell loop that waits for gate. It ends when the test ends, whatever its result."""
+        self.gates.append(gate)
+        return 'while [ ! -e "{}" ] && [ -d "{}" ]; do sleep 0.05; done'.format(gate, self.root)
+
+    def end_started(self):
+        for gate in self.gates:
+            gate.touch()
+        for process in self.started:
+            if process.poll() is None:
+                try:
+                    process.communicate(timeout=30)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate()
+
+    def assert_no_process_outlives_the_test(self):
+        roots = (str(self.root), str(self.root.resolve()))
+        deadline = time.time() + 5
+        while True:
+            listed = subprocess.run(["ps", "-A", "-ww", "-o", "pid=,args="], capture_output=True, text=True).stdout
+            left = [line.strip() for line in listed.splitlines() if any(root in line for root in roots)]
+            if not left or time.time() > deadline:
+                break
+            time.sleep(0.1)
+        self.assertEqual(left, [], "processes that this test started outlive it")
+
     def installed_code(self):
         return self.manifest()["components"]["claude-router"]["code_sha256"]
 
@@ -266,7 +301,7 @@ class ActivationFixture(ComponentFixture):
         return dict(self.env, HOME=str(self.home.resolve()), ROUTER_SCRIPTS=str(self.repo / "scripts"), MANAGED_SETTINGS=str(self.managed))
 
     def start_activate(self, *verify, prefix=(), **streams):
-        return subprocess.Popen([*prefix, *self.activate_command(*verify)], env=self.activate_env(), **streams)
+        return self.popen([*prefix, *self.activate_command(*verify)], env=self.activate_env(), **streams)
 
     def wait_for_pid(self, pidfile):
         deadline = time.time() + 30
@@ -616,7 +651,7 @@ class ActivationTests(ActivationFixture):
             with self.subTest(ending):
                 pidfile = self.root / "child-{}.pid".format(expected_exit)
                 command = ("exec > /dev/null 2>&1; sh -c 'echo $$ > \"{0}\"; exec sleep 30' & "
-                           "while [ ! -s \"{0}\" ]; do sleep 0.05; done; {1}".format(pidfile, ending))
+                           "while [ ! -s \"{0}\" ] && [ -d \"{2}\" ]; do sleep 0.05; done; {1}".format(pidfile, ending, self.root))
                 result = self.run_activate(verify=((SESSION, command),))
                 pid = int(pidfile.read_text())
                 self.addCleanup(lambda pid=pid: subprocess.run(["kill", "-9", str(pid)], capture_output=True))
@@ -667,9 +702,8 @@ class ActivationTests(ActivationFixture):
         pidfile, command = self.sleeper("verify-parallel")
         gate = self.root / "parallel.go"
         process = self.start_activate((SESSION, command), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-        senders = [subprocess.Popen([sys.executable, "-c", SIGNAL_SENDER, str(process.pid), str(gate)]) for _ in range(8)]
-        for sender in senders:
-            self.addCleanup(sender.kill)
+        self.gates.append(gate)
+        senders = [self.popen([sys.executable, "-c", SIGNAL_SENDER, str(process.pid), str(gate)]) for _ in range(8)]
         pid = self.wait_for_pid(pidfile)
         gate.touch()
         for sender in senders:
@@ -711,7 +745,7 @@ class ActivationTests(ActivationFixture):
 
     def test_signals_ignored_when_activation_starts_stay_ignored(self):
         pidfile, go = self.root / "ignored.pid", self.root / "ignored.go"
-        command = "echo $$ > \"{}\"; while [ ! -e \"{}\" ]; do sleep 0.05; done; fake-client {}".format(pidfile, go, SESSION)
+        command = "echo $$ > \"{}\"; {}; fake-client {}".format(pidfile, self.waits_for(go), SESSION)
         process = self.start_activate((SESSION, command), prefix=("/bin/sh", "-c", 'trap "" HUP INT TERM; exec "$@"', "sh"),
                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         pid = self.wait_for_pid(pidfile)
@@ -731,7 +765,7 @@ class ActivationTests(ActivationFixture):
     def activate_while_stdout_breaks(self, second):
         go = self.root / "stdout-gone.go"
         go.unlink(missing_ok=True)
-        first = "while [ ! -e \"{}\" ]; do sleep 0.05; done; fake-client {}".format(go, SESSION)
+        first = "{}; fake-client {}".format(self.waits_for(go), SESSION)
         process = self.start_activate((SESSION, first), (OTHER, second), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         late = threading.Event()
         deadline = threading.Timer(30, lambda: (late.set(), go.touch()))
@@ -978,9 +1012,8 @@ class OverlapTests(ActivationFixture):
 
     def start_held_activation(self):
         ready, gate = self.root / "verifying", self.root / "gate"
-        command = "fake-client {}; touch \"{}\"; while [ ! -e \"{}\" ]; do sleep 0.05; done".format(SESSION, ready, gate)
+        command = "fake-client {}; touch \"{}\"; {}".format(SESSION, ready, self.waits_for(gate))
         process = self.start_activate((SESSION, command), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        self.addCleanup(lambda: process.poll() is None and process.kill())
         self.wait_for(ready)
         self.assertTrue(ready.exists(), "the first activation did not reach verification")
         return process, gate
@@ -1021,9 +1054,8 @@ class OverlapTests(ActivationFixture):
     def test_a_second_activation_whose_verification_fails_refuses_before_it_touches_the_first(self):
         first, gate = self.start_held_activation()
         ready, gate2 = self.root / "verifying 2", self.root / "gate 2"
-        failing = "touch \"{}\"; while [ ! -e \"{}\" ]; do sleep 0.05; done; exit 1".format(ready, gate2)
+        failing = "touch \"{}\"; {}; exit 1".format(ready, self.waits_for(gate2))
         second = self.start_activate((OTHER, failing), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        self.addCleanup(lambda: second.poll() is None and second.kill())
         self.wait_for(ready, second)
 
         self.finish(first, gate)
@@ -1449,7 +1481,7 @@ class UpdateOverActivationTests(ActivationFixture):
         self.prepare_update()
         self.claude.write_text(SLEEPY_CLAUDE)
         pidfile = self.root / "update-check.pid"
-        process = subprocess.Popen([str(self.repo / "install.sh"), "--home", str(self.home), "--component", "claude-router"],
+        process = self.popen([str(self.repo / "install.sh"), "--home", str(self.home), "--component", "claude-router"],
                                    cwd=str(self.root), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                    env=dict(self.env, FAKE_BUILD="2", SLEEPY_PIDFILE=str(pidfile)))
         pid = self.wait_for_pid(pidfile)

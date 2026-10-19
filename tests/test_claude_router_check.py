@@ -166,7 +166,7 @@ class CheckEdgeTests(CheckFixture):
             with self.subTest(sent):
                 pidfile = self.root / "sleepy-{}.pid".format(int(sent))
                 command = [sys.executable, "-c", HELPER_WITH_MANAGED_SETTINGS, "check", "--home", str(self.home), "--claude", str(sleepy)]
-                process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                process = self.popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                            env=dict(self.activate_env(), SLEEPY_PIDFILE=str(pidfile)))
                 pid = self.wait_for_pid(pidfile)
                 process.send_signal(sent)
