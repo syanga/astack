@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/syanga/astack/components/claude-router/internal/claude"
@@ -72,7 +73,7 @@ func runSetup(in installation, names []string, noBrowser bool, out io.Writer) er
 	}
 	var added []string
 	for _, name := range names {
-		if !enrolled(cfg, name) && !strings.Contains(" "+strings.Join(added, " ")+" ", " "+name+" ") {
+		if !enrolled(cfg, name) && !slices.Contains(added, name) {
 			added = append(added, name)
 		}
 	}
@@ -80,29 +81,30 @@ func runSetup(in installation, names []string, noBrowser bool, out io.Writer) er
 		return nextError{err: errors.New("config.json lists no accounts"), next: "claude-router setup -account NAME"}
 	}
 	if len(added) > 0 {
-		if _, err := stopForChange(in, out); err != nil {
+		ran, err := stopForChange(in, out)
+		if err != nil {
 			return err
 		}
+		var signed []string
 		for _, name := range added {
 			signInLines(out, name, noBrowser)
 			if err := signIn(in.State, name, noBrowser); err != nil {
+				if aerr := addToConfig(in, signed, out); aerr != nil {
+					return fmt.Errorf("%w; adding %s to config.json also failed: %v", err, joined(signed), aerr)
+				}
+				if ran {
+					if serr := startAgain(in, out); serr != nil {
+						return fmt.Errorf("%w; starting the router again also failed: %v", err, serr)
+					}
+				}
 				return err
 			}
 			line(out, "login", name+" signed in")
+			signed = append(signed, name)
 		}
-		if err := claude.EditConfig(in.Config, func(c *claude.Config) error {
-			for _, name := range added {
-				c.Accounts = append(c.Accounts, router.Account{ID: router.AccountID(name), Capacity: 1})
-			}
-			return nil
-		}); err != nil {
+		if err := addToConfig(in, signed, out); err != nil {
 			return err
 		}
-		each := ", capacity 1"
-		if len(added) > 1 {
-			each += " each"
-		}
-		line(out, "config", "added "+joined(added)+each)
 	}
 	if err := startAgain(in, out); err != nil {
 		return err
@@ -136,5 +138,25 @@ func runSetup(in installation, names []string, noBrowser bool, out io.Writer) er
 		return silentExit(code)
 	}
 	line(out, "next", "claude-router status")
+	return nil
+}
+
+func addToConfig(in installation, names []string, out io.Writer) error {
+	if len(names) == 0 {
+		return nil
+	}
+	if err := claude.EditConfig(in.Config, func(c *claude.Config) error {
+		for _, name := range names {
+			c.Accounts = append(c.Accounts, router.Account{ID: router.AccountID(name), Capacity: 1})
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	each := ", capacity 1"
+	if len(names) > 1 {
+		each += " each"
+	}
+	line(out, "config", "added "+joined(names)+each)
 	return nil
 }

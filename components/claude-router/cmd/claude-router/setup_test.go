@@ -146,3 +146,21 @@ Claude authentication successful
 		t.Fatalf("shown %q, want only the URL", out.String())
 	}
 }
+
+func TestSetupKeepsTheAccountsSignedInBeforeAFailedSignIn(t *testing.T) {
+	l, _ := setupLane(t)
+	l.refuse["alumni"] = true
+
+	var err error
+	out := stdoutOf(t, func() { err = runSetup(l.in, []string{"work", "alumni"}, false, os.Stdout) })
+
+	if err == nil || !strings.Contains(err.Error(), "the sign-in was cancelled") {
+		t.Fatalf("setup: %v, want the sign-in error", err)
+	}
+	if got := strings.Join(l.accounts(), " "); got != "work:1" {
+		t.Fatalf("accounts %s, want work:1, the account whose credential setup wrote", got)
+	}
+	if !strings.HasSuffix(out, "config    added work, capacity 1\n") {
+		t.Fatalf("output\n%s\nwant it to end with the config line for work", out)
+	}
+}
