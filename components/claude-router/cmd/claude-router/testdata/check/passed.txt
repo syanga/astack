@@ -1,0 +1,7 @@
+ok        router running on 127.0.0.1:18787 (launchd)
+ok        work, alumni, personal ready
+ok        paid overflow off on all 3 accounts
+ok        Claude Code settings point at the router
+ok        code matches the accepted record (darwin/arm64)
+ok        test message answered 200 on alumni in 6.2s
+check     passed

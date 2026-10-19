@@ -39,6 +39,34 @@ except OSError:
     sys.exit(1)
 '''
 
+FAKE_CLAUDE = r'''#!/usr/bin/env python3
+import json, os, subprocess, sys, urllib.request
+arguments = sys.argv[1:]
+if arguments == ["--version"]:
+    print(os.environ.get("FAKE_CLAUDE_VERSION", "2.1.300") + " (Claude Code)")
+    sys.exit(0)
+with open(os.environ["FAKE_CLAUDE_LOG"], "a") as log:
+    log.write(json.dumps(arguments) + "\n")
+if os.environ.get("FAKE_CLAUDE_EXIT"):
+    sys.exit(int(os.environ["FAKE_CLAUDE_EXIT"]))
+settings = json.load(open(os.environ["CLIENT_SETTINGS"]))
+key = subprocess.run(["/bin/sh", "-c", settings["apiKeyHelper"]], capture_output=True, text=True).stdout.strip()
+def send(session, status=None):
+    headers = {"x-api-key": key, "x-claude-code-session-id": session}
+    if status:
+        headers["x-fake-status"] = status
+    request = urllib.request.Request(settings["env"]["ANTHROPIC_BASE_URL"] + "/v1/messages", data=b"{}", method="POST", headers=headers)
+    try:
+        urllib.request.urlopen(request, timeout=10).read()
+    except OSError:
+        pass
+session = arguments[arguments.index("--session-id") + 1]
+send("6f1d2c3b-0000-4000-8000-0000000000ff")
+send(session, "529")
+send(session, os.environ.get("FAKE_CLAUDE_STATUS"))
+print("a reply that check never shows")
+'''
+
 FAKE_LAUNCHER = r'''#!/bin/sh
 if [ "$1" = getenv ] && [ "$2" = "$FAKE_LAUNCHER_HAS" ]; then echo set; fi
 if [ "$1" = --user ] && [ -n "$FAKE_LAUNCHER_HAS" ]; then echo "$FAKE_LAUNCHER_HAS=set"; fi
@@ -83,6 +111,10 @@ UNDONE = ("undo    ~/.claude/settings.json restored; the router keeps its logins
 STOPPED = "claude-router: activate: verification was interrupted\n" + UNDONE
 
 
+def timed(text):
+    return re.sub(r" in \d+\.\ds$", " in 6.2s", text, flags=re.MULTILINE)
+
+
 class Killed(BaseException):
     pass
 
@@ -95,6 +127,7 @@ class FakeRouter:
     def __init__(self, token, events):
         self.status = {}
         self.overloaded = set()
+        self.account = "work"
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -122,10 +155,10 @@ class FakeRouter:
                 if not self.authorized():
                     return self.answer(401, {})
                 session = self.headers.get("x-claude-code-session-id", "")
-                status = 529 if session in fake.overloaded else 200
+                status = 529 if session in fake.overloaded else int(self.headers.get("x-fake-status") or 200)
                 with open(events, "a") as stream:
                     stream.write(json.dumps({"kind": "request", "conversation": hashlib.sha256(session.encode()).hexdigest()[:12],
-                                             "status": status, "outcome": "completed"}) + "\n")
+                                             "status": status, "outcome": "completed", "account": fake.account}) + "\n")
                 self.answer(status, {})
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -153,7 +186,7 @@ class ActivationFixture(ComponentFixture):
         self.set_commit()
         tools = self.root / "fake bin"
         for name, text in (("launchctl", FAKE_LAUNCHER), ("systemctl", FAKE_LAUNCHER), ("fake-client", FAKE_CLIENT),
-                           ("claude", "#!/bin/sh\necho '2.1.300 (Claude Code)'\n")):
+                           ("claude", FAKE_CLAUDE)):
             (tools / name).write_text(text)
             (tools / name).chmod(0o755)
         self.claude = tools / "claude"
@@ -166,10 +199,12 @@ class ActivationFixture(ComponentFixture):
         self.addCleanup(self.fake_router.close)
         config = json.loads((self.state_dir / "config.json").read_text())
         config["listen"] = "127.0.0.1:{}".format(self.fake_router.port)
+        config["accounts"] = [{"id": "work", "capacity": 1}]
         (self.state_dir / "config.json").write_text(json.dumps(config))
         self.listen = "http://127.0.0.1:{}".format(self.fake_router.port)
         self.binary_sha256 = hashlib.sha256((self.data / "bin/claude-router").read_bytes()).hexdigest()
         self.fake_router.status = {"journal": "ok", "binary": COMMIT[:7], "binary_sha256": self.binary_sha256, "sdk": SDK,
+                                   "code_sha256": self.installed_code(),
                                    "accounts": [{"id": "work", "registered": True, "needs_login": False,
                                                  "overage": {"state": "disabled"}}]}
         self.settings_path = self.home / ".claude/settings.json"
@@ -179,12 +214,18 @@ class ActivationFixture(ComponentFixture):
         }, indent=2) + "\n")
         self.before = self.settings_path.read_bytes()
         self.env["CLIENT_SETTINGS"] = str(self.settings_path)
+        self.env["FAKE_CLAUDE_LOG"] = str(self.root / "claude.log")
+        for name in ("FAKE_CLAUDE_EXIT", "FAKE_CLAUDE_STATUS", "FAKE_CLAUDE_VERSION"):
+            self.env.pop(name, None)
         self.env.pop("ANTHROPIC_API_KEY", None)
         self.env.pop("ANTHROPIC_AUTH_TOKEN", None)
         self.env.pop("FAKE_LAUNCHER_HAS", None)
         self.identity = json.loads(self.helper("identity", "--claude", str(self.claude), "--agent-sdk", str(self.sdk)).stdout)
         self.acceptance = self.root / "acceptance.json"
         self.accept()
+
+    def installed_code(self):
+        return self.manifest()["components"]["claude-router"]["code_sha256"]
 
     def set_commit(self):
         state_path = self.home / ".local/state/astack/manifest.json"
@@ -264,8 +305,8 @@ class ActivationTests(ActivationFixture):
         self.assertEqual(prepared.returncode, 0, prepared.stderr)
         lines = prepared.stdout.splitlines()
         backup = "~/.local/state/astack/backups/activate-{}/settings.json".format(hashlib.sha256(self.before).hexdigest()[:12])
-        self.assertRegex(lines[0], r"^accept  head 4b1f0c2, binary {}, helpers [0-9a-f]{{12}}, sdk v8\.0\.11, claude 2\.1\.300, "
-                                   r"agent sdk 0\.3\.300$".format(self.binary_sha256[:12]))
+        self.assertEqual(lines[0], "accept  code {}, helpers {}, sdk v8.0.11".format(self.installed_code()[:12],
+                                                                                     self.identity["helpers_sha256"][:12]))
         self.assertEqual(lines[1:], [
             "ready   router running 127.0.0.1:{}; usable accounts work".format(self.fake_router.port),
             "replace ~/.claude/settings.json apiKeyHelper (the old value stays in {})".format(backup),
@@ -281,8 +322,15 @@ class ActivationTests(ActivationFixture):
         result = self.run_activate(verify=((SESSION, "CLIENT_FLAG=inline-secret-value fake-client {} # --secret-arg".format(SESSION)),))
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[-2:], [
+        self.assertEqual(timed(result.stdout).splitlines()[-9:], [
             "verify  fake-client (conversation {}): exit 0, 1 routed request".format(CONVERSATION),
+            "ok        router running on 127.0.0.1:{} ({})".format(self.fake_router.port, self.manager_name),
+            "ok        work ready",
+            "ok        paid overflow off on work",
+            "ok        Claude Code settings point at the router",
+            "ok        code matches the accepted record ({}/{})".format(*self.router().host_platform()),
+            "ok        test message answered 200 on work in 6.2s",
+            "check     passed",
             "done    clients connect through the router; undo with claude-router direct",
         ])
         for text in (result.stdout, result.stderr):
@@ -308,14 +356,14 @@ class ActivationTests(ActivationFixture):
         self.assert_direct_and_state_kept()
 
     def test_a_missing_or_mismatched_acceptance_record_refuses_before_any_write(self):
+        code = self.installed_code()
         self.acceptance.unlink()
         self.assert_refused_before_any_write(self.run_activate(), "cannot read the acceptance record")
         for changes, expected in (
                 ({"result": "fail"}, "result: fail, not pass"),
-                ({"head": "0" * 40}, "head: accepted 000000000000, installed 4b1f0c2d9e8a"),
-                ({"clients": {"claude_code": "2.1.300"}}, "agent_sdk: the record names no version"),
-                ({"clients": {"claude_code": "2.1.299", "agent_sdk": "0.3.300"}}, "claude_code: accepted 2.1.299, --claude has 2.1.300"),
-                ({"clients": {"claude_code": "2.1.300", "agent_sdk": "0.3.276"}}, "agent_sdk: accepted 0.3.276, --agent-sdk has 0.3.300"),
+                ({"code_sha256": "d" * 64}, "code: accepted dddddddddddd, installed {}".format(code[:12])),
+                ({"code_sha256": None}, "code: the record names no digest"),
+                ({"code_sha256": code[:12]}, "code: the record names no digest"),
                 ({"sdk": "v8.0.10"}, "sdk: accepted v8.0.10, running v8.0.11"),
                 ({"helpers_sha256": "c" * 64}, "helpers: accepted cccccccccccc, installed {}".format(self.identity["helpers_sha256"][:12])),
                 ({"helpers_sha256": None}, "helpers: the record names no digest"),
@@ -326,21 +374,49 @@ class ActivationTests(ActivationFixture):
 
         self.accept()
         for status, expected in (
-                ({"binary": "9f8e7d6"}, "head: accepted 4b1f0c2, running binary built from 9f8e7d6"),
-                ({"binary": COMMIT[:7] + "+dirty"}, "head: accepted 4b1f0c2, running binary built from 4b1f0c2+dirty"),
-                ({"binary_sha256": "a" * 64}, "binary: accepted {}, running aaaaaaaaaaaa".format(self.binary_sha256[:12]))):
+                ({"code_sha256": "e" * 64}, "code: accepted {}, running eeeeeeeeeeee".format(code[:12])),
+                ({"binary_sha256": "a" * 64}, "binary: installed {}, running aaaaaaaaaaaa".format(self.binary_sha256[:12]))):
             with self.subTest(status):
                 with patch.dict(self.fake_router.status, status):
                     self.assert_refused_before_any_write(self.run_activate(), expected)
 
-        (self.claude).write_text("#!/bin/sh\necho '2.1.300 (Claude Code)'\nexit 1\n")
-        self.assert_refused_before_any_write(self.run_activate(), "claude_code: accepted 2.1.300, --claude has no version")
-        self.claude.write_text("#!/bin/sh\necho '2.1.300 (Claude Code)'\n")
-        (self.sdk / "package.json").write_text(json.dumps({"name": "claude-agent-sdk-lookalike", "version": "0.3.300"}))
-        self.assert_refused_before_any_write(self.run_activate(), "agent_sdk: accepted 0.3.300, --agent-sdk has no version")
-        (self.sdk / "package.json").write_text(json.dumps({"name": "@anthropic-ai/claude-agent-sdk", "version": "0.3.300"}))
         (self.data / "bin/claude-router").write_text("#!/bin/sh\n# rebuilt\n")
-        self.assert_refused_before_any_write(self.run_activate(), "binary: accepted {}, installed ".format(self.binary_sha256[:12]))
+        rebuilt = hashlib.sha256(b"#!/bin/sh\n# rebuilt\n").hexdigest()
+        self.assert_refused_before_any_write(self.run_activate(), "binary: installed {}, running {}".format(rebuilt[:12], self.binary_sha256[:12]))
+
+    def test_a_record_with_another_head_build_and_client_versions_activates_when_check_passes(self):
+        self.accept(head="0" * 40, binary_sha256="b" * 64, clients={"claude_code": "2.1.285", "agent_sdk": "0.3.285"})
+
+        result = self.run_activate(verify=())
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-2:], ["check     passed",
+                                                           "done    clients connect through the router; undo with claude-router direct"])
+        self.assertEqual(self.base_url(), self.listen)
+        self.assertEqual(self.journal()["phase"], "active")
+
+    def test_a_failed_check_restores_the_direct_settings(self):
+        for env, line in (({"FAKE_CLAUDE_EXIT": "1"}, "fail      test message got no answer through the router (claude exited 1)"),
+                          ({"FAKE_CLAUDE_STATUS": "529"}, "fail      test message got no answer through the router (claude exited 0)")):
+            with self.subTest(env):
+                result = self.run_activate(verify=(), **env)
+
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn(line + "\ncheck     failed\n", result.stdout)
+                self.assertEqual(result.stderr, UNDONE)
+                self.assert_direct_and_state_kept()
+
+    def test_activation_on_another_platform_than_the_record_s_names_both(self):
+        host = "{}/{}".format(*self.router().host_platform())
+        other = "linux/amd64" if host.startswith("darwin") else "darwin/arm64"
+        self.accept(platform=other)
+
+        result = self.run_activate(verify=())
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        untested = ", not yet tested on real Linux" if host.startswith("linux") else ""
+        self.assertIn("note    accepted on {}, this is {}{}\n".format(other, host, untested), result.stdout)
+        self.assertIn("ok        code matches the accepted record ({})\n".format(other), result.stdout)
 
     def test_the_helpers_digest_covers_each_installed_file_by_path_and_content(self):
         lib = self.data / "lib"
@@ -488,10 +564,6 @@ class ActivationTests(ActivationFixture):
                       refused.stderr)
         self.assert_direct_and_state_kept()
 
-        self.assertEqual(self.run_activate(verify=()).stderr,
-                         "claude-router: activate: activation needs at least one --verify continuation\n"
-                         "next    pass --verify for the terminal client and for T3\n")
-        self.assertEqual(self.settings_path.read_bytes(), self.before)
 
     def test_a_continuation_counts_only_requests_of_its_own_conversation(self):
         result = self.run_activate(verify=((SESSION, "fake-client another-conversation"),))
@@ -1013,7 +1085,8 @@ class InterruptedActivationTests(ActivationFixture):
 
     def activate_in_process(self, helper, command="fake-client " + SESSION, timeout=60):
         args = helper.argparse.Namespace(acceptance=self.acceptance, claude=self.claude, agent_sdk=self.sdk, settings=None,
-                                         project=[], verify=[(SESSION, command)], verify_timeout=timeout, prepare=False)
+                                         project=[], verify=[(SESSION, command)], verify_timeout=timeout, prepare=False,
+                                         brief=False)
         stderr = io.StringIO()
         with patch.dict(os.environ, dict(self.env, HOME=str(self.home.resolve())), clear=True), \
                 patch.object(helper, "MANAGED_SETTINGS", {sys.platform: self.managed}), \
@@ -1196,3 +1269,97 @@ class InterruptedActivationTests(ActivationFixture):
             self.assertIn("claude-router: direct: the backup of ~/.claude/settings.json changed: ", result.stderr)
             self.assertEqual(self.settings_path.read_bytes(), activated)
         self.assertEqual(self.journal()["phase"], "verifying")
+
+
+class CodeDigestTests(ActivationFixture):
+    def setUp(self):
+        super().setUp()
+        self.commit_checkout()
+        self.component()
+        self.fake_router.status["code_sha256"] = self.installed_code()
+        self.component_dir = self.repo / "components/claude-router"
+
+    def test_the_code_digest_covers_tracked_router_code_and_skips_docs_tests_testdata_and_the_record(self):
+        (self.component_dir / "accepted.json").write_text("{}\n")
+        self.commit_checkout("record")
+        listed = subprocess.run(["git", "-C", str(self.component_dir), "ls-files"], capture_output=True, text=True, check=True).stdout.split()
+        code = sorted(name for name in listed if not name.endswith((".md", "_test.go")) and "testdata" not in name.split("/")
+                      and name != "accepted.json")
+        self.assertIn("cmd/claude-router/main.go", code)
+        self.assertIn("go.sum", code)
+        expected = hashlib.sha256("".join("{}\0{}\n".format(name, hashlib.sha256((self.component_dir / name).read_bytes()).hexdigest())
+                                          for name in code).encode()).hexdigest()
+
+        self.assertEqual(self.code_only(), {"code_sha256": expected, "helpers_sha256": self.identity["helpers_sha256"]})
+
+    def test_a_record_matches_by_code_digest_at_another_commit(self):
+        code = self.code_only()
+        self.accept(head="0" * 40, binary_sha256="b" * 64, **code)
+        readme = self.component_dir / "README.md"
+        readme.write_text(readme.read_text() + "\nAnother paragraph.\n")
+        self.commit_checkout("docs")
+        self.component()
+
+        self.assertEqual(self.installed_code(), code["code_sha256"])
+        result = self.run_activate(verify=())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.journal()["phase"], "active")
+
+    def test_an_edit_inside_the_code_set_refuses_install_and_an_edit_outside_does_not(self):
+        code = self.code_only()["code_sha256"]
+        for name in ("README.md", "cmd/claude-router/main_test.go", "cmd/claude-router/testdata/status/healthy.txt"):
+            with self.subTest(name):
+                path = self.component_dir / name
+                original = path.read_bytes()
+                path.write_bytes(original + b"\n")
+                self.addCleanup(path.write_bytes, original)
+                self.component()
+                self.assertEqual(self.installed_code(), code)
+                path.write_bytes(original)
+
+        main = self.component_dir / "cmd/claude-router/main.go"
+        original = main.read_bytes()
+        extra = self.component_dir / "cmd/claude-router/extra.go"
+        for path, content, restore in ((main, original + b"\n// a local edit\n", lambda: main.write_bytes(original)),
+                                       (extra, b"package main\n", extra.unlink)):
+            with self.subTest(path.name):
+                path.write_bytes(content)
+                try:
+                    before = self.inventory()
+                    result = self.component(success=False)
+                    self.assertEqual(result.stderr, "astack: claude-router code differs from the checkout's commit: cmd/claude-router/{}; "
+                                                    "commit or revert it, then install again\n".format(path.name))
+                    self.assertEqual(self.inventory(), before)
+                finally:
+                    restore()
+
+
+class UpdateOverActivationTests(ActivationFixture):
+    def test_an_update_restarts_an_activated_router_and_keeps_it_active_when_check_passes(self):
+        self.assertEqual(self.run_activate().returncode, 0)
+        self.router_log.write_text("")
+        (self.repo / "components/claude-router/accepted.json").write_text(self.acceptance.read_text())
+        self.fake_router.status["binary_sha256"] = hashlib.sha256(b"#!/bin/sh\n# build 2\nprintf '%s\\n' \"$*\" >> \"$FAKE_ROUTER_LOG\"\n").hexdigest()
+
+        result = self.component(FAKE_BUILD="2")
+
+        self.assertEqual(self.router_log.read_text(), "stop -state {0}\nstart -state {0}\n".format(self.state_dir))
+        self.assertIn("check     passed\n", result.stdout)
+        self.assertEqual(self.base_url(), self.listen)
+        self.assertEqual(self.journal()["phase"], "active")
+
+    def test_an_update_whose_check_fails_connects_clients_directly(self):
+        self.assertEqual(self.run_activate().returncode, 0)
+        self.router_log.write_text("")
+        (self.repo / "components/claude-router/accepted.json").write_text(self.acceptance.read_text())
+        built = hashlib.sha256(b"#!/bin/sh\n# build 2\nprintf '%s\\n' \"$*\" >> \"$FAKE_ROUTER_LOG\"\n").hexdigest()
+
+        result = self.component(FAKE_BUILD="2", success=False)
+
+        self.assertIn("fail      code differs from the accepted record ({}/{})\n".format(*self.router().host_platform()) +
+                      "          binary: installed {}, running {}\n".format(built[:12], self.binary_sha256[:12]), result.stdout)
+        self.assertIn("check     failed\n", result.stdout)
+        self.assertIn("next      claude-router check\n", result.stdout)
+        self.assertIn("astack: the updated router failed its check; Claude Code connects directly\n", result.stderr)
+        self.assertEqual(self.router_log.read_text(), "stop -state {0}\nstart -state {0}\nstop -state {0}\n".format(self.state_dir))
+        self.assert_direct_and_state_kept()
