@@ -170,3 +170,48 @@ func TestRefreshRedispatchAfterABackwardClockStepIsRefusedAsStale(t *testing.T) 
 		t.Fatalf("attempt_refused events %q, want one %q", got, "acct-a overage_stale")
 	}
 }
+
+func TestRefreshRedispatchIsRefusedAfterTheJournalFails(t *testing.T) {
+	for _, nonStream := range []bool{false, true} {
+		name := "stream"
+		if nonStream {
+			name = "non-stream"
+		}
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			e.cfg.Accounts = []router.Account{{ID: "acct-a", Capacity: 1}}
+			e.writeRefreshableCredential("acct-a")
+			e.start()
+			x := &tokenExchange{up: e.upstream, account: "acct-a", accept: true}
+			e.replaceTokenExchange(x)
+			release := e.holdExchanges(x)
+			e.upstream.script("acct-a", reply{Status: http.StatusUnauthorized})
+
+			refreshing := make(chan result, 1)
+			go func() { refreshing <- e.send(msg{Session: sessionID(1), NonStream: nonStream}) }()
+			e.waitExchanging(x)
+			_ = e.svc.store.Close()
+			placed := e.send(msg{Session: sessionID(2), NonStream: nonStream})
+			release()
+
+			var r result
+			select {
+			case r = <-refreshing:
+			case <-time.After(15 * time.Second):
+				t.Fatal("the request whose redispatch the router refused did not end")
+			}
+			if placed.Status != http.StatusServiceUnavailable || !strings.Contains(placed.ErrMsg, "assignment journal unavailable") {
+				t.Fatalf("placement after the journal closed answered %d %q, want a 503 for the journal", placed.Status, placed.ErrMsg)
+			}
+			if n := len(e.upstream.inference()); n != 1 {
+				t.Fatalf("%d inference attempts, want 1: no redispatch after the journal failed", n)
+			}
+			if r.Status != http.StatusServiceUnavailable || r.ErrType != "api_error" || !strings.Contains(r.ErrMsg, "assignment journal unavailable") {
+				t.Fatalf("refused redispatch answered %d %s %q, want a 503 api_error for the journal", r.Status, r.ErrType, r.ErrMsg)
+			}
+			if got := e.refusedAttempts(); len(got) != 1 || got[0] != "acct-a journal_failed" {
+				t.Fatalf("attempt_refused events %q, want one %q", got, "acct-a journal_failed")
+			}
+		})
+	}
+}

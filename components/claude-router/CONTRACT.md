@@ -874,8 +874,8 @@ refresh redispatch (RP-5b).
 | Decision | Answer |
 | --- | --- |
 | `place`, `dispatch`, `retry`, and `migrate` | Dispatch on the bound account. `Route` has committed a migration before it returns. When the request has already used its attempt cap, a `migrate` is answered with a local 429 whose reset is 1 s away, and the client's resend goes to the destination (PR4). |
-| `wait` | Local 429 `rate_limit_error` with `anthropic-ratelimit-unified-status: rejected`, `anthropic-ratelimit-unified-reset`, and `retry-after` for the same delay. An unknown reset omits the reset header and sends `retry-after: 300`. With `RecheckOverage`, read the settings of the accounts not yet read for this request first, then decide again (PR4). |
-| `refuse` with `RecheckOverage` | Read the setting of each account not yet read for this request, then decide again |
+| `wait` | Local 429 `rate_limit_error` with `anthropic-ratelimit-unified-status: rejected`, `anthropic-ratelimit-unified-reset`, and `retry-after` for the same delay. An unknown reset omits the reset header and sends `retry-after: 300`. |
+| `refuse` or `wait` with `RecheckOverage` | Read the setting of the decision's account or, when it names none, of every account, skipping each account already read for this request, then decide again (`TestWaitRechecksAStaleAccountThatCouldServe`) |
 | `refuse` | 503 `api_error`, `x-should-retry: false`, naming the account and the reason |
 | `reauth`, `unavailable` | 503 `api_error`, `x-should-retry: false`, naming `claude-router login`. An upstream 401 never reaches the client as 401. |
 | `fail` | 503 `api_error`, `x-should-retry: false` |
@@ -921,7 +921,8 @@ The transport also refuses an inference attempt, the SDK's refresh
 redispatch included, when the router would not dispatch to its account at
 that moment (`Router.Admit`). That is the case when the account needs a
 login, showed paid use, has a rejection that applies to the model, or has no
-`disabled` check within `OverageFreshFor`. The transport does not check
+`disabled` check within `OverageFreshFor`. After a journal write or sync
+failure it is the case for every account. The transport does not check
 settings reads. `Admit` takes the lock under which the router records
 observations, so each check falls wholly before or wholly after each
 observation. The transport refuses an attempt whose check comes after a
@@ -935,8 +936,13 @@ table above gives for that decision. For each reason `Admit` returns:
 
 - `paid_use_observed`: a migration for `overage_observed` when another
   account is eligible, a local 429 until the earliest usable reset elsewhere,
-  or a 503 that names paid use.
-- `exhausted`, which also covers a model-limit rejection: the local 429, or
+  or a 503 that names paid use. When another account's check is unknown or
+  stale, the refusal sets `RecheckOverage`, and the service first reads the
+  paid-use account's setting once. A `disabled` answer, stamped after the
+  paid use, clears it, and the request goes out on the same account
+  (`TestPaidUseRecheckClearedByADisabledReadingServesOnTheSameAccount`).
+- `exhausted`, which also covers a model-limit rejection: a migration for
+  `exhausted` when another account is eligible, otherwise the local 429, or
   a 503 when the paid-overflow state bars every logged-in account.
 - `needs_login`: a migration for `never_served_relogin` when the
   conversation was never served and another account is eligible, otherwise a
@@ -945,12 +951,17 @@ table above gives for that decision. For each reason `Admit` returns:
   another decision. The request dispatches if the read returns `disabled`
   and otherwise answers 503. A request reads the setting at most once.
 - `overage_enabled`: a 503 that names the account and paid overflow.
+- `journal_failed`: the 503 for a journal error, because the next decision
+  fails on the journal too.
 
 `TestRefreshRedispatchIsRefusedAfterABlockingObservation` covers paid use
-and exhaustion on the streaming and non-streaming paths, and
+and exhaustion on the streaming and non-streaming paths,
+`TestRefreshRedispatchIsRefusedAfterTheJournalFails` covers a journal
+failure on both, and
 `TestRefusedRedispatchMovesTheConversationAfterPaidUse` covers the
-migration. The admission check reads both clocks as the policy does, so the
-two agree during a hold (`TestAdmitAgreesWithDecideDuringAHold`). A resend
+migration. The admission check reads both clocks as the policy does, so
+`Admit` and `Decide` agree during a hold
+(`TestAdmitAgreesWithDecideDuringAHold`). A resend
 after a backward step of the wall clock is refused with `overage_stale` and
 reaches no upstream
 (`TestRefreshRedispatchAfterABackwardClockStepIsRefusedAsStale`).
@@ -1379,15 +1390,18 @@ was stale by wall time.
 - **A restart keeps only a `disabled` check it can age.** After a restart,
   the router ages a saved check by the wall clock. `accounts.json`
   therefore holds no `disabled` check during a hold, and none stamped
-  before the time of the last `ExpireOverageChecks` call. Each call removes
-  those checks from the file before the clock returns its time. The next
-  start then reads the setting before it dispatches to the account. A
+  before the time of the last `ExpireOverageChecks` call. The saved records
+  of accounts left out of the configuration follow the same rule. Each call
+  removes those checks from the file before the clock returns its time. The
+  next start then reads the setting before it dispatches to the account,
+  including an account that returns to the configuration
+  (`TestAnAccountLeftOutWhileChecksExpireReadsItsSettingWhenItReturns`). A
   restart without a step keeps the saved check
   (`TestAfterARestartNoRequestDispatchesOnAReadingOlderThanItsFreshness`).
   A `disabled` reading therefore never permits dispatch more than
-  `overage_fresh_for` after its read started, during a hold, after it, or
-  across a restart, unless the wall clock steps back while the router is
-  stopped.
+  `overage_fresh_for` after its read started. The limit applies during a
+  hold, after it, and across a restart, except after a backward step of the
+  wall clock while the router is stopped.
 - **Resets are compared with the wall clock.** The policy takes both clocks
   (`router.Instant`). It ages readings and stamps bindings with the service
   clock, and it compares reset times with the wall clock. An exact reset is
@@ -1497,9 +1511,9 @@ waits in the router only for settings reads (overdue reads and rereads) and
 for the backoff between upstream attempts. A client that goes away ends
 the request, and a settings read it cancels counts as a failed read.
 
-PR4 changes two things:
+Two things changed after PR2:
 
-- **Stale checks during a wait.** PR2's placement left an account whose
+- **Stale checks during a wait (PR4).** PR2's placement left an account whose
   paid-overflow check was unknown or stale out of the reset computation.
   When every account was blocked and its check had aged past
   `overage_fresh_for`, the router refused with `no_included_only_account`
@@ -1511,10 +1525,11 @@ PR4 changes two things:
   (`TestAWaitThatOutlivesTheCheckReadsItAgainAtTheResetBeforeDispatch`;
   `TestConfirmedExhaustionMigratesDespiteAStaleSourceCheck` was updated to
   expect the wait).
-- **Rereads before a wait.** PR2 sets `RecheckOverage` on a `wait` when an
-  unblocked account is held back only by an unknown or stale check. The
-  service now reads those settings, once per account per request, and
-  decides again before it answers (`TestAWaitRereadsAStaleAccountThatCouldServeBeforeTheReset`).
+- **Rereads before a wait (PR3).** PR2 sets `RecheckOverage` on a `wait`
+  when an unblocked account is held back only by an unknown or stale check.
+  The service reads those settings, once per account per request, and
+  decides again before it answers (`TestWaitRechecksAStaleAccountThatCouldServe`,
+  `TestAWaitRereadsAStaleAccountThatCouldServeBeforeTheReset`).
 
 An unknown reset is answered without a reset header and with
 `retry-after: 300`; the account is tried again `UnknownResetRecheck` after
@@ -1556,13 +1571,13 @@ Deviation from the plan, accepted: the plan says that partial output
 one continuation turn on its own after the cut. The router never resends the
 cut request and no completed tool runs twice, but the router cannot make the
 client wait for the user. On 2026-10-06 the user accepted "client-initiated
-continuation, no router resend, no tool replay" as meeting the plan
-(`open-decisions.md` in the execution store). The live session cut no
-output, so this predicate rests on lane 2 alone. Lane 2's records name one
-check of the cut scenarios `explicit retry completed on the same account`.
-That check sends a further user turn (`Continue.`) after the cut and passes
-when it completes on the same account. It observes no retry of the cut
-request; the accepted behavior is the client's own continuation turn.
+continuation, no router resend, no tool replay" as meeting the plan. The
+live session cut no output, so this predicate rests on lane 2 alone.
+Lane 2's records name one check of the cut scenarios
+`explicit retry completed on the same account`. That check sends a further
+user turn (`Continue.`) after the cut and passes when it completes on the
+same account. It observes no retry of the cut request; the accepted
+behavior is the client's own continuation turn.
 
 ### Login and manual movement
 
