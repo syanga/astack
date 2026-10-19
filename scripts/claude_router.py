@@ -154,13 +154,11 @@ def check_go():
 
 
 def source_revision():
-    """Return the checkout's short commit, or unknown."""
     head = subprocess.run(["git", "-C", str(component_dir()), "rev-parse", "--short=7", "HEAD"], capture_output=True, text=True)
     return head.stdout.strip() if head.returncode == 0 else "unknown"
 
 
 def router_code(relative):
-    """Report whether a path under the component belongs to the router code digest."""
     parts = relative.split("/")
     return not (relative.endswith((".md", "_test.go")) or "testdata" in parts or relative == ACCEPTED)
 
@@ -171,7 +169,6 @@ def git(*arguments, data=None):
 
 
 def committed_code():
-    """Return the router code files at the checkout's commit, or None outside Git."""
     tree = git("ls-tree", "-r", "-z", "HEAD", "--", ".")
     if tree is None:
         return None
@@ -193,20 +190,17 @@ def committed_code():
 
 
 def working_code():
-    """Return the router code files in a checkout without Git."""
     root = component_dir()
     return {path.relative_to(root).as_posix(): path.read_bytes() for path in sorted(root.rglob("*"))
             if path.is_file() and router_code(path.relative_to(root).as_posix())}
 
 
 def code_sha256():
-    """Return the router code digest of the checkout's commit, or of its files outside Git."""
     contents = committed_code()
     return payload_digest(working_code() if contents is None else contents)
 
 
 def check_code_committed():
-    """Refuse a build whose router code differs from the checkout's commit."""
     status = git("status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ".")
     prefix = git("rev-parse", "--show-prefix")
     if status is None or prefix is None:
@@ -574,7 +568,6 @@ def service_command(lay, *arguments):
 
 
 def recheck(p, state, state_path):
-    """Run check on an activated router after an update, and connect clients directly when it fails."""
     lay = p.lay
     if p.binary_changed and lay.manager != "foreground":
         service_command(lay, "stop")
@@ -886,7 +879,6 @@ def read_record(path):
 
 
 def run_check(lay, state, settings_path, accepted, record_path, claude, timeout, stop):
-    """Print one line per check; return None when every check passes, else the next step."""
     steps = []
 
     def line(result, text, details=(), next_step=None):
@@ -972,7 +964,6 @@ def points_at_router(state_dir, settings_path):
 
 
 def test_message(lay, claude, timeout, stop):
-    """Send one message through the user's claude -p; return its exit code, seconds, and serving account."""
     session = str(uuid.uuid4())
     events = lay.state / "events.jsonl"
     offset = events.stat().st_size if events.exists() else 0
@@ -1132,7 +1123,6 @@ def run_verify(command, timeout, stop):
 
 
 def routed_requests(events, offset, conversation):
-    """Return the account of each completed 200 request of the conversation after offset."""
     if not events.exists():
         return []
     served = []

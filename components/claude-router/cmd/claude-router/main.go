@@ -67,7 +67,6 @@ type nextError struct {
 
 func (e nextError) Error() string { return e.err.Error() }
 
-// silentExit ends a command whose output already explains the failure.
 type silentExit int
 
 func (e silentExit) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
@@ -216,8 +215,6 @@ func login(args []string) error {
 	return nil
 }
 
-// signIn enrolls an account for setup and account add. Tests replace it,
-// because the real sign-in needs a browser and the provider.
 var signIn = func(state, account string, noBrowser bool) error {
 	_, err := enroll(state, account, noBrowser)
 	return err

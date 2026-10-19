@@ -126,8 +126,6 @@ func start(args []string) error {
 	return nil
 }
 
-// startRouter starts this installation's service, or turns its switch on
-// when the router already answers, and waits up to wait for status.
 func startRouter(in installation, wait time.Duration) error {
 	if _, err := fetchStatus(in); err == nil {
 		return switchOn(in)
@@ -309,8 +307,6 @@ func (in installation) checkHelper(purpose string) error {
 	return nil
 }
 
-// check runs the installed helper's check, which reports each part of the
-// routed setup and sends one test message through claude -p.
 func check(args []string) error {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
 	state := stateFlag(fs)

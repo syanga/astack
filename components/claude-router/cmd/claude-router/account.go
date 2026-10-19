@@ -67,8 +67,6 @@ func account(args []string) error {
 	return removeAccount(in, name, *force, time.Now(), os.Stdout)
 }
 
-// stopForChange stops a running router so that a sign-in or a config change
-// can follow. It reports whether the router ran.
 func stopForChange(in installation, out io.Writer) (bool, error) {
 	if _, err := fetchStatus(in); err != nil && !locked(in.State) {
 		return false, nil
@@ -109,8 +107,6 @@ func signInLines(out io.Writer, name string, noBrowser bool) {
 	}
 }
 
-// waitReady waits until every account has a login and a paid-overflow
-// reading, and returns the accounts whose reading shows paid overflow on.
 func waitReady(in installation, names []string, wait time.Duration) ([]string, error) {
 	var missing []string
 	for deadline := time.Now().Add(wait); ; time.Sleep(250 * time.Millisecond) {
@@ -232,8 +228,6 @@ func removeAccount(in installation, name string, force bool, now time.Time, out 
 	return nil
 }
 
-// recentConversations counts the conversations assigned to account that were
-// assigned, or had a request on it, at or after since.
 func recentConversations(state string, account router.AccountID, since time.Time) (int, error) {
 	bindings, err := router.ReadBindings(filepath.Join(state, "assignments"))
 	if err != nil {

@@ -57,9 +57,6 @@ func activated(state string) (bool, error) {
 	return journal.Phase == "active", nil
 }
 
-// runSetup signs in each new account, adds it to config.json, starts the
-// router, waits for every account to be ready, and activates through the
-// installed helper, which runs check.
 func runSetup(in installation, names []string, noBrowser bool, out io.Writer) error {
 	if on, err := activated(in.State); err != nil {
 		return err
