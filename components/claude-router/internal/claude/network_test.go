@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -30,7 +31,10 @@ const (
 	killTogether
 	stallBody
 	abortThenIgnore
+	hintThenPass
 )
+
+const hintHold = 2 * time.Second
 
 type arrival struct {
 	Conn int
@@ -110,6 +114,9 @@ func (u *netUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case stallBody:
 		<-r.Context().Done()
 		return
+	case hintThenPass:
+		w.WriteHeader(http.StatusEarlyHints)
+		time.Sleep(hintHold)
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -128,7 +135,7 @@ func (u *netUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	u.mu.Unlock()
 	switch act {
-	case pass:
+	case pass, hintThenPass:
 		u.forward(w, r, body)
 	case abortThenIgnore:
 		panic(http.ErrAbortHandler)
@@ -612,6 +619,18 @@ type offsetClock struct{ offset atomic.Int64 }
 
 func (c *offsetClock) now() time.Time { return time.Now().Add(time.Duration(c.offset.Load())) }
 
+func newClockedTransport(up http.RoundTripper, window time.Duration, wall func() time.Time, onNetwork func(callInfo, attempt)) *transport {
+	clk := &wallClock{read: wall, markEvery: time.Minute, expire: func(router.Instant) {}}
+	return newTransport(newUpstream(fixed(up)), nil, 4, window, []router.Account{{ID: "acct-a"}}, clk, nil, nil, onNetwork)
+}
+
+func sendOne(ctx context.Context, tr *transport, spend *budget, body string) error {
+	ctx = withCall(ctx, callInfo{id: "r1-0", account: "acct-a", budget: spend})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.anthropic.com/v1/messages", strings.NewReader(body))
+	_, err := accountTransport{t: tr, account: "acct-a"}.RoundTrip(req)
+	return err
+}
+
 func TestANetworkRetryThatWakesAfterTheRetryTimeIsNotSent(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -624,12 +643,9 @@ func TestANetworkRetryThatWakesAfterTheRetryTimeIsNotSent(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			clk := &offsetClock{}
 			up := &refusingUpstream{started: make(chan int32, 16)}
-			tr := newTransport(newUpstream(fixed(up)), nil, 4, time.Second, []router.Account{{ID: "acct-a"}}, clk.now, nil, nil,
-				func(callInfo, attempt) { clk.offset.Add(int64(tc.pause)) })
-			ctx := withCall(context.Background(), callInfo{id: "r1-0", account: "acct-a", budget: &budget{}})
-			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.anthropic.com/v1/messages", strings.NewReader("{}"))
+			tr := newClockedTransport(up, time.Second, clk.now, func(callInfo, attempt) { clk.offset.Add(int64(tc.pause)) })
 
-			_, err := accountTransport{t: tr, account: "acct-a"}.RoundTrip(req)
+			err := sendOne(context.Background(), tr, &budget{}, "{}")
 
 			if err == nil {
 				t.Fatal("round trip succeeded, want the refused connection's error")
@@ -638,5 +654,175 @@ func TestANetworkRetryThatWakesAfterTheRetryTimeIsNotSent(t *testing.T) {
 				t.Fatalf("upstream saw %d calls, want %d", n, tc.want)
 			}
 		})
+	}
+}
+
+func TestTheNetworkRetryTimeEndsByWhicheverClockPassesItFirst(t *testing.T) {
+	t.Run("a backward step of the wall clock does not extend the retries", func(t *testing.T) {
+		clk := &offsetClock{}
+		up := &refusingUpstream{started: make(chan int32, 64)}
+		var once sync.Once
+		tr := newClockedTransport(up, 3*time.Second, clk.now, func(callInfo, attempt) {
+			once.Do(func() { clk.offset.Add(int64(-time.Hour)) })
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		_ = sendOne(ctx, tr, &budget{}, "{}")
+
+		if n := up.calls.Load(); n != 4 {
+			t.Fatalf("upstream saw %d calls, want 4: tries at 0, 0.25, 0.75, and 1.75 s of a 3 s retry time", n)
+		}
+	})
+	t.Run("a forward jump of the wall clock cancels a stalled retry", func(t *testing.T) {
+		clk := &offsetClock{}
+		up := &refusingUpstream{started: make(chan int32, 16), holdAt: 2}
+		tr := newClockedTransport(up, 20*time.Second, clk.now, nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		go func() {
+			for {
+				select {
+				case n := <-up.started:
+					if n == 2 {
+						time.Sleep(100 * time.Millisecond)
+						clk.offset.Add(int64(time.Hour))
+						return
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+		start := time.Now()
+
+		err := sendOne(ctx, tr, &budget{}, "{}")
+
+		if took := time.Since(start); took > 4*time.Second || ctx.Err() != nil {
+			t.Fatalf("returned after %s (%v), want the stalled retry canceled soon after the wall clock passed the 20 s retry time", took, err)
+		}
+	})
+}
+
+// net/http's HTTP/2 transport can return from a cancel without calling
+// WroteRequest, even after it sent the last byte.
+type readingUpstream struct {
+	whole bool
+	calls atomic.Int32
+}
+
+func (u *readingUpstream) RoundTrip(req *http.Request) (*http.Response, error) {
+	if u.calls.Add(1) == 1 {
+		closeBody(req)
+		return nil, errors.New("dial tcp: connect: connection refused")
+	}
+	if trace := httptrace.ContextClientTrace(req.Context()); trace != nil && trace.GotConn != nil {
+		trace.GotConn(httptrace.GotConnInfo{})
+	}
+	if u.whole {
+		_, _ = io.ReadAll(req.Body)
+	} else {
+		_, _ = io.CopyN(io.Discard, req.Body, 1024)
+	}
+	<-req.Context().Done()
+	return nil, context.Cause(req.Context())
+}
+
+func TestARetryCanceledAtTheNetworkRetryTimeIsChargedOnlyIfItsBodyWasRead(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		whole  bool
+		phase  phase
+		charge int32
+	}{
+		{"part of the body read", false, beforeWrite, 0},
+		{"the whole body read", true, afterWrite, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			up := &readingUpstream{whole: tc.whole}
+			var mu sync.Mutex
+			var phases []phase
+			tr := newClockedTransport(up, time.Second, time.Now, func(_ callInfo, a attempt) {
+				mu.Lock()
+				phases = append(phases, a.Phase)
+				mu.Unlock()
+			})
+			spend := &budget{}
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+
+			err := sendOne(ctx, tr, spend, strings.Repeat("a", 64<<10))
+
+			if err == nil || ctx.Err() != nil {
+				t.Fatalf("got %v with the test context %v, want the retry canceled at the 1 s retry time", err, ctx.Err())
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if want := []phase{beforeWrite, tc.phase}; !reflect.DeepEqual(phases, want) {
+				t.Fatalf("failure phases %v, want %v", phases, want)
+			}
+			if n := spend.spent(); n != tc.charge {
+				t.Fatalf("charged %d attempts, want %d", n, tc.charge)
+			}
+		})
+	}
+}
+
+func TestARoutingLoopRetryWhoseBodyWriteStallsEndsAtTheNetworkRetryTime(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	u := newNetUpstream(t, e.upstream, func(n int) netAction {
+		switch n {
+		case 1:
+			return closeBeforeBody
+		case 2:
+			return closeAfterBody
+		}
+		return stallBody
+	})
+	e.startNet(u, Options{NetRetryFor: time.Second})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	start := time.Now()
+	r := e.sendCtx(ctx, msg{Session: sessionID(1), Body: largeBody(e, sessionID(1))})
+	took := time.Since(start)
+
+	if r.Status != http.StatusServiceUnavailable || r.Header.Get("X-Should-Retry") != "true" {
+		t.Fatalf("got %d with x-should-retry %q (%s), want 503 the client may retry", r.Status, r.Header.Get("X-Should-Retry"), r.ErrMsg)
+	}
+	if took > 5*time.Second {
+		t.Fatalf("answered after %s, want about the 1 s network retry time", took)
+	}
+	want := []string{"network/before_write", "network/after_write", "network/before_write"}
+	if got := e.failures(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("attempt_failed events %v, want %v", got, want)
+	}
+	if attempts := e.requestAttempts(); !reflect.DeepEqual(attempts, []int{1}) {
+		t.Fatalf("request upstream_attempts %v, want [1]", attempts)
+	}
+}
+
+func TestAResponseThatBeginsBeforeTheNetworkRetryTimeEndsIsNotCanceled(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	u := newNetUpstream(t, e.upstream, func(n int) netAction {
+		if n == 1 {
+			return closeBeforeBody
+		}
+		return hintThenPass
+	})
+	e.startNet(u, Options{NetRetryFor: time.Second})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	r := e.sendCtx(ctx, msg{Session: sessionID(1), Body: largeBody(e, sessionID(1))})
+
+	if r.Status != http.StatusOK || r.Text != served("acct-a") {
+		t.Fatalf("got %d %q (%s), want 200 from acct-a: the server answered 103 before the 1 s retry time ended", r.Status, r.Text, r.ErrMsg)
+	}
+	if got := e.failures(); !reflect.DeepEqual(got, []string{"network/before_write"}) {
+		t.Fatalf("attempt_failed events %v, want [network/before_write]", got)
+	}
+	if attempts := e.requestAttempts(); !reflect.DeepEqual(attempts, []int{1}) {
+		t.Fatalf("request upstream_attempts %v, want [1]", attempts)
 	}
 }

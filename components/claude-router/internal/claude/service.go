@@ -186,7 +186,7 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	admit := func(account router.AccountID, model string) router.Reason {
 		return s.router.Admit(s.clock.instant(), account, model)
 	}
-	s.transport = newTransport(newUpstream(open), redirect, cfg.MaxUpstreamAttempts, netRetry, cfg.Accounts, s.now, admit, s.observeHeaders, s.networkFailed)
+	s.transport = newTransport(newUpstream(open), redirect, cfg.MaxUpstreamAttempts, netRetry, cfg.Accounts, s.clock, admit, s.observeHeaders, s.networkFailed)
 	if redirect != nil {
 		s.events.emit(Event{Kind: "test_upstream_in_use", Detail: redirect.Host})
 	}

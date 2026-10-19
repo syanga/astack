@@ -86,10 +86,12 @@ func writeError(c *gin.Context, status int, kind, message string) {
 func answerRetriesSpent(c *gin.Context, last router.Class, message string) {
 	retry := last == router.ClassNetwork
 	if retry {
-		c.Header("Retry-After", "5")
+		c.Header("Retry-After", networkRetryAfterSeconds)
 	}
 	writeErrorRetry(c, http.StatusServiceUnavailable, "api_error", message, retry)
 }
+
+const networkRetryAfterSeconds = "5"
 
 const capMessage = "claude-router: request reached the router's upstream attempt cap"
 

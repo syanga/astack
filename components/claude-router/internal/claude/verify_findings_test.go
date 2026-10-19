@@ -202,7 +202,7 @@ func (c *countingRT) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func TestTransportCapsAttemptsAndRefusesAnotherAccount(t *testing.T) {
 	inner := &countingRT{}
-	tr := newTransport(newUpstream(fixed(inner)), nil, defaultMaxAttempts, netRetryFor, []router.Account{{ID: "acct-a", Capacity: 1}, {ID: "acct-b", Capacity: 1}}, time.Now, nil, nil, nil)
+	tr := newTransport(newUpstream(fixed(inner)), nil, defaultMaxAttempts, netRetryFor, []router.Account{{ID: "acct-a", Capacity: 1}, {ID: "acct-b", Capacity: 1}}, &wallClock{read: time.Now, expire: func(router.Instant) {}}, nil, nil, nil)
 	spend := &budget{}
 	u, _ := url.Parse("https://api.anthropic.com/v1/messages")
 	send := func(account router.AccountID) error {

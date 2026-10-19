@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptrace"
@@ -21,6 +22,10 @@ import (
 const anthropicHost = "api.anthropic.com"
 
 const netRetryFor = 25 * time.Second
+
+// Go's timers run on the monotonic clock, which stops while the machine
+// sleeps, so a timer fires late by the time slept.
+const wallCheckEvery = time.Second
 
 // Without a dial timeout, a connect to a host that drops packets waits for
 // the operating system's TCP connect timeout, 75 s on macOS.
@@ -56,32 +61,57 @@ const (
 
 // net/http can call these hooks after RoundTrip returns.
 type writeTrace struct {
-	mu       sync.Mutex
-	conn     bool
-	wrote    bool
-	failed   bool
-	expired  bool
-	returned bool
+	mu        sync.Mutex
+	conn      bool
+	bodyRead  bool
+	wrote     bool
+	failed    bool
+	responded bool
+	expired   bool
+	returned  bool
 }
 
 var errUnwritten = errors.New("claude-router: the request was not written within the network retry time")
 
-func (w *writeTrace) cancelUnwritten(req *http.Request, d time.Duration) (*http.Request, func()) {
+func (w *writeTrace) cancelUnwritten(req *http.Request, left func() time.Duration) (*http.Request, func()) {
 	ctx, cancel := context.WithCancelCause(req.Context())
-	timer := time.AfterFunc(d, func() {
+	disarmed := make(chan struct{})
+	go func() {
+		for d := left(); d > 0; d = left() {
+			select {
+			case <-disarmed:
+				return
+			case <-time.After(min(d, wallCheckEvery)):
+			}
+		}
 		w.mu.Lock()
 		defer w.mu.Unlock()
-		if !w.wrote && !w.returned {
+		if !w.wrote && !w.responded && !w.returned {
 			w.expired = true
 			cancel(errUnwritten)
 		}
-	})
+	}()
 	return req.WithContext(ctx), func() {
 		w.mu.Lock()
 		w.returned = true
 		w.mu.Unlock()
-		timer.Stop()
+		close(disarmed)
 	}
+}
+
+type tracedBody struct {
+	io.ReadCloser
+	w *writeTrace
+}
+
+func (b tracedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err == io.EOF {
+		b.w.mu.Lock()
+		b.w.bodyRead = true
+		b.w.mu.Unlock()
+	}
+	return n, err
 }
 
 func (w *writeTrace) hooks() *httptrace.ClientTrace {
@@ -100,16 +130,33 @@ func (w *writeTrace) hooks() *httptrace.ClientTrace {
 			}
 			w.mu.Unlock()
 		},
+		GotFirstResponseByte: func() {
+			w.mu.Lock()
+			w.responded = true
+			w.mu.Unlock()
+		},
 	}
 }
 
 // net/http's HTTP/2 transport calls no WroteRequest hook when writing the
 // headers fails, so a connection without a write report counts as written.
-// After a cancel it can return before it calls the hook.
+// After a cancel it can return before it calls the hook, even when it sent
+// the last byte, so a canceled request whose body net/http read to the end
+// counts as written.
 func (w *writeTrace) phase() phase {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if !w.wrote && (!w.conn || w.failed || w.expired) {
+	switch {
+	case w.wrote || w.responded:
+		return afterWrite
+	case !w.conn:
+		return beforeWrite
+	case w.expired:
+		if w.bodyRead {
+			return afterWrite
+		}
+		return beforeWrite
+	case w.failed:
 		return beforeWrite
 	}
 	return afterWrite
@@ -151,12 +198,20 @@ func withCall(ctx context.Context, info callInfo) context.Context {
 	return context.WithValue(ctx, callKey{}, info)
 }
 
+type reading struct{ mono, wall time.Time }
+
+// The monotonic clock ignores steps of the wall clock, and the wall clock
+// counts time the machine slept.
+func (r reading) since(start reading) time.Duration {
+	return max(r.mono.Sub(start.mono), r.wall.Sub(start.wall))
+}
+
 type budget struct {
 	attempts atomic.Int32
 
 	mu       sync.Mutex
 	netFails int
-	netUntil time.Time
+	netStart reading
 }
 
 func (b *budget) charge(limit int32) bool { return b.attempts.Add(1) <= limit }
@@ -165,15 +220,27 @@ func (b *budget) refund() { b.attempts.Add(-1) }
 
 func (b *budget) spent() int32 { return b.attempts.Load() }
 
-func (b *budget) netRetry(now time.Time, window time.Duration) (time.Duration, time.Time, bool) {
+func (b *budget) netRetry(now reading, window time.Duration) (wait time.Duration, retry bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.netFails == 0 {
-		b.netUntil = now.Add(window)
+		b.netStart = now
 	}
 	b.netFails++
-	wait := retryBackoff(b.netFails + 1)
-	return wait, b.netUntil, !now.Add(wait).After(b.netUntil)
+	wait = retryBackoff(b.netFails + 1)
+	return wait, now.since(b.netStart)+wait <= window
+}
+
+func (b *budget) netLeft(now reading, window time.Duration) (left time.Duration, started bool) {
+	if b == nil {
+		return 0, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.netFails == 0 {
+		return 0, false
+	}
+	return window - now.since(b.netStart), true
 }
 
 type upstream struct {
@@ -221,14 +288,14 @@ type transport struct {
 	admit       func(account router.AccountID, model string) router.Reason
 	onHeader    func(account router.AccountID, h http.Header, start, at time.Time)
 	onNetwork   func(info callInfo, a attempt)
-	now         func() time.Time
+	clock       *wallClock
 
 	mu    sync.Mutex
 	calls map[string][]attempt
 }
 
-func newTransport(up *upstream, redirect *url.URL, limit int, netRetryFor time.Duration, accounts []router.Account, now func() time.Time, admit func(router.AccountID, string) router.Reason, onHeader func(router.AccountID, http.Header, time.Time, time.Time), onNetwork func(callInfo, attempt)) *transport {
-	t := &transport{upstream: up, redirect: redirect, limit: int32(limit), netRetryFor: netRetryFor, accounts: map[string]router.AccountID{}, now: now, admit: admit, onHeader: onHeader, onNetwork: onNetwork, calls: map[string][]attempt{}}
+func newTransport(up *upstream, redirect *url.URL, limit int, netRetryFor time.Duration, accounts []router.Account, clock *wallClock, admit func(router.AccountID, string) router.Reason, onHeader func(router.AccountID, http.Header, time.Time, time.Time), onNetwork func(callInfo, attempt)) *transport {
+	t := &transport{upstream: up, redirect: redirect, limit: int32(limit), netRetryFor: netRetryFor, accounts: map[string]router.AccountID{}, clock: clock, admit: admit, onHeader: onHeader, onNetwork: onNetwork, calls: map[string][]attempt{}}
 	for _, a := range accounts {
 		t.accounts[string(a.ID)+".json"] = a.ID
 	}
@@ -273,27 +340,30 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 		return nil, fmt.Errorf("claude-router transport: request for an account that is not enrolled")
 	}
 	info, _ := req.Context().Value(callKey{}).(callInfo)
-	var until time.Time
+	left := func() time.Duration {
+		d, _ := info.budget.netLeft(t.read(), t.netRetryFor)
+		return d
+	}
 	for try := 0; ; try++ {
 		out, trace, err := t.prepare(req, try)
 		if err != nil {
 			return nil, err
 		}
-		a := attempt{Account: account, Path: req.URL.Path, Start: t.now()}
+		a := attempt{Account: account, Path: req.URL.Path, Start: t.clock.now()}
 		if a.Refused = t.refuse(info.id, account, info); a.Refused != nil {
 			closeBody(out)
 			a.End = a.Start
 			t.record(info.id, a)
 			return nil, a.Refused
 		}
-		settle := func() {}
-		if try > 0 {
-			out, settle = trace.cancelUnwritten(out, until.Sub(a.Start))
+		disarm := func() {}
+		if _, started := info.budget.netLeft(t.read(), t.netRetryFor); started {
+			out, disarm = trace.cancelUnwritten(out, left)
 		}
 		rt := t.upstream.get()
 		resp, err := rt.RoundTrip(out)
-		settle()
-		a.End = t.now()
+		disarm()
+		a.End = t.clock.now()
 		if err == nil {
 			a.Status = resp.StatusCode
 			a.Header = resp.Header.Clone()
@@ -315,17 +385,21 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 		retry := false
 		if a.Phase == beforeWrite && info.budget != nil {
 			info.budget.refund()
-			wait, until, retry = info.budget.netRetry(a.End, t.netRetryFor)
+			wait, retry = info.budget.netRetry(t.read(), t.netRetryFor)
 			retry = retry && req.GetBody != nil
 		}
 		t.record(info.id, a)
 		if a.Phase != "" && info.id != "" && t.onNetwork != nil {
 			t.onNetwork(info, a)
 		}
-		if !retry || !sleepCtx(req.Context(), wait) || t.now().After(until) {
+		if !retry || !sleepCtx(req.Context(), wait) || left() < 0 {
 			return nil, err
 		}
 	}
+}
+
+func (t *transport) read() reading {
+	return reading{mono: time.Now(), wall: t.clock.read().Round(0)}
 }
 
 func (t *transport) prepare(req *http.Request, try int) (*http.Request, *writeTrace, error) {
@@ -337,6 +411,20 @@ func (t *transport) prepare(req *http.Request, try int) (*http.Request, *writeTr
 			return nil, nil, err
 		}
 		out.Body = body
+	}
+	if out.Body == nil || out.Body == http.NoBody {
+		trace.bodyRead = true
+	} else {
+		out.Body = tracedBody{out.Body, trace}
+	}
+	if getBody := out.GetBody; getBody != nil {
+		out.GetBody = func() (io.ReadCloser, error) {
+			body, err := getBody()
+			if err != nil || body == http.NoBody {
+				return body, err
+			}
+			return tracedBody{body, trace}, nil
+		}
 	}
 	if t.redirect != nil {
 		out.URL.Scheme, out.URL.Host = t.redirect.Scheme, t.redirect.Host

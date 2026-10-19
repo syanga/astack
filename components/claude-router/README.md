@@ -113,8 +113,10 @@ the switch back on and also leaves that job running.
    `10m`) set how long a paid-overflow reading lasts and how often the service
    reads it. `max_upstream_attempts` (1 to 4, default 4) caps the upstream
    attempts of one client request. With 1 the router never resends a request
-   that may have reached the provider. It still retries a connection that
-   failed before the request was written, for up to 25 s.
+   that may have reached the provider. A request that ends on a network
+   failure gets a 503 that asks the client to retry, so the client may resend
+   it. The router still retries a connection that failed before the request
+   was written, for up to 25 s.
 
 3. Start the service. `start` waits until the service answers:
 
