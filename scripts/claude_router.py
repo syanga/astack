@@ -989,12 +989,17 @@ def activate_locked(args, state_root, home, use_env):
     check_checkout(lay)
     journal = read_journal(lay.state)
     if journal and journal["phase"] != "active":
-        if args.prepare:
-            settings = undo_journal(lay.state, state, manifest_path, check=True)
+        restores = file_sha256(Path(journal["settings"])) == journal["activated_sha256"]
+        settings = undo_journal(lay.state, state, manifest_path, check=args.prepare)
+        if not restores:
+            print("skip    {} (already the original; interrupted activation)".format(shown(settings)))
+        elif args.prepare:
             print("undo    an interrupted activation of {}; activate restores it first".format(shown(settings)))
+        else:
+            print("undo    {} restored after an interrupted activation".format(shown(settings)))
+        if args.prepare:
             print("ready   nothing changed; activate without --prepare")
             return 0
-        print("undo    {} restored after an interrupted activation".format(shown(undo_journal(lay.state, state, manifest_path))))
     owned = sorted(state.get("settings", {}).get(NAME, {}))
     if owned:
         raise Refusal("router activation already owns {}".format(", ".join(shown(Path(name)) for name in owned)),

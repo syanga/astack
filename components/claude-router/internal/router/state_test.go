@@ -239,3 +239,33 @@ func TestAnAccountLeftOutOfTheConfigurationKeepsItsStateUntilItReturns(t *testin
 		t.Fatalf("a new conversation after acct-a returned got %+v, want a wait until acct-a's reset %v", d, reset)
 	}
 }
+
+func TestAnAccountLeftOutWhileChecksExpireReadsItsSettingWhenItReturns(t *testing.T) {
+	model := req("conv").Model
+	for _, tc := range []struct {
+		name   string
+		expire []Instant
+		want   Reason
+	}{
+		{"no backward step", nil, ""},
+		{"during a hold", []Instant{{Stamp: t0.Add(70 * time.Minute), Wall: t0.Add(5 * time.Minute)}}, ReasonOverageUnknown},
+		{"when a hold ends", []Instant{At(t0.Add(5 * time.Minute))}, ReasonOverageUnknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			both := accts(a, 1.0, b, 1.0)
+			h := newDurable(t, both...)
+			h.r.ObserveOverage(b, OverageDisabled, t0)
+			h.accounts = accts(a, 1.0)
+			h.restartDurable(t0.Add(time.Minute))
+			for _, at := range tc.expire {
+				h.r.ExpireOverageChecks(at)
+			}
+			h.accounts = both
+			h.restartDurable(t0.Add(6 * time.Minute))
+
+			if got := h.r.Admit(At(t0.Add(6*time.Minute)), b, model); got != tc.want {
+				t.Fatalf("Admit(acct-b) after it returned: %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

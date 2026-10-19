@@ -179,22 +179,19 @@ func (s *Service) messages(c *gin.Context) {
 			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: assignment journal unavailable; restart the router")
 			return
 		}
+		if d.RecheckOverage && s.recheckOverage(c.Request.Context(), d.Account, rechecked) {
+			continue
+		}
 		account := d.Account
 		switch d.Kind {
 		case router.Place, router.Dispatch, router.Retry:
 		case router.Migrate:
 			s.events.emit(Event{Kind: "migrated", Conversation: conv, Account: d.Account, From: d.From, Reason: string(d.Reason)})
 		case router.Refuse:
-			if d.RecheckOverage && s.recheckOverage(c.Request.Context(), d.Account, rechecked) {
-				continue
-			}
 			finish("request", d.Account, d, http.StatusServiceUnavailable, nil)
 			writeError(c, http.StatusServiceUnavailable, "api_error", s.refuseMessage(d))
 			return
 		case router.Wait:
-			if d.RecheckOverage && s.recheckOverage(c.Request.Context(), d.Account, rechecked) {
-				continue
-			}
 			s.answerWait(c, at.Wall, d.Until, d.ResetKnown, "claude-router: no account can serve this model now")
 			finish("request", "", d, http.StatusTooManyRequests, nil)
 			return

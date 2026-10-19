@@ -326,19 +326,21 @@ func TestConcurrentCallersOfAForwardWallClockNeverExpireChecks(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
+	var first time.Time
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		c.now()
+		first = c.now()
 	}()
 	<-firstEntered
-	c.now()
+	second := c.now()
 	close(secondDone)
 	wg.Wait()
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(expired) != 0 {
-		t.Fatalf("expired checks at %v, want none: the wall clock only moved forward", expired)
+	if !first.Equal(base) || !second.Equal(base.Add(time.Millisecond)) || len(expired) != 0 {
+		t.Fatalf("callers got %v and %v and expired checks at %v; want the wall times %v and %v and no expiry: the wall clock only moved forward",
+			first, second, expired, base, base.Add(time.Millisecond))
 	}
 }

@@ -128,8 +128,6 @@ type Instant struct {
 	Wall time.Time
 }
 
-// Held reports whether Stamp is ahead of Wall, as it is while the service
-// clock stands still after a backward step of the wall clock.
 func (i Instant) Held() bool { return i.Stamp.After(i.Wall) }
 
 // At is the instant of a caller with a single clock.
@@ -201,6 +199,7 @@ const (
 	ReasonOverageEnabled  Reason = "overage_enabled"
 	ReasonPaidUse         Reason = "paid_use_observed"
 	ReasonNoVerified      Reason = "no_included_only_account"
+	ReasonJournalFailed   Reason = "journal_failed"
 )
 
 // Freshness describes the observation behind a placement.

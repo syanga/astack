@@ -953,6 +953,23 @@ class OverlapTests(ActivationFixture):
         self.finish(first, gate)
         self.assert_routed_and_owned()
 
+    def test_uninstall_while_the_lock_is_held_before_any_activation_record_removes_nothing(self):
+        fd = os.open(str(self.state_dir / "activation.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, fd)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        calls = self.router_log.read_text() if self.router_log.exists() else ""
+        files, manifest = self.inventory(), self.manifest()
+
+        results = [self.component(command="uninstall", success=False), self.helper("uninstall")]
+
+        for result in results:
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("astack: another claude-router activate, direct, or uninstall is running; wait for it to finish, then run again\n",
+                          result.stderr)
+        self.assertEqual(self.inventory(), files)
+        self.assertEqual(self.manifest(), manifest)
+        self.assertEqual(self.router_log.read_text() if self.router_log.exists() else "", calls)
+
     def test_direct_runs_under_the_lock_its_caller_holds_and_hands_down(self):
         self.assertEqual(self.run_activate().returncode, 0)
         fd = os.open(str(self.state_dir / "activation.lock"), os.O_RDWR)
@@ -1111,6 +1128,19 @@ class InterruptedActivationTests(ActivationFixture):
         self.assertEqual(self.journal()["phase"], "active")
         self.assertEqual(self.direct().returncode, 0)
         self.assert_direct_and_state_kept()
+
+    def test_the_next_activation_says_it_skips_a_settings_file_the_interruption_left_unchanged(self):
+        self.interrupt("before the settings write")
+        self.assertEqual(self.settings_path.read_bytes(), self.before)
+        skip = "skip    ~/.claude/settings.json (already the original; interrupted activation)\n"
+
+        prepared = self.run_activate("--prepare")
+        result = self.run_activate()
+
+        self.assertEqual((prepared.returncode, prepared.stdout), (0, skip + "ready   nothing changed; activate without --prepare\n"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[0] + "\n", skip)
+        self.assertEqual(self.journal()["phase"], "active")
 
     def test_an_edited_checkout_refuses_before_it_undoes_an_interrupted_activation(self):
         self.interrupt("verification")
