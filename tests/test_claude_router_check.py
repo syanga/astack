@@ -4,7 +4,7 @@ import signal
 import subprocess
 import sys
 
-from test_claude_router_activate import HELPER_WITH_MANAGED_SETTINGS, ActivationFixture, timed
+from test_claude_router_activate import HELPER_WITH_MANAGED_SETTINGS, SLEEPY_CLAUDE, ActivationFixture, timed
 
 GOLDEN = "components/claude-router/cmd/claude-router/testdata/check/"
 
@@ -116,11 +116,6 @@ class SetupActivationTests(CheckFixture):
                                                                                "activated Claude Code routes through the router\n"))
         self.assertEqual(self.base_url(), self.listen)
 
-
-SLEEPY_CLAUDE = r'''#!/bin/sh
-echo $$ > "$SLEEPY_PIDFILE"
-exec sleep 30
-'''
 
 
 class CheckEdgeTests(CheckFixture):

@@ -73,6 +73,11 @@ if [ "$1" = --user ] && [ -n "$FAKE_LAUNCHER_HAS" ]; then echo "$FAKE_LAUNCHER_H
 exit 0
 '''
 
+SLEEPY_CLAUDE = r'''#!/bin/sh
+echo $$ > "$SLEEPY_PIDFILE"
+exec sleep 30
+'''
+
 HELPER_WITH_MANAGED_SETTINGS = r'''
 import os, sys
 from pathlib import Path
@@ -1438,3 +1443,19 @@ class UpdateOverActivationTests(ActivationFixture):
                                       "Preview complete for claude-router."])
         self.assertEqual(result.stdout.splitlines()[:len(lines) - 1], lines[:-1])
         self.assertIn("check     passed\n", result.stdout)
+
+    def test_a_signal_during_the_update_check_ends_the_test_message_and_connects_clients_directly(self):
+        self.prepare_update()
+        self.claude.write_text(SLEEPY_CLAUDE)
+        pidfile = self.root / "update-check.pid"
+        process = subprocess.Popen([str(self.repo / "install.sh"), "--home", str(self.home), "--component", "claude-router"],
+                                   cwd=str(self.root), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                   env=dict(self.env, FAKE_BUILD="2", SLEEPY_PIDFILE=str(pidfile)))
+        pid = self.wait_for_pid(pidfile)
+        process.send_signal(signal.SIGTERM)
+        _, stderr = process.communicate(timeout=60)
+
+        self.assertEqual(process.returncode, 1, stderr)
+        self.assertTrue(stderr.endswith("astack: the update was interrupted; Claude Code connects directly\n"), stderr)
+        self.assertTrue(self.gone(pid), "the test message client {} still runs".format(pid))
+        self.assert_direct_and_state_kept()
