@@ -439,7 +439,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | RP-15 | The passive quota snapshot describes the failed call | failed | `TestQuotaSnapshotOutlivesAHeaderlessFailure`. Contract: classify from per-attempt headers. | Closed by PR3: `classify` reads only the call's own attempt headers at the router's transport. `TestHeaderlessThrottleAfterExhaustionRetries` classifies a headerless 429 after an exhaustion as throttle and retries on the same account |
 | RP-16 | Credential rotation or an account-set change while requests are in flight is free of SDK races | passed | Same reconciliation path as the startup race. PR3 removes that path while serving: without a file watcher, a credential or account change applies only by restart, which turns it into RP-20. `TestStartWithEnrolledAccountsUnderLoad` rotates a credential across restarts under concurrent load under `-race` (`evidence/PR3/rp20-e01433b/`). The SDK's own token refresh, which writes the auth while serving, ran live in lane 1 rerun at `9b7e059` under a `-race` build: the SDK refreshed both accounts at start, both were served, and the build reported 0 data races (`evidence/PR3/lane-1-rerun/race-count.txt`). The verifier's live-equivalence ruling for `c95ae72` and the guard's pass-through of SDK refreshes carry this to the current head. | PR3 |
 | RP-17 | The router's transport observes every upstream attempt and ties it to its call, with no proxy in effect | passed | `Upstream.AttemptsFor` assertions in `TestPinnedRetriesStayOnSelectedAccount`, `TestNonStreamingPinnedRetriesStayOnSelectedAccount`, `TestPinnedExecutorPostureMakesOneAttemptPerCall`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover`, `TestFailureSignalsClassifyDistinctly`. Streaming and non-streaming paths; the refresh redispatch path is RP-5b. | PR1 |
-| RP-18 | A router-supplied transport in place of the SDK's uTLS transport is accepted upstream | blocked | Needs the user's attended login for a live request. The PR4 live session does not settle it: its router reached the provider through the upstream gate, which opened its own TLS connection (`test_upstream`, `reports/PR4-live/upgate.py`). | PR3 attended live lane (`reports/PR3-live-runbook.md`): serves requests through the router transport without upstream rejection |
+| RP-18 | A router-supplied transport in place of the SDK's uTLS transport is accepted upstream | blocked | Needs the user's attended login for a live request. The PR4 live session does not settle it: its router reached the provider through the upstream gate, which opened its own TLS connection (`test_upstream`). | PR3 attended live lane (`reports/PR3-live-runbook.md`): serves requests through the router transport without upstream rejection |
 | RP-19 | The SDK's request-scoped failures classify separately and are not retried | passed | `TestRequestScopedRefusalIsReportedWithoutRetry` sends `"speed":"fast"` through the SDK executor. The upstream refuses with the fast-mode credits 429, the SDK returns a request-scoped error, and the router classifies it `request_scoped`, answers once with `x-should-retry: false`, and keeps the account usable. `TestRequestScopedErrorAfterASuccessfulAttemptIsNotSentAgain`: after an upstream 200, a request-scoped SDK error is answered once, with one upstream attempt. | PR3 |
 | RP-20 | Service startup with enrolled accounts is free of SDK data races | failed | `evidence/PR1/sdk/startup-race-before-mitigation.log`, `evidence/PR1/unit-6166c8c/go.log`. The racing accesses are SDK-internal, so a router barrier cannot serialize them. PR3 mitigation: no file watcher, so the SDK's auth-update consumer runs but nothing feeds it, and the client listener opens only after every account is registered and SDK account state has been quiet for 250 ms. `TestStartWithEnrolledAccountsUnderLoad` passed 50 of 50 starts under `-race`, each followed at once by 16 requests from 4 concurrent clients, with a credential rotated before each restart and no race reported (`evidence/PR3/rp20-e01433b/`; earlier runs `rp20-923bed9/` and `rp20-845ae3f/`). Each start in that test also checks that the refresh guard is still the SDK's Claude executor after the load. Residual: the SDK's token auto-refresh starts before startup model registration, so an access token that expired while the service was down can race it. The quiet period is a heuristic. | Upstream SDK fix, then the same probe passes repeatedly |
 
@@ -472,7 +472,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | WC-3 | Short reset resumes automatically | passed | passed | `waiting.json#rows[3]` | PR1 |
 | WC-4 | Unknown reset has explicit behavior | passed | passed | `waiting.json#rows[5]` | PR1 |
 | WC-5 | Client cancellation ends the turn and closes the upstream connection | passed | passed | `recovery.json#rows[14]`, `#rows[15]` | PR1 |
-| WC-6 | A multi-hour wait completes | passed | passed | `waiting.json#rows[6]` left it blocked for want of a wait through laptop sleep and wake. Live through the PR4 router with real accounts, Claude Code 2.1.300, and Agent SDK 0.3.300 (step W6, `evidence/PR4/live-2-cc2.1.300/W6/`, `RESULTS.md`): a local gate injected the exhaustion of both accounts with a 3 h reset. Both waiters got the router's local 429 and counted down in 30 s steps from 10,799 s (terminal) and 10,798 s (Agent SDK) to 29 s. The router restarted 64 s after the first local 429. The Mac slept 2,699 s in total, in two sleeps that brief wakes split into four parts (594, 947, 594, and 564 s; `W6/sleepwatch.jsonl`). No real request went out before the first resend, which came after 3 h of awake time and 2,660 s after the reset's wall time. Each resend got one real attempt and completed. The PR4 fake session ran W6 with a 150 s reset and no sleep. | PR4 live session, step W6 of `reports/PR4-live-runbook.md` |
+| WC-6 | A multi-hour wait completes | passed | passed | `waiting.json#rows[6]` left it blocked for want of a wait through laptop sleep and wake. Live through the PR4 router with real accounts, Claude Code 2.1.300, and Agent SDK 0.3.300 (step W6, `evidence/PR4/live-2-cc2.1.300/W6/`, `RESULTS.md`): a local gate injected the exhaustion of both accounts with a 3 h reset. Both waiters got the router's local 429 and counted down in 30 s steps from 10,799 s (terminal) and 10,798 s (Agent SDK) to 29 s. The router restarted 64 s after the first local 429. The Mac slept 2,699 s in total, in two sleeps that brief wakes split into four parts (594, 947, 594, and 564 s; `W6/sleepwatch.jsonl`). No real request went out before the first resend, which came after 3 h of awake time and 2,660 s after the reset's wall time. Each resend got one real attempt and completed. The PR4 fake session ran W6 with a 150 s reset and no sleep. | PR4 live session, step W6 |
 
 | ID | SDK behavior | Status | Evidence | Owner |
 | --- | --- | --- | --- | --- |
@@ -867,7 +867,7 @@ refresh redispatch (RP-5b).
 | --- | --- |
 | `place`, `dispatch`, `retry`, and `migrate` | Dispatch on the bound account. `Route` has committed a migration before it returns. When the request has already used its attempt cap, a `migrate` is answered with a local 429 whose reset is 1 s away, and the client's resend goes to the destination (PR4). |
 | `wait` | Local 429 `rate_limit_error` with `anthropic-ratelimit-unified-status: rejected`, `anthropic-ratelimit-unified-reset`, and `retry-after` for the same delay. An unknown reset omits the reset header and sends `retry-after: 300`. |
-| `refuse` or `wait` with `RecheckOverage` | Read the setting of the decision's account or, when it names none, of every account, skipping each account already read for this request, then decide again (`TestWaitRechecksAStaleAccountThatCouldServe`) |
+| `refuse` or `wait` with `RecheckOverage` | Read the setting of the decision's account or, when it names none, of every account, skipping each account already read for this request, then decide again (`TestWaitRereadsAnAccountWhoseSettingsReadFailed`) |
 | `refuse` | 503 `api_error`, `x-should-retry: false`, naming the account and the reason |
 | `reauth`, `unavailable` | 503 `api_error`, `x-should-retry: false`, naming `claude-router login`. An upstream 401 never reaches the client as 401. |
 | `fail` | 503 `api_error`, `x-should-retry: false` |
@@ -941,7 +941,8 @@ table above gives for that decision. For each reason `Admit` returns:
   503 that names `claude-router login`.
 - `overage_unknown` or `overage_stale`: one read of the setting, then
   another decision. The request dispatches if the read returns `disabled`
-  and otherwise answers 503. A request reads the setting at most once.
+  and otherwise answers 503. A request reads each account's setting at most
+  once.
 - `overage_enabled`: a 503 that names the account and paid overflow.
 - `journal_failed`: the 503 for a journal error, because the next decision
   fails on the journal too.
@@ -1333,14 +1334,14 @@ records `test_upstream_in_use` at start.
 
 PR4 replaces PR3's local 429 for an exhausted conversation with migration,
 keeps account state across restarts, and adds the manual override. The
-policy is PR2's. Two policy changes are listed under "Waiting".
+policy is PR2's, except for the stale-check rule in "Waiting".
 
 ### Wall time across sleep
 
 Go's monotonic clock stops while macOS sleeps (and during Linux suspend), and
-`time.Time` comparisons use it when both times carry it. Before PR4's fix, a
-`disabled` reading taken 5 minutes before a 2-hour sleep still counted as 5
-minutes old after the wake, so the router could dispatch on a reading that
+`time.Time` comparisons use it when both times carry it. On that clock, a
+`disabled` reading taken 5 minutes before a 2-hour sleep would still count as
+5 minutes old after the wake, so the router could dispatch on a reading that
 was stale by wall time.
 
 - **The service clock is wall time.** The service strips the monotonic
@@ -1407,7 +1408,7 @@ was stale by wall time.
   clock. It keeps an earlier one, which then counts as younger than it is by
   up to the step. The start reads every account, and a successful read
   replaces the saved check. The error remains only for an account whose
-  start read fails.
+  start read fails. This gap is open, and the user has not accepted it.
 - **Overdue reads come first.** The scheduler's timers also run on the
   monotonic clock, so after a wake the next scheduled settings read can be
   up to `overage_check_every` of awake time away. The scheduler records the
@@ -1500,25 +1501,24 @@ waits in the router only for settings reads (overdue reads and rereads) and
 for the backoff between upstream attempts. A client that goes away ends
 the request, and a settings read it cancels counts as a failed read.
 
-Two things changed after PR2:
+An account blocked until a reset counts toward the wait when its
+paid-overflow check is unknown or stale. One with paid overflow enabled or
+paid use does not. Without this rule, when every account is blocked and its
+check has aged past `overage_fresh_for`, the router would refuse with
+`no_included_only_account` (503, `x-should-retry: false`) and end the
+client's wait. The check is read again before the account serves: at the
+reset, the stale check refuses dispatch until a reread says `disabled`
+(`TestAWaitThatOutlivesTheCheckReadsItAgainAtTheResetBeforeDispatch`). A
+confirmed exhaustion with stale checks on both accounts waits for the
+source's reset and asks for a reread, and the conversation migrates once the
+destination's check is fresh
+(`TestConfirmedExhaustionMigratesDespiteAStaleSourceCheck`).
 
-- **Stale checks during a wait (PR4).** PR2's placement left an account whose
-  paid-overflow check was unknown or stale out of the reset computation.
-  When every account was blocked and its check had aged past
-  `overage_fresh_for`, the router refused with `no_included_only_account`
-  (503, `x-should-retry: false`), which ends the client's wait. An account
-  blocked until a reset now counts toward the wait when its check is
-  unknown or stale. One with paid overflow enabled or paid use still does
-  not. The check is read again before the account serves: at the reset, the
-  stale check refuses dispatch until a reread says `disabled`
-  (`TestAWaitThatOutlivesTheCheckReadsItAgainAtTheResetBeforeDispatch`;
-  `TestConfirmedExhaustionMigratesDespiteAStaleSourceCheck` was updated to
-  expect the wait).
-- **Rereads before a wait (PR3).** PR2 sets `RecheckOverage` on a `wait`
-  when an unblocked account is held back only by an unknown or stale check.
-  The service reads those settings, once per account per request, and
-  decides again before it answers (`TestWaitRechecksAStaleAccountThatCouldServe`,
-  `TestAWaitRereadsAStaleAccountThatCouldServeBeforeTheReset`).
+When an unblocked account is held back only by an unknown or stale check,
+`Decide` sets `RecheckOverage` on the `wait`. The service reads those
+settings, once per account per request, and decides again before it
+answers (`TestWaitRereadsAnAccountWhoseSettingsReadFailed`,
+`TestAWaitRereadsAStaleAccountThatCouldServeBeforeTheReset`).
 
 An unknown reset is answered without a reset header and with
 `retry-after: 300`; the account is tried again `UnknownResetRecheck` after
@@ -1621,4 +1621,4 @@ builds its router with `New`, so its restarts forget account state.
 | PR4.unit | Go tests above, under `-race` | `evidence/PR4/unit-<sha>/` |
 | PR4.perf | 5 parent and 5 head runs, interleaved, 16 waiting conversations, 5 s reset. Head: 0 attempts on a known exhausted account before its reset, p95 resumption 18 ms after the reset, 0 healthy migrations, every conversation done within 10 s. With one of two accounts exhausted, the head finished in under 81 ms by migrating; the parent waited for the reset. | `evidence/PR4/perf/perf.json`, `baseline.json` |
 | Lane 2 (PR4.live.2 with a controlled upstream) | 10 scenarios, each with terminal Claude 2.1.285 and the Agent SDK driver, sandboxed; rerun with Claude Code 2.1.300 and Agent SDK 0.3.300, all passed | `evidence/PR4/lane-2/recovery.json`, `evidence/PR4/lane-2-cc2.1.300/recovery.json` |
-| PR4.live.1, the attended part of PR4.live.2, WC-1, WC-6 | Passed with real accounts `work` and `alumni`, Claude Code 2.1.300, and Agent SDK 0.3.300: 10 real attempts, at most 2 per step. A local gate injected every exhaustion. The parent (PR3) answered the injected exhaustion with its local 429 and kept the conversation (M2). The head moved the terminal conversation (M3) and the Agent SDK conversation (M6) to the other account within the request, on the same model. The moved terminal reply named the sentinel word that only the earlier tool result held, and no tool ran again. The conversation stayed on the destination after the source's reset (M4). W1 and W6 are rows WC-1 and WC-6. Races 0. | `evidence/PR4/live-2-cc2.1.300/RESULTS.md` and its step folders; `reports/PR4-live-runbook.md` in the execution store |
+| PR4.live.1, the attended part of PR4.live.2, WC-1, WC-6 | Passed with real accounts `work` and `alumni`, Claude Code 2.1.300, and Agent SDK 0.3.300: 10 real attempts, at most 2 per step. A local gate injected every exhaustion. The parent (PR3) answered the injected exhaustion with its local 429 and kept the conversation (M2). The head moved the terminal conversation (M3) and the Agent SDK conversation (M6) to the other account within the request, on the same model. The moved terminal reply named the sentinel word that only the earlier tool result held, and no tool ran again. The conversation stayed on the destination after the source's reset (M4). W1 and W6 are rows WC-1 and WC-6. Races 0. | `evidence/PR4/live-2-cc2.1.300/RESULTS.md` and its step folders |
