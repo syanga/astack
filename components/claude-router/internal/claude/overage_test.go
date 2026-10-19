@@ -89,7 +89,7 @@ func TestStaleReadingIsRecheckedBeforeDispatch(t *testing.T) {
 	}
 }
 
-func TestWaitRechecksAStaleAccountThatCouldServe(t *testing.T) {
+func TestWaitRereadsAnAccountWhoseSettingsReadFailed(t *testing.T) {
 	e := newEnv(t, "acct-a", "acct-b")
 	t0 := time.Now()
 	e.clock.set(t0)
@@ -110,7 +110,7 @@ func TestWaitRechecksAStaleAccountThatCouldServe(t *testing.T) {
 		t.Fatalf("request on the exhausted account got %d, want the local 429", blocked.Status)
 	}
 	if r.Status != 200 || r.Text != served("acct-b") {
-		t.Fatalf("new conversation got %d %q, want 200 from acct-b after rechecking its stale reading", r.Status, r.Text)
+		t.Fatalf("new conversation got %d %q, want 200 from acct-b after rereading its setting", r.Status, r.Text)
 	}
 }
 
