@@ -60,7 +60,7 @@ func reportError(w io.Writer, command string, err error) {
 	if command == "setup" || command == "account" || command == "check" {
 		width = 10
 	}
-	fmt.Fprintf(w, "claude-router: %s: %v\n", command, n.err)
+	fmt.Fprintf(w, "claude-router: %s: %v\n", command, err)
 	if n.detail != "" {
 		fmt.Fprintf(w, "%*s%s\n", width, "", n.detail)
 	}

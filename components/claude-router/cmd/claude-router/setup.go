@@ -94,7 +94,9 @@ func runSetup(in installation, names []string, noBrowser bool, out io.Writer) er
 		for _, name := range added {
 			signInLines(out, name, noBrowser)
 			if err := signInNew(in, name, noBrowser); err != nil {
-				if aerr := addToConfig(in, signed, out); aerr != nil {
+				if published, aerr := addToConfig(in, signed, out); published && aerr != nil {
+					err = fmt.Errorf("%w; added %s to config.json: %v", err, joined(signed), aerr)
+				} else if aerr != nil {
 					err = fmt.Errorf("%w; adding %s to config.json also failed: %v", err, joined(signed), aerr)
 				}
 				return restoreRunning(in, ran, out, err)
@@ -102,7 +104,7 @@ func runSetup(in installation, names []string, noBrowser bool, out io.Writer) er
 			line(out, "login", name+" signed in")
 			signed = append(signed, name)
 		}
-		if err := addToConfig(in, signed, out); err != nil {
+		if _, err := addToConfig(in, signed, out); err != nil {
 			return restoreRunning(in, ran, out, err)
 		}
 	}
@@ -146,23 +148,23 @@ func runSetup(in installation, names []string, noBrowser bool, out io.Writer) er
 	return nil
 }
 
-func addToConfig(in installation, names []string, out io.Writer) error {
+func addToConfig(in installation, names []string, out io.Writer) (published bool, err error) {
 	if len(names) == 0 {
-		return nil
+		return false, nil
 	}
-	published, err := editConfig(in.Config, func(c *claude.Config) error {
+	published, err = editConfig(in.Config, func(c *claude.Config) error {
 		for _, name := range names {
 			c.Accounts = append(c.Accounts, router.Account{ID: router.AccountID(name), Capacity: 1})
 		}
 		return nil
 	})
 	if !published {
-		return dropCredentials(in.State, names, err)
+		return false, dropCredentials(in.State, names, err)
 	}
 	each := ", capacity 1"
 	if len(names) > 1 {
 		each += " each"
 	}
 	line(out, "config", "added "+joined(names)+each)
-	return err
+	return true, err
 }

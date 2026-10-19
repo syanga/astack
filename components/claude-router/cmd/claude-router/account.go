@@ -195,7 +195,7 @@ func addAccount(in installation, name string, noBrowser bool, out io.Writer) err
 		return restoreRunning(in, ran, out, err)
 	}
 	line(out, "login", name+" signed in")
-	if err := addToConfig(in, []string{name}, out); err != nil {
+	if _, err := addToConfig(in, []string{name}, out); err != nil {
 		return restoreRunning(in, ran, out, err)
 	}
 	if !ran {

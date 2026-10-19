@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -664,5 +665,37 @@ func TestAccountRemoveThatCannotDeleteTheLoginOrAddTheAccountBackNamesTheLogin(t
 	}
 	if _, err := os.Stat(login); err != nil {
 		t.Fatalf("the login is gone: %v", err)
+	}
+}
+
+func TestAnAccountRemoveReportsARestartThatFailsAfterThePutBackFailed(t *testing.T) {
+	l := newLane(t, "launchd", "work", "school")
+	l.start()
+	auths := filepath.Join(l.in.State, "auths")
+	if err := os.Chmod(auths, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(auths, 0o700) })
+	saved, edits := editConfig, 0
+	editConfig = func(path string, edit func(*claude.Config) error) (bool, error) {
+		if edits++; edits > 1 {
+			return false, errors.New("disk full")
+		}
+		return saved(path, edit)
+	}
+	t.Cleanup(func() { editConfig = saved })
+	t.Setenv("FAKE_FAIL", "bootstrap")
+
+	var err error
+	stdoutOf(t, func() { err = removeAccount(l.in, "school", true, time.Now(), os.Stdout) })
+	var out bytes.Buffer
+	reportError(&out, "account", err)
+
+	login := filepath.Join(auths, "school.json")
+	head := "claude-router: account: remove " + login + ": permission denied; adding school back to config.json also failed: disk full; " +
+		"starting the router again also failed: "
+	tail := "\nnext      delete " + login + ", then claude-router start\n"
+	if got := out.String(); !strings.HasPrefix(got, head) || !strings.HasSuffix(got, tail) {
+		t.Fatalf("account remove reported\n%s\nwant it to start with\n%s\nand end with%s", got, head, tail)
 	}
 }

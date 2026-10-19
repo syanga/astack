@@ -284,3 +284,18 @@ func TestSetupAndCheckPassTerminationSignalsToTheHelper(t *testing.T) {
 		}
 	}
 }
+
+func TestSetupSaysWhichAccountsItAddedWhenTheirConfigDirectoryFailsToSyncAfterAFailedSignIn(t *testing.T) {
+	l := setupLane(t)
+	l.refuse["alumni"] = true
+	l.stateWritableButUnreadable()
+
+	var err error
+	stdoutOf(t, func() { err = runSetup(l.in, []string{"work", "alumni"}, false, os.Stdout) })
+
+	want := "the sign-in was cancelled; added work to config.json: " + l.in.Config +
+		" is written, but its directory did not sync: open " + l.in.State + ": permission denied"
+	if err == nil || err.Error() != want {
+		t.Fatalf("setup: %v\nwant %s", err, want)
+	}
+}
