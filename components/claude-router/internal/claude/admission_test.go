@@ -28,6 +28,17 @@ func (e *env) writeRefreshableCredential(account string) {
 	e.upstream.bind(token, account)
 }
 
+func (e *env) refusedAttempts() []string {
+	e.t.Helper()
+	var out []string
+	for _, ev := range e.events() {
+		if ev.Kind == "attempt_refused" {
+			out = append(out, string(ev.Account)+" "+ev.Reason)
+		}
+	}
+	return out
+}
+
 func TestRefreshRedispatchIsRefusedAfterABlockingObservation(t *testing.T) {
 	paid := map[string]string{
 		"anthropic-ratelimit-unified-representative-claim": "overage",
@@ -40,9 +51,10 @@ func TestRefreshRedispatchIsRefusedAfterABlockingObservation(t *testing.T) {
 		wantStatus int
 		wantType   string
 		wantMsg    string
+		wantLogged string
 	}{
-		{"paid use", reply{Header: paid}, http.StatusServiceUnavailable, "api_error", "account acct-a reported paid use"},
-		{"exhaustion", reply{Status: http.StatusTooManyRequests, Header: exhaustedHeaders(time.Now().Add(2 * time.Hour))}, http.StatusTooManyRequests, "rate_limit_error", "no account can serve this model now"},
+		{"paid use", reply{Header: paid}, http.StatusServiceUnavailable, "api_error", "account acct-a reported paid use", "acct-a paid_use_observed"},
+		{"exhaustion", reply{Status: http.StatusTooManyRequests, Header: exhaustedHeaders(time.Now().Add(2 * time.Hour))}, http.StatusTooManyRequests, "rate_limit_error", "no account can serve this model now", "acct-a exhausted"},
 	}
 	for _, c := range cases {
 		for _, nonStream := range []bool{false, true} {
@@ -79,6 +91,9 @@ func TestRefreshRedispatchIsRefusedAfterABlockingObservation(t *testing.T) {
 				if r.Status != c.wantStatus || r.ErrType != c.wantType || !strings.Contains(r.ErrMsg, c.wantMsg) {
 					t.Fatalf("refused redispatch answered %d %s %q, want %d %s containing %q", r.Status, r.ErrType, r.ErrMsg, c.wantStatus, c.wantType, c.wantMsg)
 				}
+				if got := e.refusedAttempts(); len(got) != 1 || got[0] != c.wantLogged {
+					t.Fatalf("attempt_refused events %q, want one %q", got, c.wantLogged)
+				}
 			})
 		}
 	}
@@ -109,6 +124,9 @@ func TestRefusedRedispatchMovesTheConversationAfterPaidUse(t *testing.T) {
 	}
 	if b := e.binding(sessionID(1)); b.Account != "acct-b" || b.Reason != router.ReasonOverageObserved {
 		t.Fatalf("binding %+v, want acct-b for overage_observed", b)
+	}
+	if got := e.refusedAttempts(); len(got) != 1 || got[0] != "acct-a paid_use_observed" {
+		t.Fatalf("attempt_refused events %q, want one %q", got, "acct-a paid_use_observed")
 	}
 	want := []string{"acct-a", "acct-a", "acct-b"}
 	if got := e.upstream.accountsServed(); strings.Join(got, ",") != strings.Join(want, ",") {

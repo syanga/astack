@@ -404,7 +404,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | RP-3 | Bootstrap 401 and 403 do not fail over to another account | passed | `TestBootstrapAuthErrorsDoNotFailOver` | PR1 |
 | RP-4 | A pin to an unknown or cooling-down auth fails with 503 and selects no account | passed | `TestPinToUnknownAuthSelectsNothing`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover` | PR1 |
 | RP-5 | Single-attempt posture makes one upstream attempt per call, for credentials without a refresh token | passed | `TestPinnedExecutorPostureMakesOneAttemptPerCall` | PR1 |
-| RP-5b | Single-attempt posture for credentials with a refresh token | blocked | A 401 triggers refresh and a same-auth redispatch (`conductor_stream.go:253-263`). The refresh dials `platform.claude.com`, so no offline probe can serve it. The PR3 service also reads the paid-overflow setting with the account's credential before dispatch. A forced invalid token fails that read with 401; the service then refreshes the credential once and reads again, so the inference that follows runs on the refreshed token and does not take the redispatch path. The path runs only when a token expires between the reading and a request. | Live observation when a token expires in service (PR4 or PR5 lanes), or an SDK seam for the refresh client |
+| RP-5b | Single-attempt posture for credentials with a refresh token | blocked | A 401 triggers refresh and a same-auth redispatch (`conductor_stream.go:253-263`). Offline tests drive that path through the SDK's own refresh, with only the token exchange replaced: a 401 makes the SDK refresh and resend on the same account, and the router's transport refuses the resend after a blocking observation, on the streaming and non-streaming paths (`TestRefreshRedispatchIsRefusedAfterABlockingObservation`, `TestRefusedRedispatchMovesTheConversationAfterPaidUse`). No offline test lets the resend reach the upstream. The PR3 service also reads the paid-overflow setting with the account's credential before dispatch. A forced invalid token fails that read with 401; the service then refreshes the credential once and reads again, so the inference that follows runs on the refreshed token and does not take the redispatch path. The path runs only when a token expires between the reading and a request. | Live observation when a token expires in service (PR4 or PR5 lanes), or an offline test that lets the resend reach the upstream |
 | RP-6 | A rotated credential reloaded from the auth directory keeps its account and auth ID, after a quiet period | passed | `TestRotatedCredentialKeepsAccount` | PR1 |
 | RP-7 | SDK-initiated OAuth refresh keeps the account | passed | Live lane 1 rerun at `9b7e059` under `-race` (`evidence/PR3/lane-1-rerun/`): both accounts were due at start, the SDK refreshed them, the start reads logged `credential_refresh` `expiring` `sdk_refreshed` and read the setting, `refresh_sha256_12` and `last_refresh` changed for `work` (`rp7-before.json`, `rp7-after.json`), and step R8 served both accounts on their pinned conversations. The verifier ruled that `c95ae72` runs the same branches on that path (`reports/PR3-verify/c95ae72/receipt.md`, "Live equivalence"). The refresh guard adds no branch to it: a credential with a refresh pending at start is waited for, and the SDK's refresh passes the guard. Offline, a refresh through the SDK's own refresh path, with only the token exchange replaced, keeps the account (`TestReadOfADueCredentialWaitsForTheSDKRefresh`, `TestUnauthorizedSettingsReadRefreshesOnceAndReadsAgain`), and so does a credential renewed by restart (`TestRotatedCredentialAppliesAtRestartOnTheSameAccount`, lane 2 `renewal_keeps_account`). | PR3 |
 | RP-8 | Configuration applied at startup does not change pinned selection | passed | `TestConfigApplyKeepsPinnedSelection`, six configurations | PR1 |
@@ -872,18 +872,39 @@ the call, all on the pinned account, and otherwise answers 502.
 never retries, so upstream attempts equal client requests; the live lane
 uses this (`TestASingleAttemptCapNeverRetries`).
 
-The transport also refuses any attempt, the SDK's refresh redispatch
-included, on an account the router would not dispatch to at that moment
-(`Router.Admit`): the account needs a login, showed paid use, has a rejection
-that applies to the model, or has no `disabled` check within
-`OverageFreshFor`. `Admit` reads under the lock that records observations.
-An attempt that reaches the transport after a blocking observation is
-recorded is refused, and one admitted before it is in flight. After the
-refusal the service logs `attempt_refused`, reports no failure to the router,
-and decides again, so the client gets the answer from the table above: a
-migration, the local 429, or the 503 that names paid use
-(`TestRefreshRedispatchIsRefusedAfterABlockingObservation`,
-`TestRefusedRedispatchMovesTheConversationAfterPaidUse`).
+The transport also refuses an inference attempt, the SDK's refresh
+redispatch included, when the router would not dispatch to its account at
+that moment (`Router.Admit`). That is the case when the account needs a
+login, showed paid use, has a rejection that applies to the model, or has no
+`disabled` check within `OverageFreshFor`. The transport does not check
+settings reads. `Admit` takes the lock under which the router records
+observations, so each check falls wholly before or wholly after each
+observation. The transport refuses an attempt whose check comes after a
+blocking observation. An attempt whose check came first is sent, even if the
+observation is recorded while it is in flight. A refused attempt reaches no
+upstream and does not count toward the cap.
+
+After a refusal the service logs `attempt_refused` with the reason, reports
+no failure to the router, and decides again. The client gets the answer the
+table above gives for that decision. For each reason `Admit` returns:
+
+- `paid_use_observed`: a migration for `overage_observed` when another
+  account is eligible, a local 429 until the earliest usable reset elsewhere,
+  or a 503 that names paid use.
+- `exhausted`, which also covers a model-limit rejection: the local 429, or
+  a 503 when the paid-overflow state bars every logged-in account.
+- `needs_login`: a migration for `never_served_relogin` when the
+  conversation was never served and another account is eligible, otherwise a
+  503 that names `claude-router login`.
+- `overage_unknown` or `overage_stale`: one read of the setting, then
+  another decision. The request dispatches if the read returns `disabled`
+  and otherwise answers 503. A request reads the setting at most once.
+- `overage_enabled`: a 503 that names the account and paid overflow.
+
+`TestRefreshRedispatchIsRefusedAfterABlockingObservation` covers paid use
+and exhaustion on the streaming and non-streaming paths, and
+`TestRefusedRedispatchMovesTheConversationAfterPaidUse` covers the
+migration.
 
 The cap is per client HTTP request. Every router-made HTTP failure answer
 carries `x-should-retry: false`, which a client honors. Two answers do not
@@ -1224,11 +1245,13 @@ tested offline. PR1 lane 4 (CC-1) measures cache reads with real requests.
 ### Events and status
 
 `events.jsonl` in the state directory holds one JSON object per event:
-`request`, `attempt_failed`, `attempt_refused`, `migrated`, `served`, `paid_use_observed`,
-`overage_read`, `client_auth_rejected`, `request_rejected`, `started`,
-`stopped`, `test_upstream_in_use`, and `refresh_guard_replaced`. Events carry account IDs, the first 12
-hex digits of the SHA-256 of the conversation key, statuses, classes,
-decisions, durations, and, on `request`, the usage counters the upstream
+`request`, `attempt_failed`, `attempt_refused`, `pin_violation`, `migrated`,
+`served`, `served_mark_failed`, `paid_use_observed`, `overage_read`,
+`stamp_bounded`, `credential_refresh`, `client_auth_rejected`,
+`request_rejected`, `started`, `stopped`, `test_upstream_in_use`, and
+`refresh_guard_replaced`. Events carry account IDs, the first 12 hex digits
+of the SHA-256 of the conversation key, statuses, classes, decisions,
+durations, and, on `request`, the usage counters the upstream
 reported. A counter the upstream did not report is `null`, not 0.
 `TestNoSecretInStatusEventsOrLogs` and lane 2 search events, status, logs,
 the journal, and the SDK configuration for every token.

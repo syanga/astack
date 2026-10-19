@@ -25,9 +25,29 @@ type attempt struct {
 	Status  int
 	Header  http.Header
 	Err     error
-	Refused string
-	Bar     router.Reason
+	Refused refusal
 }
+
+type refusal interface {
+	error
+	refusal()
+}
+
+type offPin struct{}
+
+type ineligible struct{ reason router.Reason }
+
+type overCap struct{}
+
+func (offPin) refusal()     {}
+func (ineligible) refusal() {}
+func (overCap) refusal()    {}
+
+func (offPin) Error() string { return "claude-router transport refused the attempt: account" }
+func (r ineligible) Error() string {
+	return "claude-router transport refused the attempt: ineligible (" + string(r.reason) + ")"
+}
+func (overCap) Error() string { return "claude-router transport refused the attempt: budget" }
 
 type callInfo struct {
 	id      string
@@ -118,27 +138,15 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 	info, _ := req.Context().Value(callKey{}).(callInfo)
 	call := info.id
 	a := attempt{Account: account, Path: req.URL.Path, Start: t.now()}
-	if info.account != "" && info.account != account {
-		a.Refused = "account"
-	}
-	if a.Refused == "" && call != "" && t.admit != nil {
-		if a.Bar = t.admit(account, info.model); a.Bar != "" {
-			a.Refused = "ineligible"
-		}
-	}
-	if a.Refused == "" && info.budget != nil && info.budget.Add(1) > t.limit {
-		a.Refused = "budget"
-	}
-	if a.Refused != "" {
+	if a.Refused = t.refuse(call, account, info); a.Refused != nil {
 		if req.Body != nil {
 			_ = req.Body.Close()
 		}
 		a.End = a.Start
-		a.Err = fmt.Errorf("claude-router transport refused the attempt: %s", a.Refused)
 		t.mu.Lock()
 		t.calls[call] = append(t.calls[call], a)
 		t.mu.Unlock()
-		return nil, a.Err
+		return nil, a.Refused
 	}
 	resp, err := t.inner.RoundTrip(out)
 	a.End = t.now()
@@ -157,6 +165,21 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 		t.mu.Unlock()
 	}
 	return resp, err
+}
+
+func (t *transport) refuse(call string, account router.AccountID, info callInfo) refusal {
+	if info.account != "" && info.account != account {
+		return offPin{}
+	}
+	if call != "" && t.admit != nil {
+		if reason := t.admit(account, info.model); reason != "" {
+			return ineligible{reason}
+		}
+	}
+	if info.budget != nil && info.budget.Add(1) > t.limit {
+		return overCap{}
+	}
+	return nil
 }
 
 func (t *transport) attempts(call string) []attempt {
