@@ -115,8 +115,8 @@ the switch back on and also leaves that job running.
    attempts of one client request. With 1 the router never resends a request
    that may have reached the provider. A request that ends on a network
    failure gets a 503 that asks the client to retry, so the client may resend
-   it. The router still retries a connection that failed before the request
-   was written, for up to 25 s.
+   a request that the provider already ran. The router still retries a
+   connection that failed before the request was written, for up to 25 s.
 
 3. Start the service. `start` waits until the service answers:
 
