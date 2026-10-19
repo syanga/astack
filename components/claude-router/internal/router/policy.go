@@ -48,6 +48,19 @@ func overageBar(cfg Config, now, checksFrom time.Time, a accountView) Reason {
 	return ""
 }
 
+func admissionBar(cfg Config, now time.Time, a accountView, model string) Reason {
+	switch {
+	case a.needsLogin:
+		return ReasonNeedsLogin
+	case a.paidUse():
+		return ReasonPaidUse
+	}
+	if _, _, blocked := usableReset(cfg, now, a.rejections, model); blocked {
+		return ReasonExhausted
+	}
+	return overageBar(cfg, now, time.Time{}, a)
+}
+
 func recheck(bar Reason) bool {
 	return bar == ReasonOverageUnknown || bar == ReasonOverageStale
 }

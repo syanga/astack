@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -1577,5 +1578,39 @@ func TestWindowRecordsOlderThanAWeeklyPeriodArePruned(t *testing.T) {
 
 	if kept != 1 {
 		t.Fatalf("a weekly period after 50 model windows were reported, %d window records remain, want 1 for the live five-hour window", kept)
+	}
+}
+
+func TestAdmitRefusesWhatDecideWouldNotDispatchTo(t *testing.T) {
+	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0, c, 1.0)...)
+	for _, acct := range []AccountID{a, b, c} {
+		h.r.ObserveOverage(acct, OverageDisabled, t0)
+	}
+	model := "claude-sonnet-4-5"
+
+	before := h.r.Admit(t0, a, model)
+	h.r.ObserveOverage(a, OveragePaidUse, t0.Add(time.Second))
+	h.observe(b, Observation{At: t0.Add(time.Second), Windows: []Window{rejected(FiveHour, t0.Add(2*time.Hour))}})
+	h.report(t0.Add(time.Second), c, model, ClassAuth)
+	now := t0.Add(2 * time.Second)
+
+	got := map[string]Reason{
+		"a before paid use":                before,
+		"a after paid use":                 h.r.Admit(now, a, model),
+		"b with a rejection":               h.r.Admit(now, b, model),
+		"b after the reset, check 2 h old": h.r.Admit(t0.Add(2*time.Hour+time.Second), b, model),
+		"c after an auth failure":          h.r.Admit(now, c, model),
+		"not enrolled":                     h.r.Admit(now, "acct-x", model),
+	}
+	want := map[string]Reason{
+		"a before paid use":                "",
+		"a after paid use":                 ReasonPaidUse,
+		"b with a rejection":               ReasonExhausted,
+		"b after the reset, check 2 h old": ReasonOverageStale,
+		"c after an auth failure":          ReasonNeedsLogin,
+		"not enrolled":                     ReasonNotEnrolled,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Admit reasons %v, want %v", got, want)
 	}
 }

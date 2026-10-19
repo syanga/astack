@@ -100,6 +100,7 @@ type outcome struct {
 	Delivered    bool
 	ClientGone   bool
 	Violation    string
+	Refused      refusal
 	ServedFailed bool
 	Status       int
 	Err          error
@@ -226,6 +227,10 @@ func (s *Service) messages(c *gin.Context) {
 			finish("request", account, d, http.StatusServiceUnavailable, &out)
 			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: assignment journal unavailable; restart the router")
 			return
+		}
+		if r, ok := out.Refused.(ineligible); ok {
+			s.events.emit(Event{Kind: "attempt_refused", Conversation: conv, Account: account, Reason: string(r.reason)})
+			continue
 		}
 		if budget.Load() > s.transport.limit {
 			finish("request", account, router.Decision{Kind: router.Fail, Reason: router.ReasonRetryBudget}, http.StatusServiceUnavailable, &out)
@@ -373,7 +378,7 @@ func (s *Service) dispatch(c *gin.Context, call, authID string, account router.A
 	api := claudehandlers.NewClaudeCodeAPIHandler(s.base)
 	ctx, cancel := s.base.GetContextWithCancel(api, c, context.Background())
 	ctx = handlers.WithPinnedAuthID(ctx, authID)
-	ctx = withCall(ctx, call, account, budget)
+	ctx = withCall(ctx, call, account, id.Model, budget)
 	defer s.transport.forget(call)
 	var out outcome
 	if id.Stream {
@@ -384,11 +389,13 @@ func (s *Service) dispatch(c *gin.Context, call, authID string, account router.A
 	cancel(out.Err)
 	var sent []attempt
 	for _, a := range s.transport.attempts(call) {
-		if a.Refused == "account" && out.Violation == "" {
-			out.Violation = "the SDK attempted another account than the pinned one"
-		}
-		if a.Refused == "" {
+		if a.Refused == nil {
 			sent = append(sent, a)
+			continue
+		}
+		out.Refused = a.Refused
+		if _, ok := a.Refused.(offPin); ok && out.Violation == "" {
+			out.Violation = "the SDK attempted another account than the pinned one"
 		}
 	}
 	out.Attempts = len(sent)
@@ -415,7 +422,7 @@ func (s *Service) attemptsObserved(call string, account router.AccountID) string
 		if a.Account != account {
 			return "the SDK attempted another account than the pinned one"
 		}
-		if a.Refused == "" {
+		if a.Refused == nil {
 			sent++
 		}
 	}

@@ -148,7 +148,9 @@ Limits of this posture:
   settings say (`conductor_stream.go:253-263`, `conductor_execution.go:606-612`
   and `:818-824`, gated by `conductor_refresh.go:514-532`). Proxy-owned OAuth
   logins have refresh tokens. One attempt per call holds only for credentials
-  without one (rows RP-5 and RP-5b). Pinning holds either way.
+  without one (rows RP-5 and RP-5b). Pinning holds either way, and the
+  redispatch passes the router's admission check like any other attempt
+  (Routing loop).
 - **Credentials can override the posture.** Credential metadata can override
   the global retry and cooling settings (`sdk/cliproxy/auth/types.go:466-483`
   and `:503-526`). PR3 refuses to enroll a credential file that carries such
@@ -425,7 +427,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | RP-3 | Bootstrap 401 and 403 do not fail over to another account | passed | `TestBootstrapAuthErrorsDoNotFailOver` | PR1 |
 | RP-4 | A pin to an unknown or cooling-down auth fails with 503 and selects no account | passed | `TestPinToUnknownAuthSelectsNothing`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover` | PR1 |
 | RP-5 | Single-attempt posture makes one upstream attempt per call, for credentials without a refresh token | passed | `TestPinnedExecutorPostureMakesOneAttemptPerCall` | PR1 |
-| RP-5b | Single-attempt posture for credentials with a refresh token | blocked | A 401 triggers refresh and a same-auth redispatch (`conductor_stream.go:253-263`). The refresh dials `platform.claude.com`, so no offline probe can serve it. The PR3 service also reads the paid-overflow setting with the account's credential before dispatch. A forced invalid token fails that read with 401; the service then refreshes the credential once and reads again, so the inference that follows runs on the refreshed token and does not take the redispatch path. The path runs only when a token expires between the reading and a request. | Live observation when a token expires in service (PR5 lanes), or an SDK seam for the refresh client. The PR4 live session had no attempt that failed with 401 (`evidence/PR4/live-2-cc2.1.300/events.jsonl`). The PR4 runbook's steps do not force it: each step starts the router, which reads and renews a due credential before any inference |
+| RP-5b | Single-attempt posture for credentials with a refresh token | blocked | A 401 triggers refresh and a same-auth redispatch (`conductor_stream.go:253-263`). Offline tests drive that path through the SDK's own refresh, with only the token exchange replaced: a 401 makes the SDK refresh and resend on the same account, and the router's transport refuses the resend after a blocking observation, on the streaming and non-streaming paths (`TestRefreshRedispatchIsRefusedAfterABlockingObservation`, `TestRefusedRedispatchMovesTheConversationAfterPaidUse`). No offline test lets the resend reach the upstream. The PR3 service also reads the paid-overflow setting with the account's credential before dispatch. A forced invalid token fails that read with 401; the service then refreshes the credential once and reads again, so the inference that follows runs on the refreshed token and does not take the redispatch path. The path runs only when a token expires between the reading and a request. | Live observation when a token expires in service (PR5 lanes), or an offline test that lets the resend reach the upstream. The PR4 live session had no attempt that failed with 401 (`evidence/PR4/live-2-cc2.1.300/events.jsonl`). The PR4 runbook's steps do not force it: each step starts the router, which reads and renews a due credential before any inference |
 | RP-6 | A rotated credential reloaded from the auth directory keeps its account and auth ID, after a quiet period | passed | `TestRotatedCredentialKeepsAccount` | PR1 |
 | RP-7 | SDK-initiated OAuth refresh keeps the account | passed | Live lane 1 rerun at `9b7e059` under `-race` (`evidence/PR3/lane-1-rerun/`): both accounts were due at start, the SDK refreshed them, the start reads logged `credential_refresh` `expiring` `sdk_refreshed` and read the setting, `refresh_sha256_12` and `last_refresh` changed for `work` (`rp7-before.json`, `rp7-after.json`), and step R8 served both accounts on their pinned conversations. The verifier ruled that `c95ae72` runs the same branches on that path (`reports/PR3-verify/c95ae72/receipt.md`, "Live equivalence"). The refresh guard adds no branch to it: a credential with a refresh pending at start is waited for, and the SDK's refresh passes the guard. Offline, a refresh through the SDK's own refresh path, with only the token exchange replaced, keeps the account (`TestReadOfADueCredentialWaitsForTheSDKRefresh`, `TestUnauthorizedSettingsReadRefreshesOnceAndReadsAgain`), and so does a credential renewed by restart (`TestRotatedCredentialAppliesAtRestartOnTheSameAccount`, lane 2 `renewal_keeps_account`). | PR3 |
 | RP-8 | Configuration applied at startup does not change pinned selection | passed | `TestConfigApplyKeepsPinnedSelection`, six configurations | PR1 |
@@ -459,7 +461,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | ID | Contract behavior | Status | Evidence | Owner |
 | --- | --- | --- | --- | --- |
 | IO-5 | The remaining guarantee limit is stated | passed | `included-only.json`, `guarantee_limit`; "Included-only: the documented limit is accepted" above | PR1 |
-| IO-6 | The router refuses unknown or stale overage state and stops routing on observed paid use | passed | `TestUnknownOverageStateRefusesDispatch`, `TestAnAccountWithUnknownStateIsSkippedForPlacement`, `TestEnabledOverflowRefusesDispatch`, `TestStaleReadingIsRecheckedBeforeDispatch`, `TestResponseHeadersRefreshTheReading`, `TestPaidUseStopsRoutingToTheAccount`, `TestPaidUseWithoutAnotherAccountRefuses`. Paid-use detection needs every attempt to pass the router's transport: `TestCredentialsThatChangeTheUpstreamPathAreRefused` refuses a credential proxy or header override, and `TestTransportCapsAttemptsAndRefusesAnotherAccount` refuses an off-pin attempt; lane 2 `unsafe_account_not_placed`, `paid_use_stops_routing` (`evidence/PR3/lane-2/controls.json`). Controlled upstream only; the real usage endpoint is IO-4. | PR3 |
+| IO-6 | The router refuses unknown or stale overage state and stops routing on observed paid use | passed | `TestUnknownOverageStateRefusesDispatch`, `TestAnAccountWithUnknownStateIsSkippedForPlacement`, `TestEnabledOverflowRefusesDispatch`, `TestStaleReadingIsRecheckedBeforeDispatch`, `TestResponseHeadersRefreshTheReading`, `TestPaidUseStopsRoutingToTheAccount`, `TestPaidUseWithoutAnotherAccountRefuses`, `TestRefreshRedispatchIsRefusedAfterABlockingObservation`. Paid-use detection needs every attempt to pass the router's transport: `TestCredentialsThatChangeTheUpstreamPathAreRefused` refuses a credential proxy or header override, and `TestTransportCapsAttemptsAndRefusesAnotherAccount` refuses an off-pin attempt; lane 2 `unsafe_account_not_placed`, `paid_use_stops_routing` (`evidence/PR3/lane-2/controls.json`). Controlled upstream only; the real usage endpoint is IO-4. | PR3 |
 
 ### Waiting and cancellation
 
@@ -597,7 +599,7 @@ from the capacity-only choice for the same request, and `capacity` otherwise.
 | --- | --- | --- |
 | `Rule` | `reset_aware` | Simulator comparison below |
 | `ResetBias` | 8 | Simulator comparison below |
-| `FreshFor` | 15 min | No measurable difference between 5, 15, and 60 min; middle value |
+| `FreshFor` | 15 min | Middle of the swept values 5, 15, and 60 min |
 | `ActiveFor` | 1 h | Not swept; the longest prompt-cache lifetime |
 | `UnknownResetRecheck` | 5 min | Not swept; bounds attempts on an account whose reset is unknown |
 | `OverageFreshFor` | 1 h | Not swept. PR3 sets the final freshness threshold with the check mechanism. |
@@ -606,23 +608,40 @@ from the capacity-only choice for the same request, and `capacity` otherwise.
 The comparison ran 13 variants over two synthetic fixtures and five seeds:
 capacity-only, and reset-aware with bias 1, 2, 4, and 8 at freshness 5, 15,
 and 60 minutes. `evidence/PR2/comparison.json` holds every run and the labeled
-quota and cache assumptions. Means for the chosen default against
-capacity-only:
+quota and cache assumptions.
+
+The selection criterion is the unused weekly share at reset, compared with
+capacity-only on the same fixture and seed. `ResetBias` is the bias with the
+largest mean reduction in that share. Bias 8 has the largest reduction at every
+freshness on both fixtures. `FreshFor` is not chosen by the share. It is the
+middle of the three swept values. At bias 8, 60 minutes had lower mean shares
+than 15 minutes: 0.161 against 0.169 on `weekly-expiry-72h`, and 0.179 against
+0.180 on `mixed-48h`. Both lowered the share against capacity-only in 9 of 10
+seed runs, and 5 minutes in 8 of 10. The criterion does not require a lower
+share in every seed run. Bias 4 at 60 minutes is the only variant that
+lowered it in all 10 runs. Its mean shares are higher than the default's,
+0.173 on `weekly-expiry-72h` and 0.183 on `mixed-48h`, and it writes fewer
+migration cache tokens, 715,800 and 1,112,400 against the default's 846,800
+and 1,358,200.
+
+Means for the chosen default against capacity-only:
 
 | Fixture | Variant | Completed turns | Unused weekly share at reset | Wait minutes | Exhaustion migrations | Migration cache writes (tokens) |
 | --- | --- | --- | --- | --- | --- | --- |
 | `weekly-expiry-72h` | capacity-only | 2593 | 0.197 | 1473 | 63.6 | 663,200 |
-| `weekly-expiry-72h` | bias 8, 15 min | 2590 | 0.169 | 834 | 61.6 | 846,800 |
-| `mixed-48h` | capacity-only | 2975 | 0.189 | 111,080 | 342.8 | 1,058,600 |
-| `mixed-48h` | bias 8, 15 min | 3008 | 0.178 | 108,054 | 353.2 | 1,284,200 |
+| `weekly-expiry-72h` | bias 8, 15 min | 2590 | 0.169 | 836 | 61.6 | 846,800 |
+| `mixed-48h` | capacity-only | 2975 | 0.188 | 111,020 | 383.2 | 1,097,000 |
+| `mixed-48h` | bias 8, 15 min | 2991 | 0.180 | 110,421 | 388.0 | 1,358,200 |
 
-The effect is small. With bias 8, unused weekly allowance at reset was lower
-in each of the five seeds on both fixtures. Completed turns were level on
-`weekly-expiry-72h` and higher in four of five seeds on `mixed-48h`. The cost
-was more cold cache writes from migration, and on `mixed-48h` slightly more
-exhaustion migrations. No run of any variant had a healthy automatic
-migration, counting migrations returned to subagent requests. The comparison
-does not establish a percentage improvement, and none is required.
+The effect is small. With bias 8 at 15 minutes, unused weekly allowance at
+reset was lower than capacity-only in 9 of 10 seed runs. The one miss is
+`mixed-48h` seed 2, where the default left 0.1673 and capacity-only 0.1672.
+Completed turns were higher in 3 of 5 seeds on `mixed-48h`. On
+`weekly-expiry-72h` they were equal in 3 seeds, higher in 1, and lower in 1.
+The cost was more cold cache writes from migration, and on `mixed-48h`
+slightly more exhaustion migrations. No run of any variant had a healthy
+automatic migration, counting migrations returned to subagent requests. The
+comparison does not establish a percentage improvement, and none is required.
 
 ### Quota evidence must come from the attempt
 
@@ -655,7 +674,9 @@ the check or response.
   `overage_observed` when another account is eligible. If none is, it waits
   for the earliest usable reset elsewhere or is refused with
   `paid_use_observed`, and keeps its assignment. New conversations skip the
-  account. A migrated conversation does not return.
+  account. A migrated conversation does not return. While recorded paid use
+  is in force, the transport sends the account no attempt, including the
+  SDK's redispatch of a request that was waiting on a refresh.
 - **Ordering.** The router records the latest check (`disabled` or
   `enabled`) and, separately, the latest paid use, each with its time. A
   check stamped before the latest recorded check is ignored. Of two checks
@@ -887,6 +908,40 @@ the call, all on the pinned account, and otherwise answers 502.
 `max_upstream_attempts` lowers the cap to 1, 2, or 3. With 1 the router
 never retries, so upstream attempts equal client requests; the live lane
 uses this (`TestASingleAttemptCapNeverRetries`).
+
+The transport also refuses an inference attempt, the SDK's refresh
+redispatch included, when the router would not dispatch to its account at
+that moment (`Router.Admit`). That is the case when the account needs a
+login, showed paid use, has a rejection that applies to the model, or has no
+`disabled` check within `OverageFreshFor`. The transport does not check
+settings reads. `Admit` takes the lock under which the router records
+observations, so each check falls wholly before or wholly after each
+observation. The transport refuses an attempt whose check comes after a
+blocking observation. An attempt whose check came first is sent, even if the
+observation is recorded while it is in flight. A refused attempt reaches no
+upstream and does not count toward the cap.
+
+After a refusal the service logs `attempt_refused` with the reason, reports
+no failure to the router, and decides again. The client gets the answer the
+table above gives for that decision. For each reason `Admit` returns:
+
+- `paid_use_observed`: a migration for `overage_observed` when another
+  account is eligible, a local 429 until the earliest usable reset elsewhere,
+  or a 503 that names paid use.
+- `exhausted`, which also covers a model-limit rejection: the local 429, or
+  a 503 when the paid-overflow state bars every logged-in account.
+- `needs_login`: a migration for `never_served_relogin` when the
+  conversation was never served and another account is eligible, otherwise a
+  503 that names `claude-router login`.
+- `overage_unknown` or `overage_stale`: one read of the setting, then
+  another decision. The request dispatches if the read returns `disabled`
+  and otherwise answers 503. A request reads the setting at most once.
+- `overage_enabled`: a 503 that names the account and paid overflow.
+
+`TestRefreshRedispatchIsRefusedAfterABlockingObservation` covers paid use
+and exhaustion on the streaming and non-streaming paths, and
+`TestRefusedRedispatchMovesTheConversationAfterPaidUse` covers the
+migration.
 
 The cap is per client HTTP request. Every router-made HTTP failure answer
 carries `x-should-retry: false`, which a client honors. Two answers do not
@@ -1241,12 +1296,14 @@ tested offline. PR1 lane 4 (CC-1) measures cache reads with real requests.
 ### Events and status
 
 `events.jsonl` in the state directory holds one JSON object per event:
-`request`, `attempt_failed`, `migrated`, `served`, `paid_use_observed`,
-`overage_read`, `client_auth_rejected`, `request_rejected`, `started`,
-`stopped`, `test_upstream_in_use`, `refresh_guard_replaced`, and, since PR4,
-`login_confirmed`. Events carry account IDs, the first 12
-hex digits of the SHA-256 of the conversation key, statuses, classes,
-decisions, durations, and, on `request`, the usage counters the upstream
+`request`, `attempt_failed`, `attempt_refused`, `pin_violation`, `migrated`,
+`served`, `served_mark_failed`, `paid_use_observed`, `overage_read`,
+`stamp_bounded`, `credential_refresh`, `client_auth_rejected`,
+`request_rejected`, `started`, `stopped`, `test_upstream_in_use`,
+`refresh_guard_replaced`, and, since PR4, `login_confirmed`. Events carry
+account IDs, the first 12 hex digits of the SHA-256 of the conversation key,
+statuses, classes, decisions, durations, and, on `request`, the usage
+counters the upstream
 reported. A counter the upstream did not report is `null`, not 0.
 `TestNoSecretInStatusEventsOrLogs` and lane 2 search events, status, logs,
 the journal, and the SDK configuration for every token.

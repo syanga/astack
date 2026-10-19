@@ -176,7 +176,10 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	s.clock = &wallClock{read: wall, markEvery: policy.OverageFreshFor, expire: s.router.ExpireOverageChecks}
 	s.now = s.clock.now
 	s.overage = newOverageReader(s)
-	s.transport = newTransport(inner, redirect, cfg.MaxUpstreamAttempts, cfg.Accounts, s.now, s.observeHeaders)
+	admit := func(account router.AccountID, model string) router.Reason {
+		return s.router.Admit(s.now(), account, model)
+	}
+	s.transport = newTransport(inner, redirect, cfg.MaxUpstreamAttempts, cfg.Accounts, s.now, admit, s.observeHeaders)
 	if redirect != nil {
 		s.events.emit(Event{Kind: "test_upstream_in_use", Detail: redirect.Host})
 	}
