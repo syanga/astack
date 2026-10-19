@@ -215,7 +215,7 @@ class ActivationFixture(ComponentFixture):
         self.before = self.settings_path.read_bytes()
         self.env["CLIENT_SETTINGS"] = str(self.settings_path)
         self.env["FAKE_CLAUDE_LOG"] = str(self.root / "claude.log")
-        for name in ("FAKE_CLAUDE_EXIT", "FAKE_CLAUDE_STATUS", "FAKE_CLAUDE_VERSION"):
+        for name in ("FAKE_CLAUDE_EXIT", "FAKE_CLAUDE_STATUS", "FAKE_CLAUDE_VERSION", "CLAUDE_CONFIG_DIR"):
             self.env.pop(name, None)
         self.env.pop("ANTHROPIC_API_KEY", None)
         self.env.pop("ANTHROPIC_AUTH_TOKEN", None)

@@ -1,0 +1,143 @@
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/syanga/astack/components/claude-router/internal/claude"
+	"github.com/syanga/astack/components/claude-router/internal/router"
+)
+
+type accountList []string
+
+func (a *accountList) String() string { return strings.Join(*a, ",") }
+
+func (a *accountList) Set(name string) error {
+	if !claude.ValidAccountID(name) {
+		return fmt.Errorf("%q is not a valid account ID (letters, digits, '-', '_', '.')", name)
+	}
+	*a = append(*a, name)
+	return nil
+}
+
+func setup(args []string) error {
+	fs := flag.NewFlagSet("setup", flag.ExitOnError)
+	state := stateFlag(fs)
+	var names accountList
+	fs.Var(&names, "account", "account to sign in and add; repeat for each account")
+	noBrowser := fs.Bool("no-browser", false, "print each sign-in URL instead of opening a browser")
+	_ = fs.Parse(args)
+	in, err := loadInstallation(*state)
+	if err != nil {
+		return err
+	}
+	return runSetup(in, names, *noBrowser, os.Stdout)
+}
+
+func activated(state string) (bool, error) {
+	data, err := os.ReadFile(filepath.Join(state, "activation.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var journal struct {
+		Phase string `json:"phase"`
+	}
+	if err := json.Unmarshal(data, &journal); err != nil {
+		return false, fmt.Errorf("activation.json: %w", err)
+	}
+	return journal.Phase == "active", nil
+}
+
+// runSetup signs in each new account, adds it to config.json, starts the
+// router, waits for every account to be ready, and activates through the
+// installed helper, which runs check.
+func runSetup(in installation, names []string, noBrowser bool, out io.Writer) error {
+	if on, err := activated(in.State); err != nil {
+		return err
+	} else if on {
+		return nextError{err: errors.New("Claude Code already routes through the router"), next: "claude-router account add NAME"}
+	}
+	if err := in.checkHelper("setup"); err != nil {
+		return err
+	}
+	cfg, err := in.config()
+	if err != nil {
+		return err
+	}
+	var added []string
+	for _, name := range names {
+		if !enrolled(cfg, name) && !strings.Contains(" "+strings.Join(added, " ")+" ", " "+name+" ") {
+			added = append(added, name)
+		}
+	}
+	if len(cfg.Accounts) == 0 && len(added) == 0 {
+		return nextError{err: errors.New("config.json lists no accounts"), next: "claude-router setup -account NAME"}
+	}
+	if len(added) > 0 {
+		if _, err := stopForChange(in, out); err != nil {
+			return err
+		}
+		for _, name := range added {
+			signInLines(out, name, noBrowser)
+			if err := signIn(in.State, name, noBrowser); err != nil {
+				return err
+			}
+			line(out, "login", name+" signed in")
+		}
+		if err := claude.EditConfig(in.Config, func(c *claude.Config) error {
+			for _, name := range added {
+				c.Accounts = append(c.Accounts, router.Account{ID: router.AccountID(name), Capacity: 1})
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		each := ", capacity 1"
+		if len(added) > 1 {
+			each += " each"
+		}
+		line(out, "config", "added "+joined(added)+each)
+	}
+	if err := startAgain(in, out); err != nil {
+		return err
+	}
+	if cfg, err = in.config(); err != nil {
+		return err
+	}
+	all := make([]string, len(cfg.Accounts))
+	for i, a := range cfg.Accounts {
+		all[i] = string(a.ID)
+	}
+	overflow, err := waitReady(in, all, readyWait)
+	if err != nil {
+		return err
+	}
+	if len(overflow) > 0 {
+		verb, whose := "has", overflow[0]
+		if len(overflow) > 1 {
+			verb, whose = "have", "their"
+		}
+		line(out, "refuse", fmt.Sprintf("%s %s paid overflow on; Claude Code stays direct", joined(overflow), verb))
+		line(out, "next", "turn off "+whose+" paid overflow on claude.ai; claude-router setup")
+		return silentExit(1)
+	}
+	line(out, "ready", strings.Join(all, ", ")+" ready")
+	code, err := runHelperTo(in, []string{in.Helper, "activate", "--brief", "--manifest", in.Manifest}, nil, out)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return silentExit(code)
+	}
+	line(out, "next", "claude-router status")
+	return nil
+}

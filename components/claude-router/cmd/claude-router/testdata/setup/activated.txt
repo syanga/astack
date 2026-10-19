@@ -1,0 +1,15 @@
+login     work: sign in in the browser window that opened
+login     work signed in
+login     alumni: sign in in the browser window that opened
+login     alumni signed in
+config    added work and alumni, capacity 1 each
+start     router running on 127.0.0.1:18787 (launchd)
+ready     work, alumni ready
+ok        router running on 127.0.0.1:18787 (launchd)
+ok        work, alumni ready
+ok        paid overflow off on both accounts
+ok        Claude Code settings point at the router
+ok        code matches the accepted record (darwin/arm64)
+ok        test message answered 200 on work in 5.8s
+activated Claude Code routes through the router
+next      claude-router status

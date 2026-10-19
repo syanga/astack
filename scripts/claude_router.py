@@ -1384,7 +1384,8 @@ def main():
         p.add_argument("--claude", type=Path, default=Path("claude"), help="the Claude Code command that sends the test message")
         p.add_argument("--acceptance", type=Path, help="the acceptance record; default the installed accepted.json")
         p.add_argument("--settings", type=Path, help="Claude settings file; default $CLAUDE_CONFIG_DIR or ~/.claude, then settings.json")
-    c.add_argument("--manifest", type=Path, help="the astack manifest that records the installation")
+    for p in (a, c):
+        p.add_argument("--manifest", type=Path, help="the astack manifest that records the installation; default from --home")
     c.add_argument("--timeout", type=int, default=CHECK_TIMEOUT, help="seconds the test message may take")
     i.add_argument("--claude", type=Path, help="the terminal Claude Code executable to record")
     i.add_argument("--agent-sdk", type=Path, help="the installed @anthropic-ai/claude-agent-sdk package directory")
@@ -1402,7 +1403,7 @@ def main():
     home = (args.home or Path.home()).expanduser().resolve()
     use_env = args.home is None
     state_root = env_dir("XDG_STATE_HOME", ".local/state", home, use_env) / "astack"
-    if args.command == "check" and args.manifest:
+    if args.command in ("activate", "check") and args.manifest:
         state_root = args.manifest.parent
     if args.command in ("activate", "identity", "check"):
         try:

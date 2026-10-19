@@ -142,20 +142,9 @@ func (s *Store) replay() error {
 	if err != nil {
 		return err
 	}
-	good := 0
-	for good < len(data) {
-		end := bytes.IndexByte(data[good:], '\n')
-		if end < 0 {
-			break
-		}
-		var rec record
-		if err := json.Unmarshal(data[good:good+end], &rec); err != nil {
-			return fmt.Errorf("corrupt journal record at byte %d: %w", good, err)
-		}
-		if err := s.apply(rec); err != nil {
-			return fmt.Errorf("journal record at byte %d: %w", good, err)
-		}
-		good += end + 1
+	good, err := s.applyAll(data)
+	if err != nil {
+		return err
 	}
 	if good < len(data) {
 		if err := s.file.Truncate(int64(good)); err != nil {
@@ -167,6 +156,44 @@ func (s *Store) replay() error {
 	}
 	_, err = s.file.Seek(int64(good), io.SeekStart)
 	return err
+}
+
+// applyAll applies each complete record in data and returns the length of
+// the complete records.
+func (s *Store) applyAll(data []byte) (int, error) {
+	good := 0
+	for good < len(data) {
+		end := bytes.IndexByte(data[good:], '\n')
+		if end < 0 {
+			break
+		}
+		var rec record
+		if err := json.Unmarshal(data[good:good+end], &rec); err != nil {
+			return good, fmt.Errorf("corrupt journal record at byte %d: %w", good, err)
+		}
+		if err := s.apply(rec); err != nil {
+			return good, fmt.Errorf("journal record at byte %d: %w", good, err)
+		}
+		good += end + 1
+	}
+	return good, nil
+}
+
+// ReadBindings replays the journal in dir without its lock, for a reader
+// beside a running service. It skips a torn final record and changes nothing.
+func ReadBindings(dir string) (map[ConversationID]Binding, error) {
+	data, err := os.ReadFile(filepath.Join(dir, journalName))
+	if errors.Is(err, os.ErrNotExist) {
+		return map[ConversationID]Binding{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	s := &Store{bindings: map[ConversationID]Binding{}}
+	if _, err := s.applyAll(data); err != nil {
+		return nil, err
+	}
+	return s.bindings, nil
 }
 
 func (rec record) validate() error {

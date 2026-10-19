@@ -15,6 +15,17 @@ const sdkModule = "github.com/router-for-me/CLIProxyAPI/v8"
 // linked Git worktree.
 var linkedRevision string
 
+// linkedCodeDigest is the router code digest the astack installer passes to
+// the linker with -X. An acceptance record matches the binary by this digest.
+var linkedCodeDigest string
+
+func codeDigest() string {
+	if linkedCodeDigest == "" {
+		return "unknown"
+	}
+	return linkedCodeDigest
+}
+
 var buildRevision, sdkVersion = readBuildInfo()
 
 func readBuildInfo() (string, string) {

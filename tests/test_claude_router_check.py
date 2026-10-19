@@ -1,7 +1,9 @@
 import json
 import re
+import subprocess
+import sys
 
-from test_claude_router_activate import ActivationFixture, timed
+from test_claude_router_activate import HELPER_WITH_MANAGED_SETTINGS, ActivationFixture, timed
 
 GOLDEN = "components/claude-router/cmd/claude-router/testdata/check/"
 
@@ -98,3 +100,17 @@ class CheckTests(CheckFixture):
         for result in (failing, passing):
             for line in result.stdout.splitlines():
                 self.assertLessEqual(len(re.sub(r":\d+ ", ":18787 ", line)), 80, line)
+
+
+class SetupActivationTests(CheckFixture):
+    def test_brief_activation_through_the_recorded_manifest_prints_the_check_and_the_result(self):
+        self.assertEqual(self.direct().returncode, 0)
+        manifest = self.home / ".local/state/astack/manifest.json"
+        command = [sys.executable, "-c", HELPER_WITH_MANAGED_SETTINGS, "activate", "--brief", "--manifest", str(manifest)]
+
+        result = subprocess.run(command, capture_output=True, text=True, env=self.activate_env())
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.shown(result), self.golden("passed.txt").replace("check     passed\n", "check     passed\n"
+                                                                               "activated Claude Code routes through the router\n"))
+        self.assertEqual(self.base_url(), self.listen)

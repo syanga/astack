@@ -115,6 +115,61 @@ func LoadConfig(path string) (Config, error) {
 	return cfg, nil
 }
 
+// EditConfig applies edit to the configuration file at path and replaces the
+// file atomically. It refuses an edit that fails or leaves an invalid
+// configuration, and then leaves the file unchanged.
+func EditConfig(path string, edit func(*Config) error) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var cfg Config
+	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&cfg); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	if err := edit(&cfg); err != nil {
+		return err
+	}
+	if err := cfg.withDefaults().validate(); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.json")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(append(out, '\n')); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
 func (c Config) withDefaults() Config {
 	if c.OverageFreshFor == 0 {
 		c.OverageFreshFor = Duration(defaultOverageFreshFor)

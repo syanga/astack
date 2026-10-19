@@ -311,7 +311,7 @@ func TestTheLoginOwnersStopTurnsItsSwitchOffWhileAnotherHomesJobRuns(t *testing.
 	loadedB := loadedFrom(t, jobs, b.Name)
 
 	var stopA error
-	out := stdoutOf(t, func() { _, stopA = stopOwn(a, keepOff) })
+	out := stdoutOf(t, func() { _, stopA = stopOwn(a, keepOff, os.Stdout) })
 
 	want := fmt.Sprintf("router  not stopped: %s is loaded from %s, not from this installation; left running\n"+
 		"        this installation stays off until claude-router start\n", a.Name, loadedB)
@@ -492,13 +492,13 @@ func TestTheLoginOwnersUninstallBesideAnotherHomesJobTurnsTheSwitchBackOn(t *tes
 		t.Fatal(err)
 	}
 	loadedB := loadedFrom(t, jobs, b.Name)
-	if _, err := stopOwn(a, keepOff); err != nil {
+	if _, err := stopOwn(a, keepOff, os.Stdout); err != nil {
 		t.Fatal(err)
 	}
 
 	var stopped bool
 	var err error
-	out := stdoutOf(t, func() { stopped, err = stopOwn(a, release) })
+	out := stdoutOf(t, func() { stopped, err = stopOwn(a, release, os.Stdout) })
 
 	want := fmt.Sprintf("router  not stopped: %s is loaded from %s, not from this installation; left running\n", a.Name, loadedB)
 	if err != nil || stopped || out != want {
@@ -521,7 +521,7 @@ func TestAnotherInstallationsUninstallLeavesTheOwnersSwitchOn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := stopOwn(b, release); err != nil {
+	if _, err := stopOwn(b, release, os.Stdout); err != nil {
 		t.Fatal(err)
 	}
 
@@ -542,7 +542,7 @@ func TestAStopBesideAnotherHomesJobWithNoLoginOwnerLeavesTheSwitchOn(t *testing.
 	}
 
 	var err error
-	out := stdoutOf(t, func() { _, err = stopOwn(b, keepOff) })
+	out := stdoutOf(t, func() { _, err = stopOwn(b, keepOff, os.Stdout) })
 
 	want := fmt.Sprintf("router  not stopped: %s is loaded from %s, not from this installation; left running\n", b.Name, loadedFrom(t, jobs, a.Name))
 	if err != nil || out != want {

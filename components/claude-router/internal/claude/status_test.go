@@ -3,6 +3,7 @@ package claude
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"os"
 	"strconv"
@@ -170,5 +171,30 @@ func TestExecutableDigestIsTheSHA256OfTheRunningExecutable(t *testing.T) {
 	sum := sha256.Sum256(data)
 	if got, want := ExecutableDigest(), hex.EncodeToString(sum[:]); got != want {
 		t.Fatalf("ExecutableDigest() %q, want %q, the SHA-256 of %s", got, want, path)
+	}
+}
+
+func TestStatusReportsTheCodeDigestTheInstallerStamped(t *testing.T) {
+	for _, c := range []struct{ stamped, want string }{{"", "unknown"}, {strings.Repeat("cd", 32), strings.Repeat("cd", 32)}} {
+		saved := linkedCodeDigest
+		linkedCodeDigest = c.stamped
+		e := newEnv(t, "acct-a")
+		e.start()
+		req, _ := http.NewRequest(http.MethodGet, "http://"+e.svc.Addr()+"/claude-router/status", nil)
+		req.Header.Set("X-Api-Key", e.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&got)
+		resp.Body.Close()
+		linkedCodeDigest = saved
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got["code_sha256"] != c.want {
+			t.Fatalf("stamped %q: code_sha256 %v, want %q", c.stamped, got["code_sha256"], c.want)
+		}
 	}
 }

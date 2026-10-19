@@ -34,6 +34,7 @@ func main() {
 	commands := map[string]func([]string) error{
 		"serve": serve, "login": login, "token": token, "status": status,
 		"start": start, "stop": stop, "move": move, "direct": direct, "cache": cacheCommand,
+		"check": check, "setup": setup, "account": account,
 	}
 	cmd, ok := commands[os.Args[1]]
 	if !ok {
@@ -41,6 +42,10 @@ func main() {
 	}
 	if err := cmd(os.Args[2:]); err != nil {
 		var n nextError
+		var exit silentExit
+		if errors.As(err, &exit) {
+			os.Exit(int(exit))
+		}
 		if errors.As(err, &n) {
 			fmt.Fprintf(os.Stderr, "claude-router: %s: %v\n", os.Args[1], n.err)
 			if n.detail != "" {
@@ -62,8 +67,17 @@ type nextError struct {
 
 func (e nextError) Error() string { return e.err.Error() }
 
+// silentExit ends a command whose output already explains the failure.
+type silentExit int
+
+func (e silentExit) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
+
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
+  claude-router setup [-account NAME ...] [-no-browser] [-state DIR]
+  claude-router check [-state DIR]
+  claude-router account add NAME [-no-browser] [-state DIR]
+  claude-router account remove NAME [-force] [-state DIR]
   claude-router status [-v] [-state DIR]
   claude-router cache [-since 24h] [-state DIR]
   claude-router start [-state DIR]
@@ -168,10 +182,8 @@ func (stderrHook) Fire(e *log.Entry) error {
 	return err
 }
 
-// login runs the SDK's Claude OAuth login into a staging directory and
-// installs the credential as auths/<account>.json. It refuses while a
-// service holds the state directory: a running service writes its
-// in-memory credentials back to disk and would overwrite the new one.
+// login runs the SDK's Claude OAuth login and installs the credential as
+// auths/<account>.json.
 func login(args []string) error {
 	fs := flag.NewFlagSet("login", flag.ExitOnError)
 	state := stateFlag(fs)
@@ -184,77 +196,14 @@ func login(args []string) error {
 	if !claude.ValidAccountID(*account) {
 		return fmt.Errorf("%q is not a valid account ID (letters, digits, '-', '_', '.')", *account)
 	}
-	lock, err := router.OpenStore(filepath.Join(*state, "assignments"))
-	if errors.Is(err, router.ErrLocked) {
-		pid := "pid unknown"
-		if in, err := loadInstallation(*state); err == nil {
-			if st, err := fetchStatus(in); err == nil {
-				pid = fmt.Sprintf("pid %d", st.PID)
-			}
-		}
-		return nextError{err: fmt.Errorf("router running on this state directory (%s)", pid), next: "claude-router stop"}
-	}
-	if err != nil {
-		return err
-	}
-	defer lock.Close()
-
-	auths := filepath.Join(*state, "auths")
-	if err := os.MkdirAll(auths, 0o700); err != nil {
-		return err
-	}
-	staging, err := os.MkdirTemp(*state, ".login-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(staging)
-
-	store := sdkauth.NewFileTokenStore()
-	store.SetBaseDir(staging)
-	mgr := sdkauth.NewManager(store, sdkauth.NewClaudeAuthenticator())
-	cfg := &config.Config{}
-	cfg.AuthDir = staging
-	reader := bufio.NewReader(os.Stdin)
-	opts := &sdkauth.LoginOptions{
-		NoBrowser: *noBrowser,
-		Prompt: func(p string) (string, error) {
-			fmt.Fprint(os.Stderr, p)
-			line, err := reader.ReadString('\n')
-			return strings.TrimSpace(line), err
-		},
-	}
 	if *noBrowser {
 		fmt.Printf("login   open the URL below; sign in as %s (Ctrl-C cancels)\n", *account)
 	} else {
 		fmt.Printf("login   browser opened; sign in as %s (Ctrl-C cancels)\n", *account)
 	}
-	if _, _, err := mgr.Login(context.Background(), "claude", cfg, opts); err != nil {
+	kept, err := enroll(*state, *account, *noBrowser)
+	if err != nil {
 		return err
-	}
-	entries, err := filepath.Glob(filepath.Join(staging, "*.json"))
-	if err != nil || len(entries) != 1 {
-		return fmt.Errorf("expected one credential file, found %d", len(entries))
-	}
-	if err := os.Chmod(entries[0], 0o600); err != nil {
-		return err
-	}
-	if err := claude.CheckCredential(entries[0]); err != nil {
-		return err
-	}
-	dest := filepath.Join(auths, *account+".json")
-	if err := os.Rename(entries[0], dest); err != nil {
-		return err
-	}
-	if err := lock.ClearNeedsLogin(router.AccountID(*account)); err != nil {
-		return fmt.Errorf("enrolled %s, but could not clear its login requirement: %w", *account, err)
-	}
-	kept := 0
-	if bindings, err := lock.Bindings(); err == nil {
-		for _, b := range bindings {
-			if b.Account == router.AccountID(*account) {
-				kept++
-			}
-		}
 	}
 	fmt.Printf("login   %s enrolled, login requirement cleared, %d conversations kept\n", *account, kept)
 	if in, err := loadInstallation(*state); err == nil {
@@ -265,6 +214,128 @@ func login(args []string) error {
 	}
 	fmt.Println("next    claude-router start")
 	return nil
+}
+
+// signIn enrolls an account for setup and account add. Tests replace it,
+// because the real sign-in needs a browser and the provider.
+var signIn = func(state, account string, noBrowser bool) error {
+	_, err := enroll(state, account, noBrowser)
+	return err
+}
+
+// enroll runs the SDK's Claude OAuth login into a staging directory and
+// installs the credential as auths/<account>.json. It refuses while a
+// service holds the state directory: a running service writes its
+// in-memory credentials back to disk and would overwrite the new one. It
+// returns the number of conversations assigned to the account.
+func enroll(state, account string, noBrowser bool) (int, error) {
+	lock, err := router.OpenStore(filepath.Join(state, "assignments"))
+	if errors.Is(err, router.ErrLocked) {
+		pid := "pid unknown"
+		if in, err := loadInstallation(state); err == nil {
+			if st, err := fetchStatus(in); err == nil {
+				pid = fmt.Sprintf("pid %d", st.PID)
+			}
+		}
+		return 0, nextError{err: fmt.Errorf("router running on this state directory (%s)", pid), next: "claude-router stop"}
+	}
+	if err != nil {
+		return 0, err
+	}
+	defer lock.Close()
+
+	auths := filepath.Join(state, "auths")
+	if err := os.MkdirAll(auths, 0o700); err != nil {
+		return 0, err
+	}
+	staging, err := os.MkdirTemp(state, ".login-")
+	if err != nil {
+		return 0, err
+	}
+	defer os.RemoveAll(staging)
+
+	store := sdkauth.NewFileTokenStore()
+	store.SetBaseDir(staging)
+	mgr := sdkauth.NewManager(store, sdkauth.NewClaudeAuthenticator())
+	cfg := &config.Config{}
+	cfg.AuthDir = staging
+	reader := bufio.NewReader(os.Stdin)
+	opts := &sdkauth.LoginOptions{
+		NoBrowser: noBrowser,
+		Prompt: func(p string) (string, error) {
+			fmt.Fprint(os.Stderr, p)
+			line, err := reader.ReadString('\n')
+			return strings.TrimSpace(line), err
+		},
+	}
+	if err := showingOnlySignInURLs(func() error {
+		_, _, err := mgr.Login(context.Background(), "claude", cfg, opts)
+		return err
+	}); err != nil {
+		return 0, err
+	}
+	entries, err := filepath.Glob(filepath.Join(staging, "*.json"))
+	if err != nil || len(entries) != 1 {
+		return 0, fmt.Errorf("expected one credential file, found %d", len(entries))
+	}
+	if err := os.Chmod(entries[0], 0o600); err != nil {
+		return 0, err
+	}
+	if err := claude.CheckCredential(entries[0]); err != nil {
+		return 0, err
+	}
+	dest := filepath.Join(auths, account+".json")
+	if err := os.Rename(entries[0], dest); err != nil {
+		return 0, err
+	}
+	if err := lock.ClearNeedsLogin(router.AccountID(account)); err != nil {
+		return 0, fmt.Errorf("enrolled %s, but could not clear its login requirement: %w", account, err)
+	}
+	kept := 0
+	if bindings, err := lock.Bindings(); err == nil {
+		for _, b := range bindings {
+			if b.Account == router.AccountID(account) {
+				kept++
+			}
+		}
+	}
+	return kept, nil
+}
+
+// showingOnlySignInURLs runs f with standard output and the SDK log filtered
+// down to the sign-in URL. The SDK prints its progress and SSH tunnel
+// instructions for remote servers to standard output.
+func showingOnlySignInURLs(f func() error) error {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	saved := os.Stdout
+	os.Stdout = w
+	log.SetOutput(io.Discard)
+	done := make(chan struct{})
+	go func() {
+		copySignInURLs(saved, r)
+		close(done)
+	}()
+	err = f()
+	os.Stdout = saved
+	log.SetOutput(os.Stderr)
+	w.Close()
+	<-done
+	r.Close()
+	return err
+}
+
+func copySignInURLs(dst io.Writer, src io.Reader) {
+	sc := bufio.NewScanner(src)
+	sc.Buffer(nil, 1<<20)
+	for sc.Scan() {
+		if line := strings.TrimSpace(sc.Text()); strings.HasPrefix(line, "https://") {
+			fmt.Fprintln(dst, line)
+		}
+	}
+	_, _ = io.Copy(io.Discard, src)
 }
 
 func enrolled(c claude.Config, account string) bool {

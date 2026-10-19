@@ -686,6 +686,7 @@ type Status struct {
 	Journal         string          `json:"journal"`
 	Binary          string          `json:"binary"`
 	BinarySHA256    string          `json:"binary_sha256"`
+	CodeSHA256      string          `json:"code_sha256"`
 	SDK             string          `json:"sdk"`
 	QuotaFreshFor   Duration        `json:"quota_fresh_for"`
 	OverageFreshFor Duration        `json:"overage_fresh_for"`
@@ -699,7 +700,7 @@ func (s *Service) Status() Status {
 	ov := s.overage.snapshot()
 	last := s.router.LastRequests()
 	st := Status{Listen: s.addr, Now: now, Started: s.started, PID: os.Getpid(), Journal: "ok",
-		Binary: buildRevision, BinarySHA256: s.digest, SDK: sdkVersion, QuotaFreshFor: Duration(cfg.FreshFor), OverageFreshFor: s.cfg.OverageFreshFor, ActiveFor: Duration(cfg.ActiveFor)}
+		Binary: buildRevision, BinarySHA256: s.digest, CodeSHA256: codeDigest(), SDK: sdkVersion, QuotaFreshFor: Duration(cfg.FreshFor), OverageFreshFor: s.cfg.OverageFreshFor, ActiveFor: Duration(cfg.ActiveFor)}
 	bindings, err := s.store.Bindings()
 	if err != nil {
 		st.Journal = err.Error()
