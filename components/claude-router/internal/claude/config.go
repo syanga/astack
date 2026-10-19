@@ -57,8 +57,6 @@ type Config struct {
 	MoveCacheWarnPercent *int `json:"move_cache_warn_percent,omitempty"`
 }
 
-// MoveCacheWarn returns move_cache_warn_percent, or 10 when it is unset.
-// It fails, naming the field, when the value is outside 0 to 100.
 func (c Config) MoveCacheWarn() (int, error) {
 	if c.MoveCacheWarnPercent == nil {
 		return defaultMoveCacheWarn, nil

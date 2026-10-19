@@ -62,7 +62,7 @@ func writeState(t *testing.T, accounts []string, extra string, events string) in
 func cacheLines(t *testing.T, events string) string {
 	t.Helper()
 	in := writeState(t, []string{"work", "alumni"}, "", events)
-	v, err := cacheReport(in, cacheNow, 24*time.Hour)
+	v, err := cacheReport(in.State, cacheNow, 24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestAManualMoveShowsTheReasonOfItsMigratedEvent(t *testing.T) {
 		"reasons   manual 1")
 }
 
-func TestAMoveWhoseFirstRequestHasNoUsageCostsTheNextRequestWithUsage(t *testing.T) {
+func TestAMoveWhoseRequestHasNoUsageKeepsAnUnknownCostAfterALaterWrite(t *testing.T) {
 	got := cacheLines(t,
 		served(ago(3*time.Hour), "aaaaaaaaaaaa", "work", counters(0, 6000, 0))+
 			movedEvent(ago(2*time.Hour), "aaaaaaaaaaaa", "work", "alumni", "manual")+
@@ -128,7 +128,59 @@ func TestAMoveWhoseFirstRequestHasNoUsageCostsTheNextRequestWithUsage(t *testing
 
 	wantLines(t, got,
 		"alumni    hit 0%  input 0  write 2k  read 0  + 1 unknown",
-		"moves     1  cost 2k  of 8k writes  share 25.0%")
+		"moves     1  cost 0 + 1 unknown  of 8k writes  share 0.0% or more")
+}
+
+func TestAMoveWhoseRequestHasANullCacheWriteKeepsAnUnknownCostAfterALaterWrite(t *testing.T) {
+	got := cacheLines(t,
+		served(ago(3*time.Hour), "aaaaaaaaaaaa", "work", counters(0, 6000, 0))+
+			movedEvent(ago(2*time.Hour), "aaaaaaaaaaaa", "work", "alumni", "manual")+
+			served(ago(2*time.Hour), "aaaaaaaaaaaa", "alumni", `{"input_tokens":0,"cache_creation_input_tokens":null,"cache_read_input_tokens":0}`)+
+			served(ago(time.Hour), "aaaaaaaaaaaa", "alumni", counters(0, 2000, 0)))
+
+	wantLines(t, got,
+		"alumni    hit 0%  input 0  write 2k  read 0  + 1 unknown",
+		"moves     1  cost 0 + 1 unknown  of 8k writes  share 0.0% or more")
+}
+
+func TestAMoveCountsItsCostOnlyWhenItsRequestCountsTowardAllWrites(t *testing.T) {
+	got := cacheLines(t,
+		served(ago(3*time.Hour), "aaaaaaaaaaaa", "work", counters(0, 1000, 0))+
+			movedEvent(ago(2*time.Hour), "aaaaaaaaaaaa", "work", "alumni", "exhausted")+
+			served(ago(2*time.Hour), "aaaaaaaaaaaa", "alumni", `{"input_tokens":null,"cache_creation_input_tokens":5000,"cache_read_input_tokens":0}`))
+
+	wantLines(t, got,
+		"alumni    hit --  input 0  write  0  read 0  + 1 unknown",
+		"moves     1  cost 0 + 1 unknown  of 1k writes  share 0.0% or more")
+}
+
+func TestAFailedRequestWithoutUsageAddsNoAccountLine(t *testing.T) {
+	got := cacheLines(t,
+		served(ago(3*time.Hour), "aaaaaaaaaaaa", "work", counters(0, 6000, 0))+
+			fmt.Sprintf(`{"at":%q,"kind":"request","conversation":"bbbbbbbbbbbb","account":"personal","status":503}`+"\n", ago(2*time.Hour).Format(time.RFC3339)))
+
+	want := "window    last 24h, 23:05 PDT yesterday to now\n" +
+		"work      hit 0%  input 0  write 6k  read 0\n" +
+		"alumni    hit --  input 0  write  0  read 0\n" +
+		"moves     0  cost 0  of 6k writes  share 0.0%\n"
+	if got != want {
+		t.Fatalf("cache after a failed request without usage:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestCacheIgnoresAMalformedServiceRecord(t *testing.T) {
+	now := time.Now()
+	in := writeState(t, []string{"work"}, "", served(now.Add(-time.Hour), "aaaaaaaaaaaa", "work", counters(0, 6000, 0)))
+	if err := os.WriteFile(filepath.Join(in.State, serviceRecord), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var err error
+	got := stdoutOf(t, func() { err = cacheCommand([]string{"-state", in.State}) })
+
+	if err != nil || !strings.Contains(got, "work      hit 0%  input 0  write 6k  read 0\n") {
+		t.Fatalf("cache with a malformed %s returned %v:\n%s", serviceRecord, err, got)
+	}
 }
 
 func TestAMoveWithNoUsageAfterItHasAnUnknownCost(t *testing.T) {
@@ -233,7 +285,7 @@ func TestCacheMatchesTheSelectedLayout(t *testing.T) {
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {
 			in := writeState(t, []string{"work", "alumni", "personal"}, "", tc.events)
-			v, err := cacheReport(in, cacheNow, 24*time.Hour)
+			v, err := cacheReport(in.State, cacheNow, 24*time.Hour)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -307,6 +359,23 @@ func TestStatusWarnsAboveTheDefaultMoveShareOfTenPercent(t *testing.T) {
 	}
 }
 
+func TestTheStatusWarningSaysOrMoreWhenAMoveCostIsUnknown(t *testing.T) {
+	got := runningStatus(t, "", movesWithShare(cacheNow, 14)+
+		served(cacheNow.Add(-3*time.Hour), "bbbbbbbbbbbb", "work", counters(0, 0, 0))+
+		movedEvent(cacheNow.Add(-time.Hour), "bbbbbbbbbbbb", "work", "alumni", "manual")+
+		served(cacheNow.Add(-time.Hour), "bbbbbbbbbbbb", "alumni", ""))
+
+	warning := "cache   account moves wrote 14.0% or more of all cache writes in 24h, over 10%\n"
+	if !strings.Contains(got, warning) {
+		t.Fatalf("status with one uncosted move:\n%s\nwant the line:\n%s", got, warning)
+	}
+	for _, line := range strings.Split(strings.TrimSuffix(got, "\n"), "\n") {
+		if len(line) > 80 {
+			t.Fatalf("line of %d columns: %q", len(line), line)
+		}
+	}
+}
+
 func TestAMoveCacheWarnPercentOfZeroTurnsTheWarningOff(t *testing.T) {
 	off := runningStatus(t, `,"move_cache_warn_percent":0`, movesWithShare(cacheNow, 60))
 	on := runningStatus(t, `,"move_cache_warn_percent":50`, movesWithShare(cacheNow, 60))
@@ -325,7 +394,14 @@ func TestStatusAndServeRefuseAMoveCacheWarnPercentOutsideZeroToHundred(t *testin
 	r, err := statusReport(in, cacheNow)
 	var out bytes.Buffer
 	writeStatus(&out, r, false)
-	refused := serve([]string{"-config", in.Config})
+	done := make(chan error, 1)
+	go func() { done <- serve([]string{"-config", in.Config}) }()
+	var refused error
+	select {
+	case refused = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve with move_cache_warn_percent 101 is still running after 10 s, want a refusal")
+	}
 
 	const named = "move_cache_warn_percent: 101 is outside 0 to 100"
 	if err != nil || !strings.Contains(out.String(), "        config error: "+named+"\n") {

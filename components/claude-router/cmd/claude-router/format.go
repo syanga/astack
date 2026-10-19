@@ -36,6 +36,7 @@ const statusCacheWindow = 24 * time.Hour
 func writeStatus(w io.Writer, r report, verbose bool) {
 	r.Now = r.Now.Round(0)
 	clock := r.Now.Format("15:04 MST")
+	warning := moveCacheWarning(r)
 	switch {
 	case !r.Running && r.SaveErr != "":
 		fmt.Fprintf(w, "%-69s%s\n", fmt.Sprintf("router  stopped  %s  %s", r.Listen, r.Manager), clock)
@@ -63,6 +64,9 @@ func writeStatus(w io.Writer, r report, verbose bool) {
 		fmt.Fprintf(w, "%-69s%s\n", fmt.Sprintf("router  stopped  %s  %s", r.Listen, r.Manager), clock)
 		if r.Sup.LastError != "" && r.Sup.LastErrorAt.After(lastStart(r.Sup)) {
 			fmt.Fprintf(w, "        last error: %s\n", r.Sup.LastError)
+		}
+		if warning != "" {
+			fmt.Fprintln(w, warning)
 		}
 		fmt.Fprintln(w, "next    claude-router start")
 		return
@@ -98,7 +102,7 @@ func writeStatus(w io.Writer, r report, verbose bool) {
 			fmt.Fprintln(w)
 			writeMigrations(w, r)
 		}
-		if next := nextStep(r); next != "" {
+		if next := nextStep(r, false); next != "" {
 			fmt.Fprintln(w)
 			fmt.Fprintf(w, "next    %s\n", next)
 		}
@@ -115,11 +119,10 @@ func writeStatus(w io.Writer, r report, verbose bool) {
 	for _, line := range problemLines(r) {
 		fmt.Fprintln(w, line)
 	}
-	next := nextStep(r)
-	if next == "" && moveCacheWarning(r) != "" {
-		next = "claude-router cache"
+	if warning != "" {
+		fmt.Fprintln(w, warning)
 	}
-	if next != "" {
+	if next := nextStep(r, warning != ""); next != "" {
 		fmt.Fprintf(w, "next    %s\n", next)
 	}
 }
@@ -292,22 +295,22 @@ func problemLines(r report) []string {
 		}
 		moves = append(moves, fmt.Sprintf("moved   %s  %s to %s %s, %s", m.Conversation, m.From, m.To, when(r.Now, m.At), words(moveWords, m.Reason)))
 	}
-	lines = append(lines, moves...)
-	if warning := moveCacheWarning(r); warning != "" {
-		lines = append(lines, warning)
-	}
-	return lines
+	return append(lines, moves...)
 }
 
 func moveCacheWarning(r report) string {
-	cost, _ := r.Digest.Cache.moveCost()
+	cost, unknown := r.Digest.Cache.moveCost()
 	writes := r.Digest.Cache.writes()
 	limit := int64(r.MoveWarnPercent)
 	if limit == 0 || writes == 0 || cost*100 <= limit*writes {
 		return ""
 	}
+	moved := share(cost, writes)
+	if unknown > 0 {
+		moved += " or more"
+	}
 	return fmt.Sprintf("cache   account moves wrote %s of all cache writes in %s, over %d%%",
-		share(cost, writes), windowLength(statusCacheWindow), limit)
+		moved, windowLength(statusCacheWindow), limit)
 }
 
 func share(part, whole int64) string {
@@ -324,7 +327,14 @@ func windowLength(d time.Duration) string {
 	return shortDuration(d)
 }
 
-func nextStep(r report) string {
+func nextStep(r report, cacheWarned bool) string {
+	if step := problemStep(r); step != "" || !cacheWarned {
+		return step
+	}
+	return "claude-router cache"
+}
+
+func problemStep(r report) string {
 	st := r.Status
 	if st.Journal != "ok" {
 		return "claude-router stop; claude-router start"

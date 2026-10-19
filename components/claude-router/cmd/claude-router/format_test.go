@@ -152,18 +152,25 @@ func unreachableReport() report {
 	return r
 }
 
-func cacheWarningReport(warnPercent int) report {
-	r := healthyReport()
+func withMoveShare(r report, warnPercent int) report {
 	r.MoveWarnPercent = warnPercent
 	r.Digest.Conversations = map[string]*conversationDigest{}
+	if r.Digest.Accounts == nil {
+		r.Digest.Accounts = map[router.AccountID]*usageTotals{}
+	}
 	if err := r.Digest.read(strings.NewReader(movesWithShare(sampleNow, 14))); err != nil {
 		panic(err)
 	}
 	return r
 }
 
+func cacheWarningReport(warnPercent int) report {
+	return withMoveShare(healthyReport(), warnPercent)
+}
+
 func TestStatusMatchesTheSelectedLayout(t *testing.T) {
 	stopped := report{Now: sampleNow, Manager: "launchd", Listen: "127.0.0.1:18787"}
+	stoppedWarning := withMoveShare(stopped, 10)
 	gaveUp := stopped
 	gaveUp.Sup = supervision{Runs: 5, GaveUpAt: at(0, 14, 12), LastError: "listen tcp 127.0.0.1:18787: bind: address already in use", LastErrorAt: at(0, 14, 11)}
 	for _, tc := range []struct {
@@ -182,6 +189,7 @@ func TestStatusMatchesTheSelectedLayout(t *testing.T) {
 		{"gave-up", gaveUp, false},
 		{"cache-warning", cacheWarningReport(10), false},
 		{"cache-warning-off", cacheWarningReport(20), false},
+		{"stopped-cache-warning", stoppedWarning, false},
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {
 			want, err := os.ReadFile(filepath.Join("testdata", "status", tc.fixture+".txt"))

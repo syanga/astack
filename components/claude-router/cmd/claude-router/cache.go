@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/syanga/astack/components/claude-router/internal/claude"
 	"github.com/syanga/astack/components/claude-router/internal/router"
 )
 
@@ -29,11 +30,10 @@ func cacheCommand(args []string) error {
 	if *window <= 0 {
 		return errors.New("-since must be positive")
 	}
-	in, err := loadInstallation(*state)
-	if err != nil {
+	if err := checkState(*state); err != nil {
 		return err
 	}
-	v, err := cacheReport(in, time.Now(), *window)
+	v, err := cacheReport(*state, time.Now(), *window)
 	if err != nil {
 		return err
 	}
@@ -41,12 +41,12 @@ func cacheCommand(args []string) error {
 	return nil
 }
 
-func cacheReport(in installation, now time.Time, window time.Duration) (cacheView, error) {
-	cfg, err := in.config()
+func cacheReport(state string, now time.Time, window time.Duration) (cacheView, error) {
+	cfg, err := claude.LoadConfig(filepath.Join(state, "config.json"))
 	if err != nil {
 		return cacheView{}, err
 	}
-	d, err := readDigest(filepath.Join(in.State, "events.jsonl"), now.Add(-window))
+	d, err := readDigest(filepath.Join(state, "events.jsonl"), now.Add(-window))
 	if err != nil {
 		return cacheView{}, err
 	}

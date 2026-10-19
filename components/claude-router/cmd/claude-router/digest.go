@@ -37,7 +37,6 @@ type conversationDigest struct {
 
 	servedOn   router.AccountID
 	moveReason string
-	uncosted   int
 }
 
 type accountMove struct {
@@ -164,6 +163,9 @@ func (d *digest) conversation(hash string) *conversationDigest {
 }
 
 func (w *cacheWindow) count(e claude.Event) {
+	if e.Usage == nil && e.Status != http.StatusOK {
+		return
+	}
 	if w.Accounts == nil {
 		w.Accounts = map[router.AccountID]*usageTotals{}
 	}
@@ -172,53 +174,38 @@ func (w *cacheWindow) count(e claude.Event) {
 		u = &usageTotals{}
 		w.Accounts[e.Account] = u
 	}
-	switch {
-	case e.Usage == nil && e.Status != http.StatusOK:
-	case e.Usage == nil || e.Usage.InputTokens == nil || e.Usage.CacheCreationInputTokens == nil || e.Usage.CacheReadInputTokens == nil:
+	if !windowCounted(e.Usage) {
 		u.Unknown++
-	default:
-		u.Requests++
-		u.Input += *e.Usage.InputTokens
-		u.Write += *e.Usage.CacheCreationInputTokens
-		u.Read += *e.Usage.CacheReadInputTokens
-		u.Output += val(e.Usage.OutputTokens)
+		return
 	}
+	u.Requests++
+	u.Input += *e.Usage.InputTokens
+	u.Write += *e.Usage.CacheCreationInputTokens
+	u.Read += *e.Usage.CacheReadInputTokens
+	u.Output += val(e.Usage.OutputTokens)
+}
+
+func windowCounted(u *claude.Usage) bool {
+	return u != nil && u.InputTokens != nil && u.CacheCreationInputTokens != nil && u.CacheReadInputTokens != nil
 }
 
 func (w *cacheWindow) track(c *conversationDigest, e claude.Event) {
-	if c.uncosted > 0 && e.Usage != nil && e.Account == w.Moves[c.uncosted-1].To {
-		w.Moves[c.uncosted-1].Cost = copied(e.Usage.CacheCreationInputTokens)
-		c.uncosted = 0
-	}
 	if e.Status != http.StatusOK || e.Account == "" {
 		return
 	}
-	if c.servedOn != "" && c.servedOn != e.Account {
-		c.uncosted = 0
-		if !e.At.Before(w.Since) {
-			reason := c.moveReason
-			if reason == "" {
-				reason = e.Reason
-			}
-			m := accountMove{At: e.At, Conversation: e.Conversation, From: c.servedOn, To: e.Account, Reason: reason}
-			if e.Usage != nil {
-				m.Cost = copied(e.Usage.CacheCreationInputTokens)
-			}
-			w.Moves = append(w.Moves, m)
-			if e.Usage == nil {
-				c.uncosted = len(w.Moves)
-			}
+	if c.servedOn != "" && c.servedOn != e.Account && !e.At.Before(w.Since) {
+		reason := c.moveReason
+		if reason == "" {
+			reason = e.Reason
 		}
+		m := accountMove{At: e.At, Conversation: e.Conversation, From: c.servedOn, To: e.Account, Reason: reason}
+		if windowCounted(e.Usage) {
+			cost := *e.Usage.CacheCreationInputTokens
+			m.Cost = &cost
+		}
+		w.Moves = append(w.Moves, m)
 	}
 	c.servedOn, c.moveReason = e.Account, ""
-}
-
-func copied(p *int64) *int64 {
-	if p == nil {
-		return nil
-	}
-	v := *p
-	return &v
 }
 
 func val(p *int64) int64 {

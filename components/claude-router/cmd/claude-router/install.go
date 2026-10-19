@@ -34,9 +34,16 @@ func defaultState() string {
 	return filepath.Join(home, ".local", "state", "astack", "claude-router")
 }
 
-func loadInstallation(state string) (installation, error) {
+func checkState(state string) error {
 	if state == "" || !filepath.IsAbs(state) {
-		return installation{}, errors.New("need an absolute -state directory")
+		return errors.New("need an absolute -state directory")
+	}
+	return nil
+}
+
+func loadInstallation(state string) (installation, error) {
+	if err := checkState(state); err != nil {
+		return installation{}, err
 	}
 	in := installation{State: state, Manager: "foreground", Config: filepath.Join(state, "config.json")}
 	data, err := os.ReadFile(filepath.Join(state, serviceRecord))
