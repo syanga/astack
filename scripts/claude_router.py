@@ -809,12 +809,13 @@ def say(line, stream=None):
         os.close(null)
 
 
-def report(command, refusal):
+def report(command, refusal, width=8):
+    """Print a refusal with labels width columns wide: 10 under the check lines of check and setup."""
     say("claude-router: {}: {}".format(command, refusal), sys.stderr)
     for line in refusal.details:
-        say("        " + line, sys.stderr)
+        say(" " * width + line, sys.stderr)
     if refusal.next_step:
-        say("next    " + refusal.next_step, sys.stderr)
+        say("next".ljust(width) + refusal.next_step, sys.stderr)
 
 
 def file_sha256(path):
@@ -956,7 +957,7 @@ def read_record(path):
     return record if isinstance(record, dict) else None
 
 
-def run_check(lay, state, settings_path, accepted, record_path, claude, timeout, stop):
+def run_check(lay, state, settings_path, accepted, record_path, claude, timeout, stop, passed_line=True):
     steps = []
 
     def line(result, text, details=(), next_step=None):
@@ -1034,7 +1035,8 @@ def run_check(lay, state, settings_path, accepted, record_path, claude, timeout,
         else:
             reason = "timed out after {} s".format(timeout) if code is None else "claude exited {}".format(code)
             line("fail", "test message got no answer through the router ({})".format(reason), next_step="claude-router status")
-    say(CHECK_LINE.format("check", "failed" if steps else "passed"))
+    if steps or passed_line:
+        say(CHECK_LINE.format("check", "failed" if steps else "passed"))
     return steps[0] if steps else None
 
 
@@ -1365,7 +1367,8 @@ def activate_locked(args, state_root, home, use_env):
     write_journal(lay.state, dict(journal, phase="verifying"))
     try:
         failed = verify_wiring(lay, args.verify, args.verify_timeout, stop) or (stop.signal and INTERRUPTED)
-        if not failed and run_check(lay, state, settings_path, accepted, acceptance, str(args.claude), CHECK_TIMEOUT, stop) is not None:
+        if not failed and run_check(lay, state, settings_path, accepted, acceptance, str(args.claude), CHECK_TIMEOUT, stop,
+                                    passed_line=not args.brief) is not None:
             failed = INTERRUPTED if stop.signal else CHECK_FAILED
     except (OSError, ValueError, KeyError) as error:
         failed = "the check could not finish: {}".format(error)
@@ -1373,8 +1376,9 @@ def activate_locked(args, state_root, home, use_env):
         if failed != CHECK_FAILED:
             say("claude-router: activate: {}".format(failed), sys.stderr)
         undo_journal(lay.state, state, manifest_path)
-        say("undo    {} restored; the router keeps its logins and assignments".format(shown(settings_path)), sys.stderr)
-        say("next    claude-router status", sys.stderr)
+        label = CHECK_LINE.format if args.brief else "{:<7} {}".format
+        say(label("undo", "{} restored; the router keeps its logins and assignments".format(shown(settings_path))), sys.stderr)
+        say(label("next", "claude-router status"), sys.stderr)
         return 1
     write_journal(lay.state, dict(journal, phase="active", activated=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
     if args.brief:
@@ -1476,7 +1480,7 @@ def main():
                 return check(args, state_root, home, use_env)
             return activate(args, state_root, home, use_env) if args.command == "activate" else print_identity(args, state_root, home)
         except Refusal as refusal:
-            report(args.command, refusal)
+            report(args.command, refusal, 10 if args.command == "check" or getattr(args, "brief", False) else 8)
             return 1
     run(args.command, state_root, layout(home, use_env, state_root, args.manager, args.service, args.port), args)
     return 0

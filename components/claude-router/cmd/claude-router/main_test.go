@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -55,5 +56,24 @@ func TestStatusFromAnotherDirectoryReadsARelativeTokenPathBesideTheConfig(t *tes
 
 	if err != nil || !r.Running {
 		t.Fatalf("status from outside the state directory: err %v, running %v, want the running router:\n%s", err, r.Running, out.String())
+	}
+}
+
+func TestRefusalsOfStepCommandsPadTheirLabelsToTenColumns(t *testing.T) {
+	refusal := nextError{err: errors.New("Claude Code already routes through the router"), detail: "since 10:02",
+		next: "claude-router account add NAME"}
+	for command, want := range map[string]string{
+		"setup":   "claude-router: setup: Claude Code already routes through the router\n          since 10:02\nnext      claude-router account add NAME\n",
+		"account": "claude-router: account: Claude Code already routes through the router\n          since 10:02\nnext      claude-router account add NAME\n",
+		"check":   "claude-router: check: Claude Code already routes through the router\n          since 10:02\nnext      claude-router account add NAME\n",
+		"start":   "claude-router: start: Claude Code already routes through the router\n        since 10:02\nnext    claude-router account add NAME\n",
+	} {
+		var out bytes.Buffer
+
+		reportError(&out, command, refusal)
+
+		if out.String() != want {
+			t.Errorf("%s refusal\n%s\nwant\n%s", command, out.String(), want)
+		}
 	}
 }

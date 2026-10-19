@@ -41,22 +41,33 @@ func main() {
 		usage()
 	}
 	if err := cmd(os.Args[2:]); err != nil {
-		var n nextError
 		var exit silentExit
 		if errors.As(err, &exit) {
 			os.Exit(int(exit))
 		}
-		if errors.As(err, &n) {
-			fmt.Fprintf(os.Stderr, "claude-router: %s: %v\n", os.Args[1], n.err)
-			if n.detail != "" {
-				fmt.Fprintf(os.Stderr, "        %s\n", n.detail)
-			}
-			fmt.Fprintf(os.Stderr, "next    %s\n", n.next)
-		} else {
-			fmt.Fprintf(os.Stderr, "claude-router: %s: %v\n", os.Args[1], err)
-		}
+		reportError(os.Stderr, os.Args[1], err)
 		os.Exit(1)
 	}
+}
+
+// reportError prints err with its detail and next step. setup, account, and
+// check print their steps under 10-column labels, and the other commands
+// under 8-column ones, so each refusal lines up with its command's lines.
+func reportError(w io.Writer, command string, err error) {
+	var n nextError
+	if !errors.As(err, &n) {
+		fmt.Fprintf(w, "claude-router: %s: %v\n", command, err)
+		return
+	}
+	width := 8
+	if command == "setup" || command == "account" || command == "check" {
+		width = 10
+	}
+	fmt.Fprintf(w, "claude-router: %s: %v\n", command, n.err)
+	if n.detail != "" {
+		fmt.Fprintf(w, "%*s%s\n", width, "", n.detail)
+	}
+	fmt.Fprintf(w, "%-*s%s\n", width, "next", n.next)
 }
 
 type nextError struct {

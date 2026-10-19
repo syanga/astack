@@ -4,7 +4,7 @@ import signal
 import subprocess
 import sys
 
-from test_claude_router_activate import HELPER_WITH_MANAGED_SETTINGS, SLEEPY_CLAUDE, ActivationFixture, timed
+from test_claude_router_activate import HELPER_WITH_MANAGED_SETTINGS, SDK, SLEEPY_CLAUDE, ActivationFixture, timed
 
 GOLDEN = "components/claude-router/cmd/claude-router/testdata/check/"
 
@@ -112,9 +112,31 @@ class SetupActivationTests(CheckFixture):
         result = subprocess.run(command, capture_output=True, text=True, env=self.activate_env())
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.shown(result), self.golden("passed.txt").replace("check     passed\n", "check     passed\n"
+        self.assertEqual(self.shown(result), self.golden("passed.txt").replace("check     passed\n",
                                                                                "activated Claude Code routes through the router\n"))
         self.assertEqual(self.base_url(), self.listen)
+
+    def brief(self, *arguments, **env):
+        self.assertEqual(self.direct().returncode, 0)
+        command = [sys.executable, "-c", HELPER_WITH_MANAGED_SETTINGS, "activate", "--brief",
+                   "--manifest", str(self.home / ".local/state/astack/manifest.json"), *arguments]
+        return subprocess.run(command, capture_output=True, text=True, env=dict(self.activate_env(), **env))
+
+    def test_brief_activation_pads_its_refusal_and_undo_labels_like_the_check_lines(self):
+        self.accept(sdk="v0.0.1")
+        refused = self.brief("--acceptance", str(self.acceptance))
+        failed = self.brief(FAKE_CLAUDE_STATUS="529")
+
+        self.assertEqual((refused.returncode, refused.stderr), (1, "\n".join([
+            "claude-router: activate: the acceptance record does not match this installation",
+            "          sdk: accepted v0.0.1, running {}".format(SDK),
+            "next      run the acceptance matrix at this installation, or install the accepted head",
+        ]) + "\n"))
+        self.assertEqual((failed.returncode, failed.stderr), (1, "\n".join([
+            "undo      ~/.claude/settings.json restored; the router keeps its logins and assignments",
+            "next      claude-router status",
+        ]) + "\n"))
+        self.assertEqual(self.shown(failed).splitlines()[-1], "check     failed")
 
 
 
