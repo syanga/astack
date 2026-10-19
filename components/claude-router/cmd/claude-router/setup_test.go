@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -182,5 +185,102 @@ func TestSetupRemovesTheNewLoginsWhenTheConfigWriteFails(t *testing.T) {
 	}
 	if got := strings.Join(l.logins(), " "); got != "work.json" || !l.running() {
 		t.Fatalf("logins %s, running %v; want only work.json and the router running", got, l.running())
+	}
+}
+
+const lockReportingHelper = `#!/usr/bin/env python3
+import fcntl, os, sys
+held = "no --lock-fd"
+if "--lock-fd" in sys.argv:
+    fd = int(sys.argv[sys.argv.index("--lock-fd") + 1])
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        other = os.open(os.path.join(os.environ["FAKE_STATE"], "activation.lock"), os.O_RDWR)
+        try:
+            fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            held = "lock free"
+        except BlockingIOError:
+            held = "lock held"
+    except OSError:
+        held = "descriptor {} is not the lock".format(fd)
+print("helper    " + held)
+`
+
+func helperScript(t *testing.T, text string) string {
+	t.Helper()
+	python := filepath.Join(t.TempDir(), "python3")
+	if err := os.WriteFile(python, []byte(text), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return python
+}
+
+func TestSetupHandsItsLockToActivate(t *testing.T) {
+	l := setupLane(t)
+	l.in.Python = helperScript(t, lockReportingHelper)
+	t.Setenv("FAKE_STATE", l.in.State)
+
+	var err error
+	out := stdoutOf(t, func() { err = runSetup(l.in, []string{"work"}, false, os.Stdout) })
+
+	if err != nil || !strings.Contains(out, "helper    lock held\n") {
+		t.Fatalf("setup: %v, output\n%s\nwant the helper to hold the lock through descriptor 3", err, out)
+	}
+}
+
+const signalReportingHelper = `#!/usr/bin/env python3
+import os, signal, sys, time
+def stop(signum, frame):
+    print("helper    stopped by " + signal.Signals(signum).name, flush=True)
+    sys.exit(7)
+for signum in (signal.SIGTERM, signal.SIGHUP):
+    signal.signal(signum, stop)
+open(os.environ["FAKE_READY"], "w").close()
+time.sleep(5)
+`
+
+func TestSetupAndCheckPassTerminationSignalsToTheHelper(t *testing.T) {
+	commands := map[string]func(t *testing.T, python string) func() error{
+		"setup": func(t *testing.T, python string) func() error {
+			l := setupLane(t)
+			l.in.Python = python
+			return func() error { return runSetup(l.in, []string{"work"}, false, os.Stdout) }
+		},
+		"check": func(t *testing.T, python string) func() error {
+			in, _, _ := directSetup(t, python)
+			return func() error { return check([]string{"-state", in.State}) }
+		},
+	}
+	for _, sig := range []struct {
+		signal syscall.Signal
+		name   string
+	}{{syscall.SIGTERM, "SIGTERM"}, {syscall.SIGHUP, "SIGHUP"}} {
+		for command, prepare := range commands {
+			t.Run(command+" "+sig.name, func(t *testing.T) {
+				ready := filepath.Join(t.TempDir(), "ready")
+				t.Setenv("FAKE_READY", ready)
+				run := prepare(t, helperScript(t, signalReportingHelper))
+				caught := make(chan os.Signal, 1)
+				signal.Notify(caught, sig.signal)
+				defer signal.Stop(caught)
+
+				var err error
+				printed := make(chan string, 1)
+				go func() { printed <- stdoutOf(t, func() { err = run() }) }()
+				for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+					if _, serr := os.Stat(ready); serr == nil {
+						break
+					}
+				}
+				if err := syscall.Kill(os.Getpid(), sig.signal); err != nil {
+					t.Fatal(err)
+				}
+				out := <-printed
+
+				if err != silentExit(7) || !strings.HasSuffix(out, "helper    stopped by "+sig.name+"\n") {
+					t.Fatalf("%s: %v, output\n%s\nwant the helper stopped by %s and exit 7", command, err, out, sig.name)
+				}
+			})
+		}
 	}
 }

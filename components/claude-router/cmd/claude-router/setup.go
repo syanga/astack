@@ -135,7 +135,7 @@ func runSetup(in installation, names []string, noBrowser bool, out io.Writer) er
 		return silentExit(1)
 	}
 	line(out, "ready", strings.Join(all, ", ")+" ready")
-	code, err := runHelperTo(in, []string{in.Helper, "activate", "--brief", "--manifest", in.Manifest, "--lock-fd", "3"}, lock, out)
+	code, err := runHelperTo(in, []string{in.Helper, "activate", "--brief", "--manifest", in.Manifest, "--lock-fd", "3"}, lock, out, relayed...)
 	if err != nil {
 		return err
 	}

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -318,7 +319,7 @@ func check(args []string) error {
 	if err := in.checkHelper("check"); err != nil {
 		return err
 	}
-	code, err := runHelperTo(in, []string{in.Helper, "check", "--manifest", in.Manifest}, nil, os.Stdout)
+	code, err := runHelperTo(in, []string{in.Helper, "check", "--manifest", in.Manifest}, nil, os.Stdout, relayed...)
 	if err == nil && code != 0 {
 		return silentExit(code)
 	}
@@ -345,19 +346,41 @@ func runHelper(in installation, args []string, lock *os.File) (int, error) {
 	return runHelperTo(in, args, lock, os.Stdout)
 }
 
-func runHelperTo(in installation, args []string, lock *os.File, out io.Writer) (int, error) {
+// relayed are the signals that setup and check pass to the helper, whose
+// check ends its test message and restores direct settings on them.
+var relayed = []os.Signal{syscall.SIGTERM, syscall.SIGHUP}
+
+// runHelperTo runs the helper and waits for it. Each signal in relay that
+// this process receives meanwhile goes to the helper instead.
+func runHelperTo(in installation, args []string, lock *os.File, out io.Writer, relay ...os.Signal) (int, error) {
 	cmd := exec.Command(in.Python, args...)
 	cmd.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1")
 	cmd.Stdout, cmd.Stderr = out, os.Stderr
 	if lock != nil {
 		cmd.ExtraFiles = []*os.File{lock}
 	}
-	err := cmd.Run()
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		return exit.ExitCode(), nil
+	received := make(chan os.Signal, 1)
+	if len(relay) > 0 {
+		signal.Notify(received, relay...)
+		defer signal.Stop(received)
 	}
-	return 0, err
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	for {
+		select {
+		case s := <-received:
+			_ = cmd.Process.Signal(s)
+		case err := <-done:
+			var exit *exec.ExitError
+			if errors.As(err, &exit) {
+				return exit.ExitCode(), nil
+			}
+			return 0, err
+		}
+	}
 }
 
 func exitWith(code int, err error) error {
