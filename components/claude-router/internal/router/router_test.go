@@ -1649,3 +1649,19 @@ func TestAdmitAgreesWithDecideDuringAHold(t *testing.T) {
 		t.Fatalf("Admit and Decide during a hold %q, want %q: a reset not yet passed on the wall clock blocks, and a check stamped before the mark is stale", got, want)
 	}
 }
+
+func TestAConversationOnAnAccountNoLongerEnrolledIsPlacedAgain(t *testing.T) {
+	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
+	h.route(t0, req("conv"))
+	if err := h.r.Served(t0, "conv", a); err != nil {
+		t.Fatal(err)
+	}
+	h.accounts = accts(b, 1.0)
+	h.restart()
+
+	moved := h.route(t0.Add(time.Minute), req("conv"))
+
+	if moved.Kind != Migrate || moved.From != a || moved.Account != b || moved.Reason != ReasonNotEnrolled || h.bound("conv") != b {
+		t.Fatalf("got %+v bound to %s, want a not_enrolled migration from %s to %s", moved, h.bound("conv"), a, b)
+	}
+}

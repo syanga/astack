@@ -542,11 +542,11 @@ the assignment.
 | --- | --- |
 | `place` | A new conversation. Commit before dispatch. |
 | `dispatch` | An existing assignment on a usable account. |
-| `migrate` | Another account is eligible, and the assigned account has a known rejection that blocks the model (`exhausted`), showed paid use (`overage_observed`), or needs login before the assignment served any response (`never_served_relogin`). Commit before dispatch. |
+| `migrate` | Another account is eligible, and the assigned account has a known rejection that blocks the model (`exhausted`), showed paid use (`overage_observed`), needs login before the assignment served any response (`never_served_relogin`), or is no longer enrolled (`not_enrolled`). Commit before dispatch. A conversation whose account is no longer enrolled and that no account can take gets the `wait`, `refuse`, or `unavailable` of a new conversation and keeps its assignment (`TestAConversationOnAnAccountNoLongerEnrolledIsPlacedAgain`). |
 | `retry` | `transient`, `network`, or `throttle` on the previous attempt, within `MaxAttempts`. |
 | `fail` | The retry budget is spent, or the previous attempt failed `request_scoped`. |
 | `wait` | No eligible account. `Until` is the earliest usable reset; `ResetKnown` is false when `Until` is only a recheck time. |
-| `reauth` | The assigned account needs a browser login and the assignment has served a response, or no other account is eligible; or the account is no longer enrolled. |
+| `reauth` | The assigned account needs a browser login and the assignment has served a response, or no other account is eligible. |
 | `refuse` | The included-only check fails for the assigned account and no migration applies, or it fails for every logged-in account when placing. `RecheckOverage` is set when a check is unknown or stale. |
 | `unavailable` | No enrolled account is logged in. |
 | `reject` | The request has no conversation identity. |
@@ -1680,7 +1680,8 @@ destination receives the same session identity the source did
 - **No return.** A migrated conversation stays on its destination when the
   source recovers (`TestMigratedConversationStaysAfterTheSourceRecovers`).
   It moves again only on a new confirmed exhaustion, observed paid use, a
-  login requirement before it was served (PR2), or a manual move.
+  login requirement before it was served (PR2), removal of its account from
+  `config.json`, or a manual move.
 - **Cancellation.** A client that goes away during the destination's
   response cancels that attempt; the committed migration stays
   (`TestClientCancellationDuringTheMovedResponseKeepsTheMigration`).
@@ -1853,7 +1854,7 @@ claude-router` call it with the default layout. The default targets and
 
 | Rule | Behavior |
 | --- | --- |
-| Build | `go build -trimpath -buildvcs=false` of `./cmd/claude-router` with `GOPROXY=off GOSUMDB=off GOFLAGS=-mod=readonly CGO_ENABLED=0`, into a temporary directory outside the home. The linker gets the checkout's short commit, because Go records no revision for a build inside a linked Git worktree, and the router code digest (Acceptance record, below), which the service reports as `code_sha256`. A preview builds too, so it reports `WRITE` or `KEEP` exactly. |
+| Build | `go build -trimpath -buildvcs=false` of `./cmd/claude-router` with `GOPROXY=off GOSUMDB=off GOFLAGS=-mod=readonly GOWORK=off CGO_ENABLED=0`, into a temporary directory outside the home. These values replace any inherited ones, so a `go.work` above the checkout or a `GOFLAGS` from the environment cannot swap in other module code (`test_an_ambient_go_workspace_does_not_reach_the_build`). The service reports a replaced SDK module as `<version> replaced by <path> [<version>]` in `sdk`, which no acceptance record matches (`TestTheSDKVersionNamesAReplacementSoNoRecordMatchesIt`). The linker gets the checkout's short commit, because Go records no revision for a build inside a linked Git worktree, and the router code digest (Acceptance record, below), which the service reports as `code_sha256`. A preview builds too, so it reports `WRITE` or `KEEP` exactly. |
 | Router code | The router code is every file under `components/claude-router/` that Git tracks at the checkout's commit, except `*.md`, `*_test.go`, files under a `testdata/` directory, and `accepted.json`. In a checkout without Git, it is every such file in the directory, skipping paths with a part that starts with `.`. When a modified, deleted, or untracked file of the router code differs from the commit, install and its preview exit 1 before any write with `claude-router code differs from the checkout's commit: <paths>; commit or revert it, then install again` (`test_an_edit_inside_the_code_set_refuses_install_and_an_edit_outside_does_not`). An edit outside the router code installs. |
 | Prerequisites | Go 1.26.0 or later. `go env` must report the host's OS and architecture for both target and host; cross-compilation settings, an older Go, an unsupported OS, or a failed build stop the run before any write. |
 | Payload | `$XDG_DATA_HOME/astack/claude-router/bin/claude-router` and the helper with its imports in `lib/`. Both are copies, so a moved checkout leaves them runnable. When the checkout has `components/claude-router/accepted.json`, install copies it to `$XDG_DATA_HOME/astack/claude-router/accepted.json`, the record that `setup`, `check`, and `activate` read by default. |
