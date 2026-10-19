@@ -18,17 +18,20 @@ const staleAfter = 15 * time.Minute
 const recentMove = 15 * time.Minute
 
 type report struct {
-	Now        time.Time
-	Manager    string
-	Listen     string
-	StateShown string
-	Running    bool
-	Status     claude.Status
-	Sup        supervision
-	Digest     digest
-	ConfigErr  string
-	SaveErr    string
+	Now             time.Time
+	Manager         string
+	Listen          string
+	StateShown      string
+	Running         bool
+	Status          claude.Status
+	Sup             supervision
+	Digest          digest
+	ConfigErr       string
+	SaveErr         string
+	MoveWarnPercent int
 }
+
+const statusCacheWindow = 24 * time.Hour
 
 func writeStatus(w io.Writer, r report, verbose bool) {
 	r.Now = r.Now.Round(0)
@@ -112,7 +115,11 @@ func writeStatus(w io.Writer, r report, verbose bool) {
 	for _, line := range problemLines(r) {
 		fmt.Fprintln(w, line)
 	}
-	if next := nextStep(r); next != "" {
+	next := nextStep(r)
+	if next == "" && moveCacheWarning(r) != "" {
+		next = "claude-router cache"
+	}
+	if next != "" {
 		fmt.Fprintf(w, "next    %s\n", next)
 	}
 }
@@ -285,7 +292,36 @@ func problemLines(r report) []string {
 		}
 		moves = append(moves, fmt.Sprintf("moved   %s  %s to %s %s, %s", m.Conversation, m.From, m.To, when(r.Now, m.At), words(moveWords, m.Reason)))
 	}
-	return append(lines, moves...)
+	lines = append(lines, moves...)
+	if warning := moveCacheWarning(r); warning != "" {
+		lines = append(lines, warning)
+	}
+	return lines
+}
+
+func moveCacheWarning(r report) string {
+	cost, _ := r.Digest.Cache.moveCost()
+	writes := r.Digest.Cache.writes()
+	limit := int64(r.MoveWarnPercent)
+	if limit == 0 || writes == 0 || cost*100 <= limit*writes {
+		return ""
+	}
+	return fmt.Sprintf("cache   account moves wrote %s of all cache writes in %s, over %d%%",
+		share(cost, writes), windowLength(statusCacheWindow), limit)
+}
+
+func share(part, whole int64) string {
+	if whole == 0 {
+		return "--"
+	}
+	return fmt.Sprintf("%.1f%%", float64(part)*100/float64(whole))
+}
+
+func windowLength(d time.Duration) string {
+	if d%time.Hour == 0 {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return shortDuration(d)
 }
 
 func nextStep(r report) string {

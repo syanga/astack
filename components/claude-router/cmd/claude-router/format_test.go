@@ -152,6 +152,16 @@ func unreachableReport() report {
 	return r
 }
 
+func cacheWarningReport(warnPercent int) report {
+	r := healthyReport()
+	r.MoveWarnPercent = warnPercent
+	r.Digest.Conversations = map[string]*conversationDigest{}
+	if err := r.Digest.read(strings.NewReader(movesWithShare(sampleNow, 14))); err != nil {
+		panic(err)
+	}
+	return r
+}
+
 func TestStatusMatchesTheSelectedLayout(t *testing.T) {
 	stopped := report{Now: sampleNow, Manager: "launchd", Listen: "127.0.0.1:18787"}
 	gaveUp := stopped
@@ -170,6 +180,8 @@ func TestStatusMatchesTheSelectedLayout(t *testing.T) {
 		{"unreachable-verbose", unreachableReport(), true},
 		{"stopped", stopped, false},
 		{"gave-up", gaveUp, false},
+		{"cache-warning", cacheWarningReport(10), false},
+		{"cache-warning-off", cacheWarningReport(20), false},
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {
 			want, err := os.ReadFile(filepath.Join("testdata", "status", tc.fixture+".txt"))

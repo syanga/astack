@@ -1,0 +1,5 @@
+router  running 6h15m  127.0.0.1:18787  launchd  journal ok          14:20 PDT
+work    ready        5h 38% (16:40)  wk 21% (Sun)  cap 5  2/3 active  cache 91%
+alumni  ready        5h  9% (17:55)  wk 64% (Sat)  cap 1  1/2 active  cache 87%
+cache   account moves wrote 14.0% of all cache writes in 24h, over 10%
+next    claude-router cache
