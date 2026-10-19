@@ -42,8 +42,10 @@ type Config struct {
 	OverageCheckEvery Duration `json:"overage_check_every,omitzero"`
 	// MaxUpstreamAttempts caps the upstream attempts of one client request,
 	// from 1 to 4. Default 4: three router dispatches and the SDK's
-	// redispatch after a 401. With 1 the router never retries, so the number
-	// of upstream attempts equals the number of client requests.
+	// redispatch after a 401. With 1 the router never resends a request that
+	// may have reached the provider, so the number of upstream attempts
+	// equals the number of client requests. A network failure before the
+	// request was written is not an upstream attempt.
 	MaxUpstreamAttempts int `json:"max_upstream_attempts,omitempty"`
 	// TestUpstream redirects requests for api.anthropic.com to a loopback
 	// URL. It exists for controlled-upstream lanes and is reported as an

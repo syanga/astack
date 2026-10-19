@@ -179,6 +179,7 @@ implemented in `probes/classify.go`:
 | --- | --- | --- |
 | `request_scoped` | Error is request-scoped, such as the SDK's fast-mode credit refusal | Report to the client, no retry |
 | `transient` | 408 or 5xx, including 529 | Bounded retry on the assigned account |
+| `network` | No HTTP response: the connection failed before the provider answered | Retry on a new connection on the assigned account, charged or not by phase ([Network failures](#network-failures)) |
 | `throttle` | 429, not credential-scoped, no unified rejection in the attempt's headers | Bounded retry on the assigned account |
 | `exhausted` | 429, credential-scoped or a rejected 5h or 7d window in the attempt's headers | Record exhaustion, migrate |
 | `model_limit` | 429, unified rejection with only overage or model-specific claims | Record the rejection, which blocks the account for that model until its reset, as for `exhausted`. No provider response of this shape has been observed (row RP-14) |
@@ -370,7 +371,9 @@ implements exhaustion waiting and migration (see "Recovery (PR4)").
 - For an unknown reset, the router omits `anthropic-ratelimit-unified-reset` and
   sends a bounded `retry-after` (`waiting.json#rows[5]`).
 - The watchdog also raises client retries for other transient failures to about
-  300. The router's cap on its own upstream attempts covers that.
+  300. The router's cap on its own upstream attempts covers that, except for
+  the 503 after the network retry time runs out, which clients retry
+  ([Network failures](#network-failures)).
 
 ### Included-only: the documented limit is accepted
 
@@ -540,7 +543,7 @@ the assignment.
 | `place` | A new conversation. Commit before dispatch. |
 | `dispatch` | An existing assignment on a usable account. |
 | `migrate` | Another account is eligible, and the assigned account has a known rejection that blocks the model (`exhausted`), showed paid use (`overage_observed`), or needs login before the assignment served any response (`never_served_relogin`). Commit before dispatch. |
-| `retry` | `transient` or `throttle` on the previous attempt, within `MaxAttempts`. |
+| `retry` | `transient`, `network`, or `throttle` on the previous attempt, within `MaxAttempts`. |
 | `fail` | The retry budget is spent, or the previous attempt failed `request_scoped`. |
 | `wait` | No eligible account. `Until` is the earliest usable reset; `ResetKnown` is false when `Until` is only a recheck time. |
 | `reauth` | The assigned account needs a browser login and the assignment has served a response, or no other account is eligible; or the account is no longer enrolled. |
@@ -890,21 +893,22 @@ the transport, and the SDK error's status and scope:
    status check, so a generation the upstream already completed is never sent
    again. The SDK gives such an error status 500 when it carries none
    (`sdk/api/handlers/handlers_execution.go:358-361`).
-2. Otherwise the attempt failed, with an error status or with no response,
-   and the status decides first: 401 or 403 is `auth`, and 408 or 5xx is
-   `transient`, whatever the SDK's scope. The attempt's own status wins when
-   it is 400 or above; with no response, the SDK's status counts. In fast mode
-   the SDK marks every failure request-scoped, so this order keeps an upstream
-   401 from reaching the client as 401, and retries a dropped connection
-   (`TestFastModeConnectionFailureIsRetried`).
-3. Otherwise a request-scoped error is `request_scoped`. Either way it is
+2. When the attempt got no HTTP response, the failure is `network`, whatever
+   the SDK's status and scope ([Network failures](#network-failures)). In fast
+   mode the SDK marks every failure request-scoped, so this order retries a
+   dropped connection (`TestFastModeConnectionFailureIsRetried`).
+3. Otherwise the attempt failed with an error status, and the status decides
+   first: 401 or 403 is `auth`, and 408 or 5xx is `transient`, whatever the
+   SDK's scope. The attempt's own status wins when it is 400 or above. This
+   order keeps an upstream 401 from reaching the client as 401 in fast mode.
+4. Otherwise a request-scoped error is `request_scoped`. Either way it is
    answered at once with the upstream status and message and
    `x-should-retry: false`.
-4. A 429 is `exhausted`, `model_limit`, or `throttle` from the attempt's own
+5. A 429 is `exhausted`, `model_limit`, or `throttle` from the attempt's own
    headers.
 
-Transient and throttle failures retry on the same account after 250 ms, then
-500 ms, up to `MaxAttempts`.
+Transient, network, and throttle failures retry on the same account after
+250 ms, then 500 ms, up to `MaxAttempts`.
 
 One client request causes at most 4 upstream attempts. The router dispatches
 at most 3 times, and the SDK can add one same-account redispatch after a 401
@@ -914,8 +918,11 @@ account but the one the call is pinned to. Before a response reaches the
 client, the service checks that the transport saw at least one attempt for
 the call, all on the pinned account, and otherwise answers 502.
 `max_upstream_attempts` lowers the cap to 1, 2, or 3. With 1 the router
-never retries, so upstream attempts equal client requests; the live lane
-uses this (`TestASingleAttemptCapNeverRetries`).
+never resends a request that may have reached the provider, so upstream
+attempts equal client requests; the live lane uses this
+(`TestASingleAttemptCapNeverRetries`). A network failure before the request
+was written is not an upstream attempt, and the router retries it under any
+cap ([Network failures](#network-failures)).
 
 The transport also refuses an inference attempt, the SDK's refresh
 redispatch included, when the router would not dispatch to its account at
@@ -956,7 +963,9 @@ reaches no upstream
 (`TestRefreshRedispatchAfterABackwardClockStepIsRefusedAsStale`).
 
 The cap is per client HTTP request. Every router-made HTTP failure answer
-carries `x-should-retry: false`, which a client honors. Two answers do not
+carries `x-should-retry: false`, which a client honors, except the answer
+after the network retry time runs out ([Network failures](#network-failures)).
+Two other answers do not
 stop client retries: an SSE `error` event after the response committed,
 which Claude Code retries for `overloaded_error`, and the local 429, which
 clients wait through and resend. Each resend is a new request with its own
@@ -976,11 +985,86 @@ front of the client, as the live runbook's gate does.
 
 The router retries only a failure before output: an error status, an error
 event before any other event, or a connection that dropped before the first
-event. In the first two the upstream sent no output. A connection that drops,
-outside fast mode, may have dropped after the upstream began generating, and
-the retry can make it generate twice for one client request. Delivery of a
-dropped request is therefore at least once, not exactly once. A
-request-scoped SDK error after a 2xx attempt is final (rule 1 above).
+event. In the first two the upstream sent no output. A connection that drops
+after the request was written, outside fast mode, may have dropped after the
+upstream began generating, and the retry can make it generate twice for one
+client request. Delivery of a dropped request is therefore at least once, not
+exactly once. A request-scoped SDK error after a 2xx attempt is final (rule 1
+above).
+
+### Network failures
+
+A network failure is an attempt that got no HTTP response: a refused or
+timed-out connection, a failed TLS handshake, or a connection reset or
+closed before the response headers arrived. The service classifies it
+`network` and records its phase from the hooks net/http calls
+(`net/http/httptrace`):
+
+| Phase | When | Provider may have run it | Charged to the attempt cap |
+| --- | --- | --- | --- |
+| `before_write` | No connection was obtained, or every write of the request failed | No | No |
+| `after_write` | Anything else, including a connection on which net/http reported no write. Its HTTP/2 transport reports none when writing the headers fails. | Yes | Yes |
+
+The transport retries a `before_write` failure itself, without returning to
+the SDK. It waits 250 ms, then 500 ms, 1 s, and 2 s for each later try, and
+starts no try more than 25 s after the request's first `before_write`
+failure. Each try checks `Router.Admit` and the cap again. A client that goes
+away ends the retries. The dial timeout is 10 s and the TLS handshake
+timeout 10 s, so a try that starts near the end can fail up to 20 s after
+the 25 s. When the time runs out, the service answers 503 `api_error` with
+`x-should-retry: true` and a message that names the last error.
+
+Claude Code 2.1.300 and Agent SDK 0.3.300 retry that answer with their own
+backoff, about 0.5 s and then 1.1 s, up to 10 times, and honor
+`retry-after`. Claude Code with `CLAUDE_CODE_RETRY_WATCHDOG=1` retries up to
+300 times. Both clients stopped after one request only when the 503 carried
+`x-should-retry: false`. Status 500, 503, or 529, and error type `api_error`
+or `overloaded_error`, made no difference
+(`reports/net-retry/client-probe/summary.json`). Each client retry is a new
+request with its own cap and its own 25 s.
+
+An `after_write` failure returns to the routing loop, which retries it like a
+`transient` failure: on the assigned account, after 250 ms and then 500 ms,
+within the attempt cap. A network failure changes no account state, so it
+never migrates a conversation. When the cap is spent, the answer is the
+cap's 503 with `x-should-retry: false`. A client retry there could spend up
+to 4 more attempts that each may run, up to 300 times with the watchdog.
+
+After any network failure the transport replaces its `http.Transport` with a
+new one and closes the old one's idle connections. Later attempts therefore
+dial new connections and never reuse the one that failed. Requests already in
+flight on the old transport finish on it. Several streams that fail together
+on one HTTP/2 connection cause one replacement.
+
+Each network failure is an `attempt_failed` event with `class: network`, its
+`phase`, the error text in `detail` (at most 200 bytes), and no `status`.
+The transport logs the failures it retries too. The `request` event's
+`upstream_attempts` counts only charged attempts.
+
+A failure after the response headers arrived, such as a stream that drops
+before its first event, is not a network failure. It keeps its class, and
+the transport does not replace its `http.Transport` for it.
+
+The remaining risk is a double run: an `after_write` retry can make the
+provider run one client request twice, and each run draws on the account's
+allowance.
+
+Tests, each against a real HTTP/2 server without TLS
+(`internal/claude/network_test.go`):
+
+- `TestAConnectionResetBeforeTheBodyIsReadIsRetriedWithoutCharge`: with a cap
+  of 1, a reset before the server reads a 1 MiB body is retried on a new
+  connection and served.
+- `TestAConnectionResetAfterTheBodyIsReadIsRetriedAndCharged`: a reset after
+  the read is retried on a new connection on the same account, and with a cap
+  of 1 it is the cap's 503 after one attempt.
+- `TestAKilledHTTP2ConnectionRetriesEveryStreamOnANewConnection`: three
+  streams on one connection that is reset each get one charged retry on
+  another connection.
+- `TestFailuresBeforeWriteStopAfterTheNetworkRetryTime`: refused connections
+  end with the retryable 503 after the network retry time, with no charged
+  attempt.
+- `TestAClientThatLeavesStopsTheNetworkRetries`.
 
 ### Streams
 
@@ -1319,7 +1403,8 @@ tested offline. PR1 lane 4 (CC-1) measures cache reads with real requests.
 account IDs, the first 12 hex digits of the SHA-256 of the conversation key,
 statuses, classes, decisions, durations, and, on `request`, the usage
 counters the upstream
-reported. A counter the upstream did not report is `null`, not 0.
+reported. Since PR7, an `attempt_failed` event for a network failure carries
+its `phase` and the error text in `detail`. A counter the upstream did not report is `null`, not 0.
 `TestNoSecretInStatusEventsOrLogs` and lane 2 search events, status, logs,
 the journal, and the SDK configuration for every token.
 
