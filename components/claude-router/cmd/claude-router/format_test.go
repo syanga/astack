@@ -190,6 +190,7 @@ func TestStatusMatchesTheSelectedLayout(t *testing.T) {
 		{"cache-warning", cacheWarningReport(10), false},
 		{"cache-warning-off", cacheWarningReport(20), false},
 		{"stopped-cache-warning", stoppedWarning, false},
+		{"stopped-cache-warning-verbose", stoppedWarning, true},
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {
 			want, err := os.ReadFile(filepath.Join("testdata", "status", tc.fixture+".txt"))

@@ -65,7 +65,7 @@ func writeStatus(w io.Writer, r report, verbose bool) {
 		if r.Sup.LastError != "" && r.Sup.LastErrorAt.After(lastStart(r.Sup)) {
 			fmt.Fprintf(w, "        last error: %s\n", r.Sup.LastError)
 		}
-		if warning != "" {
+		if warning != "" && !verbose {
 			fmt.Fprintln(w, warning)
 		}
 		fmt.Fprintln(w, "next    claude-router start")
