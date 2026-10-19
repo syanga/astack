@@ -41,9 +41,8 @@ type Router struct {
 	// router whose account state lives in memory only (New).
 	saved map[AccountID]AccountState
 	// unenrolled holds the loaded records of accounts that are not in the
-	// configuration. persist writes them back unchanged, so an account
-	// removed for a while keeps its rejections and login state when it
-	// returns.
+	// configuration. persist writes them back, so an account removed for a
+	// while keeps its rejections and login state when it returns.
 	unenrolled []AccountState
 	expiry     Instant
 }
@@ -392,9 +391,7 @@ func (r *Router) ObserveOverage(account AccountID, state Overage, at time.Time) 
 // ExpireOverageChecks makes every disabled check stamped before at.Stamp
 // stale, so the policy dispatches to an account only on a disabled check
 // stamped at or after it. A caller calls it when its clock can no longer
-// measure the age of earlier checks. Because a restart ages a saved check by
-// the wall clock, the saved account state keeps no disabled check stamped
-// before at.Stamp, and none at all while at is held.
+// measure the age of earlier checks.
 func (r *Router) ExpireOverageChecks(at Instant) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

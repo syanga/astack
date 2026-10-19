@@ -928,7 +928,8 @@ table above gives for that decision. For each reason `Admit` returns:
 - `paid_use_observed`: a migration for `overage_observed` when another
   account is eligible, a local 429 until the earliest usable reset elsewhere,
   or a 503 that names paid use.
-- `exhausted`, which also covers a model-limit rejection: the local 429, or
+- `exhausted`, which also covers a model-limit rejection: a migration for
+  `exhausted` when another account is eligible, otherwise the local 429, or
   a 503 when the paid-overflow state bars every logged-in account.
 - `needs_login`: a migration for `never_served_relogin` when the
   conversation was never served and another account is eligible, otherwise a
@@ -941,8 +942,9 @@ table above gives for that decision. For each reason `Admit` returns:
 `TestRefreshRedispatchIsRefusedAfterABlockingObservation` covers paid use
 and exhaustion on the streaming and non-streaming paths, and
 `TestRefusedRedispatchMovesTheConversationAfterPaidUse` covers the
-migration. The admission check reads both clocks as the policy does, so the
-two agree during a hold (`TestAdmitAgreesWithDecideDuringAHold`). A resend
+migration. The admission check reads both clocks as the policy does, so
+`Admit` and `Decide` agree during a hold
+(`TestAdmitAgreesWithDecideDuringAHold`). A resend
 after a backward step of the wall clock is refused with `overage_stale` and
 reaches no upstream
 (`TestRefreshRedispatchAfterABackwardClockStepIsRefusedAsStale`).
@@ -1368,15 +1370,18 @@ was stale by wall time.
 - **A restart keeps only a `disabled` check it can age.** After a restart,
   the router ages a saved check by the wall clock. `accounts.json`
   therefore holds no `disabled` check during a hold, and none stamped
-  before the time of the last `ExpireOverageChecks` call. Each call removes
-  those checks from the file before the clock returns its time. The next
-  start then reads the setting before it dispatches to the account. A
+  before the time of the last `ExpireOverageChecks` call. The saved records
+  of accounts left out of the configuration follow the same rule. Each call
+  removes those checks from the file before the clock returns its time. The
+  next start then reads the setting before it dispatches to the account,
+  including an account that returns to the configuration
+  (`TestAnAccountLeftOutWhileChecksExpireReadsItsSettingWhenItReturns`). A
   restart without a step keeps the saved check
   (`TestAfterARestartNoRequestDispatchesOnAReadingOlderThanItsFreshness`).
   A `disabled` reading therefore never permits dispatch more than
-  `overage_fresh_for` after its read started, during a hold, after it, or
-  across a restart, unless the wall clock steps back while the router is
-  stopped.
+  `overage_fresh_for` after its read started. The limit applies during a
+  hold, after it, and across a restart, except after a backward step of the
+  wall clock while the router is stopped.
 - **Resets are compared with the wall clock.** The policy takes both clocks
   (`router.Instant`). It ages readings and stamps bindings with the service
   clock, and it compares reset times with the wall clock. An exact reset is
@@ -1545,9 +1550,8 @@ Deviation from the plan, accepted: the plan says that partial output
 one continuation turn on its own after the cut. The router never resends the
 cut request and no completed tool runs twice, but the router cannot make the
 client wait for the user. On 2026-10-06 the user accepted "client-initiated
-continuation, no router resend, no tool replay" as meeting the plan
-(`open-decisions.md` in the execution store). The live session cut no
-output, so this predicate rests on lane 2 alone.
+continuation, no router resend, no tool replay" as meeting the plan. The
+live session cut no output, so this predicate rests on lane 2 alone.
 
 ### Login and manual movement
 

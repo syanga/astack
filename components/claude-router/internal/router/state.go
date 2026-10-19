@@ -44,11 +44,15 @@ const accountsName = "accounts.json"
 func (a accountView) state(expiry Instant) AccountState {
 	st := AccountState{ID: a.ID, NeedsLogin: a.needsLogin, NeedsLoginAt: a.needsLoginAt,
 		Check: a.check, CheckAt: a.checkAt, PaidUseAt: a.paidUseAt}
-	if a.check == OverageDisabled && (expiry.Held() || a.checkAt.Before(expiry.Stamp)) {
-		st.Check, st.CheckAt = "", time.Time{}
-	}
 	for _, rj := range a.rejections {
 		st.Rejections = append(st.Rejections, Rejection{Window: rj.Window, At: rj.at})
+	}
+	return st.withoutExpiredCheck(expiry)
+}
+
+func (st AccountState) withoutExpiredCheck(expiry Instant) AccountState {
+	if st.Check == OverageDisabled && (expiry.Held() || st.CheckAt.Before(expiry.Stamp)) {
+		st.Check, st.CheckAt = "", time.Time{}
 	}
 	return st
 }
@@ -121,28 +125,34 @@ func clamp(t, now time.Time) time.Time {
 }
 
 // persist writes the account state when it changed since the last write,
-// with the saved records of accounts that are not enrolled, unchanged.
-// Callers hold r.mu. A failed write stops the store, as a failed journal
-// write does, so no later decision relies on state a restart would lose.
+// with the saved records of accounts that are not enrolled. Callers hold
+// r.mu. A failed write stops the store, as a failed journal write does, so no
+// later decision relies on state a restart would lose.
 func (r *Router) persist() {
 	if r.saved == nil {
 		return
 	}
-	states := make([]AccountState, len(r.accounts), len(r.accounts)+len(r.unenrolled))
+	states := make([]AccountState, len(r.accounts))
 	dirty := false
 	for i, a := range r.accounts {
 		states[i] = a.state(r.expiry)
 		dirty = dirty || needsWrite(r.saved[a.ID], states[i])
 	}
+	unenrolled := make([]AccountState, len(r.unenrolled))
+	for i, st := range r.unenrolled {
+		unenrolled[i] = st.withoutExpiredCheck(r.expiry)
+		dirty = dirty || needsWrite(st, unenrolled[i])
+	}
 	if !dirty {
 		return
 	}
-	if r.store.saveAccounts(append(states, r.unenrolled...)) != nil {
+	if r.store.saveAccounts(slices.Concat(states, unenrolled)) != nil {
 		return
 	}
 	for _, st := range states {
 		r.saved[st.ID] = st
 	}
+	r.unenrolled = unenrolled
 }
 
 // AccountStates returns every enrolled account's durable state.
