@@ -23,13 +23,13 @@ func TestEditConfigWritesTheEditAndKeepsEveryOtherField(t *testing.T) {
 	path := writeConfigFile(t, `{"listen": "127.0.0.1:18787", "state_dir": "/state", "client_token_file": "client-token",
 		"accounts": [{"id": "work", "capacity": 5}], "move_cache_warn_percent": 20}`)
 
-	err := EditConfig(path, func(c *Config) error {
+	published, err := EditConfig(path, func(c *Config) error {
 		c.Accounts = append(c.Accounts, router.Account{ID: "alumni", Capacity: 1})
 		return nil
 	})
 
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || !published {
+		t.Fatalf("EditConfig: published %v, %v", published, err)
 	}
 	data, _ := os.ReadFile(path)
 	want := `{
@@ -66,8 +66,8 @@ func TestEditConfigLeavesTheFileUnchangedWhenTheEditIsInvalidOrFails(t *testing.
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := writeConfigFile(t, text)
-			if err := EditConfig(path, edit); err == nil {
-				t.Fatal("EditConfig succeeded, want an error")
+			if published, err := EditConfig(path, edit); err == nil || published {
+				t.Fatalf("EditConfig: published %v, %v; want an error before publishing", published, err)
 			}
 			data, _ := os.ReadFile(path)
 			if string(data) != text {
@@ -83,8 +83,27 @@ func TestEditConfigLeavesTheFileUnchangedWhenTheEditIsInvalidOrFails(t *testing.
 
 func TestEditConfigRefusesAFileWithAnUnknownField(t *testing.T) {
 	path := writeConfigFile(t, `{"listen": "127.0.0.1:18787", "state_dir": "/state", "accounts": [{"id": "work"}], "colour": "red"}`)
-	err := EditConfig(path, func(*Config) error { return nil })
+	_, err := EditConfig(path, func(*Config) error { return nil })
 	if err == nil || !strings.Contains(err.Error(), "colour") {
 		t.Fatalf("EditConfig: %v, want a refusal naming the unknown field", err)
+	}
+}
+
+func TestEditConfigReportsAnEditPublishedBeforeItsDirectoryFailedToSync(t *testing.T) {
+	path := writeConfigFile(t, `{"listen": "127.0.0.1:18787", "state_dir": "/state", "accounts": [{"id": "work", "capacity": 1}]}`)
+	dir := filepath.Dir(path)
+	if err := os.Chmod(dir, 0o300); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+
+	published, err := EditConfig(path, func(c *Config) error {
+		c.Accounts = append(c.Accounts, router.Account{ID: "alumni", Capacity: 1})
+		return nil
+	})
+
+	cfg, lerr := LoadConfig(path)
+	if !published || !errors.Is(err, os.ErrPermission) || lerr != nil || len(cfg.Accounts) != 2 {
+		t.Fatalf("EditConfig: published %v, %v; config %+v, %v; want the edit in effect and the sync error", published, err, cfg.Accounts, lerr)
 	}
 }

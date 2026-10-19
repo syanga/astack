@@ -117,11 +117,23 @@ func restoreRunning(in installation, ran bool, out io.Writer, err error) error {
 	return err
 }
 
+// dropCredentials deletes the logins of names, which config.json does not
+// list, so that auths/ holds no login outside config.json.
 func dropCredentials(state string, names []string, err error) error {
 	for _, name := range names {
 		if rerr := os.Remove(filepath.Join(state, "auths", name+".json")); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
 			err = fmt.Errorf("%w; removing the new login of %s also failed: %v", err, name, rerr)
 		}
+	}
+	return err
+}
+
+// signInNew signs in name, which config.json does not list. A sign-in that
+// fails after it wrote auths/NAME.json deletes that login.
+func signInNew(in installation, name string, noBrowser bool) error {
+	published, err := signIn(in.State, name, noBrowser)
+	if err != nil && published {
+		return dropCredentials(in.State, []string{name}, err)
 	}
 	return err
 }
@@ -180,15 +192,15 @@ func addAccount(in installation, name string, noBrowser bool, out io.Writer) err
 	}
 	ran, err := stopForChange(in, out)
 	if err != nil {
-		return err
+		return restoreRunning(in, ran, out, err)
 	}
 	signInLines(out, name, noBrowser)
-	if err := signIn(in.State, name, noBrowser); err != nil {
+	if err := signInNew(in, name, noBrowser); err != nil {
 		return restoreRunning(in, ran, out, err)
 	}
 	line(out, "login", name+" signed in")
 	if err := addToConfig(in, []string{name}, out); err != nil {
-		return restoreRunning(in, ran, out, dropCredentials(in.State, []string{name}, err))
+		return restoreRunning(in, ran, out, err)
 	}
 	if !ran {
 		line(out, "next", "claude-router start")
@@ -233,50 +245,56 @@ func removeAccount(in installation, name string, force bool, now time.Time, out 
 	}
 	ran, err := stopForChange(in, out)
 	if err != nil {
-		return err
+		return restoreRunning(in, ran, out, err)
 	}
 	if !force {
 		if err := refuseRecent(in.State, name, now); err != nil {
 			return restoreRunning(in, ran, out, err)
 		}
 	}
-	credential := filepath.Join("auths", name+".json")
-	aside, err := os.MkdirTemp(in.State, ".remove-")
-	if err != nil {
-		return restoreRunning(in, ran, out, err)
-	}
-	defer os.RemoveAll(aside)
-	moved := true
-	if err := os.Rename(filepath.Join(in.State, credential), filepath.Join(aside, name+".json")); errors.Is(err, os.ErrNotExist) {
-		moved = false
-	} else if err != nil {
-		return restoreRunning(in, ran, out, err)
-	}
-	if err := editConfig(in.Config, func(c *claude.Config) error {
-		c.Accounts = slices.DeleteFunc(c.Accounts, func(a router.Account) bool { return string(a.ID) == name })
-		return nil
-	}); err != nil {
-		if moved {
-			if rerr := os.Rename(filepath.Join(aside, name+".json"), filepath.Join(in.State, credential)); rerr != nil {
-				err = fmt.Errorf("%w; putting %s back also failed: %v", err, credential, rerr)
-			}
+	var removed router.Account
+	at := -1
+	published, err := editConfig(in.Config, func(c *claude.Config) error {
+		at = slices.IndexFunc(c.Accounts, func(a router.Account) bool { return string(a.ID) == name })
+		if at < 0 {
+			return fmt.Errorf("%s is not an account in %s", name, in.Config)
 		}
+		removed = c.Accounts[at]
+		c.Accounts = slices.Delete(c.Accounts, at, at+1)
+		return nil
+	})
+	if !published {
 		return restoreRunning(in, ran, out, err)
 	}
 	line(out, "config", "removed "+name)
-	if err := os.RemoveAll(aside); err != nil {
-		return restoreRunning(in, ran, out, err)
-	}
-	if moved {
+	credential := filepath.Join("auths", name+".json")
+	if rerr := os.Remove(filepath.Join(in.State, credential)); rerr == nil {
 		line(out, "remove", credential)
+	} else if !errors.Is(rerr, os.ErrNotExist) {
+		return restoreRunning(in, ran, out, putBack(in, removed, at, out, errors.Join(err, rerr)))
 	}
 	if ran {
-		if err := startAgain(in, out); err != nil {
-			return err
+		if serr := startAgain(in, out); serr != nil {
+			return errors.Join(err, serr)
 		}
 	}
 	line(out, "note", name+" stays signed in on claude.ai until you sign it out there")
-	return nil
+	return err
+}
+
+// putBack adds a, whose login account remove could not delete, back to
+// config.json at index at, so that config.json lists the login again.
+func putBack(in installation, a router.Account, at int, out io.Writer, err error) error {
+	published, perr := editConfig(in.Config, func(c *claude.Config) error {
+		c.Accounts = slices.Insert(c.Accounts, min(at, len(c.Accounts)), a)
+		return nil
+	})
+	if !published {
+		return nextError{err: fmt.Errorf("%w; adding %s back to config.json also failed: %v", err, a.ID, perr),
+			next: fmt.Sprintf("delete %s, then claude-router start", filepath.Join(in.State, "auths", string(a.ID)+".json"))}
+	}
+	line(out, "config", "added "+string(a.ID)+" back")
+	return errors.Join(err, perr)
 }
 
 func refuseRecent(state, name string, now time.Time) error {

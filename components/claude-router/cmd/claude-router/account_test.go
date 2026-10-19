@@ -23,13 +23,15 @@ type lane struct {
 	listen  string
 	overage map[string]string
 	refuse  map[string]bool
+	// unclear names accounts whose sign-in writes the login and then fails to clear its login requirement.
+	unclear map[string]bool
 	signed  []string
 	queried func()
 }
 
 func newLane(t *testing.T, manager string, accounts ...string) *lane {
 	t.Helper()
-	l := &lane{t: t, jobs: fakeManager(t), overage: map[string]string{}, refuse: map[string]bool{}}
+	l := &lane{t: t, jobs: fakeManager(t), overage: map[string]string{}, refuse: map[string]bool{}, unclear: map[string]bool{}}
 	l.in = installationIn(t, manager, "dev.astack.claude-router.test")
 	if err := os.MkdirAll(filepath.Join(l.in.State, "auths"), 0o700); err != nil {
 		t.Fatal(err)
@@ -79,12 +81,18 @@ func newLane(t *testing.T, manager string, accounts ...string) *lane {
 		}
 	}
 	saved := signIn
-	signIn = func(state, account string, noBrowser bool) error {
+	signIn = func(state, account string, noBrowser bool) (bool, error) {
 		if l.refuse[account] {
-			return errors.New("the sign-in was cancelled")
+			return false, errors.New("the sign-in was cancelled")
 		}
 		l.signed = append(l.signed, account)
-		return os.WriteFile(filepath.Join(state, "auths", account+".json"), []byte("{}\n"), 0o600)
+		if err := os.WriteFile(filepath.Join(state, "auths", account+".json"), []byte("{}\n"), 0o600); err != nil {
+			return false, err
+		}
+		if l.unclear[account] {
+			return true, fmt.Errorf("enrolled %s, but could not clear its login requirement: disk full", account)
+		}
+		return true, nil
 	}
 	t.Cleanup(func() { signIn = saved })
 	return l
@@ -276,7 +284,7 @@ func TestAccountRemoveRefusesTheLastAccount(t *testing.T) {
 
 func failingConfigEdit(t *testing.T) {
 	saved := editConfig
-	editConfig = func(string, func(*claude.Config) error) error { return errors.New("disk full") }
+	editConfig = func(string, func(*claude.Config) error) (bool, error) { return false, errors.New("disk full") }
 	t.Cleanup(func() { editConfig = saved })
 }
 
@@ -328,7 +336,7 @@ func TestAFailedConfigWriteDuringRemoveKeepsTheLoginAndStartsTheRouterAgain(t *t
 	}
 }
 
-func TestAccountRemoveThatCannotMoveTheLoginLeavesTheConfigAndStartsTheRouterAgain(t *testing.T) {
+func TestAccountRemoveThatCannotDeleteTheLoginAddsTheAccountBackAndStartsTheRouterAgain(t *testing.T) {
 	l := newLane(t, "launchd", "work", "school")
 	l.start()
 	auths := filepath.Join(l.in.State, "auths")
@@ -439,5 +447,224 @@ func TestAccountRejectsTheFlagOfTheOtherSubcommand(t *testing.T) {
 		if err != silentExit(2) {
 			t.Errorf("account %v: %v, want exit 2 for the flag", args, err)
 		}
+	}
+}
+
+// unsyncedState lets config.json be replaced but not reopened, so EditConfig fails after its rename.
+func (l *lane) unsyncedState() {
+	l.t.Helper()
+	if err := os.Chmod(l.in.State, 0o300); err != nil {
+		l.t.Fatal(err)
+	}
+	l.t.Cleanup(func() { os.Chmod(l.in.State, 0o700) })
+}
+
+func TestAConfigWriteThatFailsAfterItsRenameKeepsTheLoginsOfTheAccountsItAdded(t *testing.T) {
+	t.Run("account add", func(t *testing.T) {
+		l := newLane(t, "launchd", "work")
+		l.start()
+		l.unsyncedState()
+
+		var err error
+		stdoutOf(t, func() { err = addAccount(l.in, "school", false, os.Stdout) })
+
+		if !errors.Is(err, os.ErrPermission) {
+			t.Fatalf("account add: %v, want the directory sync error", err)
+		}
+		if got := strings.Join(l.accounts(), " ") + "; " + strings.Join(l.logins(), " "); got != "work:1 school:1; school.json work.json" || !l.running() {
+			t.Fatalf("accounts; logins %s, running %v; want school in both and the router running", got, l.running())
+		}
+	})
+	t.Run("setup", func(t *testing.T) {
+		l := setupLane(t)
+		l.unsyncedState()
+
+		var err error
+		stdoutOf(t, func() { err = runSetup(l.in, []string{"work", "alumni"}, false, os.Stdout) })
+
+		if !errors.Is(err, os.ErrPermission) {
+			t.Fatalf("setup: %v, want the directory sync error", err)
+		}
+		if got := strings.Join(l.accounts(), " ") + "; " + strings.Join(l.logins(), " "); got != "work:1 alumni:1; alumni.json work.json" {
+			t.Fatalf("accounts; logins %s, want both accounts in both", got)
+		}
+	})
+}
+
+func TestAConfigWriteThatFailsAfterItsRenameStillDeletesTheRemovedLogin(t *testing.T) {
+	l := newLane(t, "launchd", "work", "school")
+	l.start()
+	l.unsyncedState()
+
+	var err error
+	stdoutOf(t, func() { err = removeAccount(l.in, "school", true, time.Now(), os.Stdout) })
+
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("account remove: %v, want the directory sync error", err)
+	}
+	if got := strings.Join(l.accounts(), " ") + "; " + strings.Join(l.logins(), " "); got != "work:1; work.json" || !l.running() {
+		t.Fatalf("accounts; logins %s, running %v; want only work in both and the router running", got, l.running())
+	}
+}
+
+func TestARemoveWhoseConfigWriteFailsKeepsTheLoginWhenAuthsTurnsReadOnly(t *testing.T) {
+	l := newLane(t, "launchd", "work", "school")
+	l.start()
+	auths := filepath.Join(l.in.State, "auths")
+	saved := editConfig
+	editConfig = func(string, func(*claude.Config) error) (bool, error) {
+		if err := os.Chmod(auths, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		return false, errors.New("disk full")
+	}
+	t.Cleanup(func() { editConfig = saved; os.Chmod(auths, 0o700) })
+
+	var err error
+	stdoutOf(t, func() { err = removeAccount(l.in, "school", true, time.Now(), os.Stdout) })
+
+	if err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("account remove: %v, want the config write error", err)
+	}
+	if got := strings.Join(l.accounts(), " ") + "; " + strings.Join(l.logins(), " "); got != "work:1 school:1; school.json work.json" || !l.running() {
+		t.Fatalf("accounts; logins %s, running %v; want both accounts with their logins and the router running", got, l.running())
+	}
+}
+
+func (l *lane) enrolledWithoutLogin() []string {
+	l.t.Helper()
+	var missing []string
+	for _, id := range l.accounts() {
+		name := strings.Split(id, ":")[0]
+		if _, err := os.Stat(filepath.Join(l.in.State, "auths", name+".json")); err != nil {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+type killed struct{}
+
+func TestAnAccountRemoveKilledAroundItsConfigWriteLeavesEveryAccountWithItsLogin(t *testing.T) {
+	for _, when := range []string{"before", "after"} {
+		t.Run("killed "+when+" the config write", func(t *testing.T) {
+			l := newLane(t, "launchd", "work", "school")
+			l.start()
+			saved := editConfig
+			editConfig = func(path string, edit func(*claude.Config) error) (bool, error) {
+				if when == "after" {
+					if _, err := saved(path, edit); err != nil {
+						t.Fatal(err)
+					}
+				}
+				panic(killed{})
+			}
+			t.Cleanup(func() { editConfig = saved })
+
+			func() {
+				defer func() {
+					if r := recover(); r != (killed{}) {
+						panic(r)
+					}
+				}()
+				_ = removeAccount(l.in, "school", true, time.Now(), io.Discard)
+			}()
+
+			if missing := l.enrolledWithoutLogin(); len(missing) > 0 {
+				t.Fatalf("%v enrolled without a login in auths/", missing)
+			}
+		})
+	}
+}
+
+func TestASignInThatFailsAfterWritingTheLoginRemovesIt(t *testing.T) {
+	t.Run("account add", func(t *testing.T) {
+		l := newLane(t, "launchd", "work")
+		l.start()
+		l.unclear["school"] = true
+		before := l.read("config.json")
+
+		var err error
+		stdoutOf(t, func() { err = addAccount(l.in, "school", false, os.Stdout) })
+
+		if err == nil || !strings.Contains(err.Error(), "could not clear its login requirement") {
+			t.Fatalf("account add: %v, want the sign-in error", err)
+		}
+		if got := strings.Join(l.logins(), " "); got != "work.json" || l.read("config.json") != before || !l.running() {
+			t.Fatalf("logins %s, config changed %v, running %v; want only work.json, config unchanged, router running",
+				got, l.read("config.json") != before, l.running())
+		}
+	})
+	t.Run("setup", func(t *testing.T) {
+		l := setupLane(t)
+		l.unclear["alumni"] = true
+
+		var err error
+		stdoutOf(t, func() { err = runSetup(l.in, []string{"work", "alumni"}, false, os.Stdout) })
+
+		if err == nil || !strings.Contains(err.Error(), "could not clear its login requirement") {
+			t.Fatalf("setup: %v, want the sign-in error", err)
+		}
+		if got := strings.Join(l.accounts(), " ") + "; " + strings.Join(l.logins(), " "); got != "work:1; work.json" {
+			t.Fatalf("accounts; logins %s, want only work in both", got)
+		}
+	})
+}
+
+func TestAPartlyFailedStopRestoresTheEnabledRunningRouter(t *testing.T) {
+	for name, change := range map[string]func(l *lane) error{
+		"account add":    func(l *lane) error { return addAccount(l.in, "school", false, io.Discard) },
+		"account remove": func(l *lane) error { return removeAccount(l.in, "alumni", true, time.Now(), io.Discard) },
+		"setup":          func(l *lane) error { return runSetup(l.in, []string{"school"}, false, io.Discard) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			l := newLane(t, "systemd", "work", "alumni")
+			l.in.Python, l.in.Helper, l.in.Manifest = "/bin/sh", "/lib/claude_router.py", "/state/manifest.json"
+			l.start()
+			before := l.read("config.json")
+			t.Setenv("FAKE_FAIL", "stop")
+
+			err := change(l)
+
+			if err == nil {
+				t.Fatal("the change succeeded although systemctl stop failed")
+			}
+			if _, statErr := os.Stat(filepath.Join(l.jobs, l.in.Name+".enabled")); statErr != nil || !l.running() {
+				t.Fatalf("after %v: enabled %v, running %v; want the unit enabled and running", err, statErr == nil, l.running())
+			}
+			if l.read("config.json") != before || len(l.signed) != 0 {
+				t.Fatalf("config changed or signed in %v", l.signed)
+			}
+		})
+	}
+}
+
+func TestAccountRemoveThatCannotDeleteTheLoginOrAddTheAccountBackNamesTheLogin(t *testing.T) {
+	l := newLane(t, "launchd", "work", "school")
+	l.start()
+	auths := filepath.Join(l.in.State, "auths")
+	if err := os.Chmod(auths, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(auths, 0o700) })
+	saved, edits := editConfig, 0
+	editConfig = func(path string, edit func(*claude.Config) error) (bool, error) {
+		if edits++; edits > 1 {
+			return false, errors.New("disk full")
+		}
+		return saved(path, edit)
+	}
+	t.Cleanup(func() { editConfig = saved })
+
+	var err error
+	stdoutOf(t, func() { err = removeAccount(l.in, "school", true, time.Now(), os.Stdout) })
+
+	login := filepath.Join(auths, "school.json")
+	var n nextError
+	if !errors.As(err, &n) || !strings.Contains(err.Error(), "permission denied") || n.next != "delete "+login+", then claude-router start" {
+		t.Fatalf("account remove: %#v, want the errors and the step that names %s", err, login)
+	}
+	if _, err := os.Stat(login); err != nil {
+		t.Fatalf("the login is gone: %v", err)
 	}
 }

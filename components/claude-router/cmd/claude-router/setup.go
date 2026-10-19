@@ -88,14 +88,14 @@ func runSetup(in installation, names []string, noBrowser bool, out io.Writer) er
 	if len(added) > 0 {
 		ran, err := stopForChange(in, out)
 		if err != nil {
-			return err
+			return restoreRunning(in, ran, out, err)
 		}
 		var signed []string
 		for _, name := range added {
 			signInLines(out, name, noBrowser)
-			if err := signIn(in.State, name, noBrowser); err != nil {
+			if err := signInNew(in, name, noBrowser); err != nil {
 				if aerr := addToConfig(in, signed, out); aerr != nil {
-					err = dropCredentials(in.State, signed, fmt.Errorf("%w; adding %s to config.json also failed: %v", err, joined(signed), aerr))
+					err = fmt.Errorf("%w; adding %s to config.json also failed: %v", err, joined(signed), aerr)
 				}
 				return restoreRunning(in, ran, out, err)
 			}
@@ -103,7 +103,7 @@ func runSetup(in installation, names []string, noBrowser bool, out io.Writer) er
 			signed = append(signed, name)
 		}
 		if err := addToConfig(in, signed, out); err != nil {
-			return restoreRunning(in, ran, out, dropCredentials(in.State, signed, err))
+			return restoreRunning(in, ran, out, err)
 		}
 	}
 	if err := startAgain(in, out); err != nil {
@@ -146,22 +146,26 @@ func runSetup(in installation, names []string, noBrowser bool, out io.Writer) er
 	return nil
 }
 
+// addToConfig adds names, whose logins are in auths/, to config.json with
+// capacity 1. When config.json keeps its old accounts, it deletes those
+// logins.
 func addToConfig(in installation, names []string, out io.Writer) error {
 	if len(names) == 0 {
 		return nil
 	}
-	if err := editConfig(in.Config, func(c *claude.Config) error {
+	published, err := editConfig(in.Config, func(c *claude.Config) error {
 		for _, name := range names {
 			c.Accounts = append(c.Accounts, router.Account{ID: router.AccountID(name), Capacity: 1})
 		}
 		return nil
-	}); err != nil {
-		return err
+	})
+	if !published {
+		return dropCredentials(in.State, names, err)
 	}
 	each := ", capacity 1"
 	if len(names) > 1 {
 		each += " each"
 	}
 	line(out, "config", "added "+joined(names)+each)
-	return nil
+	return err
 }

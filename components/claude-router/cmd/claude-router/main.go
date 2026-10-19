@@ -198,7 +198,7 @@ func login(args []string) error {
 	} else {
 		fmt.Printf("login   browser opened; sign in as %s (Ctrl-C cancels)\n", *account)
 	}
-	kept, err := enroll(*state, *account, *noBrowser)
+	kept, _, err := enroll(*state, *account, *noBrowser)
 	if err != nil {
 		return err
 	}
@@ -213,15 +213,18 @@ func login(args []string) error {
 	return nil
 }
 
-var signIn = func(state, account string, noBrowser bool) error {
-	_, err := enroll(state, account, noBrowser)
-	return err
+// signIn reports published once auths/ACCOUNT.json holds the new login,
+// including when a later step fails.
+var signIn = func(state, account string, noBrowser bool) (published bool, err error) {
+	_, published, err = enroll(state, account, noBrowser)
+	return published, err
 }
 
 // enroll refuses while a service holds the state directory, because the
 // SDK's running service writes its in-memory credentials back to disk and
-// would overwrite the new one.
-func enroll(state, account string, noBrowser bool) (int, error) {
+// would overwrite the new one. published reports that auths/ACCOUNT.json
+// holds the new login.
+func enroll(state, account string, noBrowser bool) (kept int, published bool, err error) {
 	lock, err := router.OpenStore(filepath.Join(state, "assignments"))
 	if errors.Is(err, router.ErrLocked) {
 		pid := "pid unknown"
@@ -230,20 +233,20 @@ func enroll(state, account string, noBrowser bool) (int, error) {
 				pid = fmt.Sprintf("pid %d", st.PID)
 			}
 		}
-		return 0, nextError{err: fmt.Errorf("router running on this state directory (%s)", pid), next: "claude-router stop"}
+		return 0, false, nextError{err: fmt.Errorf("router running on this state directory (%s)", pid), next: "claude-router stop"}
 	}
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	defer lock.Close()
 
 	auths := filepath.Join(state, "auths")
 	if err := os.MkdirAll(auths, 0o700); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	staging, err := os.MkdirTemp(state, ".login-")
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	defer os.RemoveAll(staging)
 
@@ -265,26 +268,25 @@ func enroll(state, account string, noBrowser bool) (int, error) {
 		_, _, err := mgr.Login(context.Background(), "claude", cfg, opts)
 		return err
 	}); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	entries, err := filepath.Glob(filepath.Join(staging, "*.json"))
 	if err != nil || len(entries) != 1 {
-		return 0, fmt.Errorf("expected one credential file, found %d", len(entries))
+		return 0, false, fmt.Errorf("expected one credential file, found %d", len(entries))
 	}
 	if err := os.Chmod(entries[0], 0o600); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if err := claude.CheckCredential(entries[0]); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	dest := filepath.Join(auths, account+".json")
 	if err := os.Rename(entries[0], dest); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if err := lock.ClearNeedsLogin(router.AccountID(account)); err != nil {
-		return 0, fmt.Errorf("enrolled %s, but could not clear its login requirement: %w", account, err)
+		return 0, true, fmt.Errorf("enrolled %s, but could not clear its login requirement: %w", account, err)
 	}
-	kept := 0
 	if bindings, err := lock.Bindings(); err == nil {
 		for _, b := range bindings {
 			if b.Account == router.AccountID(account) {
@@ -292,7 +294,7 @@ func enroll(state, account string, noBrowser bool) (int, error) {
 			}
 		}
 	}
-	return kept, nil
+	return kept, true, nil
 }
 
 // The SDK prints its progress and SSH tunnel instructions for remote servers

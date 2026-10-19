@@ -117,52 +117,61 @@ func LoadConfig(path string) (Config, error) {
 
 // EditConfig applies edit to the configuration file at path and replaces the
 // file atomically. It refuses an edit that fails or leaves an invalid
-// configuration, and then leaves the file unchanged.
-func EditConfig(path string, edit func(*Config) error) error {
+// configuration, and then leaves the file unchanged. published reports that
+// the new file has replaced the old one; an error with published set comes
+// from syncing the directory afterwards, and the edit is in effect.
+func EditConfig(path string, edit func(*Config) error) (published bool, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return false, err
 	}
 	var cfg Config
 	dec := json.NewDecoder(strings.NewReader(string(data)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&cfg); err != nil {
-		return fmt.Errorf("%s: %w", path, err)
+		return false, fmt.Errorf("%s: %w", path, err)
 	}
 	if err := edit(&cfg); err != nil {
-		return err
+		return false, err
 	}
 	if err := cfg.withDefaults().validate(); err != nil {
-		return fmt.Errorf("%s: %w", path, err)
+		return false, fmt.Errorf("%s: %w", path, err)
 	}
 	out, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return err
+		return false, err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.json")
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(append(out, '\n')); err != nil {
 		tmp.Close()
-		return err
+		return false, err
 	}
 	if err := tmp.Chmod(0o600); err != nil {
 		tmp.Close()
-		return err
+		return false, err
 	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
-		return err
+		return false, err
 	}
 	if err := tmp.Close(); err != nil {
-		return err
+		return false, err
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
-		return err
+		return false, err
 	}
-	dir, err := os.Open(filepath.Dir(path))
+	if err := syncDir(filepath.Dir(path)); err != nil {
+		return true, fmt.Errorf("%s is written, but its directory did not sync: %w", path, err)
+	}
+	return true, nil
+}
+
+func syncDir(path string) error {
+	dir, err := os.Open(path)
 	if err != nil {
 		return err
 	}
