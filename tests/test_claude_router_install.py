@@ -6,6 +6,7 @@ test starts a service manager or the real router.
 """
 
 from contextlib import redirect_stdout
+import fcntl
 import importlib.util
 import io
 import json
@@ -207,6 +208,27 @@ class ComponentSelectionTests(ComponentFixture):
         self.assertIn("WRITE {}".format(self.data / "bin/claude-router"), result.stdout)
         self.assertIn("CREATE {}".format(self.state_dir / "config.json"), result.stdout)
         self.assertFalse(self.home.exists())
+
+    def test_a_preview_over_an_install_neither_creates_nor_takes_the_activation_lock(self):
+        self.component()
+        lock = self.state_dir / "activation.lock"
+        commands = {"install.sh": [str(self.repo / "install.sh"), "--component", "claude-router"],
+                    "claude_router.py": [sys.executable, str(self.repo / "scripts/claude_router.py"), "install"]}
+        previews = {name: lambda command=command: subprocess.run(
+            command + ["--home", str(self.home), "--dry-run"], capture_output=True, text=True, env=self.env)
+            for name, command in commands.items()}
+
+        exits = [preview().returncode for preview in previews.values()]
+        self.assertEqual((exits, lock.exists()), ([0, 0], False))
+        fd = os.open(str(lock), os.O_RDWR | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, fd)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        for name, preview in previews.items():
+            with self.subTest(name):
+                result = preview()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("KEEP {}".format(self.data / "bin/claude-router"), result.stdout)
 
     def test_repeat_install_changes_nothing(self):
         self.component()

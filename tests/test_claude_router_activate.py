@@ -1568,3 +1568,118 @@ class UpdateOverActivationTests(ActivationFixture):
 
         self.assertEqual(stops, ["stop", "start", "stop"])
         self.assert_direct_and_state_kept()
+
+
+BUILD_2 = hashlib.sha256(b"#!/bin/sh\n# build 2\nprintf '%s\\n' \"$*\" >> \"$FAKE_ROUTER_LOG\"\n").hexdigest()
+
+
+class InstallLockTests(ActivationFixture):
+    def run_router(self, router, env, *arguments):
+        with patch.object(router.Path, "home", return_value=self.home), \
+                patch.dict(router.os.environ, dict(self.env, **env), clear=True), \
+                patch.object(router.sys, "argv", ["claude_router.py", *arguments]), \
+                redirect_stdout(io.StringIO()):
+            router.main()
+
+    def assert_activated(self):
+        self.assertEqual(self.base_url(), self.listen)
+        self.assertIn("claude-router", self.manifest().get("settings", {}))
+        self.assertEqual(self.journal()["phase"], "active")
+
+    def update_while_an_activation_ends_before_the_lock(self, entry):
+        (self.repo / "components/claude-router/accepted.json").write_text(self.acceptance.read_text())
+        module = self.module() if entry == "install.sh" else self.router()
+        helper = module.claude_router if entry == "install.sh" else module
+        hold, activations = helper.hold_activation, []
+
+        def activation_first(state_dir):
+            if not activations:
+                activations.append(self.run_activate())
+                self.router_log.write_text("")
+                (self.root / "claude.log").write_text("")
+                self.fake_router.status["binary_sha256"] = BUILD_2
+            return hold(state_dir)
+        env = {"FAKE_BUILD": "2", "HOME": str(self.home.resolve())}
+        with patch.object(helper, "hold_activation", activation_first):
+            if entry == "install.sh":
+                self.run_module(module, env, "install", "--home", str(self.home), "--component", "claude-router")
+            else:
+                self.run_router(module, env, "install", "--home", str(self.home))
+
+        self.assertEqual(activations[0].returncode, 0, activations[0].stderr)
+        self.assertEqual(self.router_log.read_text(), "stop -state {0}\nstart -state {0}\n".format(self.state_dir))
+        self.assertEqual(len((self.root / "claude.log").read_text().splitlines()), 1, "the update sent no check message")
+        self.assert_activated()
+
+    def test_an_update_through_install_sh_keeps_and_checks_an_activation_that_ended_before_its_lock(self):
+        self.update_while_an_activation_ends_before_the_lock("install.sh")
+
+    def test_an_update_through_the_helper_keeps_and_checks_an_activation_that_ended_before_its_lock(self):
+        self.update_while_an_activation_ends_before_the_lock("claude_router.py")
+
+    def test_an_install_refuses_when_an_uninstall_ends_before_it_takes_the_lock(self):
+        module = self.module()
+        helper = module.claude_router
+        hold = helper.hold_activation
+
+        def uninstall_first(state_dir):
+            self.component(command="uninstall")
+            return hold(state_dir)
+        with patch.object(helper, "hold_activation", uninstall_first), self.assertRaisesRegex(
+                ValueError, "^The claude-router installation changed before this command took its lock; run it again$"):
+            self.run_module(module, {"HOME": str(self.home.resolve())}, "install", "--home", str(self.home), "--component", "claude-router")
+
+        self.assertNotIn("claude-router", self.manifest().get("components", {}))
+        self.assertFalse((self.data / "bin/claude-router").exists())
+        fd = os.open(str(self.state_dir / "activation.lock"), os.O_RDWR)
+        self.addCleanup(os.close, fd)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def install_with_codex_then(self, competitor, **env):
+        module = self.module()
+        helper = module.claude_router
+        apply, competing = helper.apply, []
+
+        def compete_after(*arguments, **options):
+            apply(*arguments, **options)
+            competing.append(competitor())
+        with patch.object(helper, "apply", compete_after):
+            self.run_module(module, dict(env, HOME=str(self.home.resolve())),
+                            "install", "--home", str(self.home), "--target", "codex", "--component", "claude-router")
+        self.assertTrue((self.home / ".codex/AGENTS.md").exists())
+        return competing[0]
+
+    def test_a_direct_before_a_combined_update_saves_its_manifest_refuses_and_the_activation_stays(self):
+        self.assertEqual(self.run_activate().returncode, 0)
+        self.router_log.write_text("")
+        (self.repo / "components/claude-router/accepted.json").write_text(self.acceptance.read_text())
+        self.fake_router.status["binary_sha256"] = BUILD_2
+
+        refused = self.install_with_codex_then(self.direct, FAKE_BUILD="2")
+
+        self.assertEqual((refused.returncode, refused.stdout, refused.stderr), (1, "", "claude-router: direct: " + LOCKED))
+        self.assertEqual(self.router_log.read_text(), "stop -state {0}\nstart -state {0}\n".format(self.state_dir))
+        self.assert_activated()
+
+    def test_an_activation_before_a_combined_install_saves_its_manifest_refuses_and_runs_afterwards(self):
+        refused = self.install_with_codex_then(self.run_activate)
+
+        self.assertEqual((refused.returncode, refused.stdout, refused.stderr), (1, "", "claude-router: activate: " + LOCKED))
+        self.assertIsNone(self.journal())
+        self.assertNotIn("claude-router", self.manifest().get("settings", {}))
+        self.assertEqual(self.run_activate().returncode, 0)
+        self.assert_activated()
+
+    def test_a_harness_install_while_an_account_change_holds_the_lock_refuses_and_changes_nothing(self):
+        fd = os.open(str(self.state_dir / "activation.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, fd)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        manifest = self.manifest()
+
+        results = [self.run_installer("--target", "codex", success=False, env=self.env),
+                   self.run_installer("--target", "codex", command="uninstall", success=False, env=self.env)]
+
+        for result in results:
+            self.assertEqual(result.stderr, "astack: " + HOLDERS + "; wait for it to finish, then run again\n")
+        self.assertFalse((self.home / ".codex").exists())
+        self.assertEqual(self.manifest(), manifest)

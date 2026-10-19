@@ -6,7 +6,7 @@ descriptor, and a state directory. Installing it never changes client settings.
 """
 
 import argparse
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 import fcntl
 from dataclasses import dataclass, field
 import hashlib
@@ -377,7 +377,7 @@ class Plan:
         return [path for path, *_ in self.operations] + [path for path, *_ in self.seeds]
 
 
-def plan(command, state, lay, force=False):
+def plan(command, state, lay, force, lock):
     """Compute the component's changes without writing anything."""
     old = state.get("components", {}).get(NAME, {})
     if command == "install" and old.get("layout") and old["layout"] != lay.record():
@@ -387,13 +387,7 @@ def plan(command, state, lay, force=False):
         lay = Layout(home=lay.home, data=Path(recorded["data"]), state=Path(recorded["state"]), manifest=lay.manifest,
                      manager=recorded["manager"], service=recorded["service"],
                      descriptor=Path(recorded["descriptor"]) if recorded["descriptor"] else None, port=lay.port)
-    lock = hold_activation(lay.state) if command == "install" and old.get("layout") and lay.state.is_dir() else None
-    try:
-        return planned(Plan(command=command, lay=lay, old=old, lock=lock), state, force)
-    except BaseException:
-        if lock:
-            lock.close()
-        raise
+    return planned(Plan(command=command, lay=lay, old=old, lock=lock), state, force)
 
 
 def planned(result, state, force):
@@ -497,14 +491,6 @@ def stop_service(lay, dry_run):
 
 def apply(p, state, state_path, backup_root, dry_run=False):
     """Apply a plan, recording each completed write in the manifest."""
-    try:
-        apply_locked(p, state, state_path, backup_root, dry_run)
-    finally:
-        if p.lock:
-            p.lock.close()
-
-
-def apply_locked(p, state, state_path, backup_root, dry_run):
     lay = p.lay
     if p.command == "uninstall" and not p.old and not p.settings:
         return
@@ -1127,11 +1113,25 @@ def hold_activation(state_dir):
         raise ValueError("; ".join(filter(None, (str(refusal), refusal.next_step)))) from None
 
 
-def lock_activation_until_exit(state_path):
-    state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+def recorded_state_dir(state):
     recorded = state.get("components", {}).get(NAME, {}).get("layout")
-    if recorded and Path(recorded["state"]).is_dir():
-        hold_activation(Path(recorded["state"]))
+    return Path(recorded["state"]) if recorded and Path(recorded["state"]).is_dir() else None
+
+
+def locked_state(state_root, dry_run):
+    state_path, state = load_state(state_root)
+    state_dir = None if dry_run else recorded_state_dir(state)
+    if state_dir is None:
+        return state_path, state, None
+    lock = hold_activation(state_dir)
+    try:
+        state_path, state = load_state(state_root)
+        if recorded_state_dir(state) != state_dir:
+            raise ValueError("The claude-router installation changed before this command took its lock; run it again")
+    except BaseException:
+        lock.close()
+        raise
+    return state_path, state, lock
 
 
 def undo_journal(state_dir, state, manifest_path, check=False):
@@ -1491,16 +1491,15 @@ def load_state(state_root):
 
 
 def run(command, state_root, lay, args):
-    if command == "uninstall" and not args.dry_run:
-        lock_activation_until_exit(state_root / "manifest.json")
-    state_path, state = load_state(state_root)
-    recorded = state.get("components", {}).get(NAME, {}).get("layout")
-    if command == "uninstall" and recorded and args.service not in (None, recorded["service"]):
-        raise ValueError("--service {} differs from {}, the service this home's install recorded; omit --service".format(
-            args.service, recorded["service"]))
-    p = plan(command, state, lay, args.force)
-    check_targets(state, p)
-    finish(p, state, state_path, state_root, args)
+    state_path, state, lock = locked_state(state_root, args.dry_run)
+    with lock or nullcontext():
+        recorded = state.get("components", {}).get(NAME, {}).get("layout")
+        if command == "uninstall" and recorded and args.service not in (None, recorded["service"]):
+            raise ValueError("--service {} differs from {}, the service this home's install recorded; omit --service".format(
+                args.service, recorded["service"]))
+        p = plan(command, state, lay, args.force, lock)
+        check_targets(state, p)
+        finish(p, state, state_path, state_root, args)
 
 
 def check_targets(state, p):

@@ -267,11 +267,12 @@ check     passed
 When a check fails, `check` skips the test message, exits 1, and prints the
 next step. With the router stopped, it marks the checks that need the router
 `skip`. When `./install.sh --component claude-router` replaces the code of an
-activated router, it restarts the service and runs `check`. It refuses, and
-changes nothing, while `setup`, `account`, activation, or `claude-router
-direct` runs. If the restart or the check fails, it runs `claude-router
-direct` and prints `next      claude-router check`. `--dry-run` prints the
-restart and the check that the install would run.
+activated router, it restarts the service and runs `check`. If the restart or
+the check fails, it runs `claude-router direct` and prints
+`next      claude-router check`. `--dry-run` prints the restart and the check
+that the install would run. Once the router is installed, `./install.sh` and
+`./uninstall.sh`, with or without `--component`, refuse and change nothing
+while `setup`, `account`, activation, or `claude-router direct` runs.
 
 ## Operate the service
 
