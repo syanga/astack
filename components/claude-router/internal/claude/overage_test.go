@@ -3,6 +3,7 @@ package claude
 import (
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -85,6 +86,60 @@ func TestStaleReadingIsRecheckedBeforeDispatch(t *testing.T) {
 	}
 	if n := len(e.upstream.usageReads()); n != 3 {
 		t.Fatalf("settings reads %d, want 3: start, failed recheck, successful recheck", n)
+	}
+}
+
+func TestWaitRechecksAStaleAccountThatCouldServe(t *testing.T) {
+	e := newEnv(t, "acct-a", "acct-b")
+	t0 := time.Now()
+	e.clock.set(t0)
+	e.upstream.setUsage("acct-b", usageReply{Status: http.StatusInternalServerError})
+	e.startWith(Options{ReadRetryBase: time.Hour})
+	exhausted := exhaustedHeaders(time.Now().Add(2 * time.Hour))
+	exhausted["anthropic-ratelimit-unified-overage-status"] = "rejected"
+	exhausted["anthropic-ratelimit-unified-overage-disabled-reason"] = "org_level_disabled"
+	e.upstream.script("acct-a", reply{Status: http.StatusTooManyRequests, Header: exhausted})
+
+	e.clock.set(t0.Add(25 * time.Minute))
+	blocked := e.send(msg{Session: sessionID(1)})
+	e.upstream.setUsage("acct-b", usageReply{Enabled: boolPtr(false)})
+	e.clock.set(t0.Add(29 * time.Minute))
+	r := e.send(msg{Session: sessionID(2)})
+
+	if blocked.Status != http.StatusTooManyRequests {
+		t.Fatalf("request on the exhausted account got %d, want the local 429", blocked.Status)
+	}
+	if r.Status != 200 || r.Text != served("acct-b") {
+		t.Fatalf("new conversation got %d %q, want 200 from acct-b after rechecking its stale reading", r.Status, r.Text)
+	}
+}
+
+func TestPaidUseRecheckClearedByADisabledReadingServesOnTheSameAccount(t *testing.T) {
+	e := newEnv(t, "acct-a", "acct-b")
+	t0 := time.Now()
+	e.clock.set(t0)
+	e.startWith(Options{ReadRetryBase: time.Hour})
+	e.upstream.script("acct-a", reply{Header: map[string]string{"anthropic-ratelimit-unified-overage-in-use": "true"}})
+	e.upstream.setUsage("acct-b", usageReply{Status: http.StatusInternalServerError})
+
+	e.clock.set(t0.Add(25 * time.Minute))
+	shown := e.send(msg{Session: sessionID(1)})
+	e.clock.set(t0.Add(31 * time.Minute))
+	before := len(e.upstream.usageReads())
+	r := e.send(msg{Session: sessionID(1)})
+
+	if shown.Status != 200 || shown.Text != served("acct-a") {
+		t.Fatalf("response that showed paid use got %d %q, want it delivered from acct-a", shown.Status, shown.Text)
+	}
+	if r.Status != 200 || r.Text != served("acct-a") {
+		t.Fatalf("after a disabled reread got %d %q, want 200 from acct-a", r.Status, r.Text)
+	}
+	var reads []string
+	for _, u := range e.upstream.usageReads()[before:] {
+		reads = append(reads, u.Account)
+	}
+	if n := len(reads); n == 0 || reads[n-1] != "acct-a" || slices.Index(reads, "acct-a") != n-1 {
+		t.Fatalf("settings reads during the request %v, want catch-up reads of acct-b only, then one reread of acct-a", reads)
 	}
 }
 
