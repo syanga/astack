@@ -82,9 +82,13 @@ func writeError(c *gin.Context, status int, kind, message string) {
 }
 
 // Claude Code 2.1.300 and Agent SDK 0.3.300 retry a 503 with their own
-// backoff unless x-should-retry is false.
-func answerRetriesSpent(c *gin.Context, upstream int, message string) {
-	writeErrorRetry(c, http.StatusServiceUnavailable, "api_error", message, upstream == 0)
+// backoff unless x-should-retry is false, and honor retry-after.
+func answerRetriesSpent(c *gin.Context, last router.Class, message string) {
+	retry := last == router.ClassNetwork
+	if retry {
+		c.Header("Retry-After", "5")
+	}
+	writeErrorRetry(c, http.StatusServiceUnavailable, "api_error", message, retry)
 }
 
 const capMessage = "claude-router: request reached the router's upstream attempt cap"
@@ -207,7 +211,7 @@ func (s *Service) messages(c *gin.Context) {
 			return
 		case router.Fail:
 			finish("request", d.Account, d, http.StatusServiceUnavailable, nil)
-			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: request failed after the router's retry budget")
+			answerRetriesSpent(c, req.LastFailure, "claude-router: request failed after the router's retry budget")
 			return
 		}
 
@@ -221,7 +225,7 @@ func (s *Service) messages(c *gin.Context) {
 				return
 			}
 			finish("request", account, router.Decision{Kind: router.Fail, Reason: router.ReasonRetryBudget}, http.StatusServiceUnavailable, nil)
-			answerRetriesSpent(c, upstream, capMessage)
+			answerRetriesSpent(c, req.LastFailure, capMessage)
 			return
 		}
 		tried = account
@@ -252,12 +256,12 @@ func (s *Service) messages(c *gin.Context) {
 		}
 		if spend.spent() > s.transport.limit {
 			finish("request", account, router.Decision{Kind: router.Fail, Reason: router.ReasonRetryBudget}, http.StatusServiceUnavailable, &out)
-			answerRetriesSpent(c, upstream, capMessage)
+			answerRetriesSpent(c, out.Class, capMessage)
 			return
 		}
 		if out.Phase == beforeWrite {
 			finish("request", account, router.Decision{Kind: router.Fail, Reason: router.ReasonUnreachable}, http.StatusServiceUnavailable, &out)
-			answerRetriesSpent(c, upstream, fmt.Sprintf("claude-router: the provider could not be reached for %s (last error: %v)", s.transport.netRetryFor, out.Err))
+			answerRetriesSpent(c, out.Class, fmt.Sprintf("claude-router: the provider could not be reached for %s (last error: %v)", s.transport.netRetryFor, out.Err))
 			return
 		}
 		if out.Attempts == 0 {

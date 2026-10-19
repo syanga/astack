@@ -322,8 +322,8 @@ func TestAConnectionResetAfterTheBodyIsReadIsRetriedAndCharged(t *testing.T) {
 
 		r := e.send(msg{Session: sessionID(1)})
 
-		if r.Status != http.StatusServiceUnavailable || r.Header.Get("X-Should-Retry") != "false" {
-			t.Fatalf("got %d with x-should-retry %q, want the attempt-cap 503 the client does not retry", r.Status, r.Header.Get("X-Should-Retry"))
+		if r.Status != http.StatusServiceUnavailable || r.Header.Get("X-Should-Retry") != "true" || r.Header.Get("Retry-After") != "5" {
+			t.Fatalf("got %d with x-should-retry %q and retry-after %q, want the attempt-cap 503 the client retries after 5 s", r.Status, r.Header.Get("X-Should-Retry"), r.Header.Get("Retry-After"))
 		}
 		if seen := u.seen(); len(seen) != 1 {
 			t.Fatalf("upstream saw %d requests, want 1: the cap counts an attempt the provider may have run", len(seen))
@@ -403,8 +403,8 @@ func TestFailuresBeforeWriteStopAfterTheNetworkRetryTime(t *testing.T) {
 	r := e.send(msg{Session: sessionID(1)})
 	took := time.Since(start)
 
-	if r.Status != http.StatusServiceUnavailable || r.Header.Get("X-Should-Retry") != "true" {
-		t.Fatalf("got %d with x-should-retry %q, want 503 the client may retry", r.Status, r.Header.Get("X-Should-Retry"))
+	if r.Status != http.StatusServiceUnavailable || r.Header.Get("X-Should-Retry") != "true" || r.Header.Get("Retry-After") != "5" {
+		t.Fatalf("got %d with x-should-retry %q and retry-after %q, want 503 the client retries after 5 s", r.Status, r.Header.Get("X-Should-Retry"), r.Header.Get("Retry-After"))
 	}
 	if took > 5*time.Second {
 		t.Fatalf("answered after %s, want about the 1 s network retry time", took)
@@ -426,7 +426,7 @@ func TestFailuresBeforeWriteStopAfterTheNetworkRetryTime(t *testing.T) {
 	}
 }
 
-func TestAfterAChargedAttemptTheNetworkRetryAnswerStopsClientResends(t *testing.T) {
+func TestANetworkRetryTimeThatEndsAfterAChargedAttemptAsksTheClientToRetry(t *testing.T) {
 	e := newEnv(t, "acct-a")
 	u := newNetUpstream(t, e.upstream, func(n int) netAction {
 		if n == 1 {
@@ -438,8 +438,8 @@ func TestAfterAChargedAttemptTheNetworkRetryAnswerStopsClientResends(t *testing.
 
 	r := e.send(msg{Session: sessionID(1), Body: largeBody(e, sessionID(1))})
 
-	if r.Status != http.StatusServiceUnavailable || r.Header.Get("X-Should-Retry") != "false" {
-		t.Fatalf("got %d with x-should-retry %q, want 503 the client does not resend: the provider may have run the first attempt", r.Status, r.Header.Get("X-Should-Retry"))
+	if r.Status != http.StatusServiceUnavailable || r.Header.Get("X-Should-Retry") != "true" || r.Header.Get("Retry-After") != "5" {
+		t.Fatalf("got %d with x-should-retry %q and retry-after %q, want 503 the client retries after 5 s", r.Status, r.Header.Get("X-Should-Retry"), r.Header.Get("Retry-After"))
 	}
 	got := e.failures()
 	if len(got) < 2 || got[0] != "network/after_write" || got[1] != "network/before_write" {
@@ -450,6 +450,44 @@ func TestAfterAChargedAttemptTheNetworkRetryAnswerStopsClientResends(t *testing.
 	}
 	if reasons := e.requestReasons(); !reflect.DeepEqual(reasons, []string{"provider_unreachable"}) {
 		t.Fatalf("request reasons %v, want [provider_unreachable]", reasons)
+	}
+}
+
+func TestRetriesThatEndOnANetworkFailureAskTheClientToRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		network    bool
+		retry      string
+		retryAfter string
+	}{
+		{"after three network failures after write", true, "true", "5"},
+		{"after three provider 503 answers", false, "false", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, "acct-a")
+			u := newNetUpstream(t, e.upstream, func(int) netAction {
+				if tc.network {
+					return closeAfterBody
+				}
+				return pass
+			})
+			if !tc.network {
+				e.upstream.script("acct-a", reply{Status: 503}, reply{Status: 503}, reply{Status: 503})
+			}
+			e.startNet(u, Options{})
+
+			r := e.send(msg{Session: sessionID(1)})
+
+			if r.Status != http.StatusServiceUnavailable || r.Header.Get("X-Should-Retry") != tc.retry || r.Header.Get("Retry-After") != tc.retryAfter {
+				t.Fatalf("got %d with x-should-retry %q and retry-after %q, want 503 with %q and %q", r.Status, r.Header.Get("X-Should-Retry"), r.Header.Get("Retry-After"), tc.retry, tc.retryAfter)
+			}
+			if seen := u.seen(); len(seen) != 3 {
+				t.Fatalf("upstream saw %d requests, want 3: the router's retries ran out", len(seen))
+			}
+			if got := e.requestAttempts(); !reflect.DeepEqual(got, []int{3}) {
+				t.Fatalf("request upstream_attempts %v, want [3]", got)
+			}
+		})
 	}
 }
 
