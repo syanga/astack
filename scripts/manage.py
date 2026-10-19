@@ -159,6 +159,8 @@ def main():
     state_path = state_root / "manifest.json"
     # Reject a blocked state directory before changing any managed files.
     files.validate_parents(state_path)
+    if args.component and args.command == "uninstall" and not args.dry_run:
+        claude_router.lock_activation_until_exit(state_path)
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {"version": 1, "targets": {}}
     if state.get("version") not in range(1, MANIFEST_VERSION + 1):
         raise ValueError("Unsupported astack manifest version")

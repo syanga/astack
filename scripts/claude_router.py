@@ -268,6 +268,8 @@ def plan(command, state, lay, force=False):
     journal = read_journal(lay.state) if command == "uninstall" and old else None
     if journal and journal["phase"] != "active":
         raise ValueError("An activation of claude-router was interrupted; run claude-router direct, then uninstall")
+    if journal and not state.get("settings", {}).get(NAME):
+        raise ValueError("An activation of claude-router has no settings record; run claude-router direct, then uninstall")
     if command == "uninstall" and old and (journal or state.get("settings", {}).get(NAME)):
         try:
             check_checkout(lay)
@@ -499,6 +501,7 @@ def restore_direct(state_dir, manifest_path, mode, stopped):
     journal = read_journal(state_dir)
     if journal and (journal["phase"] != "active" or not owned):
         reason = "interrupted activation" if journal["phase"] != "active" else "activation with no settings record"
+        restores = file_sha256(Path(journal["settings"])) == journal["activated_sha256"]
         try:
             settings = undo_journal(state_dir, state, manifest_path, check=mode != "apply")
         except Refusal as refusal:
@@ -506,7 +509,8 @@ def restore_direct(state_dir, manifest_path, mode, stopped):
             return 1
         if mode == "check":
             return 0
-        print("restore {} ({})".format(shown(settings), reason))
+        print("restore {} ({})".format(shown(settings), reason) if restores
+              else "skip    {} (already the original; {})".format(shown(settings), reason))
         print("keep    " + inventory)
         print("ready   nothing changed; apply with claude-router direct" if mode == "prepare" else done)
         return 0
@@ -776,16 +780,19 @@ def write_journal(state_dir, journal):
 
 
 class ActivationLock:
-    """Serializes activate and direct. A caller that already holds the lock passes its descriptor."""
-
     def __init__(self, state_dir, fd=None):
         self.opened = fd is None
-        self.fd = os.open(str(state_dir / "activation.lock"), os.O_RDWR | os.O_CREAT, 0o600) if fd is None else fd
+        if fd is None:
+            try:
+                fd = os.open(str(state_dir / "activation.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+            except FileNotFoundError:
+                raise Refusal("no state directory at {}".format(shown(state_dir))) from None
+        self.fd = fd
         try:
             fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             self.__exit__()
-            raise Refusal("another claude-router activate or direct is running",
+            raise Refusal("another claude-router activate, direct, or uninstall is running",
                           next_step="wait for it to finish, then run again") from None
 
     def __enter__(self):
@@ -794,6 +801,17 @@ class ActivationLock:
     def __exit__(self, *exception):
         if self.opened:
             os.close(self.fd)
+
+
+def lock_activation_until_exit(state_path):
+    state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+    recorded = state.get("components", {}).get(NAME, {}).get("layout")
+    if not recorded or not Path(recorded["state"]).is_dir():
+        return
+    try:
+        ActivationLock(Path(recorded["state"]))
+    except Refusal as refusal:
+        raise ValueError("{}; {}".format(refusal, refusal.next_step)) from None
 
 
 def undo_journal(state_dir, state, manifest_path, check=False):
@@ -1088,6 +1106,8 @@ def load_state(state_root):
 
 
 def run(command, state_root, lay, args):
+    if command == "uninstall" and not args.dry_run:
+        lock_activation_until_exit(state_root / "manifest.json")
     state_path, state = load_state(state_root)
     p = plan(command, state, lay, args.force)
     check_targets(state, p)

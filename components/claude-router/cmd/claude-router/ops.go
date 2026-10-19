@@ -294,8 +294,6 @@ func direct(args []string) error {
 
 const nothingOwned = 3
 
-// lockActivation takes the lock that the helper's activate and direct also take, so that neither runs
-// between direct's check and its apply.
 func lockActivation(state string) (*os.File, error) {
 	f, err := os.OpenFile(filepath.Join(state, "activation.lock"), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
@@ -304,7 +302,7 @@ func lockActivation(state string) (*os.File, error) {
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, nextError{err: errors.New("another claude-router activate or direct is running"),
+			return nil, nextError{err: errors.New("another claude-router activate, direct, or uninstall is running"),
 				next: "wait for it to finish, then run again"}
 		}
 		return nil, err

@@ -129,7 +129,7 @@ func TestDirectRefusesWhileAnotherActivateOrDirectHoldsTheLock(t *testing.T) {
 		err := direct(args)
 
 		var n nextError
-		if !errors.As(err, &n) || n.Error() != "another claude-router activate or direct is running" ||
+		if !errors.As(err, &n) || n.Error() != "another claude-router activate, direct, or uninstall is running" ||
 			n.next != "wait for it to finish, then run again" {
 			t.Fatalf("direct %v: %v, want the held lock named", args, err)
 		}

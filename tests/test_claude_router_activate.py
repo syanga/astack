@@ -837,8 +837,47 @@ class ActivationTests(ActivationFixture):
             self.assertEqual(self.settings_path.read_bytes(), kept)
         self.assertEqual(self.journal()["phase"], "active")
 
+    def test_direct_without_a_settings_record_says_it_restores_nothing_when_the_file_is_already_the_original(self):
+        self.activate_then_lose_the_settings_record()
+        self.settings_path.write_bytes(self.before)
+        skip = "skip    ~/.claude/settings.json (already the original; activation with no settings record)\n"
 
-LOCKED = "another claude-router activate or direct is running\nnext    wait for it to finish, then run again\n"
+        prepared = self.direct("--prepare")
+        result = self.direct("--stopped")
+
+        self.assertEqual(prepared.stdout, skip + "keep    router logins work; 2 assignments\n"
+                                                 "ready   nothing changed; apply with claude-router direct\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, skip + "keep    router logins work; 2 assignments\n"
+                                               "done    clients connect directly; the router stays installed and stopped\n")
+        self.assert_direct_and_state_kept()
+
+    def test_uninstall_without_a_settings_record_refuses_and_keeps_the_activation_until_direct(self):
+        self.activate_then_lose_the_settings_record()
+
+        refused = self.component(command="uninstall", success=False)
+
+        self.assertIn("An activation of claude-router has no settings record; run claude-router direct, then uninstall",
+                      refused.stderr)
+        self.assertEqual(self.base_url(), self.listen)
+        self.assertEqual(self.journal()["phase"], "active")
+        self.assertTrue((self.data / "lib/claude_router.py").exists())
+        self.assertEqual(self.direct("--stopped").returncode, 0)
+        self.component(command="uninstall")
+        self.assertEqual(self.settings_path.read_bytes(), self.before)
+
+    def test_direct_with_a_missing_state_directory_refuses(self):
+        missing = self.root / "no-such-state"
+
+        result = subprocess.run([sys.executable, str(self.data / "lib/claude_router.py"), "direct", "--check",
+                                 "--state", str(missing), "--manifest", str(self.home / ".local/state/astack/manifest.json")],
+                                capture_output=True, text=True, env=dict(self.env, HOME=str(self.home.resolve())))
+
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (1, "", "claude-router: direct: no state directory at {}\n".format(missing)))
+
+
+LOCKED = "another claude-router activate, direct, or uninstall is running\nnext    wait for it to finish, then run again\n"
 
 
 class OverlapTests(ActivationFixture):
@@ -902,6 +941,16 @@ class OverlapTests(ActivationFixture):
         out, err = second.communicate(timeout=60)
 
         self.assertEqual((second.returncode, out, err), (1, "", "claude-router: activate: " + LOCKED))
+        self.assert_routed_and_owned()
+
+    def test_uninstall_during_an_activation_s_verification_refuses_without_changes(self):
+        first, gate = self.start_held_activation()
+
+        refused = self.component(command="uninstall", success=False)
+
+        self.assertIn("astack: another claude-router activate, direct, or uninstall is running; wait for it to finish, then run again",
+                      refused.stderr)
+        self.finish(first, gate)
         self.assert_routed_and_owned()
 
     def test_direct_runs_under_the_lock_its_caller_holds_and_hands_down(self):

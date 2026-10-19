@@ -179,7 +179,7 @@ implemented in `probes/classify.go`:
 | `transient` | 408 or 5xx, including 529 | Bounded retry on the assigned account |
 | `throttle` | 429, not credential-scoped, no unified rejection in the attempt's headers | Bounded retry on the assigned account |
 | `exhausted` | 429, credential-scoped or a rejected 5h or 7d window in the attempt's headers | Record exhaustion, migrate |
-| `model_limit` | 429, unified rejection with only overage or model-specific claims | Pending: no live header capture yet |
+| `model_limit` | 429, unified rejection with only overage or model-specific claims | Record the rejection, which blocks the account for that model until its reset, as for `exhausted`. No provider response of this shape has been observed (row RP-14) |
 | `auth` | 401 or 403 | Exclude from new placement, keep assignments |
 
 The SDK's passive quota snapshot, `ModelStates[model].Quota.Signals`, is not a
@@ -415,7 +415,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | ID-1 | Stable identity on new, resume, continue, and process restart | passed | passed | `identity.json#rows[0]` | PR1 |
 | ID-2 | Identity unchanged by a model change | passed | passed | `identity.json#rows[1]` | PR1 |
 | ID-3 | Parent linkage for subagents and nested subagents | passed | passed | `identity.json#rows[2]` | PR1 |
-| ID-4 | Binding key read before credential-specific rewriting | passed | passed | PR1's evidence was SDK source alone (`identity.json#rows[3]`). The router reads the key from the client's request in `Service.messages`, before the SDK rewrites the request, and binds on that key alone. In `TestExhaustionBeforeOutputMovesTheConversationWithinTheRequest`, a conversation that moves to another account keeps its binding, and the destination receives the source's session header and metadata session. Live, a terminal conversation (A5, A9) and an Agent SDK session (A6, A7) each kept one conversation hash on both accounts across a move (`evidence/PR6/live-35075a7/`). | PR3, PR4 |
+| ID-4 | Binding key read before credential-specific rewriting | passed | passed | The router reads the key from the client's request in `Service.messages`, before the SDK rewrites the request, and binds on that key alone. In `TestExhaustionBeforeOutputMovesTheConversationWithinTheRequest`, a conversation that moves to another account keeps its binding, and the destination receives the source's session header and metadata session. Live, a terminal conversation (A5, A9) and an Agent SDK session (A6, A7) each kept one conversation hash on both accounts across a move (`evidence/PR6/live-35075a7/`). PR1's trace of the SDK source (`identity.json#rows[3]`) supports this and does not show it. | PR4, PR6 |
 | ID-5 | A request without identity fails explicitly and is not retried | pending | pending | The router's half passed: it answers 400 `invalid_request_error` with `x-should-retry: false`, makes no upstream attempt, and creates no assignment (`TestRequestsWithoutSessionIdentityAreRejected`; PR3 lane 2 `missing_identity_rejected`, `evidence/PR3/lane-2/controls.json`). No client has been observed receiving that 400. PR1's client evidence is an analogue, a 401 with `x-should-retry: false` (`runs/recovery-terminal-api-key-w-401-noretry`), and both clients sent the header on every observed request (`identity.json`, `missing_identity_policy`). | Each client run against a server that answers with the router's 400 and its headers: one request, no resend |
 | ID-6 | A fork links to its origin (informational; forks become new conversations) | failed | pending | `identity.json#rows[4]`. Agent SDK: the `forkSession` path was not driven. | Closed by PR3: the router binds on the session header alone, so a fork is a new conversation (`TestAForkIsANewConversation`) |
 
@@ -440,7 +440,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | RP-15 | The passive quota snapshot describes the failed call | failed | `TestQuotaSnapshotOutlivesAHeaderlessFailure`. Contract: classify from per-attempt headers. | Closed by PR3: `classify` reads only the call's own attempt headers at the router's transport. `TestHeaderlessThrottleAfterExhaustionRetries` classifies a headerless 429 after an exhaustion as throttle and retries on the same account |
 | RP-16 | Credential rotation or an account-set change while requests are in flight is free of SDK races | passed | Same reconciliation path as the startup race. PR3 removes that path while serving: without a file watcher, a credential or account change applies only by restart, which turns it into RP-20. `TestStartWithEnrolledAccountsUnderLoad` rotates a credential across restarts under concurrent load under `-race` (`evidence/PR3/rp20-e01433b/`). The SDK's own token refresh, which writes the auth while serving, ran live in lane 1 rerun at `9b7e059` under a `-race` build: the SDK refreshed both accounts at start, both were served, and the build reported 0 data races (`evidence/PR3/lane-1-rerun/race-count.txt`). The verifier's live-equivalence ruling for `c95ae72` and the guard's pass-through of SDK refreshes carry this to the current head. | PR3 |
 | RP-17 | The router's transport observes every upstream attempt and ties it to its call, with no proxy in effect | passed | `Upstream.AttemptsFor` assertions in `TestPinnedRetriesStayOnSelectedAccount`, `TestNonStreamingPinnedRetriesStayOnSelectedAccount`, `TestPinnedExecutorPostureMakesOneAttemptPerCall`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover`, `TestFailureSignalsClassifyDistinctly`. Streaming and non-streaming paths; the refresh redispatch path is RP-5b. | PR1 |
-| RP-18 | A router-supplied transport in place of the SDK's uTLS transport is accepted upstream | passed | PR3 live lane 1 at `fb17a64` ran the router with no `test_upstream`, behind a client gate, so its own transport dialed the provider: all 9 inference requests completed with 200 and no `attempt_failed` (`evidence/PR3/lane-1/RESULTS.md`, `events.jsonl`). At the PR6 cutover at `35075a7`, the daily-driver router restarted without `test_upstream` (`evidence/PR6/cutover/default-routing.json`, `test_upstream_removed`) and then served the T3 check's request, 200 in 1 attempt (`t3.json`), and the requests that followed on every account (`reports/PR6-verify/cutover-35075a7/13-events-2000-2030.txt`). The PR4 and PR6 live lanes do not count here: their router reached the provider through the upstream gate, which opened its own TLS connection. | PR3, PR6 |
+| RP-18 | A router-supplied transport in place of the SDK's uTLS transport is accepted upstream | passed | PR3 live lane 1 at `fb17a64` ran the router with no `test_upstream`, behind a client gate, so its own transport dialed the provider: all 9 inference requests completed with 200 and no `attempt_failed` (`evidence/PR3/lane-1/RESULTS.md`, `events.jsonl`). At the PR6 cutover at `35075a7`, the daily-driver router restarted without `test_upstream` (`evidence/PR6/cutover/default-routing.json`, `test_upstream_removed`) and then served the T3 check's request, 200 in 1 attempt (`t3.json`). The PR4 and PR6 live lanes do not count here: their router reached the provider through the upstream gate, which opened its own TLS connection. | PR3, PR6 |
 | RP-19 | The SDK's request-scoped failures classify separately and are not retried | passed | `TestRequestScopedRefusalIsReportedWithoutRetry` sends `"speed":"fast"` through the SDK executor. The upstream refuses with the fast-mode credits 429, the SDK returns a request-scoped error, and the router classifies it `request_scoped`, answers once with `x-should-retry: false`, and keeps the account usable. `TestRequestScopedErrorAfterASuccessfulAttemptIsNotSentAgain`: after an upstream 200, a request-scoped SDK error is answered once, with one upstream attempt. | PR3 |
 | RP-20 | Service startup with enrolled accounts is free of SDK data races | failed | `evidence/PR1/sdk/startup-race-before-mitigation.log`, `evidence/PR1/unit-6166c8c/go.log`. The racing accesses are SDK-internal, so a router barrier cannot serialize them. PR3 mitigation: no file watcher, so the SDK's auth-update consumer runs but nothing feeds it, and the client listener opens only after every account is registered and SDK account state has been quiet for 250 ms. `TestStartWithEnrolledAccountsUnderLoad` passed 50 of 50 starts under `-race`, each followed at once by 16 requests from 4 concurrent clients, with a credential rotated before each restart and no race reported (`evidence/PR3/rp20-e01433b/`; earlier runs `rp20-923bed9/` and `rp20-845ae3f/`). Each start in that test also checks that the refresh guard is still the SDK's Claude executor after the load. Residual: the SDK's token auto-refresh starts before startup model registration, so an access token that expired while the service was down can race it. The quiet period is a heuristic. | Upstream SDK fix, then the same probe passes repeatedly |
 
@@ -462,7 +462,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | ID | Contract behavior | Status | Evidence | Owner |
 | --- | --- | --- | --- | --- |
 | IO-5 | The remaining guarantee limit is stated | passed | `included-only.json`, `guarantee_limit`; "Included-only: the documented limit is accepted" above | PR1 |
-| IO-6 | The router refuses unknown or stale overage state and stops routing on observed paid use | passed | `TestUnknownOverageStateRefusesDispatch`, `TestAnAccountWithUnknownStateIsSkippedForPlacement`, `TestEnabledOverflowRefusesDispatch`, `TestStaleReadingIsRecheckedBeforeDispatch`, `TestResponseHeadersRefreshTheReading`, `TestPaidUseStopsRoutingToTheAccount`, `TestPaidUseWithoutAnotherAccountRefuses`. Paid-use detection needs every attempt to pass the router's transport: `TestCredentialsThatChangeTheUpstreamPathAreRefused` refuses a credential proxy or header override, and `TestTransportCapsAttemptsAndRefusesAnotherAccount` refuses an off-pin attempt; lane 2 `unsafe_account_not_placed`, `paid_use_stops_routing` (`evidence/PR3/lane-2/controls.json`). Controlled upstream only; the real usage endpoint is IO-4. | PR3 |
+| IO-6 | The router refuses unknown or stale overage state and stops routing on observed paid use | passed | `TestUnknownOverageStateRefusesDispatch`, `TestAnAccountWithUnknownStateIsSkippedForPlacement`, `TestEnabledOverflowRefusesDispatch`, `TestStaleReadingIsRecheckedBeforeDispatch`, `TestResponseHeadersRefreshTheReading`, `TestPaidUseStopsRoutingToTheAccount`, `TestPaidUseWithoutAnotherAccountRefuses`. Paid-use detection needs every attempt to pass the router's transport: `TestCredentialsThatChangeTheUpstreamPathAreRefused` refuses a credential proxy or header override, and `TestTransportCapsAttemptsAndRefusesAnotherAccount` refuses an off-pin attempt; lane 2 `unsafe_account_not_placed`, `paid_use_stops_routing` (`evidence/PR3/lane-2/controls.json`). The policy half is PR2's: `TestUnverifiedOverageWithholdsDispatch`, `TestStaleOverageCheckRefusesWithoutMigrating`, `TestObservedPaidUseMigratesAndDoesNotReturn`, `TestObservedPaidUseWithoutADestinationRefusesAndKeepsTheBinding`. Controlled upstream only; the real usage endpoint is IO-4. | PR2, PR3 |
 
 ### Waiting and cancellation
 
@@ -477,7 +477,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 
 | ID | SDK behavior | Status | Evidence | Owner |
 | --- | --- | --- | --- | --- |
-| WC-7 | Exact reset deadlines reach the router from the call's own attempt | passed | PR1's `TestFailureSignalsClassifyDistinctly` asserts the scripted 5h and 7d reset values in the fresh SDK snapshot; its attempt-header half reads the scripted reply, so it compares the fixture with itself. The router's transport reads the headers of each attempt's own response (PR3). `TestEveryAccountExhaustedWaitsForTheEarliestUsableReset` scripts a 5h and a 7d reset on one account and a 5h reset on the other, and the local 429 carries the exact reset of the account that frees first. `TestAWaitEventCarriesTheResetItWaitsFor` finds the scripted reset in the wait event's `until`. Live, a gate-injected 120 s reset reached both waiters, and their resends went out just after it (PR4 W1, row WC-1; PR6 live lane A9, `evidence/PR6/live-35075a7/`). | PR4 |
+| WC-7 | Exact reset deadlines reach the router from the call's own attempt | passed for the SDK snapshot; pending for the attempt headers | Snapshot: PR1's `TestFailureSignalsClassifyDistinctly` asserts the scripted 5h and 7d reset values in the fresh SDK snapshot. Attempt headers: that test's header half reads the scripted reply, so it compares the fixture with itself. The router's transport reads the headers of each attempt's own response (PR3). `TestEveryAccountExhaustedWaitsForTheEarliestUsableReset` (PR4) scripts a 5h and a 7d reset on one account and a 5h reset on the other, and the local 429 carries the exact reset of the account that frees first. `TestAWaitEventCarriesTheResetItWaitsFor` (PR5) finds the scripted reset in the wait event's `until`. Live, a gate-injected 120 s reset reached both waiters, and their resends went out just after it (PR4 W1, row WC-1; PR6 live lane A9, `evidence/PR6/live-35075a7/`). Every reset in this evidence came from a script or a gate; none came from the provider. | Snapshot: PR1. Attempt headers: a live exhaustion whose provider 429 carries reset headers, with the router's wait or local 429 naming those resets |
 | WC-8 | Client cancellation stops SDK upstream work before the first event, inside the first block, and after a completed block | passed | `TestCancellationStopsUpstreamWork`, stop lag under 1 s asserted | PR1 |
 
 ### Cache and context continuity
@@ -498,7 +498,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | PS-4 | Torn tail truncates; corrupt or incomplete interior records fail closed | passed | `TestJournalTruncatesTornFinalRecord`, `TestJournalRefusesCorruptInteriorRecord` | PR1 |
 | PS-7 | A write or sync error stops acknowledgments until recovery, and no acknowledgment disagrees with replay | passed | `TestJournalStopsAcknowledgingAfterFailedSync`, `TestJournalRecoversFromPartialWrite` | PR1 |
 | PS-5 | Durability across OS crash or power loss | blocked | No power-cut rig. Relies on `F_FULLFSYNC` and `fsync`. PR5's supervision lane killed the service with SIGKILL, which is a process crash (PS-1), not an OS crash. The README states the untested scope. | A rig that cuts power or crashes the OS during journal writes and checks replay after the reboot. No one has accepted this gap as a limit. Never pass it on documentation |
-| PS-6 | Storage behavior on Linux | blocked | No Linux environment in PR1 or PR5. The PR5 Linux lane is prepared and not run (`evidence/PR5/lane-3/`). | PR5 lane 3 on a Linux host: the journal probes and the systemd-user lifecycle. The user deferred Linux on 2026-10-16 (PR6 go, item 3b, `open-decisions.md` in the execution store): the Linux rows stay blocked and do not block merge readiness |
+| PS-6 | Storage behavior on Linux | blocked | No Linux environment in PR1 or PR5. The PR5 Linux lane is prepared and not run (`evidence/PR5/lane-3/`). | PR5 lane 3 on a Linux host: the journal probes and the systemd-user lifecycle. The user deferred Linux on 2026-10-16 (PR6 go, item 3b): the Linux rows stay blocked and do not block merge readiness |
 | DS-1 | Pinned source build with an explicit Go prerequisite | passed | `go.mod`, `go.sum`; `toolchain/go-toolchain.json` in the store | PR1 |
 | DS-2 | SDK license and version requirement recorded | passed | Pinned SDK table above | PR1 |
 | DS-3 | Offline build and test from the prepared module cache | passed | `evidence/PR6/unit-35075a7/`: `run.sh` runs `go test -race` and `go vet` with `GOPROXY=off GOSUMDB=off`, and `go.exit` and `vet.exit` are 0. PR1's run, `evidence/PR1/unit-ac9169d/go.log`, passed, but its record does not show the proxy setting. | PR6 |
@@ -1028,10 +1028,9 @@ finds the guard replaced. The check before a refresh is not atomic with the
 SDK's executor lookup: a replacement between the two lets that one refresh
 run without the guard. With the router's SDK configuration, only the SDK's
 startup model sync registers a Claude executor once the SDK has started,
-and it runs during the startup quiet period (row RP-20). This gap (P2b) is
-open: the user has not accepted it (`open-decisions.md` in the execution
-store), and closing it needs a check that is atomic with the SDK's executor
-lookup, which the pinned SDK does not offer.
+and it runs during the startup quiet period (row RP-20). The user has not
+accepted this gap (P2b). Closing it needs a check that is atomic with the
+SDK's executor lookup, which the pinned SDK does not offer.
 
 The guard forwards the Claude executor's refresh, request, and request
 preparation methods, but not `ForAPIKey`. The SDK calls `ForAPIKey` only
@@ -1054,9 +1053,8 @@ resend the refresh token. Until then the account is refused once its
 reading goes stale, unless an inference request that the fresh reading
 still allows gets a 401 and the SDK's request-time refresh renews the
 credential. For an 8-hour token the outage lasts under 4 hours, plus the
-SDK's refresh and the next read (up to `overage_check_every`). This cost (L2)
-is open: the user has not accepted it (`open-decisions.md` in the execution
-store).
+SDK's refresh and the next read (up to `overage_check_every`). The user has
+not accepted this cost (L2).
 
 One read sends at most two usage requests and starts at most one refresh.
 A refresh is one call to the executor's token exchange, which posts to the
@@ -1296,7 +1294,7 @@ was stale by wall time.
     then permit dispatch until its true age reaches `overage_fresh_for` plus
     D. That happens only when every settings read in that time fails,
     because a successful read replaces the reading. The user has not
-    accepted this effect (N10); it is fixed in PR4.
+    accepted this effect (N10), which is fixed in PR4.
   - A rejection whose absolute reset falls inside the hold counts as past.
     The router can send attempts to the exhausted account until the hold
     ends. The upstream refuses each one, so they spend no allowance or
@@ -1474,8 +1472,9 @@ request; the accepted behavior is the client's own continuation turn.
 
 An `auth` failure marks the account as needing login. New conversations
 skip it. A conversation that has been served on it gets 503 naming
-`claude-router login -account ID`, never 401, and keeps its assignment; one
-that never served moves (PR2). The mark is cleared by:
+`claude-router login -account ID`, never 401, and keeps its assignment. One
+that never served moves (PR2). That move rests on a coordinator decision,
+which the user has not accepted. The mark is cleared by:
 
 - `claude-router login`, which clears it in the saved account state while
   it holds the state directory, so it applies at the next start;
@@ -1704,7 +1703,7 @@ share, waits, refusals, holds, moves, and context size from `events.jsonl`.
 | launchd switch probe | A `/bin/sleep` job under a test label: `disable` persists `=> disabled`, a `bootstrap` of a disabled label fails with error 5, `enable` leaves `=> enabled`, and no `launchctl` verb removes the entry. | `evidence/PR5/r3-launchd-probe/probe.log` |
 | `apiKeyHelper` client probe | Claude Code 2.1.300, sandboxed with a temporary HOME and `CLAUDE_CONFIG_DIR`, the `client_settings` values, and a token path with a space and a quote: each request carried the token as both `X-Api-Key` and `Authorization: Bearer`, and the router served the request from a loopback fake upstream. | `evidence/PR5/apikeyhelper-r3/result.json` |
 | Load failure under launchd | With the plist bootstrapped directly, as at login, the seeded config without accounts, a config with an unknown field, and a corrupt `supervision.json` each ended after 5 failed starts: launchd counted 6 runs, the last exited 0, and `status` showed `failed` with the error. | `evidence/PR5/loadfail-r2/loadfail.json` |
-| PR5.live.3 | Blocked: no Linux host. The systemd-user lane is prepared as `lane-3/lane3_linux.py`. The foreground mode passed on macOS. The user deferred Linux on 2026-10-16 (PR6 go, item 3b, `open-decisions.md` in the execution store), so this row does not block merge readiness. | `evidence/PR5/lane-3/` |
+| PR5.live.3 | Blocked: no Linux host. The systemd-user lane is prepared as `lane-3/lane3_linux.py`. The foreground mode passed on macOS. The user deferred Linux on 2026-10-16 (PR6 go, item 3b), so this row does not block merge readiness. | `evidence/PR5/lane-3/` |
 | PR5.perf | Not applicable. The request path changed only to stamp `until` on wait events. | |
 
 ## Activation (PR6)
@@ -1804,16 +1803,24 @@ or with `--home`.
 
 `activate` and `direct`, in every mode, hold an exclusive `flock` on
 `activation.lock` in the state directory for the whole run, including
-verification. A second one refuses before it reads the manifest or
-`activation.json`: it prints `claude-router: <command>: another claude-router
-activate or direct is running` and `next    wait for it to finish, then run
-again`, changes nothing, and exits 1. `claude-router direct` takes the lock
-before its check and holds it through the service stop and the apply, and
-passes it to the helper as an open descriptor
+verification. The component's uninstall holds it too, except with
+`--dry-run`. A second caller refuses before it reads `activation.json` or
+changes anything. `activate` and uninstall read the manifest once before the
+lock, to find the state directory, and read it again under the lock.
+`direct` reads it only under the lock. The refusal prints `claude-router:
+<command>: another claude-router activate, direct, or uninstall is running`
+and `next    wait for it to finish, then run again`, and exits 1. Uninstall
+prints `astack:` and the same two parts on one line. `claude-router direct`
+takes the lock before its check, holds it through the service stop and the
+apply, and passes it to the helper as an open descriptor. With no state
+directory, `activate` and `direct` print `no state directory at <dir>` and
+exit 1
 (`test_an_activation_during_another_s_verification_refuses_without_changes`,
 `test_direct_during_an_activation_s_verification_refuses_without_changes`,
 `test_a_second_activation_whose_verification_fails_refuses_before_it_touches_the_first`,
+`test_uninstall_during_an_activation_s_verification_refuses_without_changes`,
 `test_direct_runs_under_the_lock_its_caller_holds_and_hands_down`,
+`test_direct_with_a_missing_state_directory_refuses`,
 `TestDirectRefusesWhileAnotherActivateOrDirectHoldsTheLock`,
 `TestDirectHoldsTheLockAcrossTheCheckTheStopAndTheApplyAndHandsItToTheHelper`).
 
@@ -1970,13 +1977,19 @@ with the refusal, so `claude-router direct` refuses before it stops the
 service; otherwise `claude-router direct` stops the service first.
 `direct -prepare` prints `restore <file> (interrupted activation)`, or
 `restore <file> (activation with no settings record)` for an `active`
-journal. For an `active` journal the refusal reads `<file> changed after
-activation`, and `activation.json` stays in phase `active`
+journal. When the file holds the original SHA-256, it prints `skip    <file>
+(already the original; <reason>)` in place of the `restore` line. For an
+`active` journal the refusal reads `<file> changed after activation`, and
+`activation.json` stays in phase `active`
 (`test_direct_without_a_settings_record_restores_the_activation_backup`,
-`test_direct_without_a_settings_record_refuses_an_edited_file_and_keeps_the_activation_record`).
-Uninstall refuses while a `writing` or `verifying` journal exists, because
-the helper that undoes it is part of the payload uninstall removes
-(`test_direct_and_uninstall_after_an_interruption_between_the_settings_write_and_its_record`,
+`test_direct_without_a_settings_record_refuses_an_edited_file_and_keeps_the_activation_record`,
+`test_direct_without_a_settings_record_says_it_restores_nothing_when_the_file_is_already_the_original`).
+Uninstall refuses while a `writing` or `verifying` journal exists, or an
+`active` one without a `settings.claude-router` record, and keeps the
+journal, because the helper that undoes it is part of the payload uninstall
+removes. Its message ends `run claude-router direct, then uninstall`
+(`test_uninstall_without_a_settings_record_refuses_and_keeps_the_activation_until_direct`,
+`test_direct_and_uninstall_after_an_interruption_between_the_settings_write_and_its_record`,
 `test_direct_after_an_interruption_before_the_settings_write_drops_the_record`,
 `test_the_next_activation_undoes_an_interrupted_verification_first`,
 `test_an_edit_after_an_interruption_refuses_and_is_kept`,
@@ -2007,12 +2020,10 @@ Uninstall removes an `active` journal after it restores the settings
   commands do not run. A project not named with `--project`, or an app
   started with an env token, can still bypass the router's wiring;
   activation only warns.
-- The manifest has no lock shared with `./install.sh`. A concurrent install
-  or uninstall during activation can lose the settings record. `direct` then
-  undoes the activation from `activation.json` and the backup (Undo and
-  interrupted activation, above). Uninstall does not: with no settings record
-  it restores nothing, removes an `active` journal, and leaves the settings on
-  the router. Run `claude-router direct` before uninstalling.
+- An install takes no lock. A concurrent `./install.sh` during activation
+  can lose the settings record. `direct` then undoes the activation from
+  `activation.json` and the backup, and uninstall refuses until it has (Undo
+  and interrupted activation, above).
 
 ### Verification
 
@@ -2023,5 +2034,5 @@ Uninstall removes an `active` journal after it restores the settings
 | PR6.live.3, isolated parts | Under launchd label `dev.astack.claude-router.pr6test.<hex>`: activation refused with the service stopped and with another process on its port; a SIGKILL before any write left nothing to undo; a SIGKILL during verification was undone by `direct` and, a second time, by the next activation; a failed continuation rolled back; a stopped router failed the client with no direct request; an edit of an owned key stopped `direct` and was kept, and an unrelated edit survived it. A `--verify` command that sent nothing failed while another client routed a request in another conversation, and passed when that client continued the same session (the Known limit above). An install from a checkout with an edited helper made activation refuse, and so did activation run from an edited checkout over a clean install. A command that left a background child and exited 5 left no child, and activation exited 1. SIGTERM, SIGHUP, and closing the pseudo-terminal whose session activation leads, during verification, each rolled back with exit 1. With the real client, a mixed SIGTERM, SIGHUP, and SIGINT storm during verification, and a storm from the failure line of a failed continuation until exit, each exited 1 with the settings restored. With stdout's reader gone and stderr to a file, stderr kept the failure, `undo`, and `next` lines, and, when the command also edited the settings, the refusal and its `next` line. The daily-driver part is the cutover row below. | `evidence/PR6/lane-3/cutover-isolated.json` |
 | PR6.live.2 | At `35075a7` with Claude Code 2.1.302 and Agent SDK 0.3.276, the daily driver's versions that the user chose, real accounts `work` and `alumni`, and a sandboxed lane with gates in front of the provider. The record's `result` is `pass` with nothing open: 11 scenarios passed and 3 are accepted. Passed: the identity at the start equals the identity at the end; stable routing across resume, a subagent, and a restart (A1 to A4); migration with tools and thinking for the terminal (A5) and the Agent SDK (A7); the destination's acceptance of the source's 4 thinking blocks (A5, row CC-2); Agent SDK placement with T3's options (A6); the short wait (A9, row WC-1); included-only reads, every one `disabled`, with the IO-6 unit tests; the controlled-upstream recovery scenarios, rerun at the head; cache counters on all 11 completed requests in A1 to A7; the stable cache comparison (PR6.perf); and `apiKeyHelper` over a stored login (Part C). Accepted: the long wait (row WC-6) from PR4's W6, because the user's go took the default that skips A8; Linux (decision 3b); and the included-only gap (G1). | `evidence/PR6/lane-2/acceptance.json`, `evidence/PR6/live-35075a7/`, `reports/PR6-verify/live-35075a7/receipt.md` |
 | PR6.perf | Six direct cohorts on the direct sign-in, interleaved with three routed cohorts (two on `alumni`, one on `work`), three requests each; every first request read 0 cached tokens. The direct repeats set the envelope: 1 token at position 1, 0 at positions 2 and 3. Routed cache writes were 6,294 to 6,296 tokens at position 1, against at most 6,428 direct, and 42 at positions 2 and 3 in both arms, with no account change. The controlled cache model passed: the prefix test, and 30 simulations with 0 healthy migrations. The arms' system content differs by about 132 tokens with the auth mode, so they share no exact prefix; the rule bounds routed writes by direct writes. | `evidence/PR6/perf/baseline.json`, `comparison.json`, `model/model.json` |
-| Cutover (PR6.live.3, final part) | On the daily driver at `35075a7`, with Claude Code 2.1.302 and T3 build 0.1.1-nightly.20261016.3218, whose bundled Agent SDK is 0.3.276: the preflight, install, and readiness checks named the accepted head, binary, and helpers, and both accounts read `disabled`. `activate` verified a terminal continuation and an Agent SDK continuation, 1 routed request each, and reached `active`. The router then restarted without `test_upstream`, and a T3 message routed one request to the provider, 200 in 1 attempt. The leak scan found 0 token hits in 59 files. A first attempt failed at the T3 step on the gate's budget and was rolled back with `claude-router direct`. In the second, the first T3 check read a thread the message did not go to and failed; it was checked again instead of rolled back, a deviation from the runbook recorded in the execution store's `decisions.tsv`. | `evidence/PR6/cutover/` (`default-routing.json`, `activate.json`, `t3.json`, `leaks.json`), `evidence/PR6/cutover-attempt-1/`, `reports/PR6-verify/cutover-35075a7/receipt.md` |
-| PR6.live.1 and PR6.live.3 on Linux | Blocked: no Linux host. The user deferred Linux on 2026-10-16 (PR6 go, item 3b, `open-decisions.md` in the execution store), so these rows do not block merge readiness. | |
+| Cutover (PR6.live.3, final part) | On the daily driver at `35075a7`, with Claude Code 2.1.302 and T3 build 0.1.1-nightly.20261016.3218, whose bundled Agent SDK is 0.3.276: the preflight, install, and readiness checks named the accepted head, binary, and helpers, and both accounts read `disabled`. `activate` verified a terminal continuation and an Agent SDK continuation, 1 routed request each, and reached `active`. The router then restarted without `test_upstream`, and a T3 message routed one request to the provider, 200 in 1 attempt. The leak scan found 0 token hits in 59 files. | `evidence/PR6/cutover/` (`default-routing.json`, `activate.json`, `t3.json`, `leaks.json`), `reports/PR6-verify/cutover-35075a7/receipt.md` |
+| PR6.live.1 and PR6.live.3 on Linux | Blocked: no Linux host. The user deferred Linux on 2026-10-16 (PR6 go, item 3b), so these rows do not block merge readiness. | |

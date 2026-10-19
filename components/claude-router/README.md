@@ -180,8 +180,8 @@ Further signals do not interrupt the restore. When a command
 ends, activation kills every process in the command's process group. A
 process that starts its own session or group, such as a detached Node child,
 keeps running. Activation prints only each command's program name, never its
-arguments. One activation or `claude-router direct` runs at a time; a second
-one refuses and changes nothing.
+arguments. Activation, `claude-router direct`, and the component's uninstall
+run one at a time. A second one refuses and changes nothing.
 
 Run activation from the checkout that installed the router, or run the
 installed copy, `~/.local/share/astack/claude-router/lib/claude_router.py`.
@@ -191,7 +191,8 @@ acceptance record covers only the installed copy. `claude-router direct` runs
 the installed copy without that check.
 
 To go back to a direct connection later, run `claude-router direct`. It also
-undoes an activation that was interrupted. Uninstall refuses until then.
+undoes an activation that was interrupted or whose settings record is gone.
+Uninstall refuses until then.
 
 ## Operate the service
 
