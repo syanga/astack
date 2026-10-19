@@ -192,7 +192,8 @@ def committed_code():
 def working_code():
     root = component_dir()
     return {path.relative_to(root).as_posix(): path.read_bytes() for path in sorted(root.rglob("*"))
-            if path.is_file() and router_code(path.relative_to(root).as_posix())}
+            if path.is_file() and router_code(path.relative_to(root).as_posix())
+            and not any(part.startswith(".") for part in path.relative_to(root).parts)}
 
 
 def code_sha256():
@@ -926,12 +927,13 @@ def run_check(lay, state, settings_path, accepted, record_path, claude, timeout,
         line("fail", "Claude Code settings do not point at the router", next_step="claude-router setup")
     if accepted is None:
         line("fail", "no accepted record at {}".format(shown(record_path)),
-             next_step="install a checkout whose components/claude-router/accepted.json matches its code")
+             next_step="install a checkout whose accepted.json matches its code")
     elif status is not None:
         found = mismatches(accepted, measure(lay, state.get("components", {}).get(NAME, {}), status))
         where = " ({})".format(accepted["platform"]) if isinstance(accepted.get("platform"), str) else ""
         if found:
-            line("fail", "code differs from the accepted record" + where, found, "claude-router status")
+            line("fail", "code differs from the accepted record" + where, found,
+                 "install a checkout whose accepted.json matches its code")
         else:
             line("ok", "code matches the accepted record" + where)
     if stop.signal:
