@@ -24,6 +24,7 @@ type Event struct {
 	Decision     router.Kind      `json:"decision,omitempty"`
 	Reason       string           `json:"reason,omitempty"`
 	Class        router.Class     `json:"class,omitempty"`
+	Phase        string           `json:"phase,omitempty"`
 	Status       int              `json:"status,omitempty"`
 	Attempt      int              `json:"attempt,omitempty"`
 	Attempts     int              `json:"upstream_attempts,omitempty"`

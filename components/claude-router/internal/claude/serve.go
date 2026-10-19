@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -79,7 +78,17 @@ func (s *Service) authenticate(c *gin.Context) {
 }
 
 func writeError(c *gin.Context, status int, kind, message string) {
-	c.Header("X-Should-Retry", "false")
+	writeErrorRetry(c, status, kind, message, false)
+}
+
+// Claude Code 2.1.300 and Agent SDK 0.3.300 retry a 503 with their own
+// backoff unless x-should-retry is false.
+func answerUnreached(c *gin.Context, message string) {
+	writeErrorRetry(c, http.StatusServiceUnavailable, "api_error", message, true)
+}
+
+func writeErrorRetry(c *gin.Context, status int, kind, message string, retry bool) {
+	c.Header("X-Should-Retry", strconv.FormatBool(retry))
 	c.Header("Content-Type", "application/json")
 	body, _ := json.Marshal(map[string]any{"type": "error", "error": map[string]string{"type": kind, "message": message}})
 	c.Data(status, "application/json", body)
@@ -110,6 +119,7 @@ type outcome struct {
 	Status       int
 	Err          error
 	Class        router.Class
+	Phase        phase
 	Message      string
 	Header       http.Header
 	AttemptAt    time.Time
@@ -139,7 +149,7 @@ func (s *Service) messages(c *gin.Context) {
 	stream := id.Stream
 	req := router.Request{Conversation: id.Conversation, Agent: id.Agent, ParentAgent: id.ParentAgent, Model: id.Model, Attempt: 1}
 	call := fmt.Sprintf("r%d", s.seq.Add(1))
-	budget := &atomic.Int32{}
+	spend := &budget{}
 	upstream := 0
 	rechecked := map[router.AccountID]bool{}
 	var tried router.AccountID
@@ -202,7 +212,7 @@ func (s *Service) messages(c *gin.Context) {
 			return
 		}
 
-		if budget.Load() >= s.transport.limit {
+		if spend.attempts.Load() >= s.transport.limit {
 			// The conversation moved since this request's last attempt, by
 			// this request's migration or a concurrent one: the client sends
 			// again, and its resend goes to the new account.
@@ -217,7 +227,8 @@ func (s *Service) messages(c *gin.Context) {
 		}
 		tried = account
 		authID := s.authIDs[account]
-		out := s.dispatch(c, fmt.Sprintf("%s-%d", call, step), authID, account, id, body, budget)
+		info := callInfo{id: fmt.Sprintf("%s-%d", call, step), account: account, model: id.Model, conversation: conv, attempt: req.Attempt, budget: spend}
+		out := s.dispatch(c, info, authID, id, body)
 		upstream += out.Attempts
 		switch {
 		case out.ClientGone:
@@ -240,9 +251,14 @@ func (s *Service) messages(c *gin.Context) {
 			s.events.emit(Event{Kind: "attempt_refused", Conversation: conv, Account: account, Reason: string(r.reason)})
 			continue
 		}
-		if budget.Load() > s.transport.limit {
+		if spend.attempts.Load() > s.transport.limit {
 			finish("request", account, router.Decision{Kind: router.Fail, Reason: router.ReasonRetryBudget}, http.StatusServiceUnavailable, &out)
 			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: request reached the router's upstream attempt cap")
+			return
+		}
+		if out.Phase == beforeWrite {
+			finish("request", account, router.Decision{Kind: router.Fail, Reason: router.ReasonRetryBudget}, http.StatusServiceUnavailable, &out)
+			answerUnreached(c, fmt.Sprintf("claude-router: the connection to the provider failed before the request was sent, for %s (last error: %v)", s.transport.netRetryFor, out.Err))
 			return
 		}
 		if out.Attempts == 0 {
@@ -258,7 +274,9 @@ func (s *Service) messages(c *gin.Context) {
 			AttemptStart: attemptAt,
 			Observation:  exhaustionEvidence(out.Header, attemptAt, out.Class),
 		})
-		s.events.emit(Event{Kind: "attempt_failed", Conversation: conv, Account: account, Class: class, Status: out.Status, Attempt: req.Attempt})
+		if class != router.ClassNetwork {
+			s.events.emit(Event{Kind: "attempt_failed", Conversation: conv, Account: account, Class: class, Status: out.Status, Attempt: req.Attempt})
+		}
 		if class == router.ClassRequestScoped {
 			status := out.Status
 			if status < 400 || status >= 500 {
@@ -270,7 +288,7 @@ func (s *Service) messages(c *gin.Context) {
 		}
 		req.LastFailure = class
 		req.Attempt++
-		if class == router.ClassTransient || class == router.ClassThrottle {
+		if class == router.ClassTransient || class == router.ClassNetwork || class == router.ClassThrottle {
 			if !sleepCtx(c.Request.Context(), retryBackoff(req.Attempt)) {
 				return
 			}
@@ -382,11 +400,12 @@ func (s *Service) answerWait(c *gin.Context, now, until time.Time, known bool, p
 	c.Data(http.StatusTooManyRequests, "application/json", body)
 }
 
-func (s *Service) dispatch(c *gin.Context, call, authID string, account router.AccountID, id Identity, body []byte, budget *atomic.Int32) outcome {
+func (s *Service) dispatch(c *gin.Context, info callInfo, authID string, id Identity, body []byte) outcome {
+	call, account := info.id, info.account
 	api := claudehandlers.NewClaudeCodeAPIHandler(s.base)
 	ctx, cancel := s.base.GetContextWithCancel(api, c, context.Background())
 	ctx = handlers.WithPinnedAuthID(ctx, authID)
-	ctx = withCall(ctx, call, account, id.Model, budget)
+	ctx = withCall(ctx, info)
 	defer s.transport.forget(call)
 	var out outcome
 	if id.Stream {
@@ -395,10 +414,16 @@ func (s *Service) dispatch(c *gin.Context, call, authID string, account router.A
 		out = s.relayMessage(c, ctx, call, account, id, body)
 	}
 	cancel(out.Err)
-	var sent []attempt
+	if !out.Delivered && c.Request.Context().Err() != nil {
+		out = outcome{ClientGone: true, Result: "client_canceled"}
+	}
+	var tried []attempt
 	for _, a := range s.transport.attempts(call) {
 		if a.Refused == nil {
-			sent = append(sent, a)
+			tried = append(tried, a)
+			if a.Phase != beforeWrite {
+				out.Attempts++
+			}
 			continue
 		}
 		out.Refused = a.Refused
@@ -406,18 +431,28 @@ func (s *Service) dispatch(c *gin.Context, call, authID string, account router.A
 			out.Violation = "the SDK attempted another account than the pinned one"
 		}
 	}
-	out.Attempts = len(sent)
-	if n := len(sent); n > 0 && !out.Delivered && !out.ClientGone {
-		last := sent[n-1]
+	if n := len(tried); n > 0 && !out.Delivered && !out.ClientGone {
+		last := tried[n-1]
 		out.AttemptAt = last.Start
 		if out.Header == nil {
 			out.Header = last.Header
+		}
+		if last.Phase != "" {
+			out.Class, out.Phase, out.Err, out.Status = router.ClassNetwork, last.Phase, last.Err, 0
 		}
 		if out.Class == "" {
 			out.Class = classify(last.Status, out.Status, out.Err, last.Header)
 		}
 	}
 	return out
+}
+
+func (s *Service) networkFailed(info callInfo, a attempt) {
+	detail := a.Err.Error()
+	if len(detail) > 200 {
+		detail = detail[:200]
+	}
+	s.events.emit(Event{Kind: "attempt_failed", Conversation: info.conversation, Account: a.Account, Class: router.ClassNetwork, Phase: string(a.Phase), Attempt: info.attempt, Detail: detail})
 }
 
 // attemptsObserved reports why a response must not reach the client: the

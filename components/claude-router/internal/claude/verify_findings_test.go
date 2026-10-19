@@ -116,7 +116,7 @@ func TestCredentialsThatChangeTheUpstreamPathAreRefused(t *testing.T) {
 	for name, extra := range cases {
 		e := newEnv(t, "acct-a")
 		writeRawCredential(t, e, "acct-a", extra)
-		_, err := Start(e.cfg, Options{Upstream: e.upstream})
+		_, err := Start(e.cfg, Options{Upstream: fixed(e.upstream)})
 		if err == nil {
 			t.Fatalf("%s: start accepted the credential", name)
 		}
@@ -202,11 +202,11 @@ func (c *countingRT) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func TestTransportCapsAttemptsAndRefusesAnotherAccount(t *testing.T) {
 	inner := &countingRT{}
-	tr := newTransport(inner, nil, defaultMaxAttempts, []router.Account{{ID: "acct-a", Capacity: 1}, {ID: "acct-b", Capacity: 1}}, time.Now, nil, nil)
-	budget := &atomic.Int32{}
+	tr := newTransport(newUpstream(fixed(inner)), nil, defaultMaxAttempts, netRetryFor, []router.Account{{ID: "acct-a", Capacity: 1}, {ID: "acct-b", Capacity: 1}}, time.Now, nil, nil, nil)
+	spend := &budget{}
 	u, _ := url.Parse("https://api.anthropic.com/v1/messages")
 	send := func(account router.AccountID) error {
-		ctx := withCall(t.Context(), "c1", "acct-a", "claude-sonnet-4-5-20250929", budget)
+		ctx := withCall(t.Context(), callInfo{id: "c1", account: "acct-a", model: "claude-sonnet-4-5-20250929", budget: spend})
 		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), nil)
 		_, err := tr.roundTrip(account, req)
 		return err

@@ -136,7 +136,10 @@ var startMu sync.Mutex
 
 func (e *env) startWith(opts Options) *Service {
 	e.t.Helper()
-	opts.Upstream, opts.Now = e.upstream, e.clock.now
+	if opts.Upstream == nil {
+		opts.Upstream = fixed(e.upstream)
+	}
+	opts.Now = e.clock.now
 	startMu.Lock()
 	svc, err := Start(e.cfg, opts)
 	startMu.Unlock()
@@ -146,6 +149,10 @@ func (e *env) startWith(opts Options) *Service {
 	e.svc = svc
 	e.t.Cleanup(svc.Close)
 	return svc
+}
+
+func fixed(rt http.RoundTripper) func() http.RoundTripper {
+	return func() http.RoundTripper { return rt }
 }
 
 func (e *env) restart() *Service {

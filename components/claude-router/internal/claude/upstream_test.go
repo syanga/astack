@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
 	"sync"
 	"time"
@@ -117,6 +118,7 @@ func (u *fakeUpstream) RoundTrip(req *http.Request) (*http.Response, error) {
 		body, _ = io.ReadAll(req.Body)
 		_ = req.Body.Close()
 	}
+	wrote(req)
 	token := strings.TrimSpace(strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "))
 	if token == "" {
 		token = req.Header.Get("X-Api-Key")
@@ -192,6 +194,21 @@ func (u *fakeUpstream) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, nil
 	}
 	return stream(req, account, r, u.ended), nil
+}
+
+// net/http calls these hooks once it has sent a whole request on a
+// connection.
+func wrote(req *http.Request) {
+	trace := httptrace.ContextClientTrace(req.Context())
+	if trace == nil {
+		return
+	}
+	if trace.GotConn != nil {
+		trace.GotConn(httptrace.GotConnInfo{})
+	}
+	if trace.WroteRequest != nil {
+		trace.WroteRequest(httptrace.WroteRequestInfo{})
+	}
 }
 
 type errReader struct{ err error }
