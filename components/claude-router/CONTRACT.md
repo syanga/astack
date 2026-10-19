@@ -1408,7 +1408,7 @@ was stale by wall time.
   clock. It keeps an earlier one, which then counts as younger than it is by
   up to the step. The start reads every account, and a successful read
   replaces the saved check. The error remains only for an account whose
-  start read fails. This gap is open, and the user has not accepted it.
+  start read fails. The user accepted this gap as a limit.
 - **Overdue reads come first.** The scheduler's timers also run on the
   monotonic clock, so after a wake the next scheduled settings read can be
   up to `overage_check_every` of awake time away. The scheduler records the
