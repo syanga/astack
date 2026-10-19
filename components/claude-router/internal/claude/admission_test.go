@@ -133,3 +133,40 @@ func TestRefusedRedispatchMovesTheConversationAfterPaidUse(t *testing.T) {
 		t.Fatalf("upstream attempts %v, want %v", got, want)
 	}
 }
+
+func TestRefreshRedispatchAfterABackwardClockStepIsRefusedAsStale(t *testing.T) {
+	e := newEnv(t)
+	e.cfg.Accounts = []router.Account{{ID: "acct-a", Capacity: 1}}
+	e.writeRefreshableCredential("acct-a")
+	t0 := time.Now().Truncate(time.Second)
+	e.clock.set(t0)
+	e.start()
+	x := &tokenExchange{up: e.upstream, account: "acct-a", accept: true}
+	e.replaceTokenExchange(x)
+	release := e.holdExchanges(x)
+	e.upstream.script("acct-a", reply{Status: http.StatusUnauthorized})
+
+	refreshing := make(chan result, 1)
+	go func() { refreshing <- e.send(msg{Session: sessionID(1)}) }()
+	e.waitExchanging(x)
+	e.upstream.setUsage("acct-a", usageReply{Status: http.StatusInternalServerError})
+	e.clock.set(t0.Add(-time.Hour))
+	before := len(e.upstream.inference())
+	release()
+
+	var r result
+	select {
+	case r = <-refreshing:
+	case <-time.After(15 * time.Second):
+		t.Fatal("the request whose redispatch the router refused did not end")
+	}
+	if after := len(e.upstream.inference()); before != 1 || after != 1 {
+		t.Fatalf("inference attempts %d before the refresh finished and %d after, want 1 and 1: the resend after the clock step reaches no upstream", before, after)
+	}
+	if r.Status != http.StatusServiceUnavailable || !strings.Contains(r.ErrMsg, "account acct-a has no fresh reading") || !strings.Contains(r.ErrMsg, "overage_stale") {
+		t.Fatalf("refused redispatch answered %d %q, want 503 naming acct-a's stale reading", r.Status, r.ErrMsg)
+	}
+	if got := e.refusedAttempts(); len(got) != 1 || got[0] != "acct-a overage_stale" {
+		t.Fatalf("attempt_refused events %q, want one %q", got, "acct-a overage_stale")
+	}
+}

@@ -405,14 +405,14 @@ func (r *Router) ExpireOverageChecks(at Instant) {
 	r.persist()
 }
 
-func (r *Router) Admit(now time.Time, account AccountID, model string) Reason {
+func (r *Router) Admit(now Instant, account AccountID, model string) Reason {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	idx, ok := r.index[account]
 	if !ok {
 		return ReasonNotEnrolled
 	}
-	return admissionBar(r.cfg, now, r.accounts[idx], model)
+	return admissionBar(r.cfg, now, r.expiry.Stamp, r.accounts[idx], model)
 }
 
 // Relogin marks an account as logged in again.

@@ -941,7 +941,11 @@ table above gives for that decision. For each reason `Admit` returns:
 `TestRefreshRedispatchIsRefusedAfterABlockingObservation` covers paid use
 and exhaustion on the streaming and non-streaming paths, and
 `TestRefusedRedispatchMovesTheConversationAfterPaidUse` covers the
-migration.
+migration. The admission check reads both clocks as the policy does, so the
+two agree during a hold (`TestAdmitAgreesWithDecideDuringAHold`). A resend
+after a backward step of the wall clock is refused with `overage_stale` and
+reaches no upstream
+(`TestRefreshRedispatchAfterABackwardClockStepIsRefusedAsStale`).
 
 The cap is per client HTTP request. Every router-made HTTP failure answer
 carries `x-should-retry: false`, which a client honors. Two answers do not

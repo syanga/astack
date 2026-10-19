@@ -177,7 +177,7 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	s.now = s.clock.now
 	s.overage = newOverageReader(s)
 	admit := func(account router.AccountID, model string) router.Reason {
-		return s.router.Admit(s.now(), account, model)
+		return s.router.Admit(s.clock.instant(), account, model)
 	}
 	s.transport = newTransport(inner, redirect, cfg.MaxUpstreamAttempts, cfg.Accounts, s.now, admit, s.observeHeaders)
 	if redirect != nil {

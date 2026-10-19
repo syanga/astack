@@ -1588,7 +1588,7 @@ func TestAdmitRefusesWhatDecideWouldNotDispatchTo(t *testing.T) {
 	}
 	model := "claude-sonnet-4-5"
 
-	before := h.r.Admit(t0, a, model)
+	before := h.r.Admit(At(t0), a, model)
 	h.r.ObserveOverage(a, OveragePaidUse, t0.Add(time.Second))
 	h.observe(b, Observation{At: t0.Add(time.Second), Windows: []Window{rejected(FiveHour, t0.Add(2*time.Hour))}})
 	h.report(t0.Add(time.Second), c, model, ClassAuth)
@@ -1596,11 +1596,11 @@ func TestAdmitRefusesWhatDecideWouldNotDispatchTo(t *testing.T) {
 
 	got := map[string]Reason{
 		"a before paid use":                before,
-		"a after paid use":                 h.r.Admit(now, a, model),
-		"b with a rejection":               h.r.Admit(now, b, model),
-		"b after the reset, check 2 h old": h.r.Admit(t0.Add(2*time.Hour+time.Second), b, model),
-		"c after an auth failure":          h.r.Admit(now, c, model),
-		"not enrolled":                     h.r.Admit(now, "acct-x", model),
+		"a after paid use":                 h.r.Admit(At(now), a, model),
+		"b with a rejection":               h.r.Admit(At(now), b, model),
+		"b after the reset, check 2 h old": h.r.Admit(At(t0.Add(2*time.Hour+time.Second)), b, model),
+		"c after an auth failure":          h.r.Admit(At(now), c, model),
+		"not enrolled":                     h.r.Admit(At(now), "acct-x", model),
 	}
 	want := map[string]Reason{
 		"a before paid use":                "",
@@ -1612,5 +1612,40 @@ func TestAdmitRefusesWhatDecideWouldNotDispatchTo(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Admit reasons %v, want %v", got, want)
+	}
+}
+
+func TestAdmitAgreesWithDecideDuringAHold(t *testing.T) {
+	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0)...)
+	if got := h.route(t0, req("conv-1")); got.Kind != Place || got.Account != a {
+		t.Fatalf("first route %+v, want a placement on %s", got, a)
+	}
+	h.observe(a, Observation{At: t0, Windows: []Window{rejected(FiveHour, t0.Add(30*time.Minute))}})
+	model := req("conv-1").Model
+
+	held := Instant{Stamp: t0.Add(40 * time.Minute), Wall: t0.Add(10 * time.Minute)}
+	heldAdmit := h.r.Admit(held, a, model)
+	heldDecide, err := h.r.Decide(held, req("conv-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.r.ExpireOverageChecks(held)
+	marked := Instant{Stamp: t0.Add(41 * time.Minute), Wall: t0.Add(31 * time.Minute)}
+	markedAdmit := h.r.Admit(marked, a, model)
+	markedDecide, err := h.r.Decide(marked, req("conv-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := []string{
+		string(heldAdmit), string(heldDecide.Kind) + " " + string(heldDecide.Reason),
+		string(markedAdmit), string(markedDecide.Kind) + " " + string(markedDecide.Reason),
+	}
+	want := []string{
+		string(ReasonExhausted), string(Wait) + " " + string(ReasonAllBlocked),
+		string(ReasonOverageStale), string(Refuse) + " " + string(ReasonOverageStale),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Admit and Decide during a hold %q, want %q: a reset not yet passed on the wall clock blocks, and a check stamped before the mark is stale", got, want)
 	}
 }
