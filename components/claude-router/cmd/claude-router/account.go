@@ -264,6 +264,9 @@ func removeAccount(in installation, name string, force bool, now time.Time, out 
 		return restoreRunning(in, ran, out, err)
 	}
 	line(out, "config", "removed "+name)
+	if err := os.RemoveAll(aside); err != nil {
+		return restoreRunning(in, ran, out, err)
+	}
 	if moved {
 		line(out, "remove", credential)
 	}
