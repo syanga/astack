@@ -372,8 +372,8 @@ implements exhaustion waiting and migration (see "Recovery (PR4)").
   sends a bounded `retry-after` (`waiting.json#rows[5]`).
 - The watchdog also raises client retries for other transient failures to about
   300. The router's cap on its own upstream attempts covers that, except for
-  the 503 after the network retry time runs out, which clients retry
-  ([Network failures](#network-failures)).
+  the 503 after the network retry time runs out with no charged attempt,
+  which clients retry ([Network failures](#network-failures)).
 
 ### Included-only: the documented limit is accepted
 
@@ -975,7 +975,8 @@ reaches no upstream
 
 The cap is per client HTTP request. Every router-made HTTP failure answer
 carries `x-should-retry: false`, which a client honors, except the answer
-after the network retry time runs out ([Network failures](#network-failures)).
+after the network retry time runs out with no charged attempt
+([Network failures](#network-failures)).
 Two other answers do not
 stop client retries: an SSE `error` event after the response committed,
 which Claude Code retries for `overloaded_error`, and the local 429, which
@@ -1013,26 +1014,46 @@ closed before the response headers arrived. The service classifies it
 
 | Phase | When | Provider may have run it | Charged to the attempt cap |
 | --- | --- | --- | --- |
-| `before_write` | No connection was obtained, or every write of the request failed | No | No |
-| `after_write` | Anything else, including a connection on which net/http reported no write. Its HTTP/2 transport reports none when writing the headers fails. | Yes | Yes |
+| `before_write` | No connection was obtained, every write of the request failed, or the transport canceled a retry that was not written by the end of the network retry time | No | No |
+| `after_write` | Anything else, including a connection on which net/http reported no write | Yes | Yes |
+
+net/http's HTTP/2 transport reports no write when writing the headers fails.
+A header-write failure and a stream on a force-closed HTTP/2 connection are
+therefore `after_write`. They retry within the attempt cap and then end with
+the cap's 503.
 
 The transport retries a `before_write` failure itself, without returning to
-the SDK. It waits 250 ms, then 500 ms, 1 s, and 2 s for each later try, and
-starts no try more than 25 s after the request's first `before_write`
-failure. Each try checks `Router.Admit` and the cap again. A client that goes
-away ends the retries. The dial timeout is 10 s and the TLS handshake
-timeout 10 s, so a try that starts near the end can fail up to 20 s after
-the 25 s. When the time runs out, the service answers 503 `api_error` with
-`x-should-retry: true` and a message that names the last error.
+the SDK. It waits 250 ms, then 500 ms, 1 s, and 2 s for each later try. The
+network retry time ends 25 s after the request's first `before_write`
+failure. After each wait the transport reads the service clock and starts no
+try after that end. Each try checks `Router.Admit` and the cap again. A client
+that goes away ends the retries.
+
+A try has no time limit of its own, but a retry that net/http has not
+reported written when the network retry time ends is canceled. That covers a
+dial, a TLS handshake, and a body write that an HTTP/2 server stalls by
+granting no flow-control window. The service therefore answers at most 25 s
+after the first `before_write` failure. The transport never cancels a written
+request, a response, or a stream. The first try has only the 10 s dial
+timeout and the 10 s TLS handshake timeout, so its body write can stall
+without a bound.
+
+When the network retry time runs out, the service answers 503 `api_error`
+with a message that names the last error, and the `request` event has
+`reason: provider_unreachable`. The answer carries `x-should-retry: true`
+only when no attempt of the request was charged. After a charged
+`after_write` attempt the provider may have run the request, so the answer
+carries `x-should-retry: false`, as the cap's 503 does. `claude-router
+status` shows a conversation whose last request ended this way as
+`provider unreachable`.
 
 Claude Code 2.1.300 and Agent SDK 0.3.300 retry that answer with their own
 backoff, about 0.5 s and then 1.1 s, up to 10 times, and honor
 `retry-after`. Claude Code with `CLAUDE_CODE_RETRY_WATCHDOG=1` retries up to
 300 times. Both clients stopped after one request only when the 503 carried
 `x-should-retry: false`. Status 500, 503, or 529, and error type `api_error`
-or `overloaded_error`, made no difference
-(`reports/net-retry/client-probe/summary.json`). Each client retry is a new
-request with its own cap and its own 25 s.
+or `overloaded_error`, made no difference. Each client retry is a new request
+with its own cap and its own 25 s.
 
 An `after_write` failure returns to the routing loop, which retries it like a
 `transient` failure: on the assigned account, after 250 ms and then 500 ms,
@@ -1072,10 +1093,22 @@ Tests, each against a real HTTP/2 server without TLS
 - `TestAKilledHTTP2ConnectionRetriesEveryStreamOnANewConnection`: three
   streams on one connection that is reset each get one charged retry on
   another connection.
+- `TestARetryAfterAFailedStreamUsesANewConnection`: after a stream reset,
+  the server ignores every later stream on that connection, and the retry is
+  served on a new connection.
 - `TestFailuresBeforeWriteStopAfterTheNetworkRetryTime`: refused connections
-  end with the retryable 503 after the network retry time, with no charged
-  attempt.
-- `TestAClientThatLeavesStopsTheNetworkRetries`.
+  end with the retryable 503 and `provider_unreachable` after the network
+  retry time, with no charged attempt.
+- `TestANetworkRetryThatWakesAfterTheRetryTimeIsNotSent`: a clock that jumps
+  past the end during a wait stops the retries.
+- `TestARetryWhoseBodyWriteStallsEndsAtTheNetworkRetryTime`: a retry whose
+  1 MiB body the server never reads is canceled at the end of the network
+  retry time.
+- `TestAfterAChargedAttemptTheNetworkRetryAnswerStopsClientResends`: an
+  `after_write` failure, then `before_write` failures until the time ends,
+  answer 503 with `x-should-retry: false`.
+- `TestAClientThatLeavesStopsTheNetworkRetries`: a client that leaves after
+  two refused connections ends the retries.
 
 ### Streams
 
@@ -1414,8 +1447,9 @@ tested offline. PR1 lane 4 (CC-1) measures cache reads with real requests.
 account IDs, the first 12 hex digits of the SHA-256 of the conversation key,
 statuses, classes, decisions, durations, and, on `request`, the usage
 counters the upstream
-reported. Since PR7, an `attempt_failed` event for a network failure carries
-its `phase` and the error text in `detail`. A counter the upstream did not report is `null`, not 0.
+reported. An `attempt_failed` event for a network failure carries its `phase`
+and the error text in `detail`. A counter the upstream did not report is
+`null`, not 0.
 `TestNoSecretInStatusEventsOrLogs` and lane 2 search events, status, logs,
 the journal, and the SDK configuration for every token.
 

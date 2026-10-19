@@ -114,7 +114,7 @@ the switch back on and also leaves that job running.
    reads it. `max_upstream_attempts` (1 to 4, default 4) caps the upstream
    attempts of one client request. With 1 the router never resends a request
    that may have reached the provider. It still retries a connection that
-   failed before the request was sent, for up to 25 s.
+   failed before the request was written, for up to 25 s.
 
 3. Start the service. `start` waits until the service answers:
 
@@ -203,7 +203,7 @@ Uninstall refuses until then.
 
 | Command | What it does |
 | --- | --- |
-| `claude-router status` | One line for the service, one per account, and one per problem: a conversation that waits, is refused, or is held for login, a recent move, or a quota or paid-overflow reading older than 15 minutes. The last line names the next command to run. A stopped service shows its last start error, or that it cannot record a start. |
+| `claude-router status` | One line for the service, one per account, and one per problem: a recent move, a quota or paid-overflow reading older than 15 minutes, or a conversation that waits, is refused, is held for login, or could not reach the provider. The last line names the next command to run. A stopped service shows its last start error, or that it cannot record a start. |
 | `claude-router status -v` | Every reading with its age, cache counters per account, every assigned conversation, and the migrations, newest first. |
 | `claude-router stop` | Stops the service and keeps it off, across logins and restarts, until `claude-router start`. Assignments stay. |
 | `claude-router start` | Clears the start history, turns the job back on, and starts it. It also starts at each login until the next `stop`. |
