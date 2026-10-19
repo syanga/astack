@@ -1986,7 +1986,7 @@ each from sample state.
 
 | Command | Contract |
 | --- | --- |
-| `status` | Reads `GET /claude-router/status`, `events.jsonl`, `supervision.json`, and `service.json`. It marks a quota observation or paid-overflow reading older than 15 minutes with a `stale` line. A service that does not answer is `stopped`, or `failed` when supervision gave up. When `config.json` does not load, status prints `config error:` with the error, and `running` or `stopped` from the assignment lock. Once supervision gives up, `failed` takes precedence, and the configuration error shows as `last error:`. A stopped service whose state directory the router cannot write shows `last error: cannot record a start in <file>: <error>` and `next    fix the error, then claude-router start` (`TestStatusShowsThatTheRouterCannotRecordAStart`). An unreadable `supervision.json` makes status exit 1 naming the file, with `next    remove <file>, then claude-router start` (`TestStatusNamesAnUnreadableSupervisionRecord`). |
+| `status` | Reads `GET /claude-router/status`, `events.jsonl`, `supervision.json`, `service.json`, and the `config.json` that `service.json` names, or the state directory's `config.json` when there is no `service.json`. It marks a quota observation or paid-overflow reading older than 15 minutes with a `stale` line. A service that does not answer is `stopped`, or `failed` when supervision gave up. When `config.json` does not load, status prints `config error:` with the error, and `running` or `stopped` from the assignment lock. Once supervision gives up, `failed` takes precedence, and the configuration error shows as `last error:`. A stopped service whose state directory the router cannot write shows `last error: cannot record a start in <file>: <error>` and `next    fix the error, then claude-router start` (`TestStatusShowsThatTheRouterCannotRecordAStart`). An unreadable `supervision.json` makes status exit 1 naming the file, with `next    remove <file>, then claude-router start` (`TestStatusNamesAnUnreadableSupervisionRecord`). |
 | `status -v` | Adds every reading with its age, cache counters per account, each assigned conversation, and the migrations, newest first, at most 20. |
 | `start`, `stop` | launchd: `enable` when disabled, then `bootstrap` or `kickstart`; `disable`, then `bootout`. systemd: `daemon-reload`, `enable`, `reset-failed`, and `start`; `disable`, then `stop`. When status already answers, `start` only turns the switch on and prints `router  running  <listen>  <manager>`. Each acts only on this installation's job (Service name, Off until start, and Shared label switch, above). `start` waits up to 90 s for status to answer or for a start error; `stop` waits until the assignment lock is free and prints `router  stopped until claude-router start; assignments kept`. Foreground installations refuse both. |
 | `login` | Unchanged flow. It refuses while a process holds the state directory, names that process's pid when status answers, and prints `next    claude-router stop`. |
@@ -2464,9 +2464,11 @@ from `events.jsonl`, so the warning also shows while the router is stopped.
   account's count as `+ N unknown`. A failed request without usage is not an
   unknown request. It counts nowhere and adds no account line.
 - **Hit rate.** read / (input + write + read) over the account's counted
-  requests, rounded down, as `status` computes its lifetime cache rate. With
-  no counted request, or counted requests that sum to 0 tokens, the hit rate
-  is `--`.
+  requests, rounded down. With no counted request, or counted requests that
+  sum to 0 tokens, the hit rate is `--`. The lifetime `cache` rate in
+  `status` uses the same formula over a different set: every `request` event
+  in the log with a conversation, an account, and usage, with a `null`
+  counter read as 0.
 - **All cache writes.** The sum of the cache writes of the counted requests
   on every account.
 - **Move share.** The sum of the known move costs divided by all cache writes.
@@ -2532,7 +2534,7 @@ applies. On a stopped router the next step stays `claude-router start`.
 
 | Field | Contract |
 | --- | --- |
-| `move_cache_warn_percent` | An integer from 0 to 100. Absent or `null` means 10. 0 turns the warning off. For an integer outside 0 to 100, `status` shows `config error: move_cache_warn_percent: <value> is outside 0 to 100`, and `serve` refuses to start with the same error. A value that is not an integer does not decode. For `1.5`, `status` shows `config error: <config.json path>: json: cannot unmarshal number 1.5 into Go struct field Config.move_cache_warn_percent of type int`, and `serve` refuses with the same error. `cache` does not use the setting. |
+| `move_cache_warn_percent` | An integer from 0 to 100. Absent or `null` means 10. 0 turns the warning off. For an integer outside 0 to 100, `status` shows `config error: move_cache_warn_percent: <value> is outside 0 to 100`, and `serve` refuses to start with the same error. A value that is not an integer does not decode. For `1.5`, `status` shows `config error: <config.json path>: json: cannot unmarshal number 1.5 into Go struct field Config.move_cache_warn_percent of type int`, and `serve` refuses with the same error. `cache` ignores the value, even outside 0 to 100, but it decodes `config.json`, so for a value that is not an integer it exits 1 with the same decode error. |
 
 ### Verification
 
