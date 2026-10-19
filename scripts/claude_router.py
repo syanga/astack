@@ -225,7 +225,7 @@ def check_code_committed():
 def build(go, directory, code):
     """Build the binary from the pinned dependency cache into directory."""
     output = directory / NAME
-    env = dict(os.environ, GOPROXY="off", GOSUMDB="off", GOFLAGS="-mod=readonly", CGO_ENABLED="0")
+    env = dict(os.environ, GOPROXY="off", GOSUMDB="off", GOFLAGS="-mod=readonly", GOWORK="off", CGO_ENABLED="0")
     package = "github.com/syanga/astack/components/claude-router/internal/claude."
     flags = "-X {}linkedRevision={} -X {}linkedCodeDigest={}".format(package, source_revision(), package, code)
     result = subprocess.run([go, "build", "-trimpath", "-buildvcs=false", "-ldflags=" + flags, "-o", str(output), "./cmd/claude-router"],

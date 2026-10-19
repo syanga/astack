@@ -35,8 +35,18 @@ elif args[0] == "build":
         sys.stderr.write("cmd/claude-router/main.go:1:1: injected build error\n")
         sys.exit(1)
     out = args[args.index("-o") + 1]
+    workspace = os.environ.get("GOWORK")
+    if workspace is None:
+        here = os.getcwd()
+        while workspace is None and here != os.path.dirname(here):
+            if os.path.exists(os.path.join(here, "go.work")):
+                workspace = os.path.join(here, "go.work")
+            here = os.path.dirname(here)
     with open(out, "w") as stream:
-        stream.write("#!/bin/sh\n# build {}\nprintf '%s\\n' \"$*\" >> \"$FAKE_ROUTER_LOG\"\n".format(os.environ.get("FAKE_BUILD", "1")))
+        stream.write("#!/bin/sh\n# build {}\n".format(os.environ.get("FAKE_BUILD", "1")))
+        if workspace not in (None, "", "off"):
+            stream.write("# workspace {}\n".format(workspace))
+        stream.write("printf '%s\\n' \"$*\" >> \"$FAKE_ROUTER_LOG\"\n")
     os.chmod(out, 0o755)
 '''
 
@@ -409,6 +419,13 @@ class ServiceLabelTests(ComponentFixture):
 
 
 class ComponentFailureTests(ComponentFixture):
+    def test_an_ambient_go_workspace_does_not_reach_the_build(self):
+        (self.repo / "go.work").write_text("go 1.26\n\nuse ./components/claude-router\n")
+        self.component()
+        self.component(GOWORK=str(self.root / "elsewhere.work"))
+
+        self.assertNotIn("# workspace", (self.data / "bin/claude-router").read_text())
+
     def test_architecture_and_version_errors_fail_before_writes(self):
         cross = self.component(success=False, FAKE_GOARCH="riscv64")
         self.assertIn("Go would build for", cross.stderr)

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"strings"
 )
 
 const sdkModule = "github.com/router-for-me/CLIProxyAPI/v8"
@@ -51,12 +52,20 @@ func readBuildInfo() (string, string) {
 	if modified && revision != "unknown" {
 		revision += "+dirty"
 	}
-	for _, d := range info.Deps {
-		if d.Path == sdkModule {
-			sdk = d.Version
+	return revision, sdkVersionOf(info.Deps)
+}
+
+func sdkVersionOf(deps []*debug.Module) string {
+	for _, d := range deps {
+		if d.Path != sdkModule {
+			continue
 		}
+		if r := d.Replace; r != nil {
+			return strings.TrimSpace(d.Version + " replaced by " + r.Path + " " + r.Version)
+		}
+		return d.Version
 	}
-	return revision, sdk
+	return "unknown"
 }
 
 // ExecutableDigest returns the hex SHA-256 of the running executable's file,
