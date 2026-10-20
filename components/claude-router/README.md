@@ -55,9 +55,8 @@ on Linux. It never changes client settings. From the repository root:
 ./install.sh --component claude-router
 ```
 
-Linux is tested with fake accounts on a real Linux kernel with a systemd user
-manager in a container (Debian 13, systemd 257, arm64), not yet with real
-accounts on a Linux machine.
+Linux is tested on a real kernel in a Debian 13 arm64 container with systemd
+257 and fake accounts, not yet with real accounts on a Linux machine.
 
 | Path | Contents |
 | --- | --- |
@@ -126,8 +125,7 @@ It then activates the router with the installed acceptance record and runs
 describes. `setup` refuses when Claude Code already routes through the
 router. After `claude-router direct`, run `claude-router setup` to start
 the router and activate it again. It reuses the accounts in `config.json`.
-After a
-paid-overflow refusal, turn paid overflow off on claude.ai, run
+After a paid-overflow refusal, turn paid overflow off on claude.ai, run
 `claude-router stop`, then run `setup` again. The running router keeps its
 reading for up to 10 minutes, so a rerun without the `stop` can refuse again.
 
@@ -186,8 +184,8 @@ account in `config.json`.
 
 ## Activate the router
 
-Activation points Claude Code's settings at the router. It refuses unless an acceptance
-record matches the router code, the installed helper scripts, and the pinned
+Activation points Claude Code's settings at the router. It refuses unless an
+acceptance record matches the router code, the installed helper scripts, and the pinned
 SDK, and the running binary is the installed one. The router code digest
 covers the tracked files under `components/claude-router/` except `*.md`,
 `*_test.go`, `testdata/`, and `accepted.json`, so a record stays valid across
@@ -237,8 +235,7 @@ Before it writes, activation backs the settings file up under
 `--verify` command, then `claude-router check`. Each command must exit 0 and
 complete at least one request through the router for the conversation whose
 session ID precedes it, and every check must pass. Otherwise activation
-restores the settings file and exits 1. On a platform other than the record's,
-activation prints a `note` line that names both. Ctrl-C, SIGTERM,
+restores the settings file and exits 1. Ctrl-C, SIGTERM,
 or closing the terminal during these commands does the same, unless the shell
 started activation with that signal ignored, as `nohup` does for a hangup.
 Further signals do not interrupt the restore. When a command

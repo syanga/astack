@@ -42,15 +42,15 @@ To answer "is the router working", run `check` and report its lines. For each
 
 Give the user every other command in a code block, to run in their own
 terminal. Claude Code sessions, possibly this one, send their requests
-through the router. A command that stops or restarts the router, activates it,
-or rolls it back cuts off every routed session in the middle of a turn. A sign-in waits on a browser
+through the router. A command that stops or restarts the router cuts off
+every routed session in the middle of a turn. A sign-in waits on a browser
 window that only the user can use. Keep `start` and the commands in
 [Find the service](#find-the-service) with the user too, as the setup and
 rollback commands are. Say which reason applies.
 
 | Command | What it does |
 | --- | --- |
-| `claude-router setup -account NAME ...` | Opens a browser to sign in each account, restarts the router, and activates it. Activation points Claude Code's settings at the router. |
+| `claude-router setup -account NAME ...` | Opens a browser to sign in each new account, restarts the router when it adds one, and activates the router. Activation points Claude Code's settings at the router. |
 | `claude-router account add NAME` | Stops the router, opens a browser to sign in, and starts the router again. |
 | `claude-router account remove NAME` | Stops the router and starts it again. |
 | `claude-router login -account NAME` | Opens a browser to sign in again. It runs only while the router is stopped. |
@@ -127,9 +127,8 @@ response can happen before the router sees it.
 
 Give the user these steps, with the checkout's absolute path for `CHECKOUT` and
 the user's account labels in place of `work` and `alumni`. Linux adds step 6.
-Linux is tested with fake accounts on a real Linux kernel with a systemd user
-manager in a container (Debian 13, systemd 257, arm64), not yet with real
-accounts on a Linux machine.
+Linux is tested on a real kernel in a Debian 13 arm64 container with systemd
+257 and fake accounts, not yet with real accounts on a Linux machine.
 
 1. Install Go 1.26 or newer from <https://go.dev/dl/>, Python 3.10 or newer,
    and Claude Code. `go version` and `claude --version` must work in the shell.
@@ -197,9 +196,10 @@ user reports that `setup` finished, run `check`.
 ## Roll back
 
 Give the user `claude-router direct`. It stops the router and restores the
-Claude Code settings that activation changed. Tell the user that if it prints
-`after   claude needs its own /login`, they run `/login` in Claude Code.
-To activate the router again, give `claude-router setup`. To remove the router, give
+Claude Code settings that activation changed. Tell the user to start a new
+Claude Code session afterward. If `direct` prints
+`after   claude needs its own /login`, tell the user to run `/login` in that
+session. To activate the router again, give `claude-router setup`. To remove the router, give
 `cd CHECKOUT && ./uninstall.sh --component claude-router`. `direct` and
 uninstall both keep logins and assignments.
 

@@ -64,11 +64,11 @@ local proxy that routes Claude Code conversations across several Claude
 subscription accounts. With one Claude account, you do not need it. The
 default targets and `--target all` never install it. The component README
 explains [what an account move costs](components/claude-router/README.md#how-the-service-routes),
-how the router refuses paid overflow, and the service on each system.
+how the router refuses paid overflow, and
+[the service on each system](components/claude-router/README.md#operate-the-service).
 
-Linux is tested with fake accounts on a real Linux kernel with a systemd user
-manager in a container (Debian 13, systemd 257, arm64), not yet with real
-accounts on a Linux machine.
+Linux is tested on a real kernel in a Debian 13 arm64 container with systemd
+257 and fake accounts, not yet with real accounts on a Linux machine.
 
 To install and activate the router:
 
