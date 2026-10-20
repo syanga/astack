@@ -26,6 +26,34 @@ def load_command():
 
 
 class T3HostsTests(unittest.TestCase):
+    def test_http_requests_identify_the_command_to_the_relay_gateway(self):
+        command = load_command()
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                agent = self.headers.get('User-Agent', '')
+                if not agent or agent.startswith('Python-urllib/'):
+                    self.send_error(403)
+                    return
+                body = b'{"environments": [{"environmentId": "remote"}]}'
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                response = command.request_json('http://127.0.0.1:{}'.format(server.server_port), 2)
+            finally:
+                server.shutdown()
+                worker.join()
+        self.assertEqual(response, {'environments': [{'environmentId': 'remote'}]})
+
     def test_truncated_remote_response_preserves_healthy_host_measurements(self):
         command = load_command()
         resources = {'cpuUtilization': 0.5, 'cpuCount': 8, 'availableMemoryBytes': 20,

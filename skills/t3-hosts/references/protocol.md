@@ -22,6 +22,11 @@ one-use WebSocket ticket. The ticket authenticates the `server.getHostResources`
 request on `/ws`. The local machine instead uses the matching T3 CLI to issue and
 revoke a scoped bearer session.
 
+The [relay token exchange](https://github.com/pingdotgg/t3code/blob/main/infra/relay/src/http/Api.ts)
+requires a Clerk JWT with the relay audience. T3 CLI OAuth credentials can list
+environments but lack that audience, so they cannot replace the desktop credential
+for remote host access.
+
 Python handles HTTP and WebSocket transport. Node's crypto library handles
 Electron's macOS Safe Storage AES envelope and P-256 DPoP signatures. Private keys
 and credentials cross the crypto subprocess boundary through stdin and captured

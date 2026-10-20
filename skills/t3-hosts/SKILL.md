@@ -54,6 +54,24 @@ Exit status is 0 for a complete snapshot or an unavailable local T3 server, 1 fo
 partial results, and 2 for invalid setup. JSON has `hosts`, `errors`, and `complete`.
 An unreachable host has no resource measurements, rather than zero CPU or RAM.
 
+## Recover Keychain access
+
+If the command cannot unlock T3's sign-in, open Terminal on the same Mac where
+`t3-hosts` runs:
+
+```sh
+/usr/bin/security find-generic-password -s 't3code Safe Storage' -w >/dev/null
+```
+
+If that service is missing, replace `t3code Safe Storage` with the installation's
+`T3 Code (Nightly) Safe Storage` or `T3 Code Safe Storage` service name.
+
+The command discards the password. If macOS asks, allow access to T3's Safe Storage
+item. Choose **Always Allow** to permit subsequent reads by the `security` helper.
+Exit status 0 means access succeeded, even if no dialog appeared. Retry the host
+command after that success. If the helper hangs or exits with an error, report the
+Keychain blocker. Use `--local` to read this machine's resources.
+
 ## Compatibility
 
 The command requires Python 3.10 or newer. Connect authentication uses Node.js's

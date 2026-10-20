@@ -60,7 +60,7 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 def request_json(url: str, timeout: float, payload=None, headers=None, form=False):
-    supplied = dict(headers or {})
+    supplied = {'User-Agent': 'astack-t3-hosts/1.0', **(headers or {})}
     body = None
     if payload is not None:
         body = urlencode(payload).encode() if form else json.dumps(payload).encode()
@@ -333,7 +333,7 @@ class T3Client:
                     return value
             except HostError:
                 continue
-        raise HostError('keychain', 'Cannot unlock the saved T3 sign-in. Allow T3 Safe Storage access in the macOS Keychain dialog.')
+        raise HostError('keychain', 'Cannot unlock the saved T3 sign-in. Authorize T3 Safe Storage access from your own Terminal, then retry. See the t3-hosts Keychain recovery instructions.')
 
     def linked_environments(self):
         token = self.saved_client_token()
