@@ -286,7 +286,12 @@ func (s *Service) readOverage(ctx context.Context, account router.AccountID) {
 	defer s.bgDone.Done()
 	every := time.Duration(s.cfg.OverageCheckEvery)
 	settled := s.overage.settlements(account)
+	var resetsRead time.Time
 	for {
+		if now := s.now(); now.Sub(resetsRead) >= resetsEvery {
+			resetsRead = now
+			s.overage.readResets(ctx, account)
+		}
 		select {
 		case <-settled:
 		default:

@@ -65,6 +65,7 @@ func status(args []string) error {
 	if err != nil {
 		return err
 	}
+	r.Screen = terminalScreen(os.Stdout, os.Getenv)
 	writeStatus(os.Stdout, r, *verbose)
 	return nil
 }

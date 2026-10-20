@@ -18,6 +18,7 @@ type fakeUpstream struct {
 	accounts map[string]string
 	replies  map[string][]reply
 	usage    map[string]usageReply
+	resets   map[string]string
 	seen     []seenRequest
 	ended    chan time.Time
 }
@@ -41,12 +42,14 @@ type usageReply struct {
 	Status  int
 	Header  map[string]string
 	Enabled *bool
+	Fields  map[string]any
 	Before  func()
 }
 
 type seenRequest struct {
 	Account string
 	Path    string
+	Query   string
 	Token   string
 	Header  http.Header
 	Body    []byte
@@ -54,7 +57,7 @@ type seenRequest struct {
 }
 
 func newFakeUpstream() *fakeUpstream {
-	return &fakeUpstream{accounts: map[string]string{}, replies: map[string][]reply{}, usage: map[string]usageReply{}, ended: make(chan time.Time, 16)}
+	return &fakeUpstream{accounts: map[string]string{}, replies: map[string][]reply{}, usage: map[string]usageReply{}, resets: map[string]string{}, ended: make(chan time.Time, 16)}
 }
 
 func hashToken(token string) string {
@@ -80,6 +83,28 @@ func (u *fakeUpstream) setUsage(account string, r usageReply) {
 	u.usage[account] = r
 }
 
+func (u *fakeUpstream) setResets(account, block string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.resets[account] = block
+}
+
+func isResetsRead(r seenRequest) bool {
+	return r.Path == "/api/oauth/usage" && strings.Contains(r.Query, "cedar_ember=1")
+}
+
+func (u *fakeUpstream) resetsReads() []seenRequest {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	var out []seenRequest
+	for _, r := range u.seen {
+		if isResetsRead(r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 func (u *fakeUpstream) inference() []seenRequest {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -97,7 +122,7 @@ func (u *fakeUpstream) usageReads() []seenRequest {
 	defer u.mu.Unlock()
 	var out []seenRequest
 	for _, r := range u.seen {
-		if r.Path == "/api/oauth/usage" {
+		if r.Path == "/api/oauth/usage" && !isResetsRead(r) {
 			out = append(out, r)
 		}
 	}
@@ -128,7 +153,9 @@ func (u *fakeUpstream) RoundTrip(req *http.Request) (*http.Response, error) {
 	if !known {
 		account = "unknown"
 	}
-	u.seen = append(u.seen, seenRequest{Account: account, Path: req.URL.Path, Token: token, Header: req.Header.Clone(), Body: body, At: time.Now()})
+	seen := seenRequest{Account: account, Path: req.URL.Path, Query: req.URL.RawQuery, Token: token, Header: req.Header.Clone(), Body: body, At: time.Now()}
+	u.seen = append(u.seen, seen)
+	resets, resetsSet := u.resets[account]
 	var r reply
 	if req.URL.Path == "/v1/messages" {
 		if q := u.replies[account]; len(q) > 0 {
@@ -149,6 +176,12 @@ func (u *fakeUpstream) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	switch req.URL.Path {
 	case "/api/oauth/usage":
+		if isResetsRead(seen) {
+			if !resetsSet {
+				resets = `{"eligible":true,"grants":[]}`
+			}
+			return respond(req, http.StatusOK, map[string]string{"Content-Type": "application/json"}, `{"cedar_ember":`+resets+`}`), nil
+		}
 		if usage.Before != nil {
 			usage.Before()
 		}
@@ -160,6 +193,9 @@ func (u *fakeUpstream) RoundTrip(req *http.Request) (*http.Response, error) {
 			return respond(req, usage.Status, usage.Header, errorBody("not_found_error", "no usage")), nil
 		}
 		doc := map[string]any{"five_hour": map[string]any{"utilization": 10.0, "resets_at": "2026-10-04T05:00:00Z"}}
+		for k, v := range usage.Fields {
+			doc[k] = v
+		}
 		if usage.Enabled != nil {
 			doc["extra_usage"] = map[string]any{"is_enabled": *usage.Enabled, "monthly_limit": nil, "used_credits": nil, "utilization": nil}
 		}

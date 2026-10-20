@@ -1472,6 +1472,31 @@ turned on outside the proxy after the last reading, while the account's
 included windows are exhausted, produce one paid response before the router
 sees it.
 
+### Limit readings for status
+
+Each settings read also keeps the `five_hour`, `seven_day`, and
+`model_scoped` windows of the usage response for status, with `utilization`
+converted from a percentage to a fraction
+(`TestASettingsReadRecordsTheLimitWindowsForStatus`). Routing does not use
+them. It uses response headers only. The service decodes these fields apart
+from `extra_usage`, so a field of another shape drops out of status and
+leaves the paid-overflow reading unchanged
+(`TestMalformedLimitFieldsLeaveThePaidOverflowReadingIntact`).
+
+The scheduler of each account also reads the limit resets that Claude Code
+offers, from `cedar_ember.grants` in
+`GET /api/oauth/usage?cedar_ember=1&skip_spend=1`. It reads them at start, and
+then when it wakes 30 minutes or more after the last resets read. Status
+counts the resets left in grants that have not ended, by `type`: `session`,
+`weekly`, or `full`. A grant without a `type` takes one from the windows in
+`clears`. The resets read is separate from the settings read. It never counts
+toward the run of failed reads and never renews a credential. It skips an
+account whose access token the SDK is due to replace. A failed resets read
+keeps the last reading
+(`TestTheServiceReadsResetsAtStartWithoutCountingThemAsSettingsReads`,
+`TestAFailedResetsReadChangesNoRouting`). The grants block and its query are
+undocumented. If they change, status shows no reset count.
+
 ### Configuration and credentials change only by restart
 
 - The SDK has no file watcher, so it never reloads `sdk-config.yaml` and never
@@ -1988,7 +2013,7 @@ each from sample state.
 
 | Command | Contract |
 | --- | --- |
-| `status` | Reads `GET /claude-router/status`, `events.jsonl`, `supervision.json`, `service.json`, and the `config.json` that `service.json` names, or the state directory's `config.json` when there is no `service.json`. It marks a quota observation or paid-overflow reading older than 15 minutes with a `stale` line. A service that does not answer is `stopped`, or `failed` when supervision gave up. When `config.json` does not load, status prints `config error:` with the error, and `running` or `stopped` from the assignment lock. Once supervision gives up, `failed` takes precedence, and the configuration error shows as `last error:`. A stopped service whose state directory the router cannot write shows `last error: cannot record a start in <file>: <error>` and `next    fix the error, then claude-router start` (`TestStatusShowsThatTheRouterCannotRecordAStart`). An unreadable `supervision.json` makes status exit 1 naming the file, with `next    remove <file>, then claude-router start` (`TestStatusNamesAnUnreadableSupervisionRecord`). |
+| `status` | Reads `GET /claude-router/status`, `events.jsonl`, `supervision.json`, `service.json`, and the `config.json` that `service.json` names, or the state directory's `config.json` when there is no `service.json`. Each limit shows the newer of the response-header reading and the usage reading (Limit readings for status, above). It marks a paid-overflow reading, or the older of the shown 5-hour and weekly readings, with a `stale` line when it is older than 15 minutes (`TestStatusShowsTheNewerOfTheHeaderAndUsageReadings`). When standard output is a terminal and `TERM` is not `dumb`, status draws a box per account in place of its line, at most 100 columns wide. The box has a bar for the 5-hour window, the weekly window, and each model-scoped weekly window. Each bar shows the share left in orange and the share used hatched, with a tick at even pace: the share that would be left if use were spread evenly over the window. The share left and the reset time follow the bar. The box's bottom border counts the account's limit resets from a resets reading under 1 hour old. A terminal too narrow for a 10-column bar gets the lines. `NO_COLOR` turns color off and changes nothing else (`TestStatusDrawsLimitBarsOnATerminal`, `TestEveryBoxLineSpansTheBoxAtEveryTerminalWidth`, `TestATerminalTooNarrowForBarsGetsTheStatusLines`, `TestColorChangesOnlyTheStyleOfTheBars`, `TestStatusDrawsNoBarsWhenItsOutputIsNotATerminal`). A service that does not answer is `stopped`, or `failed` when supervision gave up. When `config.json` does not load, status prints `config error:` with the error, and `running` or `stopped` from the assignment lock. Once supervision gives up, `failed` takes precedence, and the configuration error shows as `last error:`. A stopped service whose state directory the router cannot write shows `last error: cannot record a start in <file>: <error>` and `next    fix the error, then claude-router start` (`TestStatusShowsThatTheRouterCannotRecordAStart`). An unreadable `supervision.json` makes status exit 1 naming the file, with `next    remove <file>, then claude-router start` (`TestStatusNamesAnUnreadableSupervisionRecord`). |
 | `status -v` | Adds every reading with its age, cache counters per account, each assigned conversation, and the migrations, newest first, at most 20. |
 | `start`, `stop` | launchd: `enable` when disabled, then `bootstrap` or `kickstart`; `disable`, then `bootout`. systemd: `daemon-reload`, `enable`, `reset-failed`, and `start`; `disable`, then `stop`. When status already answers, `start` only turns the switch on and prints `router  running  <listen>  <manager>`. Each acts only on this installation's job (Service name, Off until start, and Shared label switch, above). `start` waits up to 90 s for status to answer or for a start error; `stop` waits until the assignment lock is free and prints `router  stopped until claude-router start; assignments kept`. Foreground installations refuse both. |
 | `login` | Unchanged flow. It refuses while a process holds the state directory, names that process's pid when status answers, and prints `next    claude-router stop`. Of the SDK's output during the sign-in, `login` shows only lines that start with `https://`, the sign-in URL. `login` drops the SDK's progress lines and its SSH tunnel instructions for remote servers, discards the SDK log until the sign-in ends, and then restores the log output it found (`TestCopySignInURLsKeepsOnlyTheURLLines`, `TestShowingOnlySignInURLsRestoresTheLogOutputItFound`). |

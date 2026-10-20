@@ -29,6 +29,7 @@ type report struct {
 	ConfigErr       string
 	SaveErr         string
 	MoveWarnPercent int
+	Screen          *screen
 }
 
 const statusCacheWindow = 24 * time.Hour
@@ -108,22 +109,34 @@ func writeStatus(w io.Writer, r report, verbose bool) {
 		}
 		return
 	}
-	for _, a := range st.Accounts {
-		writeAccountLine(w, r, a, width)
-	}
+	var tail []string
 	for _, a := range st.Accounts {
 		if s := staleNote(r, a); s != "" {
-			fmt.Fprintf(w, "stale   %-*s%s\n", width, a.ID, s)
+			tail = append(tail, fmt.Sprintf("stale   %-*s%s", width, a.ID, s))
 		}
 	}
-	for _, line := range problemLines(r) {
-		fmt.Fprintln(w, line)
-	}
+	tail = append(tail, problemLines(r)...)
 	if warning != "" {
-		fmt.Fprintln(w, warning)
+		tail = append(tail, warning)
 	}
 	if next := nextStep(r, warning != ""); next != "" {
-		fmt.Fprintf(w, "next    %s\n", next)
+		tail = append(tail, "next    "+next)
+	}
+	if boxes, ok := accountBoxes(r); ok {
+		for _, line := range boxes {
+			fmt.Fprintln(w)
+			fmt.Fprint(w, line)
+		}
+		if len(tail) > 0 {
+			fmt.Fprintln(w)
+		}
+	} else {
+		for _, a := range st.Accounts {
+			writeAccountLine(w, r, a, width)
+		}
+	}
+	for _, line := range tail {
+		fmt.Fprintln(w, line)
 	}
 }
 
@@ -193,14 +206,47 @@ func quotaWindow(a claude.AccountStatus, kind router.WindowKind) (router.Window,
 	return router.Window{}, false
 }
 
+type shownReading struct {
+	used     float64
+	resetsAt time.Time
+	seen     time.Time
+}
+
+func shownWindow(a claude.AccountStatus, kind router.WindowKind) (shownReading, bool) {
+	var shown shownReading
+	found := false
+	if w, ok := quotaWindow(a, kind); ok && w.Utilization != nil {
+		shown, found = shownReading{used: *w.Utilization, resetsAt: w.ResetsAt, seen: a.Quota.At}, true
+	}
+	for _, w := range a.Usage.Windows {
+		if w.Kind == kind && w.Model == "" && w.Used != nil && (!found || a.Usage.At.After(shown.seen)) {
+			shown, found = shownReading{used: *w.Used, resetsAt: w.ResetsAt, seen: a.Usage.At}, true
+		}
+	}
+	return shown, found
+}
+
+func oldestShownAt(a claude.AccountStatus) time.Time {
+	var oldest time.Time
+	for _, kind := range []router.WindowKind{router.FiveHour, router.Weekly} {
+		if w, ok := shownWindow(a, kind); ok && (oldest.IsZero() || w.seen.Before(oldest)) {
+			oldest = w.seen
+		}
+	}
+	if oldest.IsZero() {
+		return a.Quota.At
+	}
+	return oldest
+}
+
 func compactWindow(r report, a claude.AccountStatus, kind router.WindowKind, label string, width int) string {
 	var s string
 	if rj, ok := activeRejection(r.Now, a, kind); ok {
 		s = fmt.Sprintf("%s out (%s)", label, resetShort(r.Now, rejectionEnd(rj)))
-	} else if w, ok := quotaWindow(a, kind); ok && w.Utilization != nil {
-		s = fmt.Sprintf("%s %2d%%", label, percent(*w.Utilization))
-		if !w.ResetsAt.IsZero() {
-			s += " (" + resetShort(r.Now, w.ResetsAt) + ")"
+	} else if w, ok := shownWindow(a, kind); ok {
+		s = fmt.Sprintf("%s %2d%%", label, percent(w.used))
+		if !w.resetsAt.IsZero() {
+			s += " (" + resetShort(r.Now, w.resetsAt) + ")"
 		}
 	} else {
 		s = label + " --"
@@ -209,21 +255,24 @@ func compactWindow(r report, a claude.AccountStatus, kind router.WindowKind, lab
 }
 
 func writeAccountLine(w io.Writer, r report, a claude.AccountStatus, width int) {
+	fmt.Fprintf(w, "%-*s%-13s%s  %s  %s\n", width, a.ID, accountState(r, a),
+		compactWindow(r, a, router.FiveHour, "5h", 14), compactWindow(r, a, router.Weekly, "wk", 12), accountSummary(r, a))
+}
+
+func accountSummary(r report, a claude.AccountStatus) string {
 	cache := "cache --"
 	if u := r.Digest.Accounts[a.ID]; u != nil {
 		if share, ok := u.readShare(); ok {
 			cache = fmt.Sprintf("cache %d%%", share)
 		}
 	}
-	fmt.Fprintf(w, "%-*s%-13s%s  %s  cap %s  %d/%d active  %s\n", width, a.ID, accountState(r, a),
-		compactWindow(r, a, router.FiveHour, "5h", 14), compactWindow(r, a, router.Weekly, "wk", 12),
-		number(a.Capacity), a.Active, a.Bound, cache)
+	return fmt.Sprintf("cap %s  %d/%d active  %s", number(a.Capacity), a.Active, a.Bound, cache)
 }
 
 func staleNote(r report, a claude.AccountStatus) string {
 	var parts []string
-	if !a.Quota.At.IsZero() && r.Now.Sub(a.Quota.At) > staleAfter {
-		parts = append(parts, fmt.Sprintf("quota seen %s (%s ago)", when(r.Now, a.Quota.At), shortDuration(r.Now.Sub(a.Quota.At))))
+	if seen := oldestShownAt(a); !seen.IsZero() && r.Now.Sub(seen) > staleAfter {
+		parts = append(parts, fmt.Sprintf("quota seen %s (%s ago)", when(r.Now, seen), shortDuration(r.Now.Sub(seen))))
 	}
 	if !a.Overage.At.IsZero() && r.Now.Sub(a.Overage.At) > staleAfter {
 		s := fmt.Sprintf("overflow read %s (%s ago)", when(r.Now, a.Overage.At), shortDuration(r.Now.Sub(a.Overage.At)))
@@ -387,6 +436,24 @@ func writeAccountDetail(w io.Writer, r report, a claude.AccountStatus, width int
 	if a.NeedsLogin {
 		fmt.Fprintf(w, "%s%-13ssince %s\n", pad, "login", when(r.Now, a.NeedsLoginAt))
 	}
+	reading := func(label, value string, seen time.Time) {
+		if seen.IsZero() {
+			fmt.Fprintf(w, "%s%-13s%s\n", pad, label, value)
+			return
+		}
+		age := shortDuration(r.Now.Sub(seen))
+		if r.Now.Sub(seen) > staleAfter {
+			age += ", stale"
+		}
+		fmt.Fprintf(w, "%s%-13s%-48sseen %s (%s)\n", pad, label, value, when(r.Now, seen), age)
+	}
+	used := func(u float64, resetsAt time.Time) string {
+		value := fmt.Sprintf("%d%% used", percent(u))
+		if !resetsAt.IsZero() {
+			value += ", resets " + resetLong(r.Now, resetsAt)
+		}
+		return value
+	}
 	for _, win := range []struct {
 		kind  router.WindowKind
 		label string
@@ -397,21 +464,18 @@ func writeAccountDetail(w io.Writer, r report, a claude.AccountStatus, width int
 			if rj.ResetsAt.IsZero() {
 				value = fmt.Sprintf("rejected at %s, reset unknown, recheck %s", when(r.Now, rj.At), when(r.Now, rejectionEnd(rj)))
 			}
-		} else if q, ok := quotaWindow(a, win.kind); ok && q.Utilization != nil {
-			value, seen = fmt.Sprintf("%d%% used", percent(*q.Utilization)), a.Quota.At
-			if !q.ResetsAt.IsZero() {
-				value += ", resets " + resetLong(r.Now, q.ResetsAt)
-			}
+		} else if q, ok := shownWindow(a, win.kind); ok {
+			value, seen = used(q.used, q.resetsAt), q.seen
 		}
-		if seen.IsZero() {
-			fmt.Fprintf(w, "%s%-13s%s\n", pad, win.label, value)
-			continue
+		reading(win.label, value, seen)
+	}
+	for _, m := range modelWindows(a) {
+		if m.Used != nil {
+			reading("weekly "+m.Model, used(*m.Used, m.ResetsAt), a.Usage.At)
 		}
-		age := shortDuration(r.Now.Sub(seen))
-		if r.Now.Sub(seen) > staleAfter {
-			age += ", stale"
-		}
-		fmt.Fprintf(w, "%s%-13s%-48sseen %s (%s)\n", pad, win.label, value, when(r.Now, seen), age)
+	}
+	if counts := resetCounts(r, a); len(counts) > 0 {
+		fmt.Fprintf(w, "%s%-13s%s\n", pad, "resets", strings.Join(counts, ", "))
 	}
 	if u := r.Digest.Accounts[a.ID]; u != nil {
 		share := "--"

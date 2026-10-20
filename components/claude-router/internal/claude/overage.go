@@ -43,7 +43,9 @@ type overageReader struct {
 	settled     map[router.AccountID]chan struct{}
 	// due is the wall time the scheduler set for the account's next read,
 	// or zero while a read runs or before the first one is scheduled.
-	due map[router.AccountID]time.Time
+	due    map[router.AccountID]time.Time
+	usage  map[router.AccountID]UsageReading
+	resets map[router.AccountID]ResetsReading
 }
 
 // readStreak is an account's run of failed reads, scheduled or on demand:
@@ -58,7 +60,8 @@ func newOverageReader(s *Service) *overageReader {
 		s: s, inFlight: map[router.AccountID]*sync.Mutex{}, last: map[router.AccountID]time.Time{},
 		state: map[router.AccountID]overageState{}, failedToken: map[router.AccountID]string{},
 		streak: map[router.AccountID]readStreak{}, settled: map[router.AccountID]chan struct{}{},
-		due: map[router.AccountID]time.Time{},
+		due: map[router.AccountID]time.Time{}, usage: map[router.AccountID]UsageReading{},
+		resets: map[router.AccountID]ResetsReading{},
 	}
 }
 
@@ -187,8 +190,13 @@ func (o *overageReader) readLocked(ctx context.Context, account router.AccountID
 	o.last[account] = start
 	delete(o.due, account)
 	o.mu.Unlock()
-	state, err := o.fetch(ctx, account)
+	body, err := o.fetch(ctx, account)
 	end := o.s.now()
+	var state router.Overage
+	if err == nil {
+		o.noteUsage(account, body.windows(), end)
+		state, err = body.overage()
+	}
 	dur := end.Sub(start).Milliseconds()
 	if err != nil {
 		o.mu.Lock()
@@ -274,29 +282,29 @@ func (e *readError) Error() string { return e.msg }
 // router did not just refresh, the read renews the credential once and reads
 // once more. A read sends at most two usage requests and starts at most one
 // refresh.
-func (o *overageReader) fetch(ctx context.Context, account router.AccountID) (router.Overage, error) {
+func (o *overageReader) fetch(ctx context.Context, account router.AccountID) (usageBody, error) {
 	authID := o.s.authIDs[account]
 	auth, ok := o.s.core.GetByID(authID)
 	if !ok || auth == nil {
-		return "", errors.New("account is not registered in the SDK")
+		return usageBody{}, errors.New("account is not registered in the SDK")
 	}
 	refreshed := false
 	if refreshDue(auth, time.Now()) {
 		var err error
 		if auth, refreshed, err = o.renew(ctx, account, authID, accessToken(auth), "expiring"); err != nil {
-			return "", err
+			return usageBody{}, err
 		}
 	}
-	state, err := o.get(ctx, account, auth)
+	body, err := o.get(ctx, account, auth, usageURL)
 	var re *readError
 	if !errors.As(err, &re) || !re.unauthorized || refreshed {
-		return state, err
+		return body, err
 	}
 	auth, _, err = o.renew(ctx, account, authID, accessToken(auth), "unauthorized")
 	if err != nil {
-		return "", fmt.Errorf("usage endpoint answered 401, and %w", err)
+		return usageBody{}, fmt.Errorf("usage endpoint answered 401, and %w", err)
 	}
-	return o.get(ctx, account, auth)
+	return o.get(ctx, account, auth, usageURL)
 }
 
 // sdkRefreshWait bounds how long a read waits for a refresh the SDK has
@@ -457,19 +465,19 @@ func accessToken(a *coreauth.Auth) string {
 	return t
 }
 
-func (o *overageReader) get(ctx context.Context, account router.AccountID, auth *coreauth.Auth) (router.Overage, error) {
+func (o *overageReader) get(ctx context.Context, account router.AccountID, auth *coreauth.Auth, url string) (usageBody, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	header := http.Header{}
 	header.Set("Accept", "application/json")
 	header.Set("Anthropic-Beta", "oauth-2025-04-20")
-	req, err := o.s.core.NewHttpRequest(ctx, auth, http.MethodGet, usageURL, nil, header)
+	req, err := o.s.core.NewHttpRequest(ctx, auth, http.MethodGet, url, nil, header)
 	if err != nil {
-		return "", errors.New("could not prepare the usage request")
+		return usageBody{}, errors.New("could not prepare the usage request")
 	}
 	resp, err := o.s.transport.roundTrip(account, req)
 	if err != nil {
-		return "", &readError{msg: "usage request failed before a response"}
+		return usageBody{}, &readError{msg: "usage request failed before a response"}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -478,23 +486,13 @@ func (o *overageReader) get(ctx context.Context, account router.AccountID, auth 
 			e.retryAfter = d
 			e.msg += fmt.Sprintf(" (retry-after %s)", d)
 		}
-		return "", e
+		return usageBody{}, e
 	}
-	var body struct {
-		ExtraUsage *struct {
-			IsEnabled *bool `json:"is_enabled"`
-		} `json:"extra_usage"`
-	}
+	var body usageBody
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
-		return "", errors.New("usage response is not JSON")
+		return usageBody{}, errors.New("usage response is not JSON")
 	}
-	if body.ExtraUsage == nil || body.ExtraUsage.IsEnabled == nil {
-		return "", errNoExtraUsage
-	}
-	if *body.ExtraUsage.IsEnabled {
-		return router.OverageEnabled, nil
-	}
-	return router.OverageDisabled, nil
+	return body, nil
 }
 
 // retryAfter parses a Retry-After value: delay seconds or an HTTP date.
