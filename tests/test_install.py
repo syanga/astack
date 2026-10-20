@@ -21,6 +21,7 @@ class InstallerFixture(unittest.TestCase):
         self.home = self.root / "test home"
         # The user's growing skill collection is not part of this test fixture.
         shutil.rmtree(self.repo / "skills")
+        (self.repo / "settings/plugins.json").unlink()
         self.skill = self.repo / "skills/test-skill"
         self.skill.mkdir(parents=True)
         (self.skill / "SKILL.md").write_text(
@@ -52,14 +53,13 @@ class InstallerTests(InstallerFixture):
         for config, filename, skills in [
             (".claude", "CLAUDE.md", ".claude/skills"),
             (".codex", "AGENTS.md", ".agents/skills"),
-            (".config/opencode", "AGENTS.md", ".config/opencode/skills"),
         ]:
             self.assertIn("Personal coding instructions", (self.home / config / filename).read_text())
             self.assertEqual((self.home / skills / "test-skill/SKILL.md").read_bytes(),
                              (self.skill / "SKILL.md").read_bytes())
             self.assertTrue(os.access(self.home / skills / "test-skill/scripts/helper.sh", os.X_OK))
         self.assertFalse(list(self.home.rglob("replace-with-skill-name")))
-        self.assertEqual(len(self.manifest()["targets"]), 3)
+        self.assertEqual(len(self.manifest()["targets"]), 2)
 
     def test_dependency_cache_is_not_installed_or_validated_as_skill_source(self):
         cache = self.skill / "scripts/node_modules"
@@ -214,7 +214,7 @@ class InstallerTests(InstallerFixture):
     def test_home_ignores_environment_overrides(self):
         outside = self.root / "outside"
         env = dict(os.environ, CODEX_HOME=str(outside), CLAUDE_CONFIG_DIR=str(outside),
-                   XDG_CONFIG_HOME=str(outside), XDG_STATE_HOME=str(outside))
+                   XDG_STATE_HOME=str(outside))
         self.run_installer("--target", "all", env=env)
         self.assertFalse(outside.exists())
         self.assertTrue((self.home / ".codex/AGENTS.md").exists())
@@ -229,7 +229,7 @@ class InstallerTests(InstallerFixture):
     def test_overlapping_target_destinations_are_rejected(self):
         registry = self.repo / "harnesses.json"
         harnesses = json.loads(registry.read_text())
-        harnesses["opencode"]["skills"] = harnesses["codex"]["skills"]
+        harnesses["claude"]["skills"] = harnesses["codex"]["skills"]
         registry.write_text(json.dumps(harnesses))
         result = self.run_installer("--target", "all", success=False)
         self.assertIn("distinct destinations", result.stderr)

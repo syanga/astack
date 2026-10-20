@@ -35,6 +35,9 @@ cd astack
 Use `--help` to see supported targets and defaults. To choose agents, pass
 `--target <name>` for each one, or `--target all` for every supported agent.
 Use the same targets for the preview and installation.
+Installation needs network access to install and refresh the plugins listed in
+[settings/plugins.json](settings/plugins.json) through each agent's plugin CLI.
+It skips agents whose CLI is not on `PATH`.
 
 ## Customize
 
@@ -48,7 +51,7 @@ The repository defines what gets installed:
 | --- | --- |
 | [instructions/](instructions/) | Shared preferences and additions for each agent |
 | [skills/](skills/) | Available skills and their usage instructions |
-| [settings/](settings/) | Settings to manage |
+| [settings/](settings/) | Settings and plugins to manage |
 | [harnesses.json](harnesses.json) | Supported agents, destinations, and configuration sources |
 
 In a JSON destination, a source value of `{"$entries": [...]}` adds its entries
