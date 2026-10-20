@@ -1,8 +1,8 @@
 # Claude router
 
 An optional local proxy that routes Claude conversations across subscription
-accounts. The behavior is specified in
-[docs/specs/claude-account-routing.md](../../docs/specs/claude-account-routing.md).
+accounts. With one Claude account, you do not need it. The behavior is
+specified in [docs/specs/claude-account-routing.md](../../docs/specs/claude-account-routing.md).
 [CONTRACT.md](CONTRACT.md) records what the pinned SDK guarantees, the routing
 policy, and which contracts are still open.
 
@@ -18,7 +18,7 @@ The module has six parts.
 | `cmd/claude-router-sim/` | A simulator that drives `internal/router` with synthetic workloads, scripted fixtures, crash tests, and a performance workload. |
 
 You need Go 1.26.0 or later. Download the pinned dependencies once, with
-network access:
+network access, from this directory:
 
 ```sh
 go mod download
@@ -55,19 +55,27 @@ on Linux. It never changes client settings. From the repository root:
 ./install.sh --component claude-router
 ```
 
+Linux is tested on a real kernel in a Debian 13 arm64 container with systemd
+257 and fake accounts, not yet with real accounts on a Linux machine.
+
 | Path | Contents |
 | --- | --- |
 | `~/.local/share/astack/claude-router/bin/claude-router` | The command. It keeps working after the checkout moves. |
 | `~/.local/share/astack/claude-router/lib/` | The Python helper that `direct`, `check`, and `setup` run. |
 | `~/.local/share/astack/claude-router/accepted.json` | The acceptance record of the router code, copied from `components/claude-router/accepted.json` when the checkout has one. |
-| `~/.local/state/astack/claude-router/` | State: `config.json`, `client-token`, `auths/`, `assignments/`, `accounts.json`, `events.jsonl`, `service.json`, `supervision.json`, `service.log` |
+| `~/.local/state/astack/claude-router/` | State: `config.json`, `client-token`, `auths/`, `assignments/`, `accounts.json`, `events.jsonl`, `service.json`, `supervision.json`, and on macOS `service.log` |
 | `~/Library/LaunchAgents/dev.astack.claude-router.plist` | The launchd agent (macOS) |
 | `~/.config/systemd/user/dev.astack.claude-router.service` | The systemd user unit (Linux) |
 
 `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `XDG_CONFIG_HOME` move these paths, as
-they do for the rest of astack. The commands below default `-state` to the
-state directory above. The installer seeds `config.json` with
-`127.0.0.1:18787` and no accounts, and creates `client-token` with mode 0600.
+they do for the rest of astack. The install neither starts the router nor puts
+`claude-router` on PATH. The root README's
+[install steps](../../README.md#install-the-optional-claude-router) give the
+PATH line.
+
+The commands below default `-state` to the state directory above. The
+installer seeds `config.json` with `127.0.0.1:18787` and no accounts, and
+creates `client-token` with mode 0600.
 The router refuses a token shorter than 32 characters or open to other users,
 so the installer replaces a shorter `client-token` and sets an existing one to
 mode 0600.
@@ -79,9 +87,6 @@ can live in another home:
 ```sh
 python3 scripts/claude_router.py install --service dev.example.router --port 28787 --home /path/to/home
 ```
-
-Linux support is not yet tested on real Linux. Unit tests cover the systemd
-path against a fake `systemctl`.
 
 On Linux, a second home does not work: systemd reads user units only from the
 account's own directories, so it never loads a unit installed under another
@@ -99,8 +104,8 @@ the switch back on and also leaves that job running.
 
 ## Enroll accounts and start
 
-To sign in each account, add it, start the router, and point Claude Code at
-it in one step, run `setup` with one `-account` per account:
+To sign in each account, add it, start the router, and activate the router in
+one step, run `setup` with one `-account` per account:
 
 ```sh
 claude-router setup -account work -account alumni
@@ -113,7 +118,11 @@ refuses, and Claude Code stays direct, when an account has paid overflow on.
 It then activates the router with the installed acceptance record and runs
 `claude-router check`, as [Activate the router](#activate-the-router)
 describes. `setup` refuses when Claude Code already routes through the
-router.
+router. With no `-account`, `setup` reuses the accounts in `config.json`, so
+`claude-router setup` after `claude-router direct` activates the router again.
+After a paid-overflow refusal, turn paid overflow off on claude.ai, run
+`claude-router stop`, then run `setup` again. Without the `stop`, the running
+router keeps its old reading for up to 10 minutes and `setup` can refuse again.
 
 To add an account later, run `account add`. It stops the router, signs in,
 adds the account with capacity 1, starts the router again, and waits for the
@@ -170,13 +179,13 @@ account in `config.json`.
 
 ## Activate the router
 
-Activation points Claude Code at the router. It refuses unless an acceptance
-record matches the router code, the installed helper scripts, and the pinned
-SDK, and the running binary is the installed one. The router code digest
-covers the tracked files under `components/claude-router/` except `*.md`,
-`*_test.go`, `testdata/`, and `accepted.json`, so a record stays valid across
-commits that change only those files. To print the digests of a checkout,
-run:
+Activation points Claude Code's settings at the router. It refuses unless an
+acceptance record matches the router code, the installed helper scripts, and
+the pinned SDK, and the running binary is the installed one. The router code
+digest covers the tracked files under `components/claude-router/` except
+`*.md`, `*_test.go`, `testdata/`, and `accepted.json`, so a record stays valid
+across commits that change only those files. To print the digests of a
+checkout, run:
 
 ```sh
 python3 scripts/claude_router.py identity --code-only
@@ -221,8 +230,7 @@ Before it writes, activation backs the settings file up under
 `--verify` command, then `claude-router check`. Each command must exit 0 and
 complete at least one request through the router for the conversation whose
 session ID precedes it, and every check must pass. Otherwise activation
-restores the settings file and exits 1. On a platform other than the record's,
-activation prints a `note` line that names both. Ctrl-C, SIGTERM,
+restores the settings file and exits 1. Ctrl-C, SIGTERM,
 or closing the terminal during these commands does the same, unless the shell
 started activation with that signal ignored, as `nohup` does for a hangup.
 Further signals do not interrupt the restore. When a command
@@ -244,6 +252,9 @@ To go back to a direct connection later, run `claude-router direct`. It also
 undoes an activation that was interrupted or whose settings record is gone.
 Uninstall refuses until then.
 
+After activation and after `direct`, start a new Claude Code session, because
+a session reads its settings when it starts.
+
 ## Check the router
 
 `claude-router check` prints one line per check: the router runs, every
@@ -263,6 +274,12 @@ ok        code matches the accepted record (darwin/arm64)
 ok        test message answered 200 on alumni in 6.2s
 check     passed
 ```
+
+On Linux, the first line ends with `(systemd)`. The fifth line names the
+record's platform, so it reads `(darwin/arm64)` on Linux too. When the record's
+platform differs from this machine's, activation and `setup` also print a
+`note` line that says `not yet tested on real Linux`. That text predates the
+Linux container run in [Install the service](#install-the-service).
 
 When a check fails, `check` skips the test message, exits 1, and prints the
 next step. With the router stopped, it marks the checks that need the router
@@ -286,11 +303,25 @@ while `setup`, `account`, activation, or `claude-router direct` runs.
 | `claude-router status -v` | Every reading with its age, cache counters per account, every assigned conversation, and the migrations, newest first. |
 | `claude-router cache [-since 24h]` | For the window, each account's cache hit rate and token counters, then the number of account moves, the cache writes those moves caused, their share of all cache writes, and the moves per reason. It reads only `events.jsonl` and `config.json`, so it works while the service is stopped. |
 | `claude-router stop` | Stops the service and keeps it off, across logins and restarts, until `claude-router start`. Assignments stay. |
-| `claude-router start` | Clears the start history, turns the job back on, and starts it. It also starts at each login until the next `stop`. |
+| `claude-router start` | Clears the start history, turns the job back on, and starts it. Until the next `stop`, it also starts at each login, or at boot on Linux with linger. |
 | `claude-router login -account ID` | Logs in again after a revoked login. It refuses while the service runs, because the service would write its old credential back. Run `stop`, `login`, then `start`. |
 | `claude-router move -conversation HASH -to ID` | Moves a conversation, named by the hash that status shows, to another account. A prefix of 4 or more hex digits works if it matches one conversation. |
 | `claude-router direct -prepare` | Lists the client settings that router activation owns and that `direct` would restore, and the backup it would write. Changes nothing. |
 | `claude-router direct` | Stops the service as `stop` does and restores those client settings, backing each file up to the path that `-prepare` printed. It restores the file of an interrupted activation, or of an activation whose settings record is gone, from its backup; if that file changed since, it refuses before it stops the service, and the edit is kept. Logins, assignments, the binary, and the job stay. A key edited after activation stops it, and the edit is kept. With no client settings to restore, it changes nothing and leaves the service running. A job loaded from another install keeps running, and `direct` does not say the router stopped. |
+
+These commands show the service's state and logs:
+
+| | macOS | Linux |
+| --- | --- | --- |
+| Service | launchd agent `dev.astack.claude-router` | systemd user unit `dev.astack.claude-router.service` |
+| State | `launchctl print gui/$(id -u)/dev.astack.claude-router` | `systemctl --user status --no-pager dev.astack.claude-router` |
+| Logs | `tail -n 100 "${XDG_STATE_HOME:-$HOME/.local/state}/astack/claude-router/service.log"` | `journalctl --user -u dev.astack.claude-router --no-pager -n 100` |
+
+On Linux, run `sudo loginctl enable-linger "$USER"` once, before or after
+`setup`. With linger, the systemd user unit starts at boot and runs without a
+login session. Without it, the unit starts at login and stops about 15 seconds
+after your last session ends, so Claude Code in tmux over SSH loses its router
+when you log out. Neither the installer nor `setup` turns linger on.
 
 Status shows hashes, account names, counters, and times, never a token or a
 prompt. A `direct` backup is a copy of the activated settings file with mode
@@ -383,18 +414,22 @@ home's install recorded. It refuses a `--service` that differs from it.
 
 ## How the service routes
 
-The service dispatches to an account only while it holds a reading, at most
+Paid overflow is the claude.ai setting that bills usage past the plan's
+included allowance, shown there as extra usage or usage credits. The service
+dispatches to an account only while it holds a reading, at most
 30 minutes old, that the account's paid overflow is disabled. It stops
 routing to an account as soon as a response shows paid use. One gap remains:
-if usage credits are turned on outside the router after the last reading,
-while the account's included windows are exhausted, one paid response can
+if paid overflow is turned on outside the router after the last reading,
+while the account's included allowance is used up, one paid response can
 happen before the router sees it.
 
 When an account's included allowance runs out before a response starts,
 the router moves the conversation to another eligible account and answers
-the same request from there. When no account can serve, it answers with a
-429 that carries the earliest reset at which an account can serve again,
-and the client sleeps until then and sends again. A conversation never
+the same request from there. That request writes the conversation's prompt
+cache again on the new account. `claude-router cache` reports each move and
+the cache writes it caused. When no account can serve, it answers with a 429
+that carries the earliest reset at which an account can serve again, and the
+client sleeps until then and sends again. A conversation never
 returns to its first account on its own. When an account needs a new
 login, its conversations get an error that names `claude-router login`,
 and new conversations go elsewhere. `claude-router move` sends

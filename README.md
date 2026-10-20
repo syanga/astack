@@ -63,22 +63,90 @@ For contribution rules, see [AGENTS.md](AGENTS.md).
 ## Install the optional Claude router
 
 [components/claude-router](components/claude-router/README.md) is an optional
-local proxy that routes Claude conversations across subscription accounts. The
-default targets and `--target all` never install it. It needs Go 1.26 or newer
-and the pinned module cache. To install it, select it explicitly:
+local proxy that routes Claude Code conversations across several Claude
+subscription accounts. With one Claude account, you do not need it. The
+default targets and `--target all` never install it. The component README
+explains [how routing works](components/claude-router/README.md#how-the-service-routes)
+and [the service on each system](components/claude-router/README.md#operate-the-service).
+
+To install and activate the router:
+
+1. Install Python 3.10 or newer, Go 1.26 or newer from <https://go.dev/dl/>,
+   and Claude Code. `python3 --version`, `go version`, and `claude --version`
+   must work in your shell. The installer fails with a `TypeError` under the
+   Python 3.9 that ships with macOS.
+2. From the checkout, download the pinned Go modules once, with network access:
+
+   ```sh
+   (cd components/claude-router && go mod download)
+   ```
+
+3. Build and install the router. The install does not start the router or
+   change Claude Code settings:
+
+   ```sh
+   ./install.sh --component claude-router --dry-run
+   ./install.sh --component claude-router
+   ```
+
+4. Put `claude-router` on PATH. The installer does not. To keep it in new
+   shells, add the same line to `~/.zshrc` on macOS or `~/.bashrc` on Linux:
+
+   ```sh
+   export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/astack/claude-router/bin:$PATH"
+   ```
+
+5. On Linux, turn on linger so the router runs without a login session
+   ([why](components/claude-router/README.md#operate-the-service)):
+
+   ```sh
+   sudo loginctl enable-linger "$USER"
+   ```
+
+6. Sign in each account and activate the router, with your own labels for
+   the accounts. Each sign-in opens a browser window, or prints a URL with
+   `-no-browser`:
+
+   ```sh
+   claude-router setup -account work -account alumni
+   ```
+
+   Activation points Claude Code's settings at the router. `setup` ends with
+   `activated Claude Code routes through the router`. If it refuses because
+   an account has paid overflow on, turn paid overflow off on claude.ai, run
+   `claude-router stop`, and run `setup` again. For any other refusal, follow
+   its `next` line.
+7. Start a new Claude Code session, because a session reads its settings when
+   it starts.
+8. Check the router. It sends one short test message and ends with
+   `check     passed`:
+
+   ```sh
+   claude-router check
+   ```
+
+Use these commands day to day:
 
 ```sh
-./install.sh --component claude-router --dry-run
-./install.sh --component claude-router
+claude-router status
+claude-router cache
+claude-router account add school
+claude-router account remove school
 ```
 
-It adds a launchd agent on macOS or a systemd user unit on Linux and changes no
-agent settings. After an acceptance run passes, `python3 scripts/claude_router.py
-activate` makes it Claude Code's default connection, and `claude-router direct`
-switches Claude Code back to a direct connection.
-`./uninstall.sh --component claude-router` removes it and keeps its logins and
-assignments. The component README explains enrollment, activation, and daily
-operation.
+`cache` reports the account moves of the last 24 hours and the prompt cache
+writes they caused.
+
+`account add`, `account remove`, `stop`, `direct`, and an install over an
+activated router stop or restart the router. That cuts off routed Claude Code
+sessions in the middle of a turn, so run them while no session is working.
+
+To roll back to a direct connection, run `claude-router direct` and start a
+new Claude Code session. If `direct` prints
+`after   claude needs its own /login`, run `/login` in that session.
+`claude-router setup` activates the router again.
+`./uninstall.sh --component claude-router` removes it. `direct` and uninstall
+keep logins and assignments.
 
 ## Find a skill
 
