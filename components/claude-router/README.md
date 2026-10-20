@@ -6,10 +6,12 @@ accounts. The behavior is specified in
 [CONTRACT.md](CONTRACT.md) records what the pinned SDK guarantees, the routing
 policy, and which contracts are still open.
 
-The module has three parts. None of them serves clients yet.
+The module has five parts.
 
 | Path | Contents |
 | --- | --- |
+| `cmd/claude-router/` | The `claude-router` command: `serve`, `login`, and `token`. |
+| `internal/claude/` | The local service. It embeds the pinned CLIProxyAPI SDK, authenticates clients, binds conversations through `internal/router`, and pins every upstream attempt to the bound account. |
 | `probes/` | Feasibility probes. They embed the pinned CLIProxyAPI SDK, serve two or more fake accounts from an in-process fake Anthropic API, and refuse every other host. |
 | `internal/router/` | The production routing policy and the durable assignment journal. It uses only the standard library. |
 | `cmd/claude-router-sim/` | A simulator that drives `internal/router` with synthetic workloads, scripted fixtures, crash tests, and a performance workload. |
@@ -34,8 +36,78 @@ To save a sanitized JSON transcript per probe test, set
 token hash prefixes, statuses, event names, and timing. They hold no tokens and
 no prompts.
 
+Two lanes run behind build tags. `-tags lane2` runs PR3.live.2 against the
+compiled command, and `-tags perf` runs PR3.perf; each file's header gives
+its command.
+
 The configuration hot-reload probe is excluded by default because the pinned SDK
 races on that path. Run it with `-tags sdkreload`.
+
+## Run the service
+
+The service is not yet installed as a background service and is not the
+default for any client. These steps run it by hand.
+
+1. Build the command:
+
+   ```sh
+   GOPROXY=off GOSUMDB=off go build -o claude-router ./cmd/claude-router
+   ```
+
+2. Create a state directory and a client token:
+
+   ```sh
+   mkdir -m 700 /path/to/state
+   ./claude-router token -out /path/to/state/client-token
+   ```
+
+3. Enroll each account with a browser login. The router must not be running
+   on that state directory. Each login writes `auths/<id>.json`:
+
+   ```sh
+   ./claude-router login -state /path/to/state -account acct-a
+   ```
+
+4. Write a configuration file:
+
+   ```json
+   {
+     "listen": "127.0.0.1:8787",
+     "state_dir": "/path/to/state",
+     "client_token_file": "/path/to/state/client-token",
+     "accounts": [{"id": "acct-a", "capacity": 5}, {"id": "acct-b", "capacity": 1}]
+   }
+   ```
+
+   `capacity` is the account's relative allowance, such as 1 for Pro and 5
+   for Max 5x. `overage_fresh_for` (default `30m`) and `overage_check_every`
+   (default `10m`) set how long a paid-overflow reading lasts and how often
+   the service reads it. `max_upstream_attempts` (1 to 4, default 4) caps the
+   upstream attempts of one client request; 1 turns off router retries.
+
+5. Start the service:
+
+   ```sh
+   ./claude-router serve -config /path/to/config.json
+   ```
+
+6. Point a client at it with `ANTHROPIC_BASE_URL=http://127.0.0.1:8787` and
+   the client token as `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`.
+
+To change the configuration or a credential, stop the service, make the
+change, and start it again. The service never reloads either while it runs.
+
+The service dispatches to an account only while it holds a reading, at most
+30 minutes old, that the account's paid overflow is disabled. It stops
+routing to an account as soon as a response shows paid use. One gap remains:
+if usage credits are turned on outside the router after the last reading,
+while the account's included windows are exhausted, one paid response can
+happen before the router sees it.
+
+`GET /claude-router/status` with the client token reports each account's
+registration and last reading. `events.jsonl` in the state directory records
+requests, failures, readings, and token counters, without tokens or prompts.
+CONTRACT.md's PR3 section lists every local answer and event.
 
 ## Use the routing policy
 
