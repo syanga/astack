@@ -1477,8 +1477,9 @@ sees it.
 Each settings read also keeps the `five_hour` and `seven_day` windows of the
 usage response for status, and each `limits` entry of kind `weekly_scoped`
 with a `scope.model.display_name`, such as `Fable`, as a model-scoped weekly
-window. Status converts `utilization` and `percent` from a percentage to a
-fraction (`TestASettingsReadRecordsTheLimitWindowsForStatus`). Routing does
+window. The service converts `utilization` and `percent` from a percentage
+to a fraction, and drops an entry of another shape without dropping the
+others (`TestASettingsReadRecordsTheLimitWindowsForStatus`). Routing does
 not use them. It uses response headers only. The service decodes these
 fields apart from `extra_usage`, so a field of another shape drops out of
 status and leaves the paid-overflow reading unchanged. A settings read with

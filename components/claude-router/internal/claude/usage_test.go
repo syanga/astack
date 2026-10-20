@@ -27,6 +27,8 @@ func TestASettingsReadRecordsTheLimitWindowsForStatus(t *testing.T) {
 		"limits": []any{
 			map[string]any{"kind": "session", "percent": 38, "resets_at": "2026-10-04T05:00:00.5+00:00", "scope": nil},
 			map[string]any{"kind": "weekly_all", "percent": 21, "resets_at": "2026-10-09T16:00:00Z", "scope": nil},
+			map[string]any{"kind": "weekly_scoped", "percent": "high",
+				"scope": map[string]any{"model": map[string]any{"display_name": "Opus"}}},
 			map[string]any{"kind": "weekly_scoped", "percent": 12, "resets_at": "2026-10-09T16:00:00Z",
 				"scope": map[string]any{"model": map[string]any{"id": nil, "display_name": "Fable"}, "surface": nil}},
 		},

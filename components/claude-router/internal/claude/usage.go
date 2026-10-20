@@ -120,22 +120,22 @@ func (b usageBody) windows() []UsageWindow {
 			out = append(out, body.window(w.kind, ""))
 		}
 	}
-	var limits []struct {
-		Kind     string   `json:"kind"`
-		Percent  *float64 `json:"percent"`
-		ResetsAt *string  `json:"resets_at"`
-		Scope    *struct {
-			Model *struct {
-				DisplayName string `json:"display_name"`
-			} `json:"model"`
-		} `json:"scope"`
-	}
-	if json.Unmarshal(b.Limits, &limits) == nil {
-		for _, l := range limits {
-			if l.Kind == "weekly_scoped" && l.Scope != nil && l.Scope.Model != nil && l.Scope.Model.DisplayName != "" {
-				w := usageWindowBody{Utilization: l.Percent, ResetsAt: l.ResetsAt}
-				out = append(out, w.window(router.Weekly, l.Scope.Model.DisplayName))
-			}
+	var limits []json.RawMessage
+	_ = json.Unmarshal(b.Limits, &limits)
+	for _, raw := range limits {
+		var l struct {
+			Kind     string   `json:"kind"`
+			Percent  *float64 `json:"percent"`
+			ResetsAt *string  `json:"resets_at"`
+			Scope    *struct {
+				Model *struct {
+					DisplayName string `json:"display_name"`
+				} `json:"model"`
+			} `json:"scope"`
+		}
+		if json.Unmarshal(raw, &l) == nil && l.Kind == "weekly_scoped" && l.Scope != nil && l.Scope.Model != nil && l.Scope.Model.DisplayName != "" {
+			w := usageWindowBody{Utilization: l.Percent, ResetsAt: l.ResetsAt}
+			out = append(out, w.window(router.Weekly, l.Scope.Model.DisplayName))
 		}
 	}
 	return out
