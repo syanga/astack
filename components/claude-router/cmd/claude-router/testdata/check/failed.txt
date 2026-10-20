@@ -1,0 +1,8 @@
+ok        router running on 127.0.0.1:18787 (launchd)
+ok        work, alumni, personal ready
+fail      paid overflow on for alumni
+ok        Claude Code settings point at the router
+ok        code matches the accepted record (darwin/arm64)
+skip      test message, not sent while a check fails
+check     failed
+next      turn off alumni paid overflow on claude.ai; claude-router check

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -119,12 +120,16 @@ func start(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := startRouter(in, *wait); err != nil {
+		return err
+	}
+	fmt.Printf("router  running  %s  %s\n", cfg.Listen, in.Manager)
+	return nil
+}
+
+func startRouter(in installation, wait time.Duration) error {
 	if _, err := fetchStatus(in); err == nil {
-		if err := switchOn(in); err != nil {
-			return err
-		}
-		fmt.Printf("router  running  %s  %s\n", cfg.Listen, in.Manager)
-		return nil
+		return switchOn(in)
 	}
 	begun := time.Now()
 	if err := (supervision{}).save(in.supervisionDir()); err != nil {
@@ -141,9 +146,8 @@ func start(args []string) error {
 		}
 		return err
 	}
-	for deadline := begun.Add(*wait); time.Now().Before(deadline); time.Sleep(250 * time.Millisecond) {
+	for deadline := begun.Add(wait); time.Now().Before(deadline); time.Sleep(250 * time.Millisecond) {
 		if _, err := fetchStatus(in); err == nil {
-			fmt.Printf("router  running  %s  %s\n", cfg.Listen, in.Manager)
 			return nil
 		}
 		if sup, err := loadSupervision(in.supervisionDir()); err == nil && sup.LastErrorAt.After(begun) {
@@ -151,7 +155,7 @@ func start(args []string) error {
 				next: fmt.Sprintf("fix the error; %s retries up to %d starts in %s, or run claude-router stop", in.Manager, crashLimit, shortDuration(crashWindow))}
 		}
 	}
-	return nextError{err: fmt.Errorf("router not ready after %s", *wait), next: "claude-router status"}
+	return nextError{err: fmt.Errorf("router not ready after %s", wait), next: "claude-router status"}
 }
 
 func stop(args []string) error {
@@ -167,16 +171,16 @@ func stop(args []string) error {
 	if *uninstall {
 		mode = release
 	}
-	_, err = stopOwn(in, mode)
+	_, err = stopOwn(in, mode, os.Stdout)
 	return err
 }
 
-func stopOwn(in installation, mode stopMode) (stopped bool, err error) {
+func stopOwn(in installation, mode stopMode, out io.Writer) (stopped bool, err error) {
 	var f foreignJob
 	if keptOff, err := stopService(in, mode); errors.As(err, &f) {
-		fmt.Printf("router  not stopped: %v; left running\n", f)
+		fmt.Fprintf(out, "router  not stopped: %v; left running\n", f)
 		if keptOff {
-			fmt.Println("        this installation stays off until claude-router start")
+			fmt.Fprintln(out, "        this installation stays off until claude-router start")
 		}
 		return false, nil
 	} else if err != nil {
@@ -186,9 +190,9 @@ func stopOwn(in installation, mode stopMode) (stopped bool, err error) {
 		return false, err
 	}
 	if mode == keepOff {
-		fmt.Println("router  stopped until claude-router start; assignments kept")
+		fmt.Fprintln(out, "router  stopped until claude-router start; assignments kept")
 	} else {
-		fmt.Println("router  stopped; assignments kept")
+		fmt.Fprintln(out, "router  stopped; assignments kept")
 	}
 	return true, nil
 }
@@ -255,15 +259,8 @@ func direct(args []string) error {
 	if err != nil {
 		return err
 	}
-	if in.Helper == "" || in.Manifest == "" {
-		return errors.New("no astack installation records this state directory; direct recovery needs one")
-	}
-	if in.Python == "" {
-		return nextError{err: errors.New("service.json names no Python for the direct-recovery helper"), next: "./install.sh --component claude-router"}
-	}
-	if _, err := os.Stat(in.Python); err != nil {
-		return nextError{err: fmt.Errorf("the Python that installed claude-router is gone: %s", in.Python),
-			next: "./install.sh --component claude-router, from the astack checkout, with a Python 3.10 or later"}
+	if err := in.checkHelper("direct recovery"); err != nil {
+		return err
 	}
 	lock, err := lockActivation(in.State)
 	if err != nil {
@@ -285,7 +282,7 @@ func direct(args []string) error {
 	if in.Manager == "foreground" {
 		return exitWith(runHelper(in, helper, lock))
 	}
-	stopped, err := stopOwn(in, keepOff)
+	stopped, err := stopOwn(in, keepOff, os.Stdout)
 	if err != nil {
 		return err
 	}
@@ -297,6 +294,38 @@ func direct(args []string) error {
 
 const nothingOwned = 3
 
+func (in installation) checkHelper(purpose string) error {
+	if in.Helper == "" || in.Manifest == "" {
+		return fmt.Errorf("no astack installation records this state directory; %s needs one", purpose)
+	}
+	if in.Python == "" {
+		return nextError{err: errors.New("service.json names no Python for the helper"), next: "./install.sh --component claude-router"}
+	}
+	if _, err := os.Stat(in.Python); err != nil {
+		return nextError{err: fmt.Errorf("the Python that installed claude-router is gone: %s", in.Python),
+			next: "./install.sh --component claude-router, from the astack checkout, with a Python 3.10 or later"}
+	}
+	return nil
+}
+
+func check(args []string) error {
+	fs := flag.NewFlagSet("check", flag.ExitOnError)
+	state := stateFlag(fs)
+	_ = fs.Parse(args)
+	in, err := loadInstallation(*state)
+	if err != nil {
+		return err
+	}
+	if err := in.checkHelper("check"); err != nil {
+		return err
+	}
+	code, err := runHelperTo(in, []string{in.Helper, "check", "--manifest", in.Manifest}, nil, os.Stdout, relayed...)
+	if err == nil && code != 0 {
+		return silentExit(code)
+	}
+	return err
+}
+
 func lockActivation(state string) (*os.File, error) {
 	f, err := os.OpenFile(filepath.Join(state, "activation.lock"), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
@@ -305,7 +334,7 @@ func lockActivation(state string) (*os.File, error) {
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, nextError{err: errors.New("another claude-router activate, direct, or uninstall is running"),
+			return nil, nextError{err: errors.New("another claude-router setup, account, activate, direct, install, or uninstall is running"),
 				next: "wait for it to finish, then run again"}
 		}
 		return nil, err
@@ -314,16 +343,40 @@ func lockActivation(state string) (*os.File, error) {
 }
 
 func runHelper(in installation, args []string, lock *os.File) (int, error) {
+	return runHelperTo(in, args, lock, os.Stdout)
+}
+
+var relayed = []os.Signal{syscall.SIGTERM, syscall.SIGHUP}
+
+func runHelperTo(in installation, args []string, lock *os.File, out io.Writer, relay ...os.Signal) (int, error) {
 	cmd := exec.Command(in.Python, args...)
 	cmd.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1")
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	cmd.ExtraFiles = []*os.File{lock}
-	err := cmd.Run()
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		return exit.ExitCode(), nil
+	cmd.Stdout, cmd.Stderr = out, os.Stderr
+	if lock != nil {
+		cmd.ExtraFiles = []*os.File{lock}
 	}
-	return 0, err
+	received := make(chan os.Signal, 1)
+	if len(relay) > 0 {
+		signal.Notify(received, relay...)
+		defer signal.Stop(received)
+	}
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	for {
+		select {
+		case s := <-received:
+			_ = cmd.Process.Signal(s)
+		case err := <-done:
+			var exit *exec.ExitError
+			if errors.As(err, &exit) {
+				return exit.ExitCode(), nil
+			}
+			return 0, err
+		}
+	}
 }
 
 func exitWith(code int, err error) error {

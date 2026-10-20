@@ -527,3 +527,25 @@ func TestAWaitThatOutlivesTheCheckReadsItAgainAtTheResetBeforeDispatch(t *testin
 		})
 	}
 }
+
+func TestARemovedAccountsConversationMovesOnItsNextRequest(t *testing.T) {
+	e := newEnv(t, "acct-a", "acct-b")
+	e.start()
+	e.send(msg{Session: sessionID(1)})
+	e.svc.Close()
+	e.cfg.Accounts = e.cfg.Accounts[1:]
+	if err := os.Remove(credentialFile(e.dir, "acct-a")); err != nil {
+		t.Fatal(err)
+	}
+	e.start()
+
+	moved := e.send(msg{Session: sessionID(1)})
+
+	if moved.Status != 200 || moved.Text != served("acct-b") {
+		t.Fatalf("got %d %q, want 200 from acct-b", moved.Status, moved.Text)
+	}
+	m := e.migrations()
+	if len(m) != 1 || m[0].From != "acct-a" || m[0].Account != "acct-b" || m[0].Reason != "not_enrolled" {
+		t.Fatalf("migrations %+v, want one not_enrolled move from acct-a to acct-b", m)
+	}
+}

@@ -87,7 +87,11 @@ func decide(cfg Config, now Instant, v view, req Request) Decision {
 	}
 	idx, enrolled := v.index[current]
 	if !enrolled {
-		return Decision{Kind: Reauth, Account: current, Reason: ReasonNotEnrolled}
+		d := place(cfg, now, v, req.Model)
+		if d.Kind == Place {
+			d.Kind, d.From, d.Reason = Migrate, current, ReasonNotEnrolled
+		}
+		return d
 	}
 	acct := v.accounts[idx]
 	if acct.needsLogin {

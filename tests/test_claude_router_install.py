@@ -6,6 +6,7 @@ test starts a service manager or the real router.
 """
 
 from contextlib import redirect_stdout
+import fcntl
 import importlib.util
 import io
 import json
@@ -35,8 +36,18 @@ elif args[0] == "build":
         sys.stderr.write("cmd/claude-router/main.go:1:1: injected build error\n")
         sys.exit(1)
     out = args[args.index("-o") + 1]
+    workspace = os.environ.get("GOWORK")
+    if workspace is None:
+        here = os.getcwd()
+        while workspace is None and here != os.path.dirname(here):
+            if os.path.exists(os.path.join(here, "go.work")):
+                workspace = os.path.join(here, "go.work")
+            here = os.path.dirname(here)
     with open(out, "w") as stream:
-        stream.write("#!/bin/sh\n# build {}\nprintf '%s\\n' \"$*\" >> \"$FAKE_ROUTER_LOG\"\n".format(os.environ.get("FAKE_BUILD", "1")))
+        stream.write("#!/bin/sh\n# build {}\n".format(os.environ.get("FAKE_BUILD", "1")))
+        if workspace not in (None, "", "off"):
+            stream.write("# workspace {}\n".format(workspace))
+        stream.write("printf '%s\\n' \"$*\" >> \"$FAKE_ROUTER_LOG\"\n")
     os.chmod(out, 0o755)
 '''
 
@@ -86,9 +97,8 @@ class ComponentFixture(InstallerFixture):
         return self.home.resolve() / ".config/systemd/user/dev.astack.claude-router.service"
 
     def inventory(self):
-        """Every file under the home except the astack manifest, which each run saves."""
         return {str(p.relative_to(self.home)): (p.read_bytes(), stat.S_IMODE(p.stat().st_mode), p.stat().st_mtime_ns)
-                for p in self.home.rglob("*") if p.is_file() and p.name != "manifest.json"}
+                for p in self.home.rglob("*") if p.is_file() and p.name not in ("manifest.json", "activation.lock")}
 
     def module(self):
         sys.modules.pop("claude_router", None)
@@ -120,6 +130,20 @@ class ComponentFixture(InstallerFixture):
         with redirect_stdout(io.StringIO()):
             change.apply(state, state_path, self.root / "unused backups")
         return replaced
+
+    def commit_checkout(self, message="checkout"):
+        if not (self.repo / ".git").exists():
+            subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        git = ["git", "-C", str(self.repo), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+               "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"]
+        subprocess.run(git + ["add", "-A"], check=True)
+        subprocess.run(git + ["commit", "-q", "-m", message], check=True)
+
+    def code_only(self):
+        result = subprocess.run([sys.executable, str(self.repo / "scripts/claude_router.py"), "identity", "--code-only"],
+                                capture_output=True, text=True, env=self.env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
 
     def enroll(self):
         """Give the router a login and an assignment, as login and a request would."""
@@ -184,6 +208,27 @@ class ComponentSelectionTests(ComponentFixture):
         self.assertIn("WRITE {}".format(self.data / "bin/claude-router"), result.stdout)
         self.assertIn("CREATE {}".format(self.state_dir / "config.json"), result.stdout)
         self.assertFalse(self.home.exists())
+
+    def test_a_preview_over_an_install_neither_creates_nor_takes_the_activation_lock(self):
+        self.component()
+        lock = self.state_dir / "activation.lock"
+        commands = {"install.sh": [str(self.repo / "install.sh"), "--component", "claude-router"],
+                    "claude_router.py": [sys.executable, str(self.repo / "scripts/claude_router.py"), "install"]}
+        previews = {name: lambda command=command: subprocess.run(
+            command + ["--home", str(self.home), "--dry-run"], capture_output=True, text=True, env=self.env)
+            for name, command in commands.items()}
+
+        exits = [preview().returncode for preview in previews.values()]
+        self.assertEqual((exits, lock.exists()), ([0, 0], False))
+        fd = os.open(str(lock), os.O_RDWR | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, fd)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        for name, preview in previews.items():
+            with self.subTest(name):
+                result = preview()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("KEEP {}".format(self.data / "bin/claude-router"), result.stdout)
 
     def test_repeat_install_changes_nothing(self):
         self.component()
@@ -349,7 +394,59 @@ class ComponentRemovalTests(ComponentFixture):
         self.assertEqual(json.loads(settings_path.read_text()), {"theme": "dark"})
 
 
+class ServiceLabelTests(ComponentFixture):
+    def helper(self, command, *arguments, success=True):
+        result = subprocess.run([sys.executable, str(self.repo / "scripts/claude_router.py"), command, "--home", str(self.home), *arguments],
+                                capture_output=True, text=True, env=self.env)
+        self.assertEqual(result.returncode == 0, success, result.stderr)
+        return result
+
+    def test_uninstall_stops_the_label_this_home_recorded_and_refuses_another(self):
+        lane = "dev.astack.claude-router.lane1"
+        self.helper("install", "--service", lane)
+        descriptor = self.descriptor.with_name(lane + self.descriptor.suffix)
+        self.assertTrue(descriptor.exists())
+
+        refused = self.helper("uninstall", "--service", "dev.astack.claude-router", success=False)
+        self.assertEqual(refused.stderr, "astack: --service dev.astack.claude-router differs from {}, the service this home's "
+                                         "install recorded; omit --service\n".format(lane))
+        self.assertTrue(descriptor.exists())
+        self.assertFalse(self.router_log.exists())
+
+        removed = self.helper("uninstall")
+        self.assertIn("STOP {} {}\n".format(self.manager_name, lane), removed.stdout)
+        self.assertEqual(self.router_log.read_text(), "stop -uninstall -state {}\n".format(self.state_dir))
+        self.assertFalse(descriptor.exists())
+
+    def test_systemd_install_writes_a_user_unit_and_uninstall_stops_it(self):
+        unit = self.home.resolve() / ".config/systemd/user/dev.astack.claude-router.lane2.service"
+        self.helper("install", "--manager", "systemd", "--service", "dev.astack.claude-router.lane2")
+
+        text = unit.read_text()
+        self.assertIn('ExecStart="{}" serve -supervised -config "{}"'.format(self.data / "bin/claude-router", self.state_dir / "config.json"),
+                      text)
+        self.assertEqual(json.loads((self.state_dir / "service.json").read_text())["descriptor"], str(unit))
+        removed = self.helper("uninstall")
+        self.assertIn("STOP systemd dev.astack.claude-router.lane2\n", removed.stdout)
+        self.assertFalse(unit.exists())
+
+    def test_on_linux_activation_reads_the_systemd_user_environment(self):
+        systemctl = self.root / "fake bin/systemctl"
+        systemctl.write_text("#!/bin/sh\n[ \"$1 $2\" = \"--user show-environment\" ] && echo ANTHROPIC_API_KEY=set\nexit 0\n")
+        systemctl.chmod(0o755)
+        router = self.router()
+        with patch.object(router.sys, "platform", "linux"), patch.dict(router.os.environ, {"PATH": self.env["PATH"]}):
+            self.assertEqual((router.launcher_has("ANTHROPIC_API_KEY"), router.launcher_has("ANTHROPIC_AUTH_TOKEN")), ("systemd", None))
+
+
 class ComponentFailureTests(ComponentFixture):
+    def test_an_ambient_go_workspace_does_not_reach_the_build(self):
+        (self.repo / "go.work").write_text("go 1.26\n\nuse ./components/claude-router\n")
+        self.component()
+        self.component(GOWORK=str(self.root / "elsewhere.work"))
+
+        self.assertNotIn("# workspace", (self.data / "bin/claude-router").read_text())
+
     def test_architecture_and_version_errors_fail_before_writes(self):
         cross = self.component(success=False, FAKE_GOARCH="riscv64")
         self.assertIn("Go would build for", cross.stderr)

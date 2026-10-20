@@ -2,6 +2,7 @@
 """Deploy personal instructions, skills, and selected harness settings."""
 
 import argparse
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -160,11 +161,12 @@ def main():
     state_path = state_root / "manifest.json"
     # Reject a blocked state directory before changing any managed files.
     files.validate_parents(state_path)
-    if args.component and args.command == "uninstall" and not args.dry_run:
-        claude_router.lock_activation_until_exit(state_path)
-    state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {"version": 1, "targets": {}}
-    if state.get("version") not in range(1, MANIFEST_VERSION + 1):
-        raise ValueError("Unsupported astack manifest version")
+    state_path, state, lock = claude_router.locked_state(state_root, args.dry_run)
+    with lock or contextlib.nullcontext():
+        deploy(args, harnesses, selected, home, use_env, state_root, state_path, state, lock)
+
+
+def deploy(args, harnesses, selected, home, use_env, state_root, state_path, state, lock):
     state["version"] = MANIFEST_VERSION
 
     skills = skill_files() if args.command == "install" else []
@@ -177,7 +179,7 @@ def main():
         astack_plugins.check_config(target, state, plugin_configs[target])
     component = None
     if args.component:
-        component = claude_router.plan(args.command, state, claude_router.layout(home, use_env, state_root), args.force)
+        component = claude_router.plan(args.command, state, claude_router.layout(home, use_env, state_root), args.force, lock)
     operations = []
     conflicts = []
     for target in selected:

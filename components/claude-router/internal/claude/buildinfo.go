@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"strings"
 )
 
 const sdkModule = "github.com/router-for-me/CLIProxyAPI/v8"
@@ -14,6 +15,17 @@ const sdkModule = "github.com/router-for-me/CLIProxyAPI/v8"
 // linker with -X, because Go records no VCS revision for a build inside a
 // linked Git worktree.
 var linkedRevision string
+
+// linkedCodeDigest is the router code digest the astack installer passes to
+// the linker with -X. An acceptance record matches the binary by this digest.
+var linkedCodeDigest string
+
+func codeDigest() string {
+	if linkedCodeDigest == "" {
+		return "unknown"
+	}
+	return linkedCodeDigest
+}
 
 var buildRevision, sdkVersion = readBuildInfo()
 
@@ -40,12 +52,20 @@ func readBuildInfo() (string, string) {
 	if modified && revision != "unknown" {
 		revision += "+dirty"
 	}
-	for _, d := range info.Deps {
-		if d.Path == sdkModule {
-			sdk = d.Version
+	return revision, sdkVersionOf(info.Deps)
+}
+
+func sdkVersionOf(deps []*debug.Module) string {
+	for _, d := range deps {
+		if d.Path != sdkModule {
+			continue
 		}
+		if r := d.Replace; r != nil {
+			return strings.TrimSpace(d.Version + " replaced by " + r.Path + " " + r.Version)
+		}
+		return d.Version
 	}
-	return revision, sdk
+	return "unknown"
 }
 
 // ExecutableDigest returns the hex SHA-256 of the running executable's file,

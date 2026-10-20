@@ -153,7 +153,7 @@ func (s *Service) messages(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
-	conv := conversationHash(id.Conversation)
+	conv := ConversationHash(id.Conversation)
 	stream := id.Stream
 	req := router.Request{Conversation: id.Conversation, Agent: id.Agent, ParentAgent: id.ParentAgent, Model: id.Model, Attempt: 1}
 	call := fmt.Sprintf("r%d", s.seq.Add(1))
@@ -634,10 +634,10 @@ func (s *Service) relayStream(c *gin.Context, ctx context.Context, call string, 
 
 func (s *Service) markServed(conv router.ConversationID, account router.AccountID) error {
 	if err := s.router.Served(s.now(), conv, account); err != nil {
-		s.events.emit(Event{Kind: "served_mark_failed", Conversation: conversationHash(conv), Account: account})
+		s.events.emit(Event{Kind: "served_mark_failed", Conversation: ConversationHash(conv), Account: account})
 		return err
 	}
-	s.events.emit(Event{Kind: "served", Conversation: conversationHash(conv), Account: account})
+	s.events.emit(Event{Kind: "served", Conversation: ConversationHash(conv), Account: account})
 	return nil
 }
 
@@ -686,6 +686,7 @@ type Status struct {
 	Journal         string          `json:"journal"`
 	Binary          string          `json:"binary"`
 	BinarySHA256    string          `json:"binary_sha256"`
+	CodeSHA256      string          `json:"code_sha256"`
 	SDK             string          `json:"sdk"`
 	QuotaFreshFor   Duration        `json:"quota_fresh_for"`
 	OverageFreshFor Duration        `json:"overage_fresh_for"`
@@ -699,7 +700,7 @@ func (s *Service) Status() Status {
 	ov := s.overage.snapshot()
 	last := s.router.LastRequests()
 	st := Status{Listen: s.addr, Now: now, Started: s.started, PID: os.Getpid(), Journal: "ok",
-		Binary: buildRevision, BinarySHA256: s.digest, SDK: sdkVersion, QuotaFreshFor: Duration(cfg.FreshFor), OverageFreshFor: s.cfg.OverageFreshFor, ActiveFor: Duration(cfg.ActiveFor)}
+		Binary: buildRevision, BinarySHA256: s.digest, CodeSHA256: codeDigest(), SDK: sdkVersion, QuotaFreshFor: Duration(cfg.FreshFor), OverageFreshFor: s.cfg.OverageFreshFor, ActiveFor: Duration(cfg.ActiveFor)}
 	bindings, err := s.store.Bindings()
 	if err != nil {
 		st.Journal = err.Error()
@@ -718,7 +719,7 @@ func (s *Service) Status() Status {
 		if on {
 			active[b.Account]++
 		}
-		st.Bindings = append(st.Bindings, BindingStatus{Conversation: conversationHash(conv), Account: b.Account,
+		st.Bindings = append(st.Bindings, BindingStatus{Conversation: ConversationHash(conv), Account: b.Account,
 			Reason: b.Reason, Since: b.Since, Served: b.Served, LastRequest: seen, Active: on})
 	}
 	sort.Slice(st.Bindings, func(i, j int) bool {
@@ -767,7 +768,7 @@ func (s *Service) move(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "invalid_request_error", "claude-router: "+err.Error())
 		return
 	}
-	hash := conversationHash(conv)
+	hash := ConversationHash(conv)
 	if from != to {
 		s.events.emit(Event{Kind: "migrated", Conversation: hash, Account: to, From: from, Reason: string(router.ReasonManual)})
 	}

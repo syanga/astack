@@ -3,6 +3,7 @@ package claude
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"os"
 	"strconv"
@@ -45,7 +46,7 @@ func TestStatusReportsCapacityQuotaAndEachBinding(t *testing.T) {
 	if a.Bound+b.Bound != 2 || a.Active+b.Active != 2 || st.Conversations != 2 {
 		t.Fatalf("bound %d+%d, active %d+%d, conversations %d; want 2 bound and 2 active", a.Bound, b.Bound, a.Active, b.Active, st.Conversations)
 	}
-	want := map[string]bool{conversationHash(router.ConversationID(sessionID(1))): true, conversationHash(router.ConversationID(sessionID(2))): true}
+	want := map[string]bool{ConversationHash(router.ConversationID(sessionID(1))): true, ConversationHash(router.ConversationID(sessionID(2))): true}
 	for _, bs := range st.Bindings {
 		if !want[bs.Conversation] || !bs.Served || bs.LastRequest.Before(before) || bs.LastRequest.After(sent) ||
 			!bs.Active || bs.Account != a.ID && bs.Account != b.ID || bs.Reason != router.ReasonCapacity {
@@ -100,7 +101,7 @@ func TestMoveTakesTheHashThatStatusShows(t *testing.T) {
 	e := newEnv(t, "acct-a", "acct-b")
 	e.start()
 	e.send(msg{Session: sessionID(1)})
-	hash := conversationHash(router.ConversationID(sessionID(1)))
+	hash := ConversationHash(router.ConversationID(sessionID(1)))
 
 	moved := e.move(hash, "acct-b")
 	after := e.send(msg{Session: sessionID(1)})
@@ -119,7 +120,7 @@ func TestMoveRefusesAHashPrefixThatNamesTwoConversations(t *testing.T) {
 	a, b := collidingSessions(4)
 	e.send(msg{Session: a})
 	e.send(msg{Session: b})
-	prefix := conversationHash(router.ConversationID(a))[:4]
+	prefix := ConversationHash(router.ConversationID(a))[:4]
 	before := []router.AccountID{e.binding(a).Account, e.binding(b).Account}
 
 	ambiguous := e.move(prefix, "acct-b")
@@ -170,5 +171,30 @@ func TestExecutableDigestIsTheSHA256OfTheRunningExecutable(t *testing.T) {
 	sum := sha256.Sum256(data)
 	if got, want := ExecutableDigest(), hex.EncodeToString(sum[:]); got != want {
 		t.Fatalf("ExecutableDigest() %q, want %q, the SHA-256 of %s", got, want, path)
+	}
+}
+
+func TestStatusReportsTheCodeDigestTheInstallerStamped(t *testing.T) {
+	for _, c := range []struct{ stamped, want string }{{"", "unknown"}, {strings.Repeat("cd", 32), strings.Repeat("cd", 32)}} {
+		saved := linkedCodeDigest
+		linkedCodeDigest = c.stamped
+		e := newEnv(t, "acct-a")
+		e.start()
+		req, _ := http.NewRequest(http.MethodGet, "http://"+e.svc.Addr()+"/claude-router/status", nil)
+		req.Header.Set("X-Api-Key", e.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&got)
+		resp.Body.Close()
+		linkedCodeDigest = saved
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got["code_sha256"] != c.want {
+			t.Fatalf("stamped %q: code_sha256 %v, want %q", c.stamped, got["code_sha256"], c.want)
+		}
 	}
 }

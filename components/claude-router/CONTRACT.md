@@ -542,11 +542,11 @@ the assignment.
 | --- | --- |
 | `place` | A new conversation. Commit before dispatch. |
 | `dispatch` | An existing assignment on a usable account. |
-| `migrate` | Another account is eligible, and the assigned account has a known rejection that blocks the model (`exhausted`), showed paid use (`overage_observed`), or needs login before the assignment served any response (`never_served_relogin`). Commit before dispatch. |
+| `migrate` | Another account is eligible, and the assigned account has a known rejection that blocks the model (`exhausted`), showed paid use (`overage_observed`), needs login before the assignment served any response (`never_served_relogin`), or is no longer enrolled (`not_enrolled`). Commit before dispatch. A conversation whose account is no longer enrolled and that no account can take gets the `wait`, `refuse`, or `unavailable` of a new conversation and keeps its assignment (`TestAConversationOnAnAccountNoLongerEnrolledIsPlacedAgain`, `TestAConversationOnAnAccountNoLongerEnrolledKeepsItsAssignmentWhenNoAccountCanTakeIt`). |
 | `retry` | `transient`, `network`, or `throttle` on the previous attempt, within `MaxAttempts`. |
 | `fail` | The retry budget is spent, or the previous attempt failed `request_scoped`. |
 | `wait` | No eligible account. `Until` is the earliest usable reset; `ResetKnown` is false when `Until` is only a recheck time. |
-| `reauth` | The assigned account needs a browser login and the assignment has served a response, or no other account is eligible; or the account is no longer enrolled. |
+| `reauth` | The assigned account needs a browser login and the assignment has served a response, or no other account is eligible. |
 | `refuse` | The included-only check fails for the assigned account and no migration applies, or it fails for every logged-in account when placing. `RecheckOverage` is set when a check is unknown or stale. |
 | `unavailable` | No enrolled account is logged in. |
 | `reject` | The request has no conversation identity. |
@@ -1680,7 +1680,8 @@ destination receives the same session identity the source did
 - **No return.** A migrated conversation stays on its destination when the
   source recovers (`TestMigratedConversationStaysAfterTheSourceRecovers`).
   It moves again only on a new confirmed exhaustion, observed paid use, a
-  login requirement before it was served (PR2), or a manual move.
+  login requirement before it was served (PR2), removal of its account from
+  `config.json`, or a manual move.
 - **Cancellation.** A client that goes away during the destination's
   response cancels that attempt; the committed migration stays
   (`TestClientCancellationDuringTheMovedResponseKeepsTheMigration`).
@@ -1853,19 +1854,20 @@ claude-router` call it with the default layout. The default targets and
 
 | Rule | Behavior |
 | --- | --- |
-| Build | `go build -trimpath -buildvcs=false` of `./cmd/claude-router` with `GOPROXY=off GOSUMDB=off GOFLAGS=-mod=readonly CGO_ENABLED=0`, into a temporary directory outside the home. The linker gets the checkout's short commit, because Go records no revision for a build inside a linked Git worktree. A preview builds too, so it reports `WRITE` or `KEEP` exactly. |
+| Build | `go build -trimpath -buildvcs=false` of `./cmd/claude-router` with `GOPROXY=off GOSUMDB=off GOFLAGS=-mod=readonly GOWORK=off CGO_ENABLED=0`, into a temporary directory outside the home. These values replace any inherited ones, so a `go.work` above the checkout or a `GOFLAGS` from the environment cannot swap in other module code (`test_an_ambient_go_workspace_does_not_reach_the_build`). The service reports a replaced SDK module as `<version> replaced by <path> [<version>]` in `sdk`, which no acceptance record matches (`TestTheSDKVersionNamesAReplacementSoNoRecordMatchesIt`). The linker gets the checkout's short commit, because Go records no revision for a build inside a linked Git worktree, and the router code digest (Acceptance record, below), which the service reports as `code_sha256`. A preview builds too, so it reports `WRITE` or `KEEP` exactly. |
+| Router code | The router code is every file under `components/claude-router/` that Git tracks at the checkout's commit, except `*.md`, `*_test.go`, files under a `testdata/` directory, and `accepted.json`. In a checkout without Git, it is every such file in the directory, skipping paths with a part that starts with `.`. When a modified, deleted, or untracked file of the router code differs from the commit, install and its preview exit 1 before any write with `claude-router code differs from the checkout's commit: <paths>; commit or revert it, then install again` (`test_an_edit_inside_the_code_set_refuses_install_and_an_edit_outside_does_not`). An edit outside the router code installs. |
 | Prerequisites | Go 1.26.0 or later. `go env` must report the host's OS and architecture for both target and host; cross-compilation settings, an older Go, an unsupported OS, or a failed build stop the run before any write. |
-| Payload | `$XDG_DATA_HOME/astack/claude-router/bin/claude-router` and the helper with its imports in `lib/`. Both are copies, so a moved checkout leaves them runnable. |
+| Payload | `$XDG_DATA_HOME/astack/claude-router/bin/claude-router` and the helper with its imports in `lib/`. Both are copies, so a moved checkout leaves them runnable. When the checkout has `components/claude-router/accepted.json`, install copies it to `$XDG_DATA_HOME/astack/claude-router/accepted.json`, the record that `setup`, `check`, and `activate` read by default. |
 | Descriptor | launchd: `~/Library/LaunchAgents/<service>.plist`. systemd: `$XDG_CONFIG_HOME/systemd/user/<service>.service`. Both run `serve -supervised -config <state>/config.json` with `HOME` set to the installer's home and the state directory as working directory. |
 | State | `$XDG_STATE_HOME/astack/claude-router`, mode 0700. `config.json` is created once, when missing, and never rewritten. `client-token` is created when missing. The service refuses a client token shorter than 32 characters or with any permission for group or others. Install replaces a shorter `client-token` and prints `REPLACE <path> (fewer than 32 characters)`. It sets any other mode on a token of 32 or more characters to 0600 and prints `CHMOD <path> 0600 (was <mode>)`. The helper writes a new token to a temporary `.client-token-*` file in the state directory at mode 0600, syncs it, and renames it into place, so an interrupted install leaves no partial token. The next install removes leftover temporary files and prints `REMOVE <path>` for each. A `client-token` that is not a regular file stops install before any write, with the step to move it aside (`TokenCreationTests`). `service.json` records the manager, service name, descriptor, configuration, helper, the Python that ran the installer, and astack manifest for the command. |
-| Ownership record | `components.claude-router` in the astack manifest: the layout, a fingerprint per managed file, the fingerprints of created seeds, the commit, and `pending`. It holds no secret. |
+| Ownership record | `components.claude-router` in the astack manifest: the layout, a fingerprint per managed file, the fingerprints of created seeds, the commit, the router code digest as `code_sha256`, the Go version as `go`, and `pending`. It holds no secret. |
 | Interruption | Before each write, the helper records the file's expected fingerprint in `pending` and saves the manifest. A rerun adopts a pending file that holds that fingerprint. Other interruptions leave a file the next run reports as a conflict. The installer is not a transaction. |
 | Conflicts | An unmanaged or locally modified payload, descriptor, or `service.json` stops install and uninstall; `--force` moves it to `backups/<id>/` first. A component path that a harness target manages is refused. A changed data, state, or descriptor location needs an uninstall first. |
-| Update | A changed binary is replaced. A running service keeps the old binary until `stop` and `start`, and the installer prints that. |
+| Update | A changed binary is replaced. A running service keeps the old binary until `stop` and `start`, and the installer prints that. When router activation is `active` and the install writes any managed file, the installer instead prints `RESTART <manager> <label>` when the binary changed and `CHECK claude-router check; claude-router direct if it fails`, then runs the installed `claude-router stop` and `start` when the binary changed, then `check` with the signal handling of activation. A foreground router gets no `RESTART` line and no restart, and runs the old binary until you start it again. A preview prints the same lines and runs nothing (`test_a_dry_run_over_an_activated_router_prints_what_the_install_then_does`). When `check` fails, or `stop`, `start`, or `check` raises, it runs `stop` and the helper's `direct`, prints `next      claude-router check`, and exits 1 with `astack: <reason>; Claude Code connects directly`. The reason is `the updated router failed its check`, after check lines that name the record mismatch; `the update was interrupted`; or `the update could not check the router (<error>)`. A `stop` that fails before `direct` prints its error and `direct` runs without claiming the router stopped. The signal handlers stay installed through that `stop` and `direct`, so a signal there does not end the install before `direct` restores the settings (`test_an_update_restarts_an_activated_router_and_keeps_it_active_when_check_passes`, `test_an_update_whose_check_fails_connects_clients_directly`, `test_an_update_that_fails_to_stop_start_or_check_the_router_connects_clients_directly`, `test_a_signal_during_the_update_check_ends_the_test_message_and_connects_clients_directly`, `test_a_signal_during_the_rollback_stop_still_connects_clients_directly`). When the manifest records a layout whose state directory exists, every install and uninstall, through `install.sh`, `uninstall.sh`, or the helper, and with or without `--component`, takes `activation.lock` in that directory before it builds or writes anything. It reads the manifest once to find the directory and again under the lock, and holds the lock until it ends: through the file writes, the restart, the check, the recovery, whose `direct` runs under the installer's descriptor, and the last manifest save. When the manifest read under the lock records another state directory or none, as after an uninstall that ended in between, it exits 1 with `astack: The claude-router installation changed before this command took its lock; run it again` and changes nothing (`test_an_install_refuses_when_an_uninstall_ends_before_it_takes_the_lock`). An activation that ends before the install takes the lock keeps its record, and the update restarts the router and checks it (`test_an_update_through_install_sh_keeps_and_checks_an_activation_that_ended_before_its_lock`, `test_an_update_through_the_helper_keeps_and_checks_an_activation_that_ended_before_its_lock`). An activation or `direct` that starts after the component's files are written and before an install with harness targets saves the manifest refuses (`test_a_direct_before_a_combined_update_saves_its_manifest_refuses_and_the_activation_stays`, `test_an_activation_before_a_combined_install_saves_its_manifest_refuses_and_runs_afterwards`). A preview neither creates nor takes the lock (`test_a_preview_over_an_install_neither_creates_nor_takes_the_activation_lock`). While another command holds the lock, the install exits 1 with `astack: another claude-router setup, account, activate, direct, install, or uninstall is running; wait for it to finish, then run again` and changes nothing (`test_an_update_while_an_account_change_holds_the_lock_refuses_and_changes_nothing`, `test_a_harness_install_while_an_account_change_holds_the_lock_refuses_and_changes_nothing`, `test_an_update_holds_the_lock_through_its_restart_check_and_recovery`). |
 | Service name | Installs in different homes that use one `--service` name share one launchd label or systemd unit name. `start`, `stop`, `direct`, and uninstall act on a loaded job only when its descriptor is this installation's: launchd's `path` from `launchctl print`, or systemd's `FragmentPath`, compared after resolving symlinks. On a mismatch, `start` refuses and `stop` leaves the other job running and says so (`TestStopAndStartLeaveAJobLoadedFromAnotherHome`, `TestSystemdStopAndStartActOnlyOnTheirOwnUnit`, `TestStopActsOnItsOwnJobLoadedThroughASymlink`). |
-| Off until start | `stop` and `direct` keep the router off until `claude-router start`, across logins and reboots. launchd: `launchctl disable`, which persists a per-label override, so launchd neither loads the plist at login nor accepts a `bootstrap` (it fails with error 5), then `bootout` of this installation's loaded job. A disable leaves a loaded job running until the `bootout`, and it comes first, so a `stop` that fails or is killed between the two calls still leaves the job off at login (`TestAStopWhoseBootoutFailsStillKeepsTheJobOffAtLogin`). `start` runs `launchctl enable` when the label is disabled, then `bootstrap` or `kickstart`. systemd: `disable` then `stop`, for the same reason (`TestASystemdStopWhoseStopFailsStillKeepsTheUnitOffAtLogin`); `start` runs `enable` then `start`. When the router already answers, as after such a failed `stop`, `start` still turns the switch on before it prints `router  running` (`TestStartTurnsTheSwitchOnWhenTheRouterStillRunsAfterAFailedStop`). Uninstall runs `stop -uninstall`: launchd boots out this installation's job and runs `enable` when the label is disabled, also while another home's job holds the label, which leaves an `enabled` override entry that blocks nothing (launchctl has no verb that deletes the entry); systemd stops and disables the unit, which removes its `default.target.wants` link (`TestStopKeepsTheJobOffAcrossLoginsUntilStart`, `TestSystemdStopDisablesAndStartEnablesOnlyItsOwnUnit`). `start` and uninstall leave a switch that another installation owns as it is (Shared label switch, below). The systemd side is unit-tested against a fake `systemctl` only, because lane 3 has no Linux host. |
+| Off until start | `stop` and `direct` keep the router off until `claude-router start`, across logins and reboots. launchd: `launchctl disable`, which persists a per-label override, so launchd neither loads the plist at login nor accepts a `bootstrap` (it fails with error 5), then `bootout` of this installation's loaded job. A disable leaves a loaded job running until the `bootout`, and it comes first, so a `stop` that fails or is killed between the two calls still leaves the job off at login (`TestAStopWhoseBootoutFailsStillKeepsTheJobOffAtLogin`). `start` runs `launchctl enable` when the label is disabled, then `bootstrap` or `kickstart`. systemd: `disable` then `stop`, for the same reason (`TestASystemdStopWhoseStopFailsStillKeepsTheUnitOffAtLogin`); `start` runs `enable` then `start`. When the router already answers, as after such a failed `stop`, `start` still turns the switch on before it prints `router  running` (`TestStartTurnsTheSwitchOnWhenTheRouterStillRunsAfterAFailedStop`). Uninstall runs `stop -uninstall`: launchd boots out this installation's job and runs `enable` when the label is disabled, also while another home's job holds the label, which leaves an `enabled` override entry that blocks nothing (launchctl has no verb that deletes the entry); systemd stops and disables the unit, which removes its `default.target.wants` link (`TestStopKeepsTheJobOffAcrossLoginsUntilStart`, `TestSystemdStopDisablesAndStartEnablesOnlyItsOwnUnit`). `start` and uninstall leave a switch that another installation owns as it is (Shared label switch, below). The systemd side is unit-tested against a fake `systemctl` only, in Go and in Python (`TestAccountAddOnSystemdStopsAndStartsItsOwnUnit`, `test_systemd_install_writes_a_user_unit_and_uninstall_stops_it`, `test_on_linux_activation_reads_the_systemd_user_environment`). Linux is not yet tested on real Linux. |
 | Shared label switch | The launchd override is per label, not per plist. The installation whose plist is `<label>.plist` in the account's login directory, `~/Library/LaunchAgents` of the home in the user database (not `$HOME`), owns it. Another installation with that label never disables or enables it: its `stop` boots out only its own loaded job and leaves the label on, and its plist, outside the login directory, never loads at login anyway. Its `start` refuses while the label is disabled, with `<label> is turned off for the installation at <path>` and `next    run claude-router start for that installation, or install this one with another --service`; when its router already answers, `start` prints `router  running` and leaves the label off (`TestStartOfAnotherInstallationsRunningRouterLeavesTheOwnersSwitchOff`). Its uninstall leaves the label as it is (`TestStopAndStartLeaveTheLoginSwitchOfAnotherInstallation`, `TestAnotherInstallationsUninstallLeavesTheOwnersSwitchOn`). The owner's `stop` and `direct` disable the label even while another installation's job holds it: they leave that job running and print `router  not stopped: <label> is loaded from <path>, not from this installation; left running`, then `        this installation stays off until claude-router start` (`TestTheLoginOwnersStopTurnsItsSwitchOffWhileAnotherHomesJobRuns`). The owner's uninstall in that case turns the label back on and prints only the first of those lines (`TestTheLoginOwnersUninstallBesideAnotherHomesJobTurnsTheSwitchBackOn`). None of them boots out that job. When no plist for the label is in the login directory, the switch only gates `bootstrap`. Any installation with the label may then enable it, and may disable it unless another installation's job holds the label: a `stop` beside that job leaves the label on and prints only the first line (`TestAStopBesideAnotherHomesJobWithNoLoginOwnerLeavesTheSwitchOn`). Only a missing plist counts as none: another error reading it, such as an unsearchable login directory, refuses `stop` and `direct`, and `start` and uninstall when the label is disabled, with `cannot tell which installation turns <label> on and off at login: <error>` before any switch changes (`TestAnUnreadableLoginDirectoryRefusesToTouchTheSwitch`). |
-| Removal | The helper runs the installed `claude-router stop -uninstall`, then removes the payload, descriptor, and `service.json`, and an unedited `config.json`. It keeps `auths/`, `assignments/`, `accounts.json`, `client-token`, `events.jsonl`, and an edited `config.json`. |
+| Removal | The helper runs the installed `claude-router stop -uninstall`, then removes the payload, descriptor, and `service.json`, and an unedited `config.json`. It keeps `auths/`, `assignments/`, `accounts.json`, `client-token`, `events.jsonl`, and an edited `config.json`. Uninstall acts on the layout and service name in the manifest record. `claude_router.py uninstall --service NAME` with another name exits 1 before any change with `--service NAME differs from <recorded>, the service this home's install recorded; omit --service` (`test_uninstall_stops_the_label_this_home_recorded_and_refuses_another`). |
 | Known limit: concurrent commands | The ownership check and the action are separate `launchctl` or `systemctl` calls. If another installation that shares the label runs `stop` and `bootstrap` between them, this installation's `stop` can boot out that job. Two installations must run lifecycle commands concurrently for this to happen. launchd and systemd offer no compare-and-act call to close the gap. |
 
 ### Settings ownership
@@ -1989,14 +1991,67 @@ each from sample state.
 | `status` | Reads `GET /claude-router/status`, `events.jsonl`, `supervision.json`, `service.json`, and the `config.json` that `service.json` names, or the state directory's `config.json` when there is no `service.json`. It marks a quota observation or paid-overflow reading older than 15 minutes with a `stale` line. A service that does not answer is `stopped`, or `failed` when supervision gave up. When `config.json` does not load, status prints `config error:` with the error, and `running` or `stopped` from the assignment lock. Once supervision gives up, `failed` takes precedence, and the configuration error shows as `last error:`. A stopped service whose state directory the router cannot write shows `last error: cannot record a start in <file>: <error>` and `next    fix the error, then claude-router start` (`TestStatusShowsThatTheRouterCannotRecordAStart`). An unreadable `supervision.json` makes status exit 1 naming the file, with `next    remove <file>, then claude-router start` (`TestStatusNamesAnUnreadableSupervisionRecord`). |
 | `status -v` | Adds every reading with its age, cache counters per account, each assigned conversation, and the migrations, newest first, at most 20. |
 | `start`, `stop` | launchd: `enable` when disabled, then `bootstrap` or `kickstart`; `disable`, then `bootout`. systemd: `daemon-reload`, `enable`, `reset-failed`, and `start`; `disable`, then `stop`. When status already answers, `start` only turns the switch on and prints `router  running  <listen>  <manager>`. Each acts only on this installation's job (Service name, Off until start, and Shared label switch, above). `start` waits up to 90 s for status to answer or for a start error; `stop` waits until the assignment lock is free and prints `router  stopped until claude-router start; assignments kept`. Foreground installations refuse both. |
-| `login` | Unchanged flow. It refuses while a process holds the state directory, names that process's pid when status answers, and prints `next    claude-router stop`. |
+| `login` | Unchanged flow. It refuses while a process holds the state directory, names that process's pid when status answers, and prints `next    claude-router stop`. Of the SDK's output during the sign-in, `login` shows only lines that start with `https://`, the sign-in URL. `login` drops the SDK's progress lines and its SSH tunnel instructions for remote servers, discards the SDK log until the sign-in ends, and then restores the log output it found (`TestCopySignInURLsKeepsOnlyTheURLLines`, `TestShowingOnlySignInURLsRestoresTheLogOutputItFound`). |
+| `setup [-account NAME ...] [-no-browser]` | Refuses when `activation.json` is in phase `active`, with `Claude Code already routes through the router` and `next      claude-router account add NAME`, before any sign-in (`TestSetupRefusesWhenTheRouterIsAlreadyActivated`). Otherwise, for each `-account` not in `config.json`, it stops a running router, signs in as `login` does, and prints `login     NAME: sign in in the browser window that opened` (with `-no-browser`, `NAME: open the URL below and sign in`) and `login     NAME signed in`. It adds the signed-in accounts to `config.json` with capacity 1, also when a later sign-in fails, so that `auths/` holds no login outside `config.json`; a failed sign-in then starts a router that ran and exits 1 (`TestSetupKeepsTheAccountsSignedInBeforeAFailedSignIn`). When that `config.json` write replaces the file but its directory fails to sync, the error names the accounts it added: `<sign-in error>; added NAME to config.json: <sync error>` (`TestSetupSaysWhichAccountsItAddedWhenTheirConfigDirectoryFailsToSyncAfterAFailedSignIn`). A sign-in that fails after it wrote `auths/NAME.json`, as when clearing the account's login requirement fails, deletes that login (`TestASignInThatFailsAfterWritingTheLoginRemovesIt`). When the `config.json` write fails before it replaces the file, setup deletes the logins it just wrote, starts a router that ran, and exits 1 with the error (`TestSetupRemovesTheNewLoginsWhenTheConfigWriteFails`). When it fails after, setup keeps them, because `config.json` lists them (`TestAConfigWriteThatFailsAfterItsRenameKeepsTheLoginsOfTheAccountsItAdded`). After every sign-in succeeds, it starts the router and waits up to 90 s until every configured account is registered, needs no login, and has a paid-overflow reading. A reading of `enabled` or `paid_use` refuses with `refuse    NAME has paid overflow on; Claude Code stays direct` and `next      turn off NAME paid overflow on claude.ai; claude-router setup`, exit 1 (`TestSetupRefusesWithTheAccountNameWhenPaidOverflowIsOn`). For two accounts the line reads `NAME and NAME have`, and the `next` line says `their`. For three or more, `refuse` names the accounts with `have paid overflow on`, and `Claude Code stays direct` follows on its own line under a blank label. Otherwise it runs the installed helper's `activate --brief --manifest <manifest> --lock-fd 3`, which reads the installed `accepted.json`, runs `check`, and prints the check lines and then `activated Claude Code routes through the router`, without a `check     passed` line (`test_brief_activation_through_the_recorded_manifest_prints_the_check_and_the_result`). Then setup prints `next      claude-router status` (`TestSetupSignsInEachAccountStartsTheRouterAndActivates`). The layout is the user's pick, setup A: one line per step, a 9-column label and a space, and every line within 80 columns for up to three account names of up to 8 characters (`TestSetupLinesFitEightyColumnsForEightCharacterAccounts`, which refuses three such accounts for paid overflow). `testdata/setup/` holds the lines setup prints itself, with the helper's output replaced by one `helper` line that names its arguments; `testdata/check/` and the Python tests cover the check lines. |
+| `check` | Runs the installed helper's `check` with the Python recorded in `service.json`, and exits with its status (Check, under Activation, below). |
+| `account add NAME [-no-browser]` | Refuses an account already in `config.json`. Stops a running router, signs in, adds the account with capacity 1, starts the router again, and waits for it to be ready (`TestAccountAddSignsInAddsTheAccountAndStartsTheRouterAgain`). A router that was stopped stays stopped, and the last line is `next      claude-router start` (`TestAccountAddAndRemoveLeaveAStoppedRouterStopped`). A failed sign-in leaves `config.json` unchanged and starts a router that ran (`TestAFailedSignInLeavesTheConfigUnchangedAndStartsTheRouterAgain`); a sign-in that fails after it wrote `auths/NAME.json` also deletes that login (`TestASignInThatFailsAfterWritingTheLoginRemovesIt`). A `config.json` write that fails before it replaces the file deletes the new login and starts a router that ran (`TestAFailedConfigWriteAfterSignInRemovesTheNewLoginAndStartsTheRouterAgain`). One that fails after, while it syncs the directory, keeps the login, starts a router that ran, and exits 1 with the error (`TestAConfigWriteThatFailsAfterItsRenameKeepsTheLoginsOfTheAccountsItAdded`). An account whose reading shows paid overflow on gets a `warn` line; the router sends it nothing. `-force` exits 2 as an unknown flag (`TestAccountRejectsTheFlagOfTheOtherSubcommand`). |
+| `account remove NAME [-force]` | Refuses the last account, with `next      claude-router account add NAME, then remove NAME` (`TestAccountRemoveRefusesTheLastAccount`). Without `-force`, refuses when conversations assigned to NAME were assigned in the last 5 hours or had a request on NAME in `events.jsonl` in that time, and prints their count and `-force`. It reads the assignment journal without its lock and skips a torn final record. Then it stops a running router and, without `-force`, counts again, so a conversation assigned before the stop also refuses, and a router that ran starts again (`TestAccountRemoveRefusesAConversationAssignedBeforeTheRouterStopped`). It removes the account from `config.json`, then deletes `auths/NAME.json`, starts a router that ran, and prints that the claude.ai session stays signed in. A `config.json` write that fails before it replaces the file changes nothing else, and a router that ran starts again (`TestAFailedConfigWriteDuringRemoveKeepsTheLoginAndStartsTheRouterAgain`, `TestARemoveWhoseConfigWriteFailsKeepsTheLoginWhenAuthsTurnsReadOnly`). One that fails after, while it syncs the directory, still deletes the login and exits 1 with the error (`TestAConfigWriteThatFailsAfterItsRenameStillDeletesTheRemovedLogin`). A login that cannot be deleted puts the account back in `config.json` at its old position and starts a router that ran (`TestAccountRemoveThatCannotDeleteTheLoginAddsTheAccountBackAndStartsTheRouterAgain`); when that write fails too, the error ends with `next      delete <state>/auths/NAME.json, then claude-router start` (`TestAccountRemoveThatCannotDeleteTheLoginOrAddTheAccountBackNamesTheLogin`). A process killed before the `config.json` write leaves the account and its login; killed after it, it leaves `auths/NAME.json` without an account, and `start` then refuses with `auth directory holds NAME.json, which is not an enrolled account` until the file is deleted. No point leaves an account in `config.json` without its login (`TestAnAccountRemoveKilledAroundItsConfigWriteLeavesEveryAccountWithItsLogin`). A router that was stopped stays stopped. The account's assignments are placed again on their next request, with reason `not_enrolled`, and `cache` counts each as a move (`TestAccountRemoveRefusesWithTheCountOfRecentConversationsUnlessForced`, `TestAConversationOnAnAccountNoLongerEnrolledIsPlacedAgain`, `TestARemovedAccountsConversationMovesOnItsNextRequest`, `TestAMoveOffARemovedAccountCountsAsAMove`). `-no-browser` exits 2 as an unknown flag. |
 | `move` | Takes the 12-hex hash that status shows, a prefix of at least 4 hex digits, or a session ID. A prefix that matches two conversations is answered 409 and nothing moves. |
 | `direct -prepare`, `direct` | Run the installed helper with the Python recorded in `service.json`, and refuse, naming it, when that interpreter is gone. `-prepare` prints each owned key with its installed value, secrets as `[redacted]`, the count of other keys, the router's logins and assignment count, and the backup path, and changes nothing. The backup path is `backups/direct-<first 12 hex of the file's SHA-256>/<file name>`, so `-prepare` and `direct` print the same path while the file is unchanged. `direct` refuses on a key edited after activation, then stops the service, copies each settings file to the backup with mode 0600, and restores the keys. A key that already holds its value from before activation, as after a crash between the settings write and the manifest save, prints `skip` and its record is dropped. With no owned settings, `direct` prints `nothing to change` and stops nothing. In foreground mode, or when another installation's job holds the label and stays running, it does not say the router stopped (`TestDirectWithAnotherInstallationsJobDoesNotClaimTheRouterStopped`). `after   claude needs its own /login` appears when `direct` removes `apiKeyHelper` that had no prior value. Logins, assignments, the binary, and the job stay. |
+
+When `setup`, `account add`, or `account remove` stops the router and the
+stop fails after it turned the service off, as when `launchctl bootout` or
+`systemctl --user stop` fails after the disable, the command starts the
+router again, which turns the service back on, and exits 1 with the stop's
+error (`TestAPartlyFailedStopRestoresTheEnabledRunningRouter`).
+
+`setup`, `account add`, and `account remove` write `config.json` through the
+`Config` struct. They decode it, refusing a file with a key the struct does
+not have, apply the edit, validate the result with defaults applied, write a
+temporary file in the same directory with mode 0600, sync it, rename it into
+place, and sync the directory. A failed edit or an invalid result leaves the
+file and the directory unchanged
+(`TestEditConfigLeavesTheFileUnchangedWhenTheEditIsInvalidOrFails`,
+`TestEditConfigRefusesAFileWithAnUnknownField`). The edit reports whether the
+rename happened, so that a failure to open or sync the directory after it
+counts as a change in effect
+(`TestEditConfigReportsAnEditPublishedBeforeItsDirectoryFailedToSync`). The
+write keeps every value, and an optional field that the file omits stays
+omitted. It does not keep the formatting: the file comes back as JSON indented
+by two spaces, with keys in the order of the struct, and a duration in Go's
+form, so `30m` becomes `30m0s`
+(`TestEditConfigWritesTheEditAndKeepsEveryOtherField`). A relative
+`client_token_file` stays relative.
+
+`setup`, `account add`, and `account remove` hold `activation.lock` from
+before they read `config.json` until they return, across the config edit,
+the login change, and the restart. `activate`, `direct`, and every install
+and uninstall over an installed router take the same lock, so a second of
+these commands refuses with `another claude-router setup, account, activate,
+direct, install, or uninstall is running` and changes nothing
+(`TestAccountChangesRefuseWhileAnotherChangeHoldsTheLock`). `setup` passes
+its lock to `activate` with `--lock-fd 3` (`TestSetupHandsItsLockToActivate`,
+`test_activation_runs_under_the_lock_its_caller_holds_and_hands_down`).
+
+`setup` and `check` pass SIGTERM and SIGHUP that they receive while the
+helper runs to the helper and wait for it, so the helper ends its test
+message and, under `setup`, restores direct settings
+(`TestSetupAndCheckPassTerminationSignalsToTheHelper`). The refusals of
+`setup`, `account`, and `check` pad `next` and the detail line to 10
+columns, as their step lines do; the other commands use 8
+(`TestRefusalsOfStepCommandsPadTheirLabelsToTenColumns`,
+`test_a_check_refusal_pads_its_next_label_to_ten_columns`). A brief
+activation pads its refusal and undo lines the same way
+(`test_brief_activation_pads_its_refusal_and_undo_labels_like_the_check_lines`).
+The first line of a refusal carries the whole error, including what failed
+after the refusal itself, such as a restart that failed after `account
+remove` could not put the account back
+(`TestAnAccountRemoveReportsARestartThatFailsAfterThePutBackFailed`).
 
 The status endpoint adds `capacity`, `quota` (the newest observation, kept in
 memory only), `bound` and `active` counts, `needs_login_at`, a `bindings`
 list (hash, account, reason, since, served, last request, active), and `now`,
-`started`, `pid`, `journal`, `binary`, `binary_sha256` (PR6), `sdk`, `quota_fresh_for`,
+`started`, `pid`, `journal`, `binary`, `binary_sha256` (PR6), `code_sha256`, `sdk`, `quota_fresh_for`,
 `overage_fresh_for`, and `active_for` (`TestStatusReportsCapacityQuotaAndEachBinding`,
 `TestStatusCountsAnIdleConversationAsBoundButNotActive`). A `request` event
 with decision `wait` carries `until`, the reset it waits for
@@ -2027,36 +2082,108 @@ before it reads its configuration or starts the SDK
 `TestExecutableDigestIsTheSHA256OfTheRunningExecutable`). Activation needs it
 to compare the running binary, not only the file on disk, which an update
 replaces while the old binary keeps running.
+The service also reports `code_sha256`, the router code digest that the
+installer passes to the linker, or `unknown` for a build without it
+(`TestStatusReportsTheCodeDigestTheInstallerStamped`).
 
 ### Acceptance record
 
 `claude_router.py identity --claude PATH --agent-sdk DIR` prints the
-installation's identity as JSON. The acceptance run saves that identity with
-its verdict. Activation reads these fields of the record and ignores the rest:
+installation's identity as JSON: `head`, `code_sha256`, `binary_sha256`,
+`helpers_sha256`, the running binary's `running_binary`,
+`running_code_sha256`, and `running_binary_sha256`, `sdk`, `go`, `platform`
+(`<os>/<arch>`), and `clients`. `claude_router.py identity --code-only` prints
+only `code_sha256` and `helpers_sha256`, computed from the checkout without
+an installation or client paths. The acceptance run saves the identity with
+its verdict. Activation and `check` read these fields of the record:
 
 | Field | Activation compares it with |
 | --- | --- |
 | `result` | Must be `pass`. |
-| `head` | The full commit in the astack manifest's `components.claude-router.commit`, and its first 7 hex digits with the running service's `binary` revision. A `+dirty` build never matches. |
-| `binary_sha256` | The SHA-256 of the installed `bin/claude-router`, and the running service's `binary_sha256`. |
+| `code_sha256` | Must be 64 hex digits and equal the installed `code_sha256` in the astack manifest and the running service's `code_sha256`. The digest uses the line format of `helpers_sha256` over the router code (Installation, above), with paths relative to `components/claude-router/` (`test_the_code_digest_covers_tracked_router_code_and_skips_docs_tests_testdata_and_the_record`). |
 | `helpers_sha256` | Must be 64 hex digits and equal the digest of the installed helper payload in `lib/`. For each file in `lib/`, sorted by relative path, the digest input holds one line: the relative path, a NUL byte, and the file's SHA-256 in hex. `__pycache__` and compiled files are skipped. The digest is the SHA-256 of these lines (`test_the_helpers_digest_covers_each_installed_file_by_path_and_content`). See "Which code runs" below. |
 | `sdk` | The running service's `sdk`, the pinned CLIProxyAPI module version. |
-| `clients.claude_code` | The first word of `--claude PATH --version`, which must exit 0. |
-| `clients.agent_sdk` | `version` in `--agent-sdk DIR/package.json`, whose `name` must be `@anthropic-ai/claude-agent-sdk`. |
+
+Activation also requires that the running service's `binary_sha256` equal
+the SHA-256 of the installed `bin/claude-router`, so a service that still
+runs the binary an update replaced refuses. `head`, `binary_sha256`, `go`,
+`platform`, and `clients` are information only. A record therefore matches
+at another commit with the same router code, another build of it, and other
+client versions (`test_a_record_matches_by_code_digest_at_another_commit`,
+`test_a_record_with_another_head_build_and_client_versions_activates_when_check_passes`).
+When the record's `platform` differs from this host's, activation prints
+`note    accepted on <record platform>, this is <host platform>`, followed
+by `, not yet tested on real Linux` on Linux, and continues
+(`test_activation_on_another_platform_than_the_record_s_names_both`).
 
 A missing record, a record that does not parse, or any mismatch refuses
 before any write and lists every mismatch
-(`test_a_missing_or_mismatched_acceptance_record_refuses_before_any_write`,
-`test_an_install_from_an_edited_checkout_refuses_before_any_write`). Both client fields
-are required, because acceptance covers the terminal client and T3's Agent
-SDK. Two installs of one clean commit with the same Go in different homes
-built the same bytes (`evidence/PR6/reproducible-build/run.txt`). A binary
-built in an acceptance lane therefore matches the daily-driver build only
-when both used the same Go and a clean checkout: an edit under
-`components/claude-router` links `<commit>+dirty`, which changes the bytes
-and never matches a `head`. The installer copies the helpers from the
-working tree, so an edit under `scripts/` changes `helpers_sha256` instead
-(`test_an_install_from_an_edited_checkout_refuses_before_any_write`).
+(`test_a_missing_or_mismatched_acceptance_record_refuses_before_any_write`).
+The installer copies the helpers from the working tree, so an edit under
+`scripts/` changes `helpers_sha256`
+(`test_an_install_from_an_edited_checkout_refuses_before_any_write`), and it
+refuses to build router code that differs from the commit.
+
+`components/claude-router/accepted.json` holds the record of the live
+acceptance run at the router code it names. A change to the router code
+needs a new acceptance run and record.
+
+### Check
+
+`claude_router.py check [--home DIR | --manifest FILE] [--claude PATH]
+[--settings FILE] [--acceptance FILE] [--timeout 120]` prints one line per
+check, with a 9-column label of `ok`, `fail`, or `skip`. `--home` and
+`--manifest` exclude each other, and `activate` takes them the same way
+(`test_home_and_manifest_together_are_refused`):
+
+1. The router answers `GET /claude-router/status` at the configured
+   `listen`, named with the manager.
+2. Every account in `config.json` is registered and needs no login.
+3. Every account's paid-overflow reading is `disabled`. `enabled` or
+   `paid_use` fails with `paid overflow on for NAME` and `next      turn off
+   NAME paid overflow on claude.ai; claude-router check`. A missing reading
+   fails with `paid overflow not read yet for NAME`.
+4. The settings file holds the three keys of `client_settings` with the
+   router's values. The default file is the one `activation.json` names,
+   then `$CLAUDE_CONFIG_DIR/settings.json` or `~/.claude/settings.json`.
+5. The acceptance record, by default the installed `accepted.json`, matches
+   (Acceptance record, above). The line names the record's `platform`, and
+   each mismatch follows on its own line.
+6. When every line before passed, `check` runs `claude -p ping --session-id
+   <new UUID> --strict-mcp-config --no-session-persistence --tools ""` with
+   `/bin/sh -c` in its own process group, stdin from `/dev/null` and its
+   output discarded, for up to 120 seconds. The line passes when
+   `events.jsonl`, from its size before the run, holds a `request` event
+   whose `conversation` is that session's hash, with status 200 and outcome
+   `completed`. Other requests, including the client's side requests and
+   failed requests of the same session, do not count
+   (`test_check_passes_every_line_and_finds_its_own_request_among_side_requests`,
+   `test_check_fails_when_only_another_session_is_answered`). The line
+   names the account of the last such request and the client's run time.
+   Otherwise the line is `skip      test message, not sent while a check
+   fails`, and no message is sent
+   (`test_check_fails_and_sends_no_message_while_paid_overflow_is_on`).
+
+When the router does not answer, `check` still prints every line of the
+layout. Lines 2, 3, and 5 print `skip` with `accounts, not read while the
+router is stopped`, `paid overflow, not read while the router is stopped`, and
+`accepted record, not compared while the router is stopped`
+(`test_with_the_router_stopped_check_prints_every_line_and_skips_what_it_cannot_read`).
+With no accounts in `config.json`, line 3 is `skip      paid overflow, no
+accounts to read`.
+
+`check` installs the signal handlers of activation's verification. SIGINT,
+SIGTERM, or SIGHUP kills the test message's process group, prints
+`check     interrupted`, and exits 1
+(`test_a_signal_ends_the_test_message_client_with_check`).
+
+The last line is `check     passed` or `check     failed`; a brief
+activation leaves out `check     passed`. A failure adds
+`next      <step>` for the first failed check and exits 1. `check` never
+prints the prompt or the reply. The layout is the user's pick, check A
+(`cmd/claude-router/testdata/check/`), and every line fits 80 columns for
+three accounts of 8 characters
+(`test_lines_fit_eighty_columns_with_three_eight_character_accounts`).
 
 ### Which code runs
 
@@ -2105,32 +2232,41 @@ These paths run without that check:
 
 ### Order of operations
 
-`claude_router.py activate --acceptance FILE --claude PATH --agent-sdk DIR
---verify SESSION COMMAND [--verify SESSION COMMAND]... [--settings FILE]
-[--project DIR]... [--prepare]` runs these steps. `--settings` defaults to
-`$CLAUDE_CONFIG_DIR/settings.json`, or `~/.claude/settings.json` without it
-or with `--home`.
+`claude_router.py activate [--acceptance FILE] [--claude PATH] [--verify
+SESSION COMMAND]... [--settings FILE] [--project DIR]... [--prepare]
+[--brief] [--home DIR | --manifest FILE] [--lock-fd FD]` runs these steps.
+`--acceptance` defaults to the installed `accepted.json`. `--claude`
+defaults to `claude` on `PATH` and runs the check's test message.
+`--settings` defaults to `$CLAUDE_CONFIG_DIR/settings.json`, or
+`~/.claude/settings.json` without it or with `--home`. `--brief`, which
+`setup` passes, prints the `note` and `warn` lines, the check lines without
+`check     passed`, and `activated Claude Code routes through the router`
+in place of the other lines.
 
 `activate` and `direct`, in every mode, hold an exclusive `flock` on
 `activation.lock` in the state directory for the whole run, including
-verification. The component's uninstall holds it too, except with
-`--dry-run`. A second caller refuses before it reads `activation.json` or
-changes anything. `activate` and uninstall read the manifest once before the
-lock, to find the state directory, and read it again under the lock.
-`direct` reads it only under the lock. The refusal prints `claude-router:
-<command>: another claude-router activate, direct, or uninstall is running`
-and `next    wait for it to finish, then run again`, and exits 1. Uninstall
-prints `astack:` and the same two parts on one line. `claude-router direct`
-takes the lock before its check, holds it through the service stop and the
-apply, and passes it to the helper as an open descriptor. With no state
-directory, the helper's `activate` and `direct` print `no state directory at
-<dir>` and exit 1. The Go `claude-router direct` finds no `service.json`
-there and prints `claude-router: direct: no astack installation records this
-state directory; direct recovery needs one`, exits 1, and creates nothing.
-Uninstall with the lock held refuses before it stops the service or removes
-a file, whether or not `activation.json` exists. When uninstall finds the
-state directory but cannot open `activation.lock` in it, it prints `astack:
-no state directory at <dir>` with no next step
+verification. Every install and uninstall over an installed router holds it
+too, except with `--dry-run`, with or without `--component` (Update, under
+Installation), and so do `setup`, `account add`, and `account remove`
+(Commands, under Operation). With `--lock-fd`, `activate` and `direct` lock
+the descriptor their caller passes, which already holds the lock. A second
+caller refuses before it reads `activation.json` or changes anything.
+`activate`, install, and uninstall read the manifest once before the lock, to
+find the state directory, and read it again under the lock. `direct` reads it
+only under the lock. The refusal prints `claude-router: <command>: another
+claude-router setup, account, activate, direct, install, or uninstall is
+running` and `next    wait for it to finish, then run again`, and exits 1.
+Install and uninstall print `astack:` and the same two parts on one line.
+`claude-router direct` takes the lock before its check, holds it through the
+service stop and the apply, and passes it to the helper as an open descriptor.
+With no state directory, the helper's `activate` and `direct` print
+`no state directory at <dir>` and exit 1. The Go `claude-router
+direct` finds no `service.json` there and prints `claude-router: direct: no
+astack installation records this state directory; direct recovery needs one`,
+exits 1, and creates nothing. Uninstall with the lock held refuses before it
+stops the service or removes a file, whether or not `activation.json` exists.
+When uninstall finds the state directory but cannot open `activation.lock` in
+it, it prints `astack: no state directory at <dir>` with no next step
 (`test_an_activation_during_another_s_verification_refuses_without_changes`,
 `test_direct_during_an_activation_s_verification_refuses_without_changes`,
 `test_a_second_activation_whose_verification_fails_refuses_before_it_touches_the_first`,
@@ -2179,7 +2315,7 @@ no state directory at <dir>` with no next step
    show-environment`
    (`test_local_settings_and_environment_tokens_are_refused_or_named`).
    Activation checks no other project.
-7. With `--prepare`, stop here. Otherwise refuse without a `--verify`.
+7. With `--prepare`, stop here.
 8. Copy the settings file to
    `backups/activate-<first 12 hex of its SHA-256>/settings.json` with mode
    0600, and write `activation.json` in the state directory with phase
@@ -2263,12 +2399,23 @@ no state directory at <dir>` with no next step
 14. The router never sends a request around itself: a stopped router fails
     the client's request (`evidence/PR6/lane-3/cutover-isolated.json`, step
     `unavailable_after_activation_no_bypass`).
-15. Otherwise set the phase to `active`, print `done    clients connect
+15. After the last `--verify` command, run `check` (Check, above) on the
+    settings file just written, with the record read in step 3. A failed
+    check prints the check lines, undoes the write, prints `undo    <file>
+    restored; the router keeps its logins and assignments` and `next
+    claude-router status` on stderr, and exits 1
+    (`test_a_failed_check_restores_the_direct_settings`). A `--verify`
+    command or a check that raises an `OSError`, `ValueError`, or `KeyError`,
+    such as an unreadable `events.jsonl`, prints `claude-router: activate: the
+    check could not finish: <error>` and undoes the write the same way
+    (`test_a_check_that_cannot_read_the_events_restores_the_direct_settings`).
+    The check runs inside the signal handling of step 12.
+16. Otherwise set the phase to `active`, print `done    clients connect
     through the router; undo with claude-router direct`, and exit 0.
 
 Activation never starts, stops, or enables the service, and never touches
-logins, assignments, or the client token. It needs one `--verify` and does
-not know which client a command runs. The runbook's cutover passes two, a
+logins, assignments, or the client token. `--verify` is optional, and
+activation does not know which client a command runs. The runbook's cutover passes two, a
 terminal continuation and an Agent SDK continuation with T3's options
 (`reports/PR6-live-runbook.md`, Part E), and then checks a T3 message
 through the router. The spec's check of one terminal and one T3
@@ -2388,12 +2535,10 @@ so the retirement requirement stays blocked (Verification, below).
 
 - A client update after activation is not checked. Claude Code and T3 update
   themselves, and the acceptance record then names an older client.
-- An install after activation is not checked either. `./install.sh` can
-  replace the binary and the helpers while `activation.json` is `active`,
-  and after the next `start` the activated clients route through a build no
-  acceptance run covered. Nothing refuses or warns. Run `claude-router
-  direct` before installing another head, then activate against its own
-  record.
+- During `login`, `setup`, and `account add` with `-no-browser`, or when the
+  browser does not open, the SDK prints SSH tunnel instructions and looks
+  up this machine's public IP address over the network to fill them in. The
+  router hides the instructions but cannot stop the lookup.
 - `--agent-sdk DIR` is the caller's choice. Activation compares the version
   in its `package.json` with the record and does not check that it is T3's
   bundled SDK. The runbook's `t3-check` step compares the SDK version that
