@@ -27,8 +27,8 @@ type UsageWindow struct {
 	ResetsAt time.Time         `json:"resets_at,omitzero"`
 }
 
-// UsageReading holds an account's limit windows from its last successful
-// usage read. Status shows them; routing uses response headers only.
+// UsageReading holds an account's limit windows from its last usage
+// response that decoded. Status shows them; routing uses response headers only.
 type UsageReading struct {
 	At      time.Time     `json:"at"`
 	Windows []UsageWindow `json:"windows"`
@@ -52,6 +52,10 @@ type ResetGrant struct {
 	Type   ResetKind `json:"type"`
 	Left   int       `json:"left"`
 	EndsAt time.Time `json:"ends_at,omitzero"`
+}
+
+func (g ResetGrant) OpenAt(now time.Time) bool {
+	return g.EndsAt.IsZero() || g.EndsAt.After(now)
 }
 
 // ResetsReading holds an account's reset grants from its last successful
@@ -142,21 +146,17 @@ func (b usageBody) grants(now time.Time) ([]ResetGrant, bool) {
 		if g.ResetsLeft <= 0 {
 			continue
 		}
-		var end time.Time
+		grant := ResetGrant{Type: g.Type, Left: g.ResetsLeft}
+		if grant.Type == "" {
+			grant.Type = clearedType(g.Clears)
+		}
 		if g.EndsAt != nil {
 			if t, err := time.Parse(time.RFC3339Nano, *g.EndsAt); err == nil {
-				end = t
+				grant.EndsAt = t
 			}
 		}
-		if !end.IsZero() && !end.After(now) {
-			continue
-		}
-		kind := g.Type
-		if kind == "" {
-			kind = clearedType(g.Clears)
-		}
-		if slices.Contains(ResetKinds, kind) {
-			out = append(out, ResetGrant{Type: kind, Left: g.ResetsLeft, EndsAt: end})
+		if slices.Contains(ResetKinds, grant.Type) && grant.OpenAt(now) {
+			out = append(out, grant)
 		}
 	}
 	return out, true

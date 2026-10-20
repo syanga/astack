@@ -1496,9 +1496,9 @@ takes one from the windows in `clears`, and a grant of any other type is
 dropped. The resets read is separate from the settings read. It never counts
 toward the run of failed reads and never renews a credential. It skips an
 account whose access token the SDK is due to replace. A failed resets read
-records nothing, and the account keeps serving
+records no resets reading, and the account keeps serving
 (`TestTheServiceReadsResetsAtStartWithoutCountingThemAsSettingsReads`,
-`TestAFailedResetsReadChangesNoRouting`). Like every response through the
+`TestAFailedResetsReadLeavesTheAccountServing`). Like every response through the
 router's transport, a resets response's rate-limit and overage headers are
 readings for routing. The grants block and its query are undocumented. If
 they change, status shows no reset count.

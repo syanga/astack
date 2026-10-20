@@ -84,7 +84,7 @@ func TestTheServiceReadsResetsAtStartWithoutCountingThemAsSettingsReads(t *testi
 	}
 }
 
-func TestAFailedResetsReadChangesNoRouting(t *testing.T) {
+func TestAFailedResetsReadLeavesTheAccountServing(t *testing.T) {
 	e := newEnv(t, "acct-a")
 	e.upstream.setResets("acct-a", `"unavailable"`)
 	s := e.start()

@@ -153,7 +153,7 @@ func resetCounts(r report, a claude.AccountStatus) []string {
 	}
 	left := map[claude.ResetKind]int{}
 	for _, g := range a.Resets.Grants {
-		if g.EndsAt.IsZero() || g.EndsAt.After(r.Now) {
+		if g.OpenAt(r.Now) {
 			left[g.Type] += g.Left
 		}
 	}
