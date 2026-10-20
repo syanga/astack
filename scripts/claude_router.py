@@ -545,26 +545,61 @@ def apply_shell(change, record, dry_run):
         record["shell_path_declined"] = True
     elif dry_run:
         print("{} {} {}".format("APPEND" if action is ShellAction.ADD else "REMOVE", shell_file, line))
-    else:
-        target = shell_file.resolve() if shell_file.is_symlink() else shell_file
-        existed = target.is_file()
-        text = target.read_text() if existed else ""
-        mode = stat.S_IMODE(target.stat().st_mode) if existed else 0o644
-        if action is ShellAction.REMOVE:
-            if block in text:
-                text = text.replace(block, "", 1)
-                if text or not record.get("shell_path", {}).get("created"):
-                    files.atomic_write(target, text.encode(), mode)
-                else:
-                    target.unlink()
+    elif action is ShellAction.REMOVE:
+        try:
+            if remove_block(shell_file, block.encode(), record.get("shell_path", {}).get("created")):
                 print("REMOVE {} {}".format(shell_file, line))
-            record.pop("shell_path", None)
+        except OSError as error:
+            print("WARN {} ({}); remove these lines yourself: {}".format(shell_file, error.strerror or error, line))
+        record.pop("shell_path", None)
+    else:
+        try:
+            created = append_block(shell_file, block.encode())
+        except OSError as error:
+            print("WARN {} ({}); to add it yourself: {}".format(shell_file, error.strerror or error, line))
             return
-        if text and not text.endswith("\n"):
-            text += "\n"
-        files.atomic_write(target, (text + block).encode(), mode)
-        record["shell_path"] = {"file": str(shell_file), "lines": list(change.lines), "created": not existed}
+        record["shell_path"] = {"file": str(shell_file), "lines": list(change.lines), "created": created}
         print("APPEND {} {}".format(shell_file, line))
+
+
+def append_block(path, block):
+    existed = path.exists()
+    fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+    with os.fdopen(fd, "ab") as stream:
+        size = os.fstat(fd).st_size
+        if size:
+            with open(path, "rb") as current:
+                current.seek(size - 1)
+                if current.read(1) != b"\n":
+                    block = b"\n" + block
+        stream.write(block)
+    return not existed
+
+
+def remove_block(path, block, created):
+    target = path.resolve() if path.is_symlink() else path
+    for _ in range(3):
+        data = target.read_bytes()
+        if block not in data:
+            return False
+        rest = data.replace(block, b"", 1)
+        mode = stat.S_IMODE(target.stat().st_mode)
+        fd, temporary = tempfile.mkstemp(prefix=".astack-", dir=str(target.parent))
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(rest)
+                os.fchmod(stream.fileno(), mode)
+            if target.read_bytes() != data:
+                continue
+            if created and not rest:
+                target.unlink()
+            else:
+                os.replace(temporary, target)
+            return True
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    raise OSError("the file kept changing during removal")
 
 
 def check_harness_settings(harness_values):

@@ -315,6 +315,60 @@ class ShellPathTests(ComponentFixture):
         self.assertIn("SKIP PATH (no shell file known for SHELL=/usr/bin/fish", result.stdout)
         self.assertEqual([p.name for p in self.home.iterdir() if p.name.startswith(".") and p.is_file()], [])
 
+    def test_the_shell_file_keeps_its_exact_bytes_through_install_and_uninstall(self):
+        rc = self.bash_rc()
+        rc.parent.mkdir(parents=True)
+        original = b"export CONTROL='\r'\nexport LANG=C"
+        rc.write_bytes(original)
+
+        self.component(SHELL="/bin/bash")
+        installed = rc.read_bytes()
+        self.component(command="uninstall", SHELL="/bin/bash")
+
+        self.assertEqual(installed, original + b"\n" + self.block().encode())
+        self.assertEqual(rc.read_bytes(), original + b"\n")
+
+    def test_an_edit_saved_while_uninstall_removes_the_lines_is_kept(self):
+        rc = self.bash_rc()
+        self.component(SHELL="/bin/bash")
+        router = self.module().claude_router
+        read = router.Path.read_bytes
+        edited = []
+
+        def read_then_edit(path):
+            data = read(path)
+            if path == rc and not edited:
+                edited.append(True)
+                with open(rc, "ab") as stream:
+                    stream.write(b"export EDITOR=vi\n")
+            return data
+
+        change = router.ShellChange(router.ShellAction.REMOVE, rc, tuple(self.block().splitlines()))
+        with patch.object(router.Path, "read_bytes", read_then_edit), redirect_stdout(io.StringIO()):
+            router.apply_shell(change, {"shell_path": {"created": True}}, dry_run=False)
+
+        self.assertEqual(rc.read_bytes(), b"export EDITOR=vi\n")
+
+    def test_uninstall_restores_client_settings_when_the_shell_file_cannot_change(self):
+        self.run_installer("--target", "claude", env=self.env)
+        target = self.home / "dotfiles/bashrc"
+        target.parent.mkdir(parents=True)
+        target.write_text("set -o vi\n")
+        self.bash_rc().symlink_to(target)
+        self.component(SHELL="/bin/bash")
+        settings_path = self.home / ".claude/settings.json"
+        before = settings_path.read_bytes()
+        self.activate(settings_path)
+        target.parent.chmod(0o500)
+        target.chmod(0o400)
+        self.addCleanup(target.parent.chmod, 0o700)
+
+        result = self.component(command="uninstall", SHELL="/bin/bash")
+
+        self.assertEqual(settings_path.read_bytes(), before)
+        self.assertIn("WARN {}".format(self.bash_rc()), result.stdout)
+        self.assertIn(self.block().splitlines()[1], result.stdout)
+
     def test_a_zsh_user_gets_the_line_in_zshrc(self):
         self.component(SHELL="/bin/zsh")
 
