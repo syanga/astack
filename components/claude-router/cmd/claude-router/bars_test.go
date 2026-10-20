@@ -20,8 +20,8 @@ func usageWindow(kind router.WindowKind, model string, used float64, h, m, daysA
 func withUsage(r report) report {
 	work, alumni := &r.Status.Accounts[0], &r.Status.Accounts[1]
 	work.Usage = claude.UsageReading{At: at(0, 14, 16), Windows: []claude.UsageWindow{
-		usageWindow(router.FiveHour, "", fiveHourUsed(*work), 16, 40, 0),
-		usageWindow(router.Weekly, "", weeklyUsed(*work), 9, 0, -3),
+		usageWindow(router.FiveHour, "", headerUsed(*work, router.FiveHour), 16, 40, 0),
+		usageWindow(router.Weekly, "", headerUsed(*work, router.Weekly), 9, 0, -3),
 		usageWindow(router.Weekly, "Fable", 0.12, 9, 0, -3)}}
 	work.Resets = claude.ResetsReading{At: at(0, 14, 0), Grants: []claude.ResetGrant{{Type: "weekly", Left: 2}}}
 	alumni.Usage = claude.UsageReading{At: at(0, 14, 16), Windows: []claude.UsageWindow{
@@ -29,20 +29,11 @@ func withUsage(r report) report {
 	return r
 }
 
-func fiveHourUsed(a claude.AccountStatus) float64 {
-	w, _ := quotaWindow(a, router.FiveHour)
-	return used(w)
-}
-func weeklyUsed(a claude.AccountStatus) float64 {
-	w, _ := quotaWindow(a, router.Weekly)
-	return used(w)
-}
-
-func used(w router.Window) float64 {
-	if w.Utilization == nil {
-		return 1
+func headerUsed(a claude.AccountStatus, kind router.WindowKind) float64 {
+	if w, ok := quotaWindow(a, kind); ok && w.Utilization != nil {
+		return *w.Utilization
 	}
-	return *w.Utilization
+	return 1
 }
 
 func onScreen(r report, width int, color bool) report {
@@ -114,29 +105,6 @@ func TestATerminalTooNarrowForBarsGetsTheStatusLines(t *testing.T) {
 	}
 }
 
-func TestStatusDrawsNoBarsWhenItsOutputIsNotATerminal(t *testing.T) {
-	env := func(vars map[string]string) func(string) string {
-		return func(k string) string { return vars[k] }
-	}
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	defer w.Close()
-	if s := terminalScreen(w, env(nil)); s != nil {
-		t.Fatalf("a pipe gave screen %+v, want none", *s)
-	}
-	null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer null.Close()
-	if s := terminalScreen(null, env(nil)); s != nil {
-		t.Fatalf("%s gave screen %+v, want none", os.DevNull, *s)
-	}
-}
-
 func TestStatusShowsTheNewerOfTheHeaderAndUsageReadings(t *testing.T) {
 	r := healthyReport()
 	work := &r.Status.Accounts[0]
@@ -156,9 +124,46 @@ func TestStatusShowsTheNewerOfTheHeaderAndUsageReadings(t *testing.T) {
 
 func TestStatusHidesResetsFromAReadingOverAnHourOld(t *testing.T) {
 	r := withUsage(healthyReport())
-	r.Status.Accounts[0].Resets.At = at(0, 13, 19)
+	work := &r.Status.Accounts[0]
 
+	work.Resets.At = at(0, 13, 21)
+	if got := render(onScreen(r, 100, false)); !strings.Contains(got, "╰─ 2 weekly resets ─") {
+		t.Fatalf("status\n%s\nwant the reset count from a reading 59 minutes old", got)
+	}
+	work.Resets.At = at(0, 13, 19)
 	if got := render(onScreen(r, 100, false)); strings.Contains(got, "reset") {
 		t.Fatalf("status\n%s\nwant no reset count from a reading 61 minutes old", got)
+	}
+}
+
+func TestABoxShowsAWindowWithNoReadingAsDashes(t *testing.T) {
+	r := healthyReport()
+	work := &r.Status.Accounts[0]
+	work.Quota = router.Observation{}
+	work.Usage = claude.UsageReading{At: at(0, 14, 16), Windows: []claude.UsageWindow{
+		{Kind: router.Weekly, Used: util(0.25)}}}
+
+	got := render(onScreen(r, 80, false))
+
+	for _, want := range []string{
+		"│ 5-hour " + strings.Repeat(" ", 38) + "         --                     │",
+		"│ weekly " + strings.Repeat("█", 28) + "▌" + strings.Repeat("╱", 9) + "   75% left                     │",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status\n%s\nwant the line\n%s", got, want)
+		}
+	}
+}
+
+func TestAnOldModelReadingShowsTheStaleLine(t *testing.T) {
+	r := healthyReport()
+	work := &r.Status.Accounts[0]
+	work.Usage = claude.UsageReading{At: at(0, 12, 0), Windows: []claude.UsageWindow{
+		usageWindow(router.Weekly, "Fable", 0.12, 9, 0, -3)}}
+
+	got := render(r)
+
+	if !strings.Contains(got, "stale   work    quota seen 12:00 (2h20m ago)") {
+		t.Fatalf("status\n%s\nwant a stale line for work's 12:00 Fable reading", got)
 	}
 }

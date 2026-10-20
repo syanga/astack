@@ -213,8 +213,9 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	bg, cancel := context.WithCancel(context.Background())
 	s.bgStop = cancel
 	for _, a := range cfg.Accounts {
-		s.bgDone.Add(1)
+		s.bgDone.Add(2)
 		go s.readOverage(bg, a.ID)
+		go s.readResets(bg, a.ID)
 	}
 
 	ln, err := net.Listen("tcp", cfg.Listen)
@@ -286,12 +287,7 @@ func (s *Service) readOverage(ctx context.Context, account router.AccountID) {
 	defer s.bgDone.Done()
 	every := time.Duration(s.cfg.OverageCheckEvery)
 	settled := s.overage.settlements(account)
-	var resetsRead time.Time
 	for {
-		if now := s.now(); now.Sub(resetsRead) >= resetsEvery {
-			resetsRead = now
-			s.overage.readResets(ctx, account)
-		}
 		select {
 		case <-settled:
 		default:
@@ -310,6 +306,20 @@ func (s *Service) readOverage(ctx context.Context, account router.AccountID) {
 		case <-t.C:
 		}
 		s.overage.read(ctx, account)
+	}
+}
+
+func (s *Service) readResets(ctx context.Context, account router.AccountID) {
+	defer s.bgDone.Done()
+	for {
+		s.overage.readResets(ctx, account)
+		t := time.NewTimer(resetsEvery)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return
+		case <-t.C:
+		}
 	}
 }
 

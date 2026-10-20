@@ -233,6 +233,9 @@ func oldestShownAt(a claude.AccountStatus) time.Time {
 			oldest = w.seen
 		}
 	}
+	if len(modelWindows(a)) > 0 && (oldest.IsZero() || a.Usage.At.Before(oldest)) {
+		oldest = a.Usage.At
+	}
 	if oldest.IsZero() {
 		return a.Quota.At
 	}
@@ -454,10 +457,7 @@ func writeAccountDetail(w io.Writer, r report, a claude.AccountStatus, width int
 		}
 		return value
 	}
-	for _, win := range []struct {
-		kind  router.WindowKind
-		label string
-	}{{router.FiveHour, "5-hour"}, {router.Weekly, "weekly"}} {
+	for _, win := range limitWindows {
 		value, seen := "no reading yet", time.Time{}
 		if rj, ok := activeRejection(r.Now, a, win.kind); ok {
 			value, seen = fmt.Sprintf("rejected at %s, resets %s", when(r.Now, rj.At), resetLong(r.Now, rejectionEnd(rj))), rj.At
@@ -471,7 +471,7 @@ func writeAccountDetail(w io.Writer, r report, a claude.AccountStatus, width int
 	}
 	for _, m := range modelWindows(a) {
 		if m.Used != nil {
-			reading("weekly "+m.Model, used(*m.Used, m.ResetsAt), a.Usage.At)
+			reading(modelLabel(m), used(*m.Used, m.ResetsAt), a.Usage.At)
 		}
 	}
 	if counts := resetCounts(r, a); len(counts) > 0 {

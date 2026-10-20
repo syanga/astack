@@ -34,11 +34,23 @@ type UsageReading struct {
 	Windows []UsageWindow `json:"windows"`
 }
 
-// ResetGrant is one grant of limit resets the account can redeem. Type is
-// session, weekly, or full, which clears both.
+// ResetKind names the windows a limit reset clears.
+type ResetKind string
+
+const (
+	ResetSession ResetKind = "session"
+	ResetWeekly  ResetKind = "weekly"
+	// ResetFull clears the 5-hour and weekly windows.
+	ResetFull ResetKind = "full"
+)
+
+// ResetKinds lists every ResetKind.
+var ResetKinds = []ResetKind{ResetSession, ResetWeekly, ResetFull}
+
+// ResetGrant is one grant of limit resets the account can redeem.
 type ResetGrant struct {
-	Type string `json:"type"`
-	Left int    `json:"left"`
+	Type ResetKind `json:"type"`
+	Left int       `json:"left"`
 }
 
 // ResetsReading holds an account's reset grants from its last successful
@@ -115,10 +127,10 @@ func (b usageBody) windows() []UsageWindow {
 func (b usageBody) grants(now time.Time) ([]ResetGrant, bool) {
 	var block *struct {
 		Grants []struct {
-			ResetsLeft int      `json:"resets_left"`
-			Type       string   `json:"type"`
-			Clears     []string `json:"clears"`
-			EndsAt     *string  `json:"ends_at"`
+			ResetsLeft int       `json:"resets_left"`
+			Type       ResetKind `json:"type"`
+			Clears     []string  `json:"clears"`
+			EndsAt     *string   `json:"ends_at"`
 		} `json:"grants"`
 	}
 	if json.Unmarshal(b.CedarEmber, &block) != nil || block == nil {
@@ -145,15 +157,15 @@ func (b usageBody) grants(now time.Time) ([]ResetGrant, bool) {
 	return out, true
 }
 
-func clearedType(clears []string) string {
+func clearedType(clears []string) ResetKind {
 	session, weekly := slices.Contains(clears, "five_hour"), slices.Contains(clears, "seven_day")
 	switch {
 	case session && weekly:
-		return "full"
+		return ResetFull
 	case session:
-		return "session"
+		return ResetSession
 	case weekly:
-		return "weekly"
+		return ResetWeekly
 	}
 	return ""
 }

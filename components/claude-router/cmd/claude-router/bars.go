@@ -104,26 +104,33 @@ type limitRow struct {
 	period   time.Duration
 }
 
+var limitWindows = []struct {
+	kind  router.WindowKind
+	label string
+}{{router.FiveHour, "5-hour"}, {router.Weekly, "weekly"}}
+
+func modelLabel(w claude.UsageWindow) string { return "weekly " + w.Model }
+
+func leftOf(used float64) *float64 {
+	left := min(max(1-used, 0), 1)
+	return &left
+}
+
 func limitRows(r report, a claude.AccountStatus) []limitRow {
 	var rows []limitRow
-	for _, win := range []struct {
-		kind  router.WindowKind
-		label string
-	}{{router.FiveHour, "5-hour"}, {router.Weekly, "weekly"}} {
+	for _, win := range limitWindows {
 		row := limitRow{label: win.label, period: win.kind.Period()}
 		if rj, ok := activeRejection(r.Now, a, win.kind); ok {
 			row.out, row.resetsAt = true, rejectionEnd(rj)
 		} else if w, ok := shownWindow(a, win.kind); ok {
-			left := 1 - w.used
-			row.left, row.resetsAt = &left, w.resetsAt
+			row.left, row.resetsAt = leftOf(w.used), w.resetsAt
 		}
 		rows = append(rows, row)
 	}
 	for _, w := range modelWindows(a) {
-		row := limitRow{label: "weekly " + w.Model, resetsAt: w.ResetsAt, period: router.Weekly.Period()}
+		row := limitRow{label: modelLabel(w), resetsAt: w.ResetsAt, period: router.Weekly.Period()}
 		if w.Used != nil {
-			left := 1 - *w.Used
-			row.left = &left
+			row.left = leftOf(*w.Used)
 		}
 		rows = append(rows, row)
 	}
@@ -144,15 +151,15 @@ func resetCounts(r report, a claude.AccountStatus) []string {
 	if a.Resets.At.IsZero() || r.Now.Sub(a.Resets.At) > resetsShownFor {
 		return nil
 	}
-	left := map[string]int{}
+	left := map[claude.ResetKind]int{}
 	for _, g := range a.Resets.Grants {
 		left[g.Type] += g.Left
 	}
 	var out []string
-	for _, kind := range []string{"session", "weekly", "full"} {
+	for _, kind := range claude.ResetKinds {
 		switch n := left[kind]; {
 		case n == 1:
-			out = append(out, "1 "+kind+" reset")
+			out = append(out, fmt.Sprintf("1 %s reset", kind))
 		case n > 1:
 			out = append(out, fmt.Sprintf("%d %s resets", n, kind))
 		}
@@ -248,7 +255,7 @@ func accountBox(r report, a claude.AccountStatus, width, labelWidth, barWidth in
 		case row.left == nil:
 			c.put(sgrDim, fmt.Sprintf("%*s", percentWidth, "--"))
 		default:
-			c.put(sgrBold, fmt.Sprintf("%3d%% left", percent(min(max(*row.left, 0), 1))))
+			c.put(sgrBold, fmt.Sprintf("%3d%% left", percent(*row.left)))
 		}
 		if !row.resetsAt.IsZero() {
 			c.put("", "  ")
@@ -299,8 +306,7 @@ func drawBar(c *cells, now time.Time, row limitRow, n int) {
 		c.put("", strings.Repeat(" ", n))
 		return
 	}
-	left := min(max(*row.left, 0), 1)
-	units := int(left*float64(n*8) + 0.5)
+	units := int(*row.left*float64(n*8) + 0.5)
 	full, part := units/8, units%8
 	evenPaceCell := -1
 	if row.period > 0 && row.resetsAt.After(now) {
