@@ -1,6 +1,6 @@
 ---
 name: claude-router
-description: Operate the astack Claude router, which spreads Claude Code across Claude accounts. Use to check it, read its status or cache cost, set it up, add or remove an account, or roll back to direct.
+description: Operate the astack Claude router, which routes Claude Code across Claude accounts. Use to check it, read its status or cache cost, set it up, add or remove an account, or roll back to direct.
 ---
 
 # Operate the Claude router
@@ -44,9 +44,11 @@ Give the user every other command in a code block, to run in their own
 terminal. Claude Code sessions, possibly this one, send their requests
 through the router. A command that stops or restarts the router cuts off
 every routed session in the middle of a turn. A sign-in waits on a browser
-window that only the user can use. Keep `start` and the commands in
-[Find the service](#find-the-service) with the user too, as the setup and
-rollback commands are. Say which reason applies.
+window that only the user can use. `start` also turns the router on at every
+login, a lasting change to the user's machine. The state and log commands in
+[Find the service](#find-the-service) print service-manager output that,
+unlike `status`, has no guarantee to omit tokens and prompts. Say which
+reason applies.
 
 | Command | What it does |
 | --- | --- |
@@ -166,8 +168,7 @@ Linux is tested on a real kernel in a Debian 13 arm64 container with systemd
    sudo loginctl enable-linger "$USER"
    ```
 
-   With linger, the unit starts at boot. Without it, the unit stops about 15
-   seconds after the last session ends.
+   The Start row in [Find the service](#find-the-service) says why.
 7. Sign in each account, start the router, and activate it:
 
    ```sh
@@ -199,9 +200,9 @@ Give the user `claude-router direct`. It stops the router and restores the
 Claude Code settings that activation changed. Tell the user to start a new
 Claude Code session afterward. If `direct` prints
 `after   claude needs its own /login`, tell the user to run `/login` in that
-session. To activate the router again, give `claude-router setup`. To remove the router, give
-`cd CHECKOUT && ./uninstall.sh --component claude-router`. `direct` and
-uninstall both keep logins and assignments.
+session. To activate the router again, give `claude-router setup`. To remove
+the router, give `cd CHECKOUT && ./uninstall.sh --component claude-router`.
+`direct` and uninstall both keep logins and assignments.
 
 ## Find the service
 

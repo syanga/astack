@@ -185,12 +185,12 @@ account in `config.json`.
 ## Activate the router
 
 Activation points Claude Code's settings at the router. It refuses unless an
-acceptance record matches the router code, the installed helper scripts, and the pinned
-SDK, and the running binary is the installed one. The router code digest
-covers the tracked files under `components/claude-router/` except `*.md`,
-`*_test.go`, `testdata/`, and `accepted.json`, so a record stays valid across
-commits that change only those files. To print the digests of a checkout,
-run:
+acceptance record matches the router code, the installed helper scripts, and
+the pinned SDK, and the running binary is the installed one. The router code
+digest covers the tracked files under `components/claude-router/` except
+`*.md`, `*_test.go`, `testdata/`, and `accepted.json`, so a record stays valid
+across commits that change only those files. To print the digests of a
+checkout, run:
 
 ```sh
 python3 scripts/claude_router.py identity --code-only
@@ -285,9 +285,8 @@ platform the record was accepted on, not this machine, so it reads
 `(darwin/arm64)` on Linux too. When the two differ, activation and `setup`
 also print a line such as
 `note      accepted on darwin/arm64, this is linux/arm64, not yet tested on real Linux`.
-The router helper prints that text. It predates the Linux container run
-described in [Install the service](#install-the-service), and it changes only
-with the helper.
+The router helper prints that text. The text predates the Linux container
+run described in [Install the service](#install-the-service).
 
 When a check fails, `check` skips the test message, exits 1, and prints the
 next step. With the router stopped, it marks the checks that need the router

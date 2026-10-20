@@ -111,9 +111,12 @@ To install and activate the router:
    ```
 
    Each sign-in opens a browser window. Sign in to claude.ai with that
-   account. Activation points Claude Code's settings at the router. `setup`
-   ends with `activated Claude Code routes through the router`. If it
-   refuses, follow its `next` line and
+   account. With `-no-browser`, `setup` prints the sign-in URL instead of
+   opening a browser. Activation points Claude Code's settings at the router.
+   `setup` ends with `activated Claude Code routes through the router`. If it
+   refuses because an account has paid overflow on, turn paid overflow off on
+   claude.ai. Then run `claude-router stop` before you run `setup` again. For
+   any other refusal, follow its `next` line and
    [Enroll accounts and start](components/claude-router/README.md#enroll-accounts-and-start).
 7. Start a new Claude Code session. A new session reads the changed settings
    when it starts.
