@@ -15,6 +15,7 @@ import uuid
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 import astack_files as files
+import astack_plugins
 import astack_settings
 import claude_router
 
@@ -167,7 +168,13 @@ def main():
     state["version"] = MANIFEST_VERSION
 
     skills = skill_files() if args.command == "install" else []
+    plugins = astack_plugins.load(REPO / "settings/plugins.json") if args.command == "install" else astack_plugins.Source()
     settings = settings_operations(harnesses, selected, state, home, use_env, args)
+    plugin_configs = {}
+    for target in selected:
+        spec = harnesses[target]["settings"]
+        plugin_configs[target] = astack_plugins.ConfigDir(destination(spec, home, use_env).parent, spec["env"], home, use_env)
+        astack_plugins.check_config(target, state, plugin_configs[target])
     component = None
     if args.component:
         component = claude_router.plan(args.command, state, claude_router.layout(home, use_env, state_root), args.force)
@@ -273,6 +280,8 @@ def main():
 
     for change in settings:
         change.apply(state, state_path, backup_root, dry_run=args.dry_run)
+    for target in selected:
+        astack_plugins.sync(target, plugins, state, state_path, plugin_configs[target], args.dry_run)
     if component:
         claude_router.apply(component, state, state_path, backup_root, dry_run=args.dry_run)
     if args.command == "install" and not args.dry_run and selected:
