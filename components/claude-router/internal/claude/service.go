@@ -34,13 +34,18 @@ import (
 
 // Options holds what tests vary. The zero value is production.
 type Options struct {
-	// Upstream replaces the transport that reaches api.anthropic.com.
-	Upstream http.RoundTripper
+	// Upstream replaces the function that opens a transport to
+	// api.anthropic.com. The service calls it at start and again after each
+	// network failure.
+	Upstream func() http.RoundTripper
 	// Now replaces the machine's wall clock, which the service clock reads.
 	Now func() time.Time
 	// ReadRetryBase replaces the delay before the first re-read after a
 	// failed settings read.
 	ReadRetryBase time.Duration
+	// NetRetryFor replaces netRetryFor, the time a client request may spend
+	// retrying network failures before write.
+	NetRetryFor time.Duration
 	// BinarySHA256 is the SHA-256 of the executable, taken when the process
 	// started. Status reports it as binary_sha256.
 	BinarySHA256 string
@@ -142,15 +147,13 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	if cfg.TestUpstream != "" {
 		redirect, _ = url.Parse(cfg.TestUpstream)
 	}
-	inner := opts.Upstream
-	if inner == nil {
-		inner = &http.Transport{
-			Proxy:               nil,
-			ForceAttemptHTTP2:   true,
-			MaxIdleConnsPerHost: 64,
-			IdleConnTimeout:     90 * time.Second,
-			TLSHandshakeTimeout: 10 * time.Second,
-		}
+	open := opts.Upstream
+	if open == nil {
+		open = providerTransport
+	}
+	netRetry := opts.NetRetryFor
+	if netRetry <= 0 {
+		netRetry = netRetryFor
 	}
 	wall := opts.Now
 	if wall == nil {
@@ -183,7 +186,7 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	admit := func(account router.AccountID, model string) router.Reason {
 		return s.router.Admit(s.clock.instant(), account, model)
 	}
-	s.transport = newTransport(inner, redirect, cfg.MaxUpstreamAttempts, cfg.Accounts, s.now, admit, s.observeHeaders)
+	s.transport = newTransport(newUpstream(open), redirect, cfg.MaxUpstreamAttempts, netRetry, cfg.Accounts, s.clock, admit, s.observeHeaders, s.networkFailed)
 	if redirect != nil {
 		s.events.emit(Event{Kind: "test_upstream_in_use", Detail: redirect.Host})
 	}

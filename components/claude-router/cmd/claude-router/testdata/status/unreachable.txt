@@ -1,0 +1,4 @@
+router  running 6h15m  127.0.0.1:18787  launchd  journal ok          14:20 PDT
+work    ready        5h 38% (16:40)  wk 21% (Sun)  cap 5  2/3 active  cache 93%
+alumni  ready        5h  9% (17:55)  wk 64% (Sat)  cap 1  1/2 active  cache 88%
+failed  e91f675b4f8a  work    since 14:15, provider unreachable

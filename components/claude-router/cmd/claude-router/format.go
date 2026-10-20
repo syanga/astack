@@ -247,6 +247,10 @@ func words(table map[string]string, code string) string {
 	return code
 }
 
+func unreachable(c *conversationDigest) bool {
+	return c.Decision == router.Fail && c.Reason == string(router.ReasonUnreachable)
+}
+
 func problemLines(r report) []string {
 	var lines, moves []string
 	flagged := map[string]bool{}
@@ -268,6 +272,8 @@ func problemLines(r report) []string {
 			lines = append(lines, fmt.Sprintf("refuse  %ssince %s, %s", prefix, when(r.Now, c.Since), words(refuseWords, c.Reason)))
 		case c.Decision == router.Reauth && r.Now.Sub(c.Last) < activeFor:
 			lines = append(lines, fmt.Sprintf("held    %ssince %s, needs login", prefix, when(r.Now, c.Since)))
+		case unreachable(c) && r.Now.Sub(c.Last) < activeFor:
+			lines = append(lines, fmt.Sprintf("failed  %ssince %s, provider unreachable", prefix, when(r.Now, c.Since)))
 		default:
 			continue
 		}
@@ -426,6 +432,8 @@ func writeConversations(w io.Writer, r report) {
 				state = "refuse, " + c.Reason
 			case c.Decision == router.Reauth && b.Active:
 				state = "held, needs login"
+			case unreachable(c) && b.Active:
+				state = "provider unreachable"
 			}
 		}
 		if !lastAt.IsZero() {

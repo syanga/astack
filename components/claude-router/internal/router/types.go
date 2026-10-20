@@ -84,6 +84,10 @@ const (
 	ClassExhausted  Class = "exhausted"
 	ClassModelLimit Class = "model_limit"
 	ClassAuth       Class = "auth"
+	// ClassNetwork is a failure on the path to the provider without an HTTP
+	// response, such as a reset or closed connection. It says nothing about
+	// the account.
+	ClassNetwork Class = "network"
 	// ClassRequestScoped is a refusal of this request only, such as the
 	// SDK's fast-mode credit refusal. It is reported, never retried.
 	ClassRequestScoped Class = "request_scoped"
@@ -185,6 +189,7 @@ const (
 	ReasonManual          Reason = "manual"
 	ReasonTransient       Reason = "transient_retry"
 	ReasonRetryBudget     Reason = "retry_budget_spent"
+	ReasonUnreachable     Reason = "provider_unreachable"
 	ReasonNeedsLogin      Reason = "needs_login"
 	ReasonNotEnrolled     Reason = "not_enrolled"
 	ReasonMissingIdentity Reason = "missing_identity"

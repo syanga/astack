@@ -121,7 +121,7 @@ func decide(cfg Config, now Instant, v view, req Request) Decision {
 		return Decision{Kind: Refuse, Account: current, Reason: bar, RecheckOverage: recheck(bar)}
 	}
 	switch req.LastFailure {
-	case ClassTransient, ClassThrottle:
+	case ClassTransient, ClassNetwork, ClassThrottle:
 		if req.Attempt > cfg.MaxAttempts {
 			return Decision{Kind: Fail, Account: current, Reason: ReasonRetryBudget}
 		}
