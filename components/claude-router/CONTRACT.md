@@ -1472,6 +1472,42 @@ turned on outside the proxy after the last reading, while the account's
 included windows are exhausted, produce one paid response before the router
 sees it.
 
+### Limit readings for status
+
+Each settings read also keeps the `five_hour` and `seven_day` windows of the
+usage response for status, and each `limits` entry of kind `weekly_scoped`
+with a `scope.model.display_name`, such as `Fable`, as a model-scoped weekly
+window. The service converts `utilization` and `percent` from a percentage
+to a fraction, and drops an entry of another shape without dropping the
+others (`TestASettingsReadRecordsTheLimitWindowsForStatus`). Routing does
+not use them. It uses response headers only. The service decodes these
+fields apart from `extra_usage`, so a field of another shape drops out of
+status and leaves the paid-overflow reading unchanged. A settings read with
+no readable window clears the last limit reading
+(`TestMalformedLimitFieldsLeaveThePaidOverflowReadingIntact`,
+`TestASettingsReadWithoutReadableLimitFieldsClearsTheLimitReading`).
+
+The service also reads each account's limit resets that Claude Code offers,
+from `cedar_ember.grants` in
+`GET /api/oauth/usage?cedar_ember=1&skip_spend=1`. It reads them at start and
+every 30 minutes after, on a timer apart from the settings reads, with the
+user agent `claude-cli/2.1.280 (external, cli)` that the pinned SDK, v8.0.11,
+sends on inference requests. Without a Claude Code user agent, the endpoint answers
+`"eligible": false, "ineligible_reason": "surface"` and no grants. Status
+counts the resets left in grants whose `ends_at` has not passed when status
+runs, by `type`: `session`, `weekly`, or `full`
+(`TestStatusCountsOnlyResetGrantsThatHaveNotEnded`). A grant without a `type`
+takes one from the windows in `clears`, and a grant of any other type is
+dropped. The resets read is separate from the settings read. It never counts
+toward the run of failed reads and never renews a credential. It skips an
+account whose access token the SDK is due to replace. A failed resets read
+records no resets reading, and the account keeps serving
+(`TestTheServiceReadsResetsAtStartWithoutCountingThemAsSettingsReads`,
+`TestAFailedResetsReadLeavesTheAccountServing`). Like every response through the
+router's transport, a resets response's rate-limit and overage headers are
+readings for routing. The grants block and its query are undocumented. If
+they change, status shows no reset count.
+
 ### Configuration and credentials change only by restart
 
 - The SDK has no file watcher, so it never reloads `sdk-config.yaml` and never
@@ -1988,7 +2024,7 @@ each from sample state.
 
 | Command | Contract |
 | --- | --- |
-| `status` | Reads `GET /claude-router/status`, `events.jsonl`, `supervision.json`, `service.json`, and the `config.json` that `service.json` names, or the state directory's `config.json` when there is no `service.json`. It marks a quota observation or paid-overflow reading older than 15 minutes with a `stale` line. A service that does not answer is `stopped`, or `failed` when supervision gave up. When `config.json` does not load, status prints `config error:` with the error, and `running` or `stopped` from the assignment lock. Once supervision gives up, `failed` takes precedence, and the configuration error shows as `last error:`. A stopped service whose state directory the router cannot write shows `last error: cannot record a start in <file>: <error>` and `next    fix the error, then claude-router start` (`TestStatusShowsThatTheRouterCannotRecordAStart`). An unreadable `supervision.json` makes status exit 1 naming the file, with `next    remove <file>, then claude-router start` (`TestStatusNamesAnUnreadableSupervisionRecord`). |
+| `status` | Reads `GET /claude-router/status`, `events.jsonl`, `supervision.json`, `service.json`, and the `config.json` that `service.json` names, or the state directory's `config.json` when there is no `service.json`. Each limit shows the newer of the response-header reading and the usage reading (Limit readings for status, above). It marks a paid-overflow reading, or the oldest of the shown 5-hour, weekly, and model-scoped readings, with a `stale` line when it is older than 15 minutes (`TestStatusShowsTheNewerOfTheHeaderAndUsageReadings`, `TestAnOldModelReadingShowsTheStaleLine`). When standard output is a terminal and `TERM` is not `dumb`, status draws a box per account in place of its line, at most 100 columns wide. The box has a bar for the 5-hour window, the weekly window, and each model-scoped weekly window. Each bar shows the share left in orange and the share used hatched, with a tick at even pace: the share that would be left if use were spread evenly over the window. The share left and the reset time follow the bar, and a window with no reading shows `--` and an empty bar (`TestABoxShowsAWindowWithNoReadingAsDashes`). The box's bottom border counts the account's limit resets from a resets reading under 1 hour old (`TestStatusHidesResetsFromAReadingOverAnHourOld`). A terminal too narrow for a 10-column bar gets the lines. `NO_COLOR` turns color off and changes nothing else (`TestStatusDrawsLimitBarsOnATerminal`, `TestEveryBoxLineSpansTheBoxAtEveryTerminalWidth`, `TestATerminalTooNarrowForBarsGetsTheStatusLines`, `TestColorChangesOnlyTheStyleOfTheBars`, `TestStatusDrawsBarsOnlyWhenItsOutputIsATerminal`). A service that does not answer is `stopped`, or `failed` when supervision gave up. When `config.json` does not load, status prints `config error:` with the error, and `running` or `stopped` from the assignment lock. Once supervision gives up, `failed` takes precedence, and the configuration error shows as `last error:`. A stopped service whose state directory the router cannot write shows `last error: cannot record a start in <file>: <error>` and `next    fix the error, then claude-router start` (`TestStatusShowsThatTheRouterCannotRecordAStart`). An unreadable `supervision.json` makes status exit 1 naming the file, with `next    remove <file>, then claude-router start` (`TestStatusNamesAnUnreadableSupervisionRecord`). |
 | `status -v` | Adds every reading with its age, cache counters per account, each assigned conversation, and the migrations, newest first, at most 20. |
 | `start`, `stop` | launchd: `enable` when disabled, then `bootstrap` or `kickstart`; `disable`, then `bootout`. systemd: `daemon-reload`, `enable`, `reset-failed`, and `start`; `disable`, then `stop`. When status already answers, `start` only turns the switch on and prints `router  running  <listen>  <manager>`. Each acts only on this installation's job (Service name, Off until start, and Shared label switch, above). `start` waits up to 90 s for status to answer or for a start error; `stop` waits until the assignment lock is free and prints `router  stopped until claude-router start; assignments kept`. Foreground installations refuse both. |
 | `login` | Unchanged flow. It refuses while a process holds the state directory, names that process's pid when status answers, and prints `next    claude-router stop`. Of the SDK's output during the sign-in, `login` shows only lines that start with `https://`, the sign-in URL. `login` drops the SDK's progress lines and its SSH tunnel instructions for remote servers, discards the SDK log until the sign-in ends, and then restores the log output it found (`TestCopySignInURLsKeepsOnlyTheURLLines`, `TestShowingOnlySignInURLsRestoresTheLogOutputItFound`). |
@@ -2127,6 +2163,20 @@ refuses to build router code that differs from the commit.
 `components/claude-router/accepted.json` holds the record of the live
 acceptance run at the router code it names. A change to the router code
 needs a new acceptance run and record.
+
+The record at `956b5e8` comes from a scoped run the operator chose for the
+limit bars (PR102). It ran on Linux 7.0 x86_64 with real accounts `work` and
+`alumni`, Claude Code 2.1.305, and a foreground router on its own port and
+state directory, beside the daily router. It reran the rows the change can
+affect: the identity at the start and end, stable routing, resume, a
+subagent, and a restart (A1 to A4), cache counters, every overage read
+`disabled`, the run budget, the limit windows and reset grants against the
+usage endpoint's own answers, and status on a terminal and in a pipe. After
+the install on the same host, the systemd service ran this code and `check`
+passed every line. The rows the change cannot affect, such as migration,
+waiting, Agent SDK placement, the cache comparison, `apiKeyHelper`
+precedence, the controlled-upstream lane reruns, and the Linux service
+lifecycle, are `accepted` and cite earlier records' evidence.
 
 ### Check
 

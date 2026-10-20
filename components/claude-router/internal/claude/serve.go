@@ -658,6 +658,8 @@ type AccountStatus struct {
 	Quota        router.Observation `json:"quota"`
 	Bound        int                `json:"bound"`
 	Active       int                `json:"active"`
+	Usage        UsageReading       `json:"usage,omitzero"`
+	Resets       ResetsReading      `json:"resets,omitzero"`
 }
 
 // BindingStatus is one assigned conversation. Conversation is the first 12
@@ -698,6 +700,7 @@ func (s *Service) Status() Status {
 	now := s.now()
 	cfg := s.router.Config()
 	ov := s.overage.snapshot()
+	usage, resets := s.overage.usageSnapshot()
 	last := s.router.LastRequests()
 	st := Status{Listen: s.addr, Now: now, Started: s.started, PID: os.Getpid(), Journal: "ok",
 		Binary: buildRevision, BinarySHA256: s.digest, CodeSHA256: codeDigest(), SDK: sdkVersion, QuotaFreshFor: Duration(cfg.FreshFor), OverageFreshFor: s.cfg.OverageFreshFor, ActiveFor: Duration(cfg.ActiveFor)}
@@ -731,7 +734,7 @@ func (s *Service) Status() Status {
 	for _, a := range s.router.Accounts() {
 		st.Accounts = append(st.Accounts, AccountStatus{ID: a.ID, Registered: s.authIDs[a.ID] != "", Overage: ov[a.ID],
 			NeedsLogin: a.NeedsLogin, NeedsLoginAt: a.NeedsLoginAt, Rejections: a.Rejections, Capacity: a.Capacity,
-			Quota: a.Observation, Bound: bound[a.ID], Active: active[a.ID]})
+			Quota: a.Observation, Bound: bound[a.ID], Active: active[a.ID], Usage: usage[a.ID], Resets: resets[a.ID]})
 	}
 	return st
 }
