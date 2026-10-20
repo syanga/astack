@@ -17,6 +17,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 import astack_files as files
 import astack_plugins
 import astack_settings
+import claude_router
 
 
 def destination_identity(path):
@@ -129,6 +130,8 @@ def settings_operations(harnesses, selected, state, home, use_env, args):
             if source.is_symlink():
                 raise ValueError("Settings source symlinks are unsupported: {}".format(source))
             values = astack_settings.json_loads(source.read_text(encoding="utf-8"))
+            if target == "claude":
+                claude_router.check_harness_settings(values)
             if list(astack_settings.leaves(values)):
                 desired[str(destination(spec, home, use_env))] = (spec["format"], values)
             if old and str(destination(spec, home, use_env)) not in old:
@@ -142,12 +145,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("install", "uninstall"))
     parser.add_argument("--target", action="append", choices=list(harnesses) + ["all"],
-                        help="repeat for multiple harnesses; default: claude and codex")
+                        help="repeat for multiple harnesses; default: claude and codex, unless --component is given")
+    parser.add_argument("--component", action="append", choices=[claude_router.NAME],
+                        help="optional component; never selected by default or by --target all")
     parser.add_argument("--home", type=Path, help="alternate home; ignores configuration environment overrides")
     parser.add_argument("--dry-run", action="store_true", help="show changes without writing anything")
     parser.add_argument("--force", action="store_true", help="back up conflicting files before replacing/removing them")
     args = parser.parse_args()
-    selected = args.target or ["claude", "codex"]
+    selected = args.target or ([] if args.component else ["claude", "codex"])
     selected = list(harnesses) if "all" in selected else list(dict.fromkeys(selected))
     home = (args.home or Path.home()).expanduser().resolve()
     use_env = args.home is None
@@ -168,6 +173,9 @@ def main():
         spec = harnesses[target]["settings"]
         plugin_configs[target] = astack_plugins.ConfigDir(destination(spec, home, use_env).parent, spec["env"], home, use_env)
         astack_plugins.check_config(target, state, plugin_configs[target])
+    component = None
+    if args.component:
+        component = claude_router.plan(args.command, state, claude_router.layout(home, use_env, state_root), args.force)
     operations = []
     conflicts = []
     for target in selected:
@@ -200,25 +208,47 @@ def main():
     for target, path, action, payload, expected, conflict in operations:
         if payload is not None:
             owners.setdefault(destination_identity(path), set()).add(target)
-    for target, records in state.get("settings", {}).items():
-        for filename in records:
-            owners.setdefault(destination_identity(Path(filename)), set()).add(target + " settings")
-    for change in settings:
-        owners.setdefault(destination_identity(change.path), set()).add(change.target + " settings")
+    if component:
+        for path in component.paths():
+            owners.setdefault(destination_identity(path), set()).add(claude_router.NAME)
     for filename, targets in owners.items():
         if len(targets) > 1:
             raise ValueError("Targets must use distinct destinations: {} ({})".format(
                 filename, ", ".join(sorted(targets))))
+    keys = {}
+    for target, records in state.get("settings", {}).items():
+        for filename, record in records.items():
+            keys.setdefault(destination_identity(Path(filename)), {})[target] = set(record["keys"])
+    for change in settings + (component.settings if component else []):
+        keys.setdefault(destination_identity(change.path), {})[change.target] = change.owned_keys
+    for filename, by_target in keys.items():
+        harness_targets = {t for t in by_target if t != claude_router.NAME}
+        if filename in owners or len(harness_targets) > 1:
+            raise ValueError("Targets must use distinct destinations: {} ({})".format(
+                filename, ", ".join(sorted(owners.get(filename, set()) | {t + " settings" for t in by_target}))))
+        claimed = {}
+        for target, names in by_target.items():
+            for name in names:
+                claimed.setdefault(name, set()).add(target)
+        for name, targets in sorted(claimed.items()):
+            if len(targets) > 1:
+                raise ValueError("Targets must own distinct settings keys: {} [{}] ({})".format(
+                    filename, ".".join(json.loads(name)), ", ".join(sorted(targets))))
+    changed_files = [destination_identity(change.path) for change in settings + (component.settings if component else [])]
+    if len(changed_files) != len(set(changed_files)):
+        raise ValueError("Harness and component settings share a file; run the component separately")
 
     for change in settings:
         conflicts.extend("{} [{}]".format(change.path, key) for key in change.conflicts)
+    if component:
+        conflicts.extend(component.conflicts)
     if conflicts and not args.force:
         raise ValueError("Existing or locally modified files:\n  " + "\n  ".join(conflicts) +
                          "\nReconcile them, or use --force to back them up first.")
 
     backup_root = state_root / "backups" / uuid.uuid4().hex
     # Check all shared settings files again before starting any mutation.
-    for change in settings:
+    for change in settings + (component.settings if component else []):
         change.check_unchanged("preview")
     for target, path, action, payload, expected, conflict in operations:
         if conflict:
@@ -250,7 +280,9 @@ def main():
         change.apply(state, state_path, backup_root, dry_run=args.dry_run)
     for target in selected:
         astack_plugins.sync(target, plugins, state, state_path, plugin_configs[target], args.dry_run)
-    if args.command == "install" and not args.dry_run:
+    if component:
+        claude_router.apply(component, state, state_path, backup_root, dry_run=args.dry_run)
+    if args.command == "install" and not args.dry_run and selected:
         commit = git("rev-parse", "HEAD")
         commits = state.setdefault("commits", {})
         for target in selected:
@@ -259,7 +291,8 @@ def main():
                 commits[target] = commit
         state["remote"] = git("remote", "get-url", "origin")
         files.save_manifest(state_path, state)
-    print("{} complete for {}.".format("Preview" if args.dry_run else args.command.capitalize(), ", ".join(selected)))
+    print("{} complete for {}.".format("Preview" if args.dry_run else args.command.capitalize(),
+                                       ", ".join(selected + (args.component or []))))
 
 
 if __name__ == "__main__":

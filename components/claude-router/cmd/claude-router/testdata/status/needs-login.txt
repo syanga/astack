@@ -1,0 +1,6 @@
+router  running 6h15m  127.0.0.1:18787  launchd  journal ok          14:20 PDT
+work    ready        5h 44% (16:40)  wk 23% (Sun)  cap 5  3/4 active  cache 93%
+alumni  needs login  5h 11% (17:55)  wk 64% (Sat)  cap 1  1/2 active  cache 88%
+held    e91f675b4f8a  alumni  since 14:07, needs login
+moved   9a41c07e2b13  alumni to work 14:07, before its first reply
+next    claude-router stop; claude-router login -account alumni; start

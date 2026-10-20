@@ -1,0 +1,27 @@
+router  running 6h15m  127.0.0.1:18787  launchd  journal ok          14:20 PDT
+        pid 48211, 0 restarts, binary 40937db, sdk v8.0.11, ~/.local/state/astack/claude-router
+
+work    exhausted    capacity 5, 1 of 2 conversations active
+        overflow     off, settings read 14:16
+        5-hour       rejected at 13:52, resets 16:40                 seen 13:52 (28m, stale)
+        weekly       31% used, resets Sun 09:00                      seen 13:52 (28m, stale)
+        cache        188 requests, input 19k, write 318k, read 4.22M, output 161k, read 92%
+
+alumni  overflow on  capacity 1, 2 of 3 conversations active
+        overflow     ON, settings read 14:05; not used until a read shows off
+        5-hour       52% used, resets 17:55                          seen 14:04 (16m, stale)
+        weekly       66% used, resets Sat 06:00                      seen 14:04 (16m, stale)
+        cache        71 requests, input 7k, write 207k, read 1.24M, output 58k, read 85%
+
+conversation  account  bound                       last         state                  context
+87ef7f9f6285  work     13:12 reset_preference      13:53        wait until 16:40          118k
+3d79daedf017  alumni   13:52 exhausted, from work  14:09        refuse, overage_enabled    52k
+e91f675b4f8a  alumni   14:02 capacity              14:04        active                     47k
+a833c9b837a0  work     Wed 22:10 capacity          Wed 23:02    idle                       31k
+5c2e19b0d4a7  alumni   Tue 16:30 manual, from work Tue 17:44    idle                       12k
+
+migration     conversation  from     to       reason
+13:52         3d79daedf017  work     alumni   exhausted
+Tue 16:30     5c2e19b0d4a7  work     alumni   manual
+
+next    16:40 on work, or now on alumni once its paid overflow is off

@@ -28,7 +28,8 @@ type Config struct {
 	// (assignments/), the generated SDK configuration, and events.jsonl.
 	StateDir string `json:"state_dir"`
 	// ClientTokenFile holds the private client token. It must be readable only
-	// by its owner.
+	// by its owner. LoadConfig resolves a relative path against the directory
+	// of the configuration file.
 	ClientTokenFile string `json:"client_token_file"`
 	// Accounts lists enrolled accounts in tie-break order. Each account's
 	// credential is auths/<id>.json in StateDir.
@@ -86,6 +87,13 @@ func LoadConfig(path string) (Config, error) {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&cfg); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if cfg.ClientTokenFile != "" && !filepath.IsAbs(cfg.ClientTokenFile) {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.ClientTokenFile = filepath.Join(filepath.Dir(abs), cfg.ClientTokenFile)
 	}
 	return cfg, nil
 }

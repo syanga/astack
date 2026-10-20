@@ -427,7 +427,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | RP-3 | Bootstrap 401 and 403 do not fail over to another account | passed | `TestBootstrapAuthErrorsDoNotFailOver` | PR1 |
 | RP-4 | A pin to an unknown or cooling-down auth fails with 503 and selects no account | passed | `TestPinToUnknownAuthSelectsNothing`, `TestSDKCooldownBlocksPinnedAccountWithoutFailover` | PR1 |
 | RP-5 | Single-attempt posture makes one upstream attempt per call, for credentials without a refresh token | passed | `TestPinnedExecutorPostureMakesOneAttemptPerCall` | PR1 |
-| RP-5b | Single-attempt posture for credentials with a refresh token | blocked | A 401 triggers refresh and a same-auth redispatch (`conductor_stream.go:253-263`). Offline tests drive that path through the SDK's own refresh, with only the token exchange replaced: a 401 makes the SDK refresh and resend on the same account, and the router's transport refuses the resend after a blocking observation, on the streaming and non-streaming paths (`TestRefreshRedispatchIsRefusedAfterABlockingObservation`, `TestRefusedRedispatchMovesTheConversationAfterPaidUse`). No offline test lets the resend reach the upstream. The PR3 service also reads the paid-overflow setting with the account's credential before dispatch. A forced invalid token fails that read with 401; the service then refreshes the credential once and reads again, so the inference that follows runs on the refreshed token and does not take the redispatch path. The path runs only when a token expires between the reading and a request. | Live observation when a token expires in service (PR5 lanes), or an offline test that lets the resend reach the upstream. The PR4 live session had no attempt that failed with 401 (`evidence/PR4/live-2-cc2.1.300/events.jsonl`). The PR4 runbook's steps do not force it: each step starts the router, which reads and renews a due credential before any inference |
+| RP-5b | Single-attempt posture for credentials with a refresh token | blocked | A 401 triggers refresh and a same-auth redispatch (`conductor_stream.go:253-263`). Offline tests drive that path through the SDK's own refresh, with only the token exchange replaced: a 401 makes the SDK refresh and resend on the same account, and the router's transport refuses the resend after a blocking observation, on the streaming and non-streaming paths (`TestRefreshRedispatchIsRefusedAfterABlockingObservation`, `TestRefusedRedispatchMovesTheConversationAfterPaidUse`). No offline test lets the resend reach the upstream. The PR3 service also reads the paid-overflow setting with the account's credential before dispatch. A forced invalid token fails that read with 401; the service then refreshes the credential once and reads again, so the inference that follows runs on the refreshed token and does not take the redispatch path. The path runs only when a token expires between the reading and a request. | Live observation when a token expires in service, or an offline test that lets the resend reach the upstream. The PR4 live session had no attempt that failed with 401 (`evidence/PR4/live-2-cc2.1.300/events.jsonl`). The PR4 runbook's steps do not force it: each step starts the router, which reads and renews a due credential before any inference. The PR5 lanes use fake credentials without a refresh token against a controlled upstream, so they cannot reach the path (`evidence/PR5/lane-2/macos.json`). Next chance: PR6's live acceptance |
 | RP-6 | A rotated credential reloaded from the auth directory keeps its account and auth ID, after a quiet period | passed | `TestRotatedCredentialKeepsAccount` | PR1 |
 | RP-7 | SDK-initiated OAuth refresh keeps the account | passed | Live lane 1 rerun at `9b7e059` under `-race` (`evidence/PR3/lane-1-rerun/`): both accounts were due at start, the SDK refreshed them, the start reads logged `credential_refresh` `expiring` `sdk_refreshed` and read the setting, `refresh_sha256_12` and `last_refresh` changed for `work` (`rp7-before.json`, `rp7-after.json`), and step R8 served both accounts on their pinned conversations. The verifier ruled that `c95ae72` runs the same branches on that path (`reports/PR3-verify/c95ae72/receipt.md`, "Live equivalence"). The refresh guard adds no branch to it: a credential with a refresh pending at start is waited for, and the SDK's refresh passes the guard. Offline, a refresh through the SDK's own refresh path, with only the token exchange replaced, keeps the account (`TestReadOfADueCredentialWaitsForTheSDKRefresh`, `TestUnauthorizedSettingsReadRefreshesOnceAndReadsAgain`), and so does a credential renewed by restart (`TestRotatedCredentialAppliesAtRestartOnTheSameAccount`, lane 2 `renewal_keeps_account`). | PR3 |
 | RP-8 | Configuration applied at startup does not change pinned selection | passed | `TestConfigApplyKeepsPinnedSelection`, six configurations | PR1 |
@@ -467,7 +467,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 
 | ID | Behavior | Terminal | Agent SDK (T3) | Evidence | Owner |
 | --- | --- | --- | --- | --- | --- |
-| WC-1 | Automatic waiting for a long reset with cancellation and resumption | passed with `CLAUDE_CODE_RETRY_WATCHDOG=1`; failed with defaults | passed with the watchdog; failed with defaults | `waiting.json#rows[4]`. Through the PR4 router against a controlled upstream: both clients waited out a 75 s usable reset behind the router's local 429 and resumed, and SIGINT or `interrupt()` ended a 2 h wait (`evidence/PR4/lane-2/recovery.json`, `wait_nested`, `long_reset_cancel`). Live through the PR4 router with real accounts, Claude Code 2.1.300, and Agent SDK 0.3.300 (step W1, `evidence/PR4/live-2-cc2.1.300/W1/`): a local gate injected the exhaustion of both accounts with a 120 s reset. Both waiters got the router's local 429 and counted down in 30 s steps from 119.6 s (terminal) and 118.5 s (Agent SDK). Neither sent a request during the wait. The first resend came 0.01 s after the reset, and each resend got one real attempt and completed. Cancellation was not run live. | PR5: managed client wiring sets `CLAUDE_CODE_RETRY_WATCHDOG=1` |
+| WC-1 | Automatic waiting for a long reset with cancellation and resumption | passed with `CLAUDE_CODE_RETRY_WATCHDOG=1`; failed with defaults | passed with the watchdog; failed with defaults | `waiting.json#rows[4]`. Through the PR4 router against a controlled upstream: both clients waited out a 75 s usable reset behind the router's local 429 and resumed, and SIGINT or `interrupt()` ended a 2 h wait (`evidence/PR4/lane-2/recovery.json`, `wait_nested`, `long_reset_cancel`). Live through the PR4 router with real accounts, Claude Code 2.1.300, and Agent SDK 0.3.300 (step W1, `evidence/PR4/live-2-cc2.1.300/W1/`): a local gate injected the exhaustion of both accounts with a 120 s reset. Both waiters got the router's local 429 and counted down in 30 s steps from 119.6 s (terminal) and 118.5 s (Agent SDK). Neither sent a request during the wait. The first resend came 0.01 s after the reset, and each resend got one real attempt and completed. Cancellation was not run live. | PR6: activation's client wiring sets `CLAUDE_CODE_RETRY_WATCHDOG=1`. PR5 installs the service only and sets no client environment; it reserves the key for activation ("Settings ownership") |
 | WC-2 | Bounded connection lifetime: client limits measured | passed | passed | `waiting.json#rows[0]` to `#rows[2]` | PR1 |
 | WC-3 | Short reset resumes automatically | passed | passed | `waiting.json#rows[3]` | PR1 |
 | WC-4 | Unknown reset has explicit behavior | passed | passed | `waiting.json#rows[5]` | PR1 |
@@ -496,8 +496,8 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | PS-3 | A second writer process is refused | passed | Same test and comparison | PR1 |
 | PS-4 | Torn tail truncates; corrupt or incomplete interior records fail closed | passed | `TestJournalTruncatesTornFinalRecord`, `TestJournalRefusesCorruptInteriorRecord` | PR1 |
 | PS-7 | A write or sync error stops acknowledgments until recovery, and no acknowledgment disagrees with replay | passed | `TestJournalStopsAcknowledgingAfterFailedSync`, `TestJournalRecoversFromPartialWrite` | PR1 |
-| PS-5 | Durability across OS crash or power loss | blocked | No power-cut rig. Relies on `F_FULLFSYNC` and `fsync`. | PR5: supervision lane records the durability scope; a power-cut check stays out of scope unless a rig exists |
-| PS-6 | Storage behavior on Linux | blocked | No Linux environment in PR1 | PR5: Linux lane runs the journal probes under systemd-user |
+| PS-5 | Durability across OS crash or power loss | blocked | No power-cut rig. Relies on `F_FULLFSYNC` and `fsync`. PR5's supervision lane killed the service with SIGKILL, which is a process crash (PS-1), not an OS crash. The README states the untested scope. | Accepted limit unless a power-cut rig exists. Never pass it on documentation |
+| PS-6 | Storage behavior on Linux | blocked | No Linux environment in PR1 or PR5. The PR5 Linux lane is prepared and not run (`evidence/PR5/lane-3/`). | PR5 lane 3 on a Linux host: the journal probes and the systemd-user lifecycle |
 | DS-1 | Pinned source build with an explicit Go prerequisite | passed | `go.mod`, `go.sum`; `toolchain/go-toolchain.json` in the store | PR1 |
 | DS-2 | SDK license and version requirement recorded | passed | Pinned SDK table above | PR1 |
 | DS-3 | Offline build and test from the prepared module cache | passed | `evidence/PR1/unit-<head>/go.log` | PR1 |
@@ -803,6 +803,11 @@ PR3 adds the client-facing service in `internal/claude` and the
 
 1. Validate the configuration. `listen` must be a loopback IP and port. The
    client token file must be mode 0600 and hold at least 32 characters.
+   `LoadConfig` resolves a relative `client_token_file` against the
+   directory of the configuration file, so the service and the commands read
+   the same file from any working directory
+   (`TestTheServiceReadsARelativeTokenPathBesideItsConfig`,
+   `TestStatusFromAnotherDirectoryReadsARelativeTokenPathBesideTheConfig`).
 2. Check every enrolled credential, `auths/<id>.json` in the state directory.
    It must be a Claude credential with an access token and mode 0600. After
    `coreauth.NormalizeCredentialMetadata` rewrites aliases such as `proxy-url`,
@@ -1623,3 +1628,179 @@ builds its router with `New`, so its restarts forget account state.
 | PR4.perf | 5 parent and 5 head runs, interleaved, 16 waiting conversations, 5 s reset. Head: 0 attempts on a known exhausted account before its reset, p95 resumption 18 ms after the reset, 0 healthy migrations, every conversation done within 10 s. With one of two accounts exhausted, the head finished in under 81 ms by migrating; the parent waited for the reset. | `evidence/PR4/perf/perf.json`, `baseline.json` |
 | Lane 2 (PR4.live.2 with a controlled upstream) | 10 scenarios, each with terminal Claude 2.1.285 and the Agent SDK driver, sandboxed; rerun with Claude Code 2.1.300 and Agent SDK 0.3.300, all passed | `evidence/PR4/lane-2/recovery.json`, `evidence/PR4/lane-2-cc2.1.300/recovery.json` |
 | PR4.live.1, the attended part of PR4.live.2, WC-1, WC-6 | Passed with real accounts `work` and `alumni`, Claude Code 2.1.300, and Agent SDK 0.3.300: 10 real attempts, at most 2 per step. A local gate injected every exhaustion. The parent (PR3) answered the injected exhaustion with its local 429 and kept the conversation (M2). The head moved the terminal conversation (M3) and the Agent SDK conversation (M6) to the other account within the request, on the same model. The moved terminal reply named the sentinel word that only the earlier tool result held, and no tool ran again. The conversation stayed on the destination after the source's reset (M4). W1 and W6 are rows WC-1 and WC-6. Races 0. | `evidence/PR4/live-2-cc2.1.300/RESULTS.md` and its step folders |
+
+## Operation (PR5)
+
+PR5 installs the router as an optional per-user service and operates it from
+the command line. It never writes client settings: activation is PR6.
+
+### Installation
+
+`scripts/claude_router.py` is the component's lifecycle helper.
+`./install.sh --component claude-router` and `./uninstall.sh --component
+claude-router` call it with the default layout. The default targets and
+`--target all` never select it. Run directly, the helper also takes
+`--service NAME`, `--port PORT`, and `--manager launchd|systemd|foreground`.
+
+| Rule | Behavior |
+| --- | --- |
+| Build | `go build -trimpath -buildvcs=false` of `./cmd/claude-router` with `GOPROXY=off GOSUMDB=off GOFLAGS=-mod=readonly CGO_ENABLED=0`, into a temporary directory outside the home. The linker gets the checkout's short commit, because Go records no revision for a build inside a linked Git worktree. A preview builds too, so it reports `WRITE` or `KEEP` exactly. |
+| Prerequisites | Go 1.26.0 or later. `go env` must report the host's OS and architecture for both target and host; cross-compilation settings, an older Go, an unsupported OS, or a failed build stop the run before any write. |
+| Payload | `$XDG_DATA_HOME/astack/claude-router/bin/claude-router` and the helper with its imports in `lib/`. Both are copies, so a moved checkout leaves them runnable. |
+| Descriptor | launchd: `~/Library/LaunchAgents/<service>.plist`. systemd: `$XDG_CONFIG_HOME/systemd/user/<service>.service`. Both run `serve -supervised -config <state>/config.json` with `HOME` set to the installer's home and the state directory as working directory. |
+| State | `$XDG_STATE_HOME/astack/claude-router`, mode 0700. `config.json` is created once, when missing, and never rewritten. `client-token` is created when missing. The service refuses a client token shorter than 32 characters or with any permission for group or others. Install replaces a shorter `client-token` and prints `REPLACE <path> (fewer than 32 characters)`. It sets any other mode on a token of 32 or more characters to 0600 and prints `CHMOD <path> 0600 (was <mode>)`. The helper writes a new token to a temporary `.client-token-*` file in the state directory at mode 0600, syncs it, and renames it into place, so an interrupted install leaves no partial token. The next install removes leftover temporary files and prints `REMOVE <path>` for each. A `client-token` that is not a regular file stops install before any write, with the step to move it aside (`TokenCreationTests`). `service.json` records the manager, service name, descriptor, configuration, helper, the Python that ran the installer, and astack manifest for the command. |
+| Ownership record | `components.claude-router` in the astack manifest: the layout, a fingerprint per managed file, the fingerprints of created seeds, the commit, and `pending`. It holds no secret. |
+| Interruption | Before each write, the helper records the file's expected fingerprint in `pending` and saves the manifest. A rerun adopts a pending file that holds that fingerprint. Other interruptions leave a file the next run reports as a conflict. The installer is not a transaction. |
+| Conflicts | An unmanaged or locally modified payload, descriptor, or `service.json` stops install and uninstall; `--force` moves it to `backups/<id>/` first. A component path that a harness target manages is refused. A changed data, state, or descriptor location needs an uninstall first. |
+| Update | A changed binary is replaced. A running service keeps the old binary until `stop` and `start`, and the installer prints that. |
+| Service name | Installs in different homes that use one `--service` name share one launchd label or systemd unit name. `start`, `stop`, `direct`, and uninstall act on a loaded job only when its descriptor is this installation's: launchd's `path` from `launchctl print`, or systemd's `FragmentPath`, compared after resolving symlinks. On a mismatch, `start` refuses and `stop` leaves the other job running and says so (`TestStopAndStartLeaveAJobLoadedFromAnotherHome`, `TestSystemdStopAndStartActOnlyOnTheirOwnUnit`, `TestStopActsOnItsOwnJobLoadedThroughASymlink`). |
+| Off until start | `stop` and `direct` keep the router off until `claude-router start`, across logins and reboots. launchd: `launchctl disable`, which persists a per-label override, so launchd neither loads the plist at login nor accepts a `bootstrap` (it fails with error 5), then `bootout` of this installation's loaded job. A disable leaves a loaded job running until the `bootout`, and it comes first, so a `stop` that fails or is killed between the two calls still leaves the job off at login (`TestAStopWhoseBootoutFailsStillKeepsTheJobOffAtLogin`). `start` runs `launchctl enable` when the label is disabled, then `bootstrap` or `kickstart`. systemd: `disable` then `stop`, for the same reason (`TestASystemdStopWhoseStopFailsStillKeepsTheUnitOffAtLogin`); `start` runs `enable` then `start`. When the router already answers, as after such a failed `stop`, `start` still turns the switch on before it prints `router  running` (`TestStartTurnsTheSwitchOnWhenTheRouterStillRunsAfterAFailedStop`). Uninstall runs `stop -uninstall`: launchd boots out this installation's job and runs `enable` when the label is disabled, also while another home's job holds the label, which leaves an `enabled` override entry that blocks nothing (launchctl has no verb that deletes the entry); systemd stops and disables the unit, which removes its `default.target.wants` link (`TestStopKeepsTheJobOffAcrossLoginsUntilStart`, `TestSystemdStopDisablesAndStartEnablesOnlyItsOwnUnit`). `start` and uninstall leave a switch that another installation owns as it is (Shared label switch, below). The systemd side is unit-tested against a fake `systemctl` only, because lane 3 has no Linux host. |
+| Shared label switch | The launchd override is per label, not per plist. The installation whose plist is `<label>.plist` in the account's login directory, `~/Library/LaunchAgents` of the home in the user database (not `$HOME`), owns it. Another installation with that label never disables or enables it: its `stop` boots out only its own loaded job and leaves the label on, and its plist, outside the login directory, never loads at login anyway. Its `start` refuses while the label is disabled, with `<label> is turned off for the installation at <path>` and `next    run claude-router start for that installation, or install this one with another --service`; when its router already answers, `start` prints `router  running` and leaves the label off (`TestStartOfAnotherInstallationsRunningRouterLeavesTheOwnersSwitchOff`). Its uninstall leaves the label as it is (`TestStopAndStartLeaveTheLoginSwitchOfAnotherInstallation`, `TestAnotherInstallationsUninstallLeavesTheOwnersSwitchOn`). The owner's `stop` and `direct` disable the label even while another installation's job holds it: they leave that job running and print `router  not stopped: <label> is loaded from <path>, not from this installation; left running`, then `        this installation stays off until claude-router start` (`TestTheLoginOwnersStopTurnsItsSwitchOffWhileAnotherHomesJobRuns`). The owner's uninstall in that case turns the label back on and prints only the first of those lines (`TestTheLoginOwnersUninstallBesideAnotherHomesJobTurnsTheSwitchBackOn`). None of them boots out that job. When no plist for the label is in the login directory, the switch only gates `bootstrap`. Any installation with the label may then enable it, and may disable it unless another installation's job holds the label: a `stop` beside that job leaves the label on and prints only the first line (`TestAStopBesideAnotherHomesJobWithNoLoginOwnerLeavesTheSwitchOn`). Only a missing plist counts as none: another error reading it, such as an unsearchable login directory, refuses `stop` and `direct`, and `start` and uninstall when the label is disabled, with `cannot tell which installation turns <label> on and off at login: <error>` before any switch changes (`TestAnUnreadableLoginDirectoryRefusesToTouchTheSwitch`). |
+| Removal | The helper runs the installed `claude-router stop -uninstall`, then removes the payload, descriptor, and `service.json`, and an unedited `config.json`. It keeps `auths/`, `assignments/`, `accounts.json`, `client-token`, `events.jsonl`, and an edited `config.json`. |
+| Known limit: concurrent commands | The ownership check and the action are separate `launchctl` or `systemctl` calls. If another installation that shares the label runs `stop` and `bootstrap` between them, this installation's `stop` can boot out that job. Two installations must run lifecycle commands concurrently for this to happen. launchd and systemd offer no compare-and-act call to close the gap. |
+
+### Settings ownership
+
+A settings file can have several owners, one per key. The installer refuses a
+run in which two owners claim one key, and a run that would change the same
+settings file for a harness and the component, which must run separately.
+Router activation owns `apiKeyHelper`, `env.ANTHROPIC_BASE_URL`, and
+`env.CLAUDE_CODE_RETRY_WATCHDOG` in the Claude settings file.
+`claude_router.client_settings` returns their values: `apiKeyHelper` is `cat`
+of the `client_token_file` path from `config.json`, resolved against the
+directory of `config.json` as the service resolves it, and quoted for
+`/bin/sh`, so relative paths and paths with spaces or quotes work
+(`test_a_relative_token_path_is_read_from_the_state_directory`). Harness settings that name an owned key, or
+`env.ANTHROPIC_AUTH_TOKEN` or `env.ANTHROPIC_API_KEY`, are refused, because
+Claude Code uses either env token before `apiKeyHelper`. `client_settings`
+refuses client settings that hold either env token, and returns the owned keys
+whose existing values activation replaces, such as another `apiKeyHelper`.
+The component's settings record is `settings.claude-router` in the manifest,
+the format the harness targets use. PR5 writes none. Uninstall and `direct`
+restore one if it exists, including a prior `apiKeyHelper`, byte for byte
+(`test_a_prior_api_key_helper_is_restored_exactly_by_direct_and_by_uninstall`).
+
+Claude Code 2.1.300 runs `apiKeyHelper` and sends its trimmed output as both
+`X-Api-Key` and `Authorization: Bearer` (documented under "Authentication
+precedence", and checked in a sandboxed client against a recorder and the
+router, with a token path holding a space and a quote:
+`evidence/PR5/apikeyhelper-r3/`). The router accepts either header.
+
+N8 is closed only for stored copies of the client token: the settings file
+activation writes, the manifest's `settings.claude-router` record, and
+`direct` backups hold the helper command, not the token, so the token lives
+only in `client-token`. The test scans those files, the manifest, every backup,
+and every command output for the client token and for the fixtures' login
+credential (`test_no_output_settings_file_manifest_or_backup_holds_the_client_token`).
+These parts stay open:
+
+- Claude Code uses `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` before
+  `apiKeyHelper` wherever it finds one. `client_settings` sees only the
+  settings file it is given. An env token in another settings layer (a
+  project's `.claude/settings.json` or `.claude/settings.local.json`, or
+  managed settings) or exported in the client's process environment still
+  takes precedence, and no installer check sees it.
+- Nothing in PR5 calls `client_settings`. Its env-token refusal and its report
+  of a replaced `apiKeyHelper` reach the user only when PR6 activation calls it
+  and shows the result.
+- That `apiKeyHelper` takes precedence over a credential stored by `/login`
+  rests on the documentation. The client probe ran with no stored login, so it
+  does not show it.
+- The harness record format stores the settings file's original and last text,
+  so any other secret a user keeps in that settings file is copied into the
+  manifest and backups at mode 0600.
+
+### Supervision
+
+`serve -supervised` keeps `supervision.json` beside its `-config` file, which
+the installer puts in the state directory. Each start records its time before
+the service reads its configuration; a clean stop on SIGINT or SIGTERM removes
+it. An unreadable `supervision.json` is replaced by a new record. When 5
+starts within 10 minutes have no clean stop, the next start records
+`gave_up_at` and exits 0. A start that cannot save the record also exits 0
+without serving. launchd (`KeepAlive` with `SuccessfulExit` false,
+`ThrottleInterval` 10) and systemd (`Restart=on-failure`, `RestartSec=10`)
+do not restart a job that exits 0. A failed start, including a configuration
+that does not load, records its error
+(`TestAConfigThatFailsToLoadCountsTowardTheLimit`,
+`TestAnUnreadableSupervisionRecordStillBoundsRestarts`,
+`TestASupervisedStartThatCannotRecordItselfExitsCleanlyWithoutServing`).
+`serve -supervised` without `-config`, or with a relative one, exits 1 and
+records nothing
+(`TestASupervisedStartNeedsAnAbsoluteConfigAndCountsNothingWithout`).
+Each save writes a temporary file with a unique name in the same directory and
+renames it over `supervision.json`. Concurrent saves, such as `start`'s and a
+respawned service's, do not fail on each other, and a temporary file left with
+the wrong mode or owner does not stop a start
+(`TestConcurrentSupervisionSavesEachSucceed`,
+`TestALeftoverUnwritableTemporaryRecordDoesNotStopASupervisedStart`). A crash
+between the write and the rename can leave a `supervision.json.<random>.tmp`
+file, which nothing reads.
+`claude-router start` clears the record, so an explicit start always runs.
+`serve` without `-supervised` says that nothing restarts it.
+
+### Commands
+
+The layout is the user's selection, mock C with three additions
+(`evidence/PR5/output-mocks/selected.txt`). `selected.txt` also holds screens
+in C's line format for states the mocks did not show. The user accepted the
+further lines listed in the round-2 verifier receipt, section "N6"
+(2026-10-15). These lines change or extend the selection:
+
+- `stop` and `direct` print `router  stopped until claude-router start;
+  assignments kept`, and `direct` names `apiKeyHelper`.
+- `start` refuses for a label another installation turned off (Shared label
+  switch, above).
+- `status` refuses an unreadable `supervision.json`, and shows a state
+  directory where the router cannot record a start.
+- The installer refuses with `Harness settings must not set keys that
+  claude-router activation owns or overrides: <keys>`.
+- `stop -h` describes `-uninstall` as `stop for removal: leave the job free to
+  load at login after a reinstall`.
+- `client_settings` refuses as named under Settings ownership.
+- After `router  not stopped: … left running`, `stop` and `direct` print
+  `        this installation stays off until claude-router start` when this
+  installation owns the label switch.
+- `stop`, `direct`, `start`, and uninstall refuse with `cannot tell which
+  installation turns <label> on and off at login: <error>` (Shared label
+  switch, above).
+- Errors from `launchctl print-disabled`, `disable`, and `enable` and from
+  `systemctl --user enable` and `disable` use the existing `claude-router:
+  <command>: <error>` format. `start` can print one of them, or the `cannot
+  tell` refusal, when the router already answers.
+
+`cmd/claude-router/testdata/status/`
+holds the status screens, and `TestStatusMatchesTheSelectedLayout` renders
+each from sample state.
+
+| Command | Contract |
+| --- | --- |
+| `status` | Reads `GET /claude-router/status`, `events.jsonl`, `supervision.json`, and `service.json`. It marks a quota observation or paid-overflow reading older than 15 minutes with a `stale` line. A service that does not answer is `stopped`, or `failed` when supervision gave up. When `config.json` does not load, status prints `config error:` with the error, and `running` or `stopped` from the assignment lock. Once supervision gives up, `failed` takes precedence, and the configuration error shows as `last error:`. A stopped service whose state directory the router cannot write shows `last error: cannot record a start in <file>: <error>` and `next    fix the error, then claude-router start` (`TestStatusShowsThatTheRouterCannotRecordAStart`). An unreadable `supervision.json` makes status exit 1 naming the file, with `next    remove <file>, then claude-router start` (`TestStatusNamesAnUnreadableSupervisionRecord`). |
+| `status -v` | Adds every reading with its age, cache counters per account, each assigned conversation, and the migrations, newest first, at most 20. |
+| `start`, `stop` | launchd: `enable` when disabled, then `bootstrap` or `kickstart`; `disable`, then `bootout`. systemd: `daemon-reload`, `enable`, `reset-failed`, and `start`; `disable`, then `stop`. When status already answers, `start` only turns the switch on and prints `router  running  <listen>  <manager>`. Each acts only on this installation's job (Service name, Off until start, and Shared label switch, above). `start` waits up to 90 s for status to answer or for a start error; `stop` waits until the assignment lock is free and prints `router  stopped until claude-router start; assignments kept`. Foreground installations refuse both. |
+| `login` | Unchanged flow. It refuses while a process holds the state directory, names that process's pid when status answers, and prints `next    claude-router stop`. |
+| `move` | Takes the 12-hex hash that status shows, a prefix of at least 4 hex digits, or a session ID. A prefix that matches two conversations is answered 409 and nothing moves. |
+| `direct -prepare`, `direct` | Run the installed helper with the Python recorded in `service.json`, and refuse, naming it, when that interpreter is gone. `-prepare` prints each owned key with its installed value, secrets as `[redacted]`, the count of other keys, the router's logins and assignment count, and the backup path, and changes nothing. The backup path is `backups/direct-<first 12 hex of the file's SHA-256>/<file name>`, so `-prepare` and `direct` print the same path while the file is unchanged. `direct` refuses on a key edited after activation, then stops the service, copies each settings file to the backup with mode 0600, and restores the keys. A key that already holds its value from before activation, as after a crash between the settings write and the manifest save, prints `skip` and its record is dropped. With no owned settings, `direct` prints `nothing to change` and stops nothing. In foreground mode, or when another installation's job holds the label and stays running, it does not say the router stopped (`TestDirectWithAnotherInstallationsJobDoesNotClaimTheRouterStopped`). `after   claude needs its own /login` appears when `direct` removes `apiKeyHelper` that had no prior value. Logins, assignments, the binary, and the job stay. |
+
+The status endpoint adds `capacity`, `quota` (the newest observation, kept in
+memory only), `bound` and `active` counts, `needs_login_at`, a `bindings`
+list (hash, account, reason, since, served, last request, active), and `now`,
+`started`, `pid`, `journal`, `binary`, `sdk`, `quota_fresh_for`,
+`overage_fresh_for`, and `active_for` (`TestStatusReportsCapacityQuotaAndEachBinding`,
+`TestStatusCountsAnIdleConversationAsBoundButNotActive`). A `request` event
+with decision `wait` carries `until`, the reset it waits for
+(`TestAWaitEventCarriesTheResetItWaitsFor`). Status derives cache read
+share, waits, refusals, holds, moves, and context size from `events.jsonl`.
+
+### Verification
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| PR5.unit | `python3 -m unittest discover -s tests -v` and the Go tests under `-race`, with `go vet` | `evidence/PR5/unit-<sha>/` |
+| PR5.live.1 | Ordinary install, repeat, update with a changed unrelated setting, preview, uninstall preview, and uninstall gave the same output and inventories on parent `40937db` and head. On head, the component built from the pinned cache, a repeat wrote nothing, the Claude settings file did not change, a default install left the component alone, and after the checkout moved the binary ran and the component uninstalled. | `evidence/PR5/lane-1/ordinary-install.json` |
+| PR5.live.2 | launchd on macOS with a unique label, port, temporary HOME, fake credentials, and a loopback upstream. Each run reran only the steps listed for it, and each step passed. `cb1f68f`: install, readiness, 401 without the token and 200 with it, the binding kept across stop and start and across SIGKILL, a crash loop that gave up after 4 kills with no pid for 25 s, recovery by `start`, a visible credential-mode failure and port conflict, loopback-only connections, and uninstall that booted out the job and kept logins, assignments, and client settings. `3773b40`: the same steps, plus `login` refused while running, `move` by hash, `direct -prepare` and `direct` with nothing activated left the job running, and a second home with the same label could neither start nor stop the first home's job, and its uninstall left that job serving with the same pid. `876850b`: the steps of `3773b40`, plus `stop` left the label `disabled` and unloaded, a `bootstrap` as at login failed with error 5, and `start` enabled and served again; `direct` after activation through `apiKeyHelper` stopped and disabled the job, restored the settings, and stored the token in no settings file, manifest, or backup; uninstall after a `stop` left the label `enabled`, and a reinstalled plist loaded as at login. `452c45c`: install, readiness, the requests, stop and start, the `stop` and `start` switch steps (with `stop` calling `launchctl print`, `disable`, and `bootout` in that order), the second home, `direct` with nothing activated and after activation, loopback-only connections, uninstall, and reinstall. `9c2bf58`: the steps of `452c45c`, plus a `stop` whose `bootout` a shim failed for the test label only, which left the job running and the label `disabled`, after which `start` printed `router  running`, kept the same pid, and left the label `enabled`; the second home's `stop` printed no kept-off line. The owner installation's `stop` and uninstall beside another home's job need a plist in the real `~/Library/LaunchAgents`, which the lane does not write, so only unit tests cover them. | `evidence/PR5/lane-2-r5/macos.json`, `evidence/PR5/lane-2-r4/macos.json`, `evidence/PR5/lane-2-r3/macos.json`, `evidence/PR5/lane-2-r2/`, `evidence/PR5/lane-2/`, `evidence/PR5/lifecycle.json`, `evidence/PR5/restoration.json` |
+| launchd switch probe | A `/bin/sleep` job under a test label: `disable` persists `=> disabled`, a `bootstrap` of a disabled label fails with error 5, `enable` leaves `=> enabled`, and no `launchctl` verb removes the entry. | `evidence/PR5/r3-launchd-probe/probe.log` |
+| `apiKeyHelper` client probe | Claude Code 2.1.300, sandboxed with a temporary HOME and `CLAUDE_CONFIG_DIR`, the `client_settings` values, and a token path with a space and a quote: each request carried the token as both `X-Api-Key` and `Authorization: Bearer`, and the router served the request from a loopback fake upstream. | `evidence/PR5/apikeyhelper-r3/result.json` |
+| Load failure under launchd | With the plist bootstrapped directly, as at login, the seeded config without accounts, a config with an unknown field, and a corrupt `supervision.json` each ended after 5 failed starts: launchd counted 6 runs, the last exited 0, and `status` showed `failed` with the error. | `evidence/PR5/loadfail-r2/loadfail.json` |
+| PR5.live.3 | Blocked: no Linux host. The systemd-user lane is prepared as `lane-3/lane3_linux.py`. The foreground mode passed on macOS. | `evidence/PR5/lane-3/` |
+| PR5.perf | Not applicable. The request path changed only to stamp `until` on wait events. | |

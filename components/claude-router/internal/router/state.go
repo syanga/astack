@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -239,4 +240,34 @@ func (s *Store) ClearNeedsLogin(account AccountID) error {
 	}
 	states[i].NeedsLogin, states[i].NeedsLoginAt = false, time.Time{}
 	return s.saveAccounts(states)
+}
+
+// AccountView is an enrolled account as status reports it: its durable
+// state, its capacity, and its newest quota observation, which lives only in
+// memory.
+type AccountView struct {
+	AccountState
+	Capacity    float64     `json:"capacity"`
+	Observation Observation `json:"observation"`
+}
+
+// Accounts returns every enrolled account's view, in tie-break order.
+func (r *Router) Accounts() []AccountView {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]AccountView, len(r.accounts))
+	for i, a := range r.accounts {
+		obs := a.observation
+		obs.Windows = slices.Clone(obs.Windows)
+		out[i] = AccountView{AccountState: a.state(r.expiry), Capacity: a.Capacity, Observation: obs}
+	}
+	return out
+}
+
+// LastRequests returns the time of each conversation's latest routed request
+// since the router was made.
+func (r *Router) LastRequests() map[ConversationID]time.Time {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return maps.Clone(r.active)
 }

@@ -60,6 +60,23 @@ only the entries it added.
 
 For contribution rules, see [AGENTS.md](AGENTS.md).
 
+## Install the optional Claude router
+
+[components/claude-router](components/claude-router/README.md) is an optional
+local proxy that routes Claude conversations across subscription accounts. The
+default targets and `--target all` never install it. It needs Go 1.26 or newer
+and the pinned module cache. To install it, select it explicitly:
+
+```sh
+./install.sh --component claude-router --dry-run
+./install.sh --component claude-router
+```
+
+It adds a launchd agent on macOS or a systemd user unit on Linux and changes no
+agent settings. `./uninstall.sh --component claude-router` removes it and keeps
+its logins and assignments. The component README explains enrollment and
+daily operation.
+
 ## Find a skill
 
 Ask [astack-help](skills/astack-help/SKILL.md) which skills fit the current task.

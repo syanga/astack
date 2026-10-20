@@ -1,0 +1,8 @@
+router  running 6h15m  127.0.0.1:18787  launchd  journal ok          14:20 PDT
+work    exhausted    5h out (16:40)  wk 31% (Sun)  cap 5  1/2 active  cache 92%
+alumni  overflow on  5h 52% (17:55)  wk 66% (Sat)  cap 1  2/3 active  cache 85%
+stale   work    quota seen 13:52 (28m ago)
+stale   alumni  quota seen 14:04 (16m ago)
+wait    87ef7f9f6285  work    since 13:53, resends at 16:40
+refuse  3d79daedf017  alumni  since 14:09, paid overflow on
+next    16:40 on work, or now on alumni once its paid overflow is off

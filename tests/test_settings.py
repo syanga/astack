@@ -236,6 +236,18 @@ class SettingsTests(InstallerFixture):
         self.assertIn("distinct destinations", result.stderr)
         self.assertFalse(self.home.exists())
 
+    def test_two_harnesses_cannot_share_a_settings_file_across_runs(self):
+        registry = self.repo / "harnesses.json"
+        config = json.loads(registry.read_text())
+        config["codex"]["settings"] = dict(config["claude"]["settings"], source="codex.json")
+        registry.write_text(json.dumps(config))
+        self.source("codex", {"model": "gpt-5"})
+        self.run_installer("--target", "claude")
+        installed = (self.home / ".claude/settings.json").read_bytes()
+        result = self.run_installer("--target", "codex", success=False)
+        self.assertIn("Targets must use distinct destinations", result.stderr)
+        self.assertEqual((self.home / ".claude/settings.json").read_bytes(), installed)
+
     def test_custom_roots_and_recorded_path_uninstall(self):
         self.source("codex", {"model_reasoning_effort": "high"})
         module = self.manager()
