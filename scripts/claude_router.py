@@ -8,8 +8,8 @@ descriptor, and a state directory. Installing it never changes client settings.
 import argparse
 from contextlib import nullcontext, redirect_stdout
 import fcntl
-from enum import Enum
 from dataclasses import dataclass, field
+from enum import Enum
 import hashlib
 import io
 import json
@@ -375,7 +375,7 @@ class ShellAction(Enum):
 class ShellChange:
     action: ShellAction
     file: Path | None
-    lines: list
+    lines: tuple[str, str]
 
 
 @dataclass
@@ -493,9 +493,9 @@ def shell_file_for(home, use_env):
 def shell_change(command, lay, old):
     owned = old.get("shell_path")
     if command == "uninstall":
-        return ShellChange(ShellAction.REMOVE, Path(owned["file"]), owned["lines"]) if owned else None
+        return ShellChange(ShellAction.REMOVE, Path(owned["file"]), tuple(owned["lines"])) if owned else None
     directory = re.sub(r'([\\"$`])', r"\\\1", str(lay.binary.parent))
-    lines = [PATH_MARKER, 'export PATH="{}:$PATH"'.format(directory)]
+    lines = (PATH_MARKER, 'export PATH="{}:$PATH"'.format(directory))
     shell_file = Path(owned["file"]) if owned else shell_file_for(lay.home, lay.use_env)
     if shell_file is None:
         return ShellChange(ShellAction.UNKNOWN_SHELL, None, lines)
@@ -563,7 +563,7 @@ def apply_shell(change, record, dry_run):
         if text and not text.endswith("\n"):
             text += "\n"
         files.atomic_write(target, (text + block).encode(), mode)
-        record["shell_path"] = {"file": str(shell_file), "lines": change.lines, "created": not existed}
+        record["shell_path"] = {"file": str(shell_file), "lines": list(change.lines), "created": not existed}
         print("APPEND {} {}".format(shell_file, line))
 
 

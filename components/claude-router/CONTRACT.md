@@ -876,13 +876,13 @@ such as `claude-haiku-5-5` for SDK v8.0.11, got 503 `the SDK refused the pinned
 account without an upstream attempt`. At start, before it reads paid-overflow
 settings, the service reads the model catalog that the SDK's own server
 fetches. The catalog is `router-for-me/models`, `models.json`, with its mirror,
-and the read has 5 s. It takes the catalog's `claude` entries whose ID starts
-with `claude-` and registers, for every account, those the built-in list lacks,
-with the catalog's metadata. The metadata matters: the SDK strips the thinking
-settings from a request for a model whose entry has no `thinking` support
-(`TestAModelOnlyTheCatalogListsIsServedWithItsThinkingSettings`). A model the
-built-in list has keeps its built-in entry. The service records `model_catalog`
-with outcome `read` and the added IDs.
+and the read times out after 5 s. It takes the catalog's `claude` entries whose
+ID starts with `claude-` and registers, for every account, those the built-in
+list lacks, with the catalog's metadata. The metadata matters: the SDK strips
+the thinking settings from a request for a model whose entry has no `thinking`
+support (`TestAModelOnlyTheCatalogListsIsServedWithItsThinkingSettings`). A
+model the built-in list has keeps its built-in entry. The service records
+`model_catalog` with outcome `read` and the added IDs.
 
 When the catalog does not answer, is not JSON of the SDK's format, or lists no
 Claude model, the service records `model_catalog` with outcome `failed` and

@@ -116,7 +116,7 @@ when moves caused more than 10% of the last 24 hours' cache writes.
 
 A Claude model newer than the router's model list gets a 503 that says the
 SDK refused the pinned account without an upstream attempt. The router
-reads the published model catalog at each start, so give
+reads the published model catalog at each start, so give the user
 `claude-router stop` and `claude-router start`.
 
 Paid overflow is the claude.ai setting that bills usage past the plan's
@@ -150,7 +150,8 @@ Give the user these steps. Put the checkout's absolute path in place of
    ```
 
 5. When the install asks `Add claude-router to PATH in FILE? [Y/n]`, press
-   Enter. Then open a new shell.
+   Enter. When it prints `SKIP PATH` instead, add the line it prints to the
+   shell's startup file. Then open a new shell.
 
 6. On Linux only, let the router run without a login session:
 

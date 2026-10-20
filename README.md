@@ -90,7 +90,8 @@ To install and activate the router:
    ```
 
 4. When the install asks `Add claude-router to PATH in FILE? [Y/n]`, press
-   Enter. Then open a new shell.
+   Enter. When it prints `SKIP PATH` instead, add the line it prints to your
+   shell's startup file. Then open a new shell.
 
 5. On Linux, turn on linger so the router runs without a login session
    ([why](components/claude-router/README.md#operate-the-service)):
