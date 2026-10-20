@@ -16,6 +16,11 @@ const resetsURL = usageURL + "?cedar_ember=1&skip_spend=1"
 
 const resetsEvery = 30 * time.Minute
 
+// resetsUserAgent is the Claude Code user agent that the pinned SDK sends on
+// inference requests. The usage endpoint offers resets only to a Claude Code
+// client and otherwise answers ineligible_reason "surface".
+const resetsUserAgent = "claude-cli/2.1.280 (external, cli)"
+
 // UsageWindow is one limit window as the usage endpoint reports it. Model
 // is the endpoint's label for a model-scoped weekly window, such as "Fable",
 // and is empty for a window that counts every model. Used is the fraction
@@ -69,10 +74,10 @@ type usageBody struct {
 	ExtraUsage *struct {
 		IsEnabled *bool `json:"is_enabled"`
 	} `json:"extra_usage"`
-	FiveHour    json.RawMessage `json:"five_hour"`
-	SevenDay    json.RawMessage `json:"seven_day"`
-	ModelScoped json.RawMessage `json:"model_scoped"`
-	CedarEmber  json.RawMessage `json:"cedar_ember"`
+	FiveHour   json.RawMessage `json:"five_hour"`
+	SevenDay   json.RawMessage `json:"seven_day"`
+	Limits     json.RawMessage `json:"limits"`
+	CedarEmber json.RawMessage `json:"cedar_ember"`
 }
 
 func (b usageBody) overage() (router.Overage, error) {
@@ -115,14 +120,21 @@ func (b usageBody) windows() []UsageWindow {
 			out = append(out, body.window(w.kind, ""))
 		}
 	}
-	var scoped []struct {
-		DisplayName string `json:"display_name"`
-		usageWindowBody
+	var limits []struct {
+		Kind     string   `json:"kind"`
+		Percent  *float64 `json:"percent"`
+		ResetsAt *string  `json:"resets_at"`
+		Scope    *struct {
+			Model *struct {
+				DisplayName string `json:"display_name"`
+			} `json:"model"`
+		} `json:"scope"`
 	}
-	if json.Unmarshal(b.ModelScoped, &scoped) == nil {
-		for _, s := range scoped {
-			if s.DisplayName != "" {
-				out = append(out, s.window(router.Weekly, s.DisplayName))
+	if json.Unmarshal(b.Limits, &limits) == nil {
+		for _, l := range limits {
+			if l.Kind == "weekly_scoped" && l.Scope != nil && l.Scope.Model != nil && l.Scope.Model.DisplayName != "" {
+				w := usageWindowBody{Utilization: l.Percent, ResetsAt: l.ResetsAt}
+				out = append(out, w.window(router.Weekly, l.Scope.Model.DisplayName))
 			}
 		}
 	}
@@ -192,7 +204,7 @@ func (o *overageReader) readResets(ctx context.Context, account router.AccountID
 	if !ok || auth == nil || refreshDue(auth, time.Now()) {
 		return
 	}
-	body, err := o.get(ctx, account, auth, resetsURL)
+	body, err := o.get(ctx, account, auth, resetsURL, resetsUserAgent)
 	if err != nil {
 		return
 	}

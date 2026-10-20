@@ -22,9 +22,14 @@ func accountStatus(t *testing.T, s *Service, id router.AccountID) AccountStatus 
 func TestASettingsReadRecordsTheLimitWindowsForStatus(t *testing.T) {
 	e := newEnv(t, "acct-a")
 	e.upstream.setUsage("acct-a", usageReply{Enabled: boolPtr(false), Fields: map[string]any{
-		"five_hour":    map[string]any{"utilization": 38.0, "resets_at": "2026-10-04T05:00:00.5+00:00"},
-		"seven_day":    map[string]any{"utilization": 21.0, "resets_at": "2026-10-09T16:00:00Z"},
-		"model_scoped": []any{map[string]any{"display_name": "Fable", "utilization": 12.0, "resets_at": "2026-10-09T16:00:00Z"}},
+		"five_hour": map[string]any{"utilization": 38.0, "resets_at": "2026-10-04T05:00:00.5+00:00"},
+		"seven_day": map[string]any{"utilization": 21.0, "resets_at": "2026-10-09T16:00:00Z"},
+		"limits": []any{
+			map[string]any{"kind": "session", "percent": 38, "resets_at": "2026-10-04T05:00:00.5+00:00", "scope": nil},
+			map[string]any{"kind": "weekly_all", "percent": 21, "resets_at": "2026-10-09T16:00:00Z", "scope": nil},
+			map[string]any{"kind": "weekly_scoped", "percent": 12, "resets_at": "2026-10-09T16:00:00Z",
+				"scope": map[string]any{"model": map[string]any{"id": nil, "display_name": "Fable"}, "surface": nil}},
+		},
 	}})
 	s := e.start()
 
@@ -47,9 +52,9 @@ func TestASettingsReadRecordsTheLimitWindowsForStatus(t *testing.T) {
 func TestMalformedLimitFieldsLeaveThePaidOverflowReadingIntact(t *testing.T) {
 	e := newEnv(t, "acct-a")
 	e.upstream.setUsage("acct-a", usageReply{Enabled: boolPtr(false), Fields: map[string]any{
-		"five_hour":    "full",
-		"seven_day":    map[string]any{"utilization": "high"},
-		"model_scoped": map[string]any{"display_name": "Fable"},
+		"five_hour": "full",
+		"seven_day": map[string]any{"utilization": "high"},
+		"limits":    map[string]any{"kind": "weekly_scoped"},
 	}})
 	s := e.start()
 

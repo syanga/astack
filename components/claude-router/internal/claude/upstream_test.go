@@ -177,7 +177,10 @@ func (u *fakeUpstream) RoundTrip(req *http.Request) (*http.Response, error) {
 	switch req.URL.Path {
 	case "/api/oauth/usage":
 		if isResetsRead(seen) {
-			if !resetsSet {
+			switch {
+			case !strings.HasPrefix(req.Header.Get("User-Agent"), "claude-cli/"):
+				resets = `{"eligible":false,"ineligible_reason":"surface","grants":[]}`
+			case !resetsSet:
 				resets = `{"eligible":true,"grants":[]}`
 			}
 			return respond(req, http.StatusOK, map[string]string{"Content-Type": "application/json"}, `{"cedar_ember":`+resets+`}`), nil

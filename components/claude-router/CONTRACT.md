@@ -1474,21 +1474,25 @@ sees it.
 
 ### Limit readings for status
 
-Each settings read also keeps the `five_hour`, `seven_day`, and
-`model_scoped` windows of the usage response for status, with `utilization`
-converted from a percentage to a fraction
-(`TestASettingsReadRecordsTheLimitWindowsForStatus`). Routing does not use
-them. It uses response headers only. The service decodes these fields apart
-from `extra_usage`, so a field of another shape drops out of status and
-leaves the paid-overflow reading unchanged. A settings read with no readable
-window clears the last limit reading
+Each settings read also keeps the `five_hour` and `seven_day` windows of the
+usage response for status, and each `limits` entry of kind `weekly_scoped`
+with a `scope.model.display_name`, such as `Fable`, as a model-scoped weekly
+window. Status converts `utilization` and `percent` from a percentage to a
+fraction (`TestASettingsReadRecordsTheLimitWindowsForStatus`). Routing does
+not use them. It uses response headers only. The service decodes these
+fields apart from `extra_usage`, so a field of another shape drops out of
+status and leaves the paid-overflow reading unchanged. A settings read with
+no readable window clears the last limit reading
 (`TestMalformedLimitFieldsLeaveThePaidOverflowReadingIntact`,
 `TestASettingsReadWithoutReadableLimitFieldsClearsTheLimitReading`).
 
 The service also reads each account's limit resets that Claude Code offers,
 from `cedar_ember.grants` in
 `GET /api/oauth/usage?cedar_ember=1&skip_spend=1`. It reads them at start and
-every 30 minutes after, on a timer apart from the settings reads. Status
+every 30 minutes after, on a timer apart from the settings reads, with the
+user agent `claude-cli/2.1.280 (external, cli)` that the pinned SDK sends on
+inference requests. Without a Claude Code user agent, the endpoint answers
+`"eligible": false, "ineligible_reason": "surface"` and no grants. Status
 counts the resets left in grants whose `ends_at` has not passed when status
 runs, by `type`: `session`, `weekly`, or `full`
 (`TestStatusCountsOnlyResetGrantsThatHaveNotEnded`). A grant without a `type`

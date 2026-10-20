@@ -295,7 +295,7 @@ func (o *overageReader) fetch(ctx context.Context, account router.AccountID) (us
 			return usageBody{}, err
 		}
 	}
-	body, err := o.get(ctx, account, auth, usageURL)
+	body, err := o.get(ctx, account, auth, usageURL, "")
 	var re *readError
 	if !errors.As(err, &re) || !re.unauthorized || refreshed {
 		return body, err
@@ -304,7 +304,7 @@ func (o *overageReader) fetch(ctx context.Context, account router.AccountID) (us
 	if err != nil {
 		return usageBody{}, fmt.Errorf("usage endpoint answered 401, and %w", err)
 	}
-	return o.get(ctx, account, auth, usageURL)
+	return o.get(ctx, account, auth, usageURL, "")
 }
 
 // sdkRefreshWait bounds how long a read waits for a refresh the SDK has
@@ -465,12 +465,15 @@ func accessToken(a *coreauth.Auth) string {
 	return t
 }
 
-func (o *overageReader) get(ctx context.Context, account router.AccountID, auth *coreauth.Auth, url string) (usageBody, error) {
+func (o *overageReader) get(ctx context.Context, account router.AccountID, auth *coreauth.Auth, url, userAgent string) (usageBody, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	header := http.Header{}
 	header.Set("Accept", "application/json")
 	header.Set("Anthropic-Beta", "oauth-2025-04-20")
+	if userAgent != "" {
+		header.Set("User-Agent", userAgent)
+	}
 	req, err := o.s.core.NewHttpRequest(ctx, auth, http.MethodGet, url, nil, header)
 	if err != nil {
 		return usageBody{}, errors.New("could not prepare the usage request")
