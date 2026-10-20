@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -140,6 +141,9 @@ func (e *env) startWith(opts Options) *Service {
 		opts.Upstream = fixed(e.upstream)
 	}
 	opts.Now = e.clock.now
+	if opts.ModelCatalog == nil {
+		opts.ModelCatalog = noCatalog
+	}
 	startMu.Lock()
 	svc, err := Start(e.cfg, opts)
 	startMu.Unlock()
@@ -150,6 +154,8 @@ func (e *env) startWith(opts Options) *Service {
 	e.t.Cleanup(svc.Close)
 	return svc
 }
+
+func noCatalog(context.Context) ([]byte, error) { return nil, errors.New("no catalog in tests") }
 
 func fixed(rt http.RoundTripper) func() http.RoundTripper {
 	return func() http.RoundTripper { return rt }

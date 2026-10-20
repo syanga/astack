@@ -49,6 +49,8 @@ type Options struct {
 	// BinarySHA256 is the SHA-256 of the executable, taken when the process
 	// started. Status reports it as binary_sha256.
 	BinarySHA256 string
+	// ModelCatalog replaces the read of the published model catalog.
+	ModelCatalog func(context.Context) ([]byte, error)
 }
 
 type wallClock struct {
@@ -196,6 +198,11 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	if s.guard, err = installRefreshGuard(s.core, slices.Collect(maps.Values(s.authIDs))); err != nil {
 		return nil, err
 	}
+	readCatalog := opts.ModelCatalog
+	if readCatalog == nil {
+		readCatalog = fetchCatalog
+	}
+	s.readModelCatalog(readCatalog)
 
 	readCtx, cancelReads := context.WithTimeout(context.Background(), 15*time.Second)
 	var wg sync.WaitGroup
@@ -229,6 +236,20 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	go func() { _ = s.server.Serve(ln) }()
 	s.events.emit(Event{Kind: "started", Detail: fmt.Sprintf("%d accounts", len(cfg.Accounts))})
 	return s, nil
+}
+
+func (s *Service) readModelCatalog(read func(context.Context) ([]byte, error)) {
+	data, err := read(context.Background())
+	var catalog []*cliproxy.ModelInfo
+	if err == nil {
+		catalog, err = catalogClaudeModels(data)
+	}
+	if err != nil {
+		s.events.emit(Event{Kind: "model_catalog", Outcome: "failed", Detail: err.Error()})
+		return
+	}
+	added := registerCatalogModels(s.core, catalog, slices.Sorted(maps.Values(s.authIDs)))
+	s.events.emit(Event{Kind: "model_catalog", Outcome: "read", Detail: strings.Join(added, " ")})
 }
 
 // guardRegistered reports whether the refresh guard is still the SDK's

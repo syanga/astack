@@ -437,6 +437,13 @@ and new conversations go elsewhere. `claude-router move` sends
 `{"conversation": "<session id or hash>", "to": "<account>"}`. Exhaustion,
 login, and paid-overflow state survive a restart.
 
+At each start, the service reads the model catalog that its SDK's
+maintainers publish and adds the Claude models the SDK's built-in list lacks.
+Without that, a model newer than the pinned SDK, such as `claude-haiku-5-5`,
+gets a 503. A model released while the router runs works after the next
+`claude-router stop` and `claude-router start`. When the catalog does not
+answer within 5 seconds, the service serves the built-in list.
+
 `GET /claude-router/status` with the client token reports each account's
 registration, capacity, latest quota observation, paid-overflow reading,
 login requirement, known rejections, and bound and active conversation

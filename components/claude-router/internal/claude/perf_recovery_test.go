@@ -151,7 +151,7 @@ func runRecoveryScenario(t *testing.T, scenario string) scenarioResult {
 	e := newEnv(t, "acct-a", "acct-b")
 	x := &exhauster{inner: e.upstream, until: map[string]time.Time{}}
 	startMu.Lock()
-	svc, err := Start(e.cfg, Options{Upstream: fixed(x)})
+	svc, err := Start(e.cfg, Options{ModelCatalog: noCatalog, Upstream: fixed(x)})
 	startMu.Unlock()
 	if err != nil {
 		t.Fatalf("start: %v", err)

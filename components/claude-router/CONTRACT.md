@@ -835,8 +835,10 @@ PR3 adds the client-facing service in `internal/claude` and the
 6. Wait for the SDK's watcher-step log entry, then until every enrolled
    account has an SDK auth with registered models and SDK account state has
    not changed for 250 ms.
-7. Read each account's paid-overflow setting.
-8. Open the client listener.
+7. Register the Claude models of the published model catalog that the SDK's
+   built-in list lacks (Models newer than the SDK, below).
+8. Read each account's paid-overflow setting.
+9. Open the client listener.
 
 ### Routes
 
@@ -864,6 +866,33 @@ ID it names. The SDK's model registry lists only the dated IDs and refuses an
 alias without an upstream attempt. The upstream therefore receives the dated
 ID, and per-model state treats both names as one model
 (`TestModelAliasesTheAPIAcceptsAreServed`).
+
+### Models newer than the SDK
+
+The pinned SDK serves a model only when its registry lists the model for the
+pinned account, and it refuses any other model without an upstream attempt.
+Its built-in list stops at the models of its release, so a newer Claude Code
+model, such as `claude-haiku-5-5` for SDK v8.0.11, got 503 `the SDK refused
+the pinned account without an upstream attempt`. At start, before it reads
+paid-overflow settings, the service reads the model catalog that the SDK's
+own server fetches (`router-for-me/models`, `models.json`, with its mirror),
+within 5 s. It takes the catalog's `claude` entries whose ID starts with
+`claude-` and registers, for every account, those the built-in list lacks,
+with the catalog's metadata. The metadata matters: the SDK strips the
+thinking settings from a request for a model whose entry has no `thinking`
+support (`TestAModelOnlyTheCatalogListsIsServedWithItsThinkingSettings`). A
+model the built-in list has keeps its built-in entry. The service records
+`model_catalog` with outcome `read` and the added IDs.
+
+When the catalog does not answer, is not JSON of the SDK's format, or lists
+no Claude model, the service records `model_catalog` with outcome `failed`
+and serves the built-in list
+(`TestWithoutACatalogTheRouterServesTheBuiltInModels`). The SDK registers an
+account's models again only through its file watcher, its model updater, and
+its management routes, and the router runs none of them, so the added models
+last until the service stops, also across a token renewal
+(`TestACatalogModelIsServedAfterTheSDKRenewsTheAccountsCredential`). A model
+the catalog gains while the router runs is served after the next start.
 
 ### Routing loop
 
@@ -1559,7 +1588,8 @@ tested offline. PR1 lane 4 (CC-1) measures cache reads with real requests.
 `served`, `served_mark_failed`, `paid_use_observed`, `overage_read`,
 `stamp_bounded`, `credential_refresh`, `client_auth_rejected`,
 `request_rejected`, `started`, `stopped`, `test_upstream_in_use`,
-`refresh_guard_replaced`, and, since PR4, `login_confirmed`. Events carry
+`refresh_guard_replaced`, `model_catalog`, and, since PR4,
+`login_confirmed`. Events carry
 account IDs, the first 12 hex digits of the SHA-256 of the conversation key,
 statuses, classes, decisions, durations, and, on `request`, the usage
 counters the upstream
