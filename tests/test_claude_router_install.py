@@ -16,6 +16,7 @@ import re
 import stat
 import subprocess
 import sys
+import unittest
 from unittest.mock import patch
 
 from test_install import InstallerFixture
@@ -295,7 +296,7 @@ class ShellPathTests(ComponentFixture):
         self.assertNotIn("APPEND", repeat.stdout)
         self.assertEqual(stat.S_IMODE(rc.stat().st_mode), 0o600)
         self.component(command="uninstall", SHELL="/bin/bash")
-        self.assertEqual(rc.read_text(), "alias ll='ls -l'\n")
+        self.assertEqual(rc.read_text(), "alias ll='ls -l'")
 
     def test_a_shell_file_that_already_lists_the_router_stays_as_it_is_through_uninstall(self):
         rc = self.home / ".zshrc"
@@ -326,7 +327,7 @@ class ShellPathTests(ComponentFixture):
         self.component(command="uninstall", SHELL="/bin/bash")
 
         self.assertEqual(installed, original + b"\n" + self.block().encode())
-        self.assertEqual(rc.read_bytes(), original + b"\n")
+        self.assertEqual(rc.read_bytes(), original)
 
     def test_an_edit_saved_while_uninstall_removes_the_lines_is_kept(self):
         rc = self.bash_rc()
@@ -349,6 +350,25 @@ class ShellPathTests(ComponentFixture):
 
         self.assertEqual(rc.read_bytes(), b"export EDITOR=vi\n")
 
+    def test_uninstall_after_the_shell_file_was_deleted_says_nothing_about_it(self):
+        self.component(SHELL="/bin/bash")
+        self.bash_rc().unlink()
+
+        result = self.component(command="uninstall", SHELL="/bin/bash")
+
+        self.assertNotIn(str(self.bash_rc()), result.stdout)
+        self.assertFalse(self.bash_rc().exists())
+
+    def test_a_shell_file_that_is_not_utf8_gets_the_line(self):
+        rc = self.bash_rc()
+        rc.parent.mkdir(parents=True)
+        rc.write_bytes(b"export NAME='\xff'\n")
+
+        self.component(SHELL="/bin/bash")
+
+        self.assertEqual(rc.read_bytes(), b"export NAME='\xff'\n" + self.block().encode())
+
+    @unittest.skipIf(os.geteuid() == 0, "root writes files whatever their mode")
     def test_uninstall_restores_client_settings_when_the_shell_file_cannot_change(self):
         self.run_installer("--target", "claude", env=self.env)
         target = self.home / "dotfiles/bashrc"
@@ -367,7 +387,7 @@ class ShellPathTests(ComponentFixture):
 
         self.assertEqual(settings_path.read_bytes(), before)
         self.assertIn("WARN {}".format(self.bash_rc()), result.stdout)
-        self.assertIn(self.block().splitlines()[1], result.stdout)
+        self.assertIn(" / ".join(self.block().splitlines()), result.stdout)
 
     def test_a_zsh_user_gets_the_line_in_zshrc(self):
         self.component(SHELL="/bin/zsh")

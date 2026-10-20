@@ -499,7 +499,7 @@ def shell_change(command, lay, old):
     shell_file = Path(owned["file"]) if owned else shell_file_for(lay.home, lay.use_env)
     if shell_file is None:
         return ShellChange(ShellAction.UNKNOWN_SHELL, None, lines)
-    text = shell_file.read_text() if shell_file.is_file() else ""
+    text = shell_file.read_bytes().decode(errors="replace") if shell_file.is_file() else ""
     if owned and "\n".join(lines) + "\n" in text:
         return ShellChange(ShellAction.KEEP, shell_file, lines)
     if old.get("shell_path_declined"):
@@ -546,40 +546,48 @@ def apply_shell(change, record, dry_run):
     elif dry_run:
         print("{} {} {}".format("APPEND" if action is ShellAction.ADD else "REMOVE", shell_file, line))
     elif action is ShellAction.REMOVE:
+        owned = record.pop("shell_path", {})
         try:
-            if remove_block(shell_file, block.encode(), record.get("shell_path", {}).get("created")):
+            if remove_block(shell_file, block.encode(), owned.get("separator", False), owned.get("created", False)):
                 print("REMOVE {} {}".format(shell_file, line))
         except OSError as error:
-            print("WARN {} ({}); remove these lines yourself: {}".format(shell_file, error.strerror or error, line))
-        record.pop("shell_path", None)
+            print("WARN {} ({}); remove these lines yourself: {}".format(shell_file, reason(error), " / ".join(change.lines)))
     else:
         try:
-            created = append_block(shell_file, block.encode())
+            created, separator = append_block(shell_file, block.encode())
         except OSError as error:
-            print("WARN {} ({}); to add it yourself: {}".format(shell_file, error.strerror or error, line))
+            print("WARN {} ({}); to add it yourself: {}".format(shell_file, reason(error), line))
             return
-        record["shell_path"] = {"file": str(shell_file), "lines": list(change.lines), "created": created}
+        record["shell_path"] = {"file": str(shell_file), "lines": list(change.lines), "created": created,
+                                "separator": separator}
         print("APPEND {} {}".format(shell_file, line))
+
+
+def reason(error):
+    return error.strerror or str(error)
 
 
 def append_block(path, block):
     existed = path.exists()
-    fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
-    with os.fdopen(fd, "ab") as stream:
+    fd = os.open(str(path), os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o644)
+    try:
         size = os.fstat(fd).st_size
-        if size:
-            with open(path, "rb") as current:
-                current.seek(size - 1)
-                if current.read(1) != b"\n":
-                    block = b"\n" + block
-        stream.write(block)
-    return not existed
+        separator = size > 0 and os.pread(fd, 1, size - 1) != b"\n"
+        os.write(fd, (b"\n" if separator else b"") + block)
+    finally:
+        os.close(fd)
+    return not existed, separator
 
 
-def remove_block(path, block, created):
+def remove_block(path, block, separator, created):
     target = path.resolve() if path.is_symlink() else path
     for _ in range(3):
-        data = target.read_bytes()
+        try:
+            data = target.read_bytes()
+        except FileNotFoundError:
+            return False
+        if separator and b"\n" + block in data:
+            block = b"\n" + block
         if block not in data:
             return False
         rest = data.replace(block, b"", 1)
