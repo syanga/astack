@@ -1,8 +1,8 @@
 # Claude router
 
 An optional local proxy that routes Claude conversations across subscription
-accounts. The behavior is specified in
-[docs/specs/claude-account-routing.md](../../docs/specs/claude-account-routing.md).
+accounts. With one Claude account, you do not need it. The behavior is
+specified in [docs/specs/claude-account-routing.md](../../docs/specs/claude-account-routing.md).
 [CONTRACT.md](CONTRACT.md) records what the pinned SDK guarantees, the routing
 policy, and which contracts are still open.
 
@@ -18,7 +18,7 @@ The module has six parts.
 | `cmd/claude-router-sim/` | A simulator that drives `internal/router` with synthetic workloads, scripted fixtures, crash tests, and a performance workload. |
 
 You need Go 1.26.0 or later. Download the pinned dependencies once, with
-network access:
+network access, from this directory:
 
 ```sh
 go mod download
@@ -60,14 +60,22 @@ on Linux. It never changes client settings. From the repository root:
 | `~/.local/share/astack/claude-router/bin/claude-router` | The command. It keeps working after the checkout moves. |
 | `~/.local/share/astack/claude-router/lib/` | The Python helper that `direct`, `check`, and `setup` run. |
 | `~/.local/share/astack/claude-router/accepted.json` | The acceptance record of the router code, copied from `components/claude-router/accepted.json` when the checkout has one. |
-| `~/.local/state/astack/claude-router/` | State: `config.json`, `client-token`, `auths/`, `assignments/`, `accounts.json`, `events.jsonl`, `service.json`, `supervision.json`, `service.log` |
+| `~/.local/state/astack/claude-router/` | State: `config.json`, `client-token`, `auths/`, `assignments/`, `accounts.json`, `events.jsonl`, `service.json`, `supervision.json`, and on macOS `service.log` |
 | `~/Library/LaunchAgents/dev.astack.claude-router.plist` | The launchd agent (macOS) |
 | `~/.config/systemd/user/dev.astack.claude-router.service` | The systemd user unit (Linux) |
 
 `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `XDG_CONFIG_HOME` move these paths, as
-they do for the rest of astack. The commands below default `-state` to the
-state directory above. The installer seeds `config.json` with
-`127.0.0.1:18787` and no accounts, and creates `client-token` with mode 0600.
+they do for the rest of astack. The install neither starts the router nor puts
+`claude-router` on PATH. To run the commands below by name, run this line and
+add it to `~/.zshrc` on macOS or `~/.bashrc` on Linux:
+
+```sh
+export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/astack/claude-router/bin:$PATH"
+```
+
+The commands below default `-state` to the state directory above. The
+installer seeds `config.json` with `127.0.0.1:18787` and no accounts, and
+creates `client-token` with mode 0600.
 The router refuses a token shorter than 32 characters or open to other users,
 so the installer replaces a shorter `client-token` and sets an existing one to
 mode 0600.
@@ -113,7 +121,8 @@ refuses, and Claude Code stays direct, when an account has paid overflow on.
 It then activates the router with the installed acceptance record and runs
 `claude-router check`, as [Activate the router](#activate-the-router)
 describes. `setup` refuses when Claude Code already routes through the
-router.
+router. After `claude-router direct`, run `claude-router setup` with no
+`-account` to start the router and route through it again.
 
 To add an account later, run `account add`. It stops the router, signs in,
 adds the account with capacity 1, starts the router again, and waits for the
@@ -291,6 +300,21 @@ while `setup`, `account`, activation, or `claude-router direct` runs.
 | `claude-router move -conversation HASH -to ID` | Moves a conversation, named by the hash that status shows, to another account. A prefix of 4 or more hex digits works if it matches one conversation. |
 | `claude-router direct -prepare` | Lists the client settings that router activation owns and that `direct` would restore, and the backup it would write. Changes nothing. |
 | `claude-router direct` | Stops the service as `stop` does and restores those client settings, backing each file up to the path that `-prepare` printed. It restores the file of an interrupted activation, or of an activation whose settings record is gone, from its backup; if that file changed since, it refuses before it stops the service, and the edit is kept. Logins, assignments, the binary, and the job stay. A key edited after activation stops it, and the edit is kept. With no client settings to restore, it changes nothing and leaves the service running. A job loaded from another install keeps running, and `direct` does not say the router stopped. |
+
+The service has the same name on both systems. To see its state and logs
+beyond what `status` shows:
+
+| | macOS | Linux |
+| --- | --- | --- |
+| Service | launchd agent `dev.astack.claude-router` | systemd user unit `dev.astack.claude-router.service` |
+| State | `launchctl print gui/$(id -u)/dev.astack.claude-router` | `systemctl --user status dev.astack.claude-router` |
+| Logs | `~/.local/state/astack/claude-router/service.log` | `journalctl --user -u dev.astack.claude-router` |
+
+Both start the router at each login until the next `stop`. A systemd user
+unit stops when your last session ends. To keep the router running after you
+log out, such as for Claude Code in tmux over SSH, run
+`loginctl enable-linger "$USER"` once. Neither the installer nor `setup` runs
+it.
 
 Status shows hashes, account names, counters, and times, never a token or a
 prompt. A `direct` backup is a copy of the activated settings file with mode

@@ -60,22 +60,109 @@ For contribution rules, see [AGENTS.md](AGENTS.md).
 ## Install the optional Claude router
 
 [components/claude-router](components/claude-router/README.md) is an optional
-local proxy that routes Claude conversations across subscription accounts. The
-default targets and `--target all` never install it. It needs Go 1.26 or newer
-and the pinned module cache. To install it, select it explicitly:
+local proxy that routes Claude Code conversations across several Claude
+subscription accounts. With one Claude account, you do not need it. The
+default targets and `--target all` never install it.
+
+Linux setup is tested offline against a fake `systemctl`, not yet on real Linux.
+
+A conversation stays on its account until that account's included allowance
+runs out. The router then moves the conversation to another account, and the
+next request writes the conversation's prompt cache again on that account.
+`claude-router cache` reports the moves and the cache writes they caused.
+
+The router sends requests only to accounts whose latest reading says paid
+overflow is off, and `setup` refuses an account with paid overflow on. If you
+turn on usage credits at claude.ai after the last reading, while the account's
+included windows are exhausted, one paid response can happen before the router
+sees it.
+
+To install and activate the router:
+
+1. Install Go 1.26 or newer from <https://go.dev/dl/>, and Claude Code.
+   `go version` and `claude --version` must work in your shell. Linux
+   distribution packages of Go are often older than 1.26.
+2. From the checkout, download the pinned Go modules once, with network access:
+
+   ```sh
+   (cd components/claude-router && go mod download)
+   ```
+
+3. Build and install the router. The install changes no agent settings and
+   does not start the router:
+
+   ```sh
+   ./install.sh --component claude-router --dry-run
+   ./install.sh --component claude-router
+   ```
+
+   It adds a launchd agent on macOS or a systemd user unit on Linux, both
+   named `dev.astack.claude-router`.
+4. The installer does not put `claude-router` on PATH. Run this line, and add
+   it to `~/.zshrc` on macOS or `~/.bashrc` on Linux:
+
+   ```sh
+   export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/astack/claude-router/bin:$PATH"
+   ```
+
+5. Sign in each account, start the router, and point Claude Code at it. Name
+   each account with your own label:
+
+   ```sh
+   claude-router setup -account work -account alumni
+   ```
+
+   Each sign-in opens a browser window. Sign in to claude.ai with that
+   account. With `-no-browser`, `setup` prints the sign-in URL instead. `setup`
+   ends with the `check` lines and
+   `activated Claude Code routes through the router`.
+6. Check the router at any time. It sends one short test message:
+
+   ```sh
+   claude-router check
+   ```
+
+   ```text
+   ok        router running on 127.0.0.1:18787 (launchd)
+   ok        work, alumni ready
+   ok        paid overflow off on both accounts
+   ok        Claude Code settings point at the router
+   ok        code matches the accepted record (darwin/arm64)
+   ok        test message answered 200 on work in 5.8s
+   check     passed
+   ```
+
+   On Linux, the first line ends with `(systemd)`. The platform in the fifth
+   line is the acceptance record's, and `setup` prints a `note` line when it
+   differs from this machine's.
+
+On Linux, the router runs while you are logged in. To keep it running after
+your last session ends, such as for Claude Code in tmux over SSH, run
+`loginctl enable-linger "$USER"` once.
+
+Use these commands day to day:
 
 ```sh
-./install.sh --component claude-router --dry-run
-./install.sh --component claude-router
+claude-router status
+claude-router cache
+claude-router account add school
+claude-router account remove school
 ```
 
-It adds a launchd agent on macOS or a systemd user unit on Linux and changes no
-agent settings. After an acceptance run passes, `python3 scripts/claude_router.py
-activate` makes it Claude Code's default connection, and `claude-router direct`
-switches Claude Code back to a direct connection.
-`./uninstall.sh --component claude-router` removes it and keeps its logins and
-assignments. The component README explains enrollment, activation, and daily
-operation.
+`status` prints a `cache` line when account moves caused more than 10% of the
+last 24 hours' cache writes. `account remove` refuses while the account has
+conversations from the last 5 hours, unless you pass `-force`.
+
+To roll back to a direct connection, run `claude-router direct`. It stops the
+router and restores the Claude Code settings that activation changed. In a
+shell without the PATH line, run
+`~/.local/share/astack/claude-router/bin/claude-router direct`. Logins and
+assignments stay, and `claude-router setup` routes again. To remove the
+router, run `./uninstall.sh --component claude-router`. It keeps logins and
+assignments.
+
+The component README explains configuration, the service on each system,
+and every command.
 
 ## Find a skill
 
