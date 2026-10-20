@@ -115,9 +115,12 @@ class SetupActivationTests(CheckFixture):
 
         result = subprocess.run(command, capture_output=True, text=True, env=self.activate_env())
 
+        host = "{}/{}".format(*self.router().host_platform())
+        untested = ", not yet tested on real Linux" if host.startswith("linux") else ""
+        note = "" if host == "darwin/arm64" else "note      accepted on darwin/arm64, this is {}{}\n".format(host, untested)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.shown(result), self.golden("passed.txt").replace("check     passed\n",
-                                                                               "activated Claude Code routes through the router\n"))
+        self.assertEqual(self.shown(result), note + self.golden("passed.txt").replace("check     passed\n",
+                                                                                      "activated Claude Code routes through the router\n"))
         self.assertEqual(self.base_url(), self.listen)
 
     def brief(self, *arguments, **env):
