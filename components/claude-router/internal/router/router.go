@@ -22,25 +22,31 @@ const maxRouteAttempts = 3
 // them for one request. Every method takes the current time so the simulator
 // can drive the same code with a deterministic clock.
 //
-// After any journal write or sync failure, every method that answers with an
-// account or changes routing state returns ErrFailed until the store is
-// reopened.
+// After any journal write or sync failure, or a failed write of the account
+// state of a router made by Open, every method that answers with an account
+// or changes routing state returns ErrFailed until the store is reopened.
 type Router struct {
 	cfg   Config
 	store *Store
 
-	// commitMu serializes commits with Served, Relogin, and Move, so a
-	// commit re-decides against their effects.
+	// commitMu serializes commits with Served, Relogin, LoginConfirmed, and
+	// Move, so a commit re-decides against their effects.
 	commitMu sync.Mutex
 
 	mu       sync.RWMutex
 	accounts []accountView
 	index    map[AccountID]int
 	active   map[ConversationID]time.Time
+	// saved is the account state last written by persist, or nil for a
+	// router whose account state lives in memory only (New).
+	saved      map[AccountID]AccountState
+	unenrolled []AccountState
+	expiry     Instant
 }
 
 // New returns a router over the enrolled accounts, in tie-break order, and an
-// open store. Account login and quota state start unknown.
+// open store. Account login and quota state start unknown and live in memory
+// only; Open keeps them across restarts.
 func New(cfg Config, accounts []Account, store *Store) (*Router, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -66,7 +72,7 @@ func New(cfg Config, accounts []Account, store *Store) (*Router, error) {
 func (r *Router) Config() Config { return r.cfg }
 
 // Decide returns the policy outcome for a request without changing state.
-func (r *Router) Decide(now time.Time, req Request) (Decision, error) {
+func (r *Router) Decide(now Instant, req Request) (Decision, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	b, bound, err := r.store.Lookup(req.Conversation)
@@ -75,12 +81,13 @@ func (r *Router) Decide(now time.Time, req Request) (Decision, error) {
 	}
 	var loadErr error
 	v := view{
-		accounts: r.accounts,
-		index:    r.index,
-		binding:  b,
-		bound:    bound,
+		accounts:   r.accounts,
+		index:      r.index,
+		binding:    b,
+		bound:      bound,
+		checksFrom: r.expiry.Stamp,
 		loads: func() []int {
-			l, err := r.loads(now, req.Conversation)
+			l, err := r.loads(now.Stamp, req.Conversation)
 			loadErr = err
 			return l
 		},
@@ -114,7 +121,7 @@ func (r *Router) loads(now time.Time, skip ConversationID) ([]int, error) {
 // the commit lock and commits that fresh decision, so a Served or Relogin
 // call that landed after d was made is honored. It returns the fresh
 // decision, which may differ from d. Any other kind is returned unchanged.
-func (r *Router) Commit(now time.Time, req Request, d Decision) (Decision, error) {
+func (r *Router) Commit(now Instant, req Request, d Decision) (Decision, error) {
 	if err := r.store.Err(); err != nil {
 		return Decision{}, err
 	}
@@ -130,9 +137,9 @@ func (r *Router) Commit(now time.Time, req Request, d Decision) (Decision, error
 	var b Binding
 	switch fresh.Kind {
 	case Place:
-		b, err = r.store.Assign(req.Conversation, fresh.Account, fresh.Reason, now)
+		b, err = r.store.Assign(req.Conversation, fresh.Account, fresh.Reason, now.Stamp)
 	case Migrate:
-		b, err = r.store.Migrate(req.Conversation, fresh.From, fresh.Account, fresh.Reason, now)
+		b, err = r.store.Migrate(req.Conversation, fresh.From, fresh.Account, fresh.Reason, now.Stamp)
 	default:
 		return fresh, nil
 	}
@@ -142,7 +149,7 @@ func (r *Router) Commit(now time.Time, req Request, d Decision) (Decision, error
 	if b.Account != fresh.Account {
 		return Decision{}, ErrUnsettled
 	}
-	r.touch(req.Conversation, now)
+	r.touch(req.Conversation, now.Stamp)
 	return fresh, nil
 }
 
@@ -162,7 +169,7 @@ func (r *Router) CommitAssignment(now time.Time, conv ConversationID, account Ac
 
 // Route decides a request and commits a placement or migration before
 // returning it. The returned account is the one to pin the request to.
-func (r *Router) Route(now time.Time, req Request) (Decision, error) {
+func (r *Router) Route(now Instant, req Request) (Decision, error) {
 	for range maxRouteAttempts {
 		d, err := r.Decide(now, req)
 		if err != nil {
@@ -179,7 +186,7 @@ func (r *Router) Route(now time.Time, req Request) (Decision, error) {
 			}
 		}
 		if d.Kind == Dispatch || d.Kind == Retry {
-			r.touch(req.Conversation, now)
+			r.touch(req.Conversation, now.Stamp)
 		}
 		return d, nil
 	}
@@ -189,33 +196,42 @@ func (r *Router) Route(now time.Time, req Request) (Decision, error) {
 // Move is the manual override: it binds an assigned conversation to an
 // enrolled account, whatever its quota or login state.
 func (r *Router) Move(now time.Time, conv ConversationID, to AccountID) error {
+	_, err := r.MoveFrom(now, conv, to)
+	return err
+}
+
+// MoveFrom is Move that also returns the account the conversation was bound
+// to when the move took effect, under the commit lock. It returns to when
+// the conversation was already there.
+func (r *Router) MoveFrom(now time.Time, conv ConversationID, to AccountID) (from AccountID, err error) {
 	r.mu.RLock()
 	_, enrolled := r.index[to]
 	r.mu.RUnlock()
 	if !enrolled {
-		return fmt.Errorf("account %s is not enrolled", to)
+		return "", fmt.Errorf("account %s is not enrolled", to)
 	}
 	r.commitMu.Lock()
 	defer r.commitMu.Unlock()
 	b, ok, err := r.store.Lookup(conv)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !ok {
-		return ErrUnassigned
+		return "", ErrUnassigned
 	}
 	if b.Account == to {
-		return nil
+		return to, nil
 	}
-	b, err = r.store.Migrate(conv, b.Account, to, ReasonManual, now)
+	from = b.Account
+	b, err = r.store.Migrate(conv, from, to, ReasonManual, now)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if b.Account != to {
-		return ErrUnsettled
+		return "", ErrUnsettled
 	}
 	r.touch(conv, now)
-	return nil
+	return from, nil
 }
 
 // Served durably marks the conversation's binding on account as having
@@ -248,6 +264,7 @@ func (r *Router) Observe(account AccountID, attemptStart time.Time, obs Observat
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.observe(account, obs)
+	r.persist()
 }
 
 func windowKey(w Window) string {
@@ -324,7 +341,12 @@ func (r *Router) Report(f Failure) Class {
 	switch f.Class {
 	case ClassAuth:
 		if ok {
-			r.accounts[idx].needsLogin = true
+			a := &r.accounts[idx]
+			a.needsLogin = true
+			if f.AttemptStart.After(a.needsLoginAt) {
+				a.needsLoginAt = f.AttemptStart
+			}
+			r.persist()
 		}
 	case ClassExhausted, ClassModelLimit:
 		confirmed := ok && fromAttempt(f.AttemptStart, f.Observation) &&
@@ -333,6 +355,7 @@ func (r *Router) Report(f Failure) Class {
 			return ClassThrottle
 		}
 		r.observe(f.Account, f.Observation)
+		r.persist()
 	}
 	return f.Class
 }
@@ -359,12 +382,27 @@ func (r *Router) ObserveOverage(account AccountID, state Overage, at time.Time) 
 	case at.After(a.checkAt), at.Equal(a.checkAt) && state != OverageDisabled:
 		a.check, a.checkAt = state, at
 	}
+	r.persist()
+}
+
+// ExpireOverageChecks makes every disabled check stamped before at.Stamp
+// stale, so the policy dispatches to an account only on a disabled check
+// stamped at or after it. A caller calls it when its clock can no longer
+// measure the age of earlier checks.
+func (r *Router) ExpireOverageChecks(at Instant) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !at.Stamp.After(r.expiry.Stamp) {
+		return
+	}
+	r.expiry = at
+	r.persist()
 }
 
 // Admit returns why the router would not send an inference attempt to the
 // account now, or "" when it would. After a journal write or sync failure it
 // returns ReasonJournalFailed for every account.
-func (r *Router) Admit(now time.Time, account AccountID, model string) Reason {
+func (r *Router) Admit(now Instant, account AccountID, model string) Reason {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.store.Err() != nil {
@@ -374,20 +412,7 @@ func (r *Router) Admit(now time.Time, account AccountID, model string) Reason {
 	if !ok {
 		return ReasonNotEnrolled
 	}
-	return admissionBar(r.cfg, now, r.accounts[idx], model)
-}
-
-// BlockedUntil reports whether a known rejection blocks the model on an
-// account, and until when. Known is false when the reset is only a recheck
-// time for a rejection without a reported reset.
-func (r *Router) BlockedUntil(now time.Time, account AccountID, model string) (until time.Time, known, blocked bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	idx, ok := r.index[account]
-	if !ok {
-		return time.Time{}, false, false
-	}
-	return usableReset(r.cfg, now, r.accounts[idx].rejections, model)
+	return admissionBar(r.cfg, now, r.expiry.Stamp, r.accounts[idx], model)
 }
 
 // Relogin marks an account as logged in again.
@@ -401,8 +426,27 @@ func (r *Router) Relogin(account AccountID) error {
 	defer r.mu.Unlock()
 	if idx, ok := r.index[account]; ok {
 		r.accounts[idx].needsLogin = false
+		r.persist()
 	}
-	return nil
+	return r.store.Err()
+}
+
+// LoginConfirmed clears an account's login requirement when a request with
+// its credential that started at start succeeded after the failure that set
+// it: the credential works, so the account needs no browser login. It
+// reports whether it cleared the requirement.
+func (r *Router) LoginConfirmed(account AccountID, start time.Time) bool {
+	r.commitMu.Lock()
+	defer r.commitMu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	idx, ok := r.index[account]
+	if !ok || !r.accounts[idx].needsLogin || !start.After(r.accounts[idx].needsLoginAt) {
+		return false
+	}
+	r.accounts[idx].needsLogin = false
+	r.persist()
+	return true
 }
 
 func (r *Router) touch(conv ConversationID, now time.Time) {

@@ -111,6 +111,24 @@ const (
 	OveragePaidUse  Overage = "paid_use"
 )
 
+// Instant is the time of a routing call on the two clocks the policy reads.
+// After the machine's wall clock steps back, the service clock stands still
+// until the wall clock passes it, so Stamp can be ahead of Wall.
+type Instant struct {
+	// Stamp is the service clock, which never steps back. The policy ages
+	// readings by it and stamps bindings with it.
+	Stamp time.Time
+	// Wall is the machine's wall clock. The policy compares reset times
+	// with it, because a provider reports an exact reset in its own wall
+	// time.
+	Wall time.Time
+}
+
+func (i Instant) Held() bool { return i.Stamp.After(i.Wall) }
+
+// At is the instant of a caller with a single clock.
+func At(t time.Time) Instant { return Instant{Stamp: t, Wall: t} }
+
 // Request is one inference attempt. Attempt counts from 1. LastFailure is the
 // class of the previous attempt of the same request, or ClassNone.
 type Request struct {
@@ -249,6 +267,8 @@ func (c Config) Validate() error {
 		return fmt.Errorf("reset bias %v is not a finite non-negative number", c.ResetBias)
 	case c.FreshFor <= 0, c.ActiveFor <= 0, c.UnknownResetRecheck <= 0, c.OverageFreshFor <= 0:
 		return errors.New("every duration must be positive")
+	case c.UnknownResetRecheck > Weekly.Period():
+		return errors.New("unknown reset recheck must not exceed one week, the horizon for forgetting reset rejections")
 	case c.MaxAttempts < 1:
 		return errors.New("max attempts must be at least 1")
 	}

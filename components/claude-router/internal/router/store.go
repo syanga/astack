@@ -42,6 +42,7 @@ type Binding struct {
 // append-only JSON-lines file, and an fsync before a commit returns.
 type Store struct {
 	mu       sync.RWMutex
+	dir      string
 	file     journalFile
 	lock     *os.File
 	bindings map[ConversationID]Binding
@@ -99,7 +100,7 @@ func OpenStore(dir string) (*Store, error) {
 		lock.Close()
 		return nil, err
 	}
-	s := &Store{file: file, lock: lock, bindings: map[ConversationID]Binding{}}
+	s := &Store{dir: dir, file: file, lock: lock, bindings: map[ConversationID]Binding{}}
 	if errors.Is(statErr, os.ErrNotExist) {
 		if err := syncDir(dir); err != nil {
 			s.Close()

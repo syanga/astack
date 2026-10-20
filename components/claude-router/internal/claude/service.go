@@ -36,11 +36,55 @@ import (
 type Options struct {
 	// Upstream replaces the transport that reaches api.anthropic.com.
 	Upstream http.RoundTripper
-	// Now replaces the clock.
+	// Now replaces the machine's wall clock, which the service clock reads.
 	Now func() time.Time
 	// ReadRetryBase replaces the delay before the first re-read after a
 	// failed settings read.
 	ReadRetryBase time.Duration
+}
+
+type wallClock struct {
+	read      func() time.Time
+	markEvery time.Duration
+	expire    func(mark router.Instant)
+
+	mu   sync.Mutex
+	last time.Time
+	wall time.Time
+	mark router.Instant
+}
+
+func (c *wallClock) now() time.Time { return c.instant().Stamp }
+
+func (c *wallClock) instant() router.Instant {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	t := c.read().Round(0)
+	stepped := t.Before(c.wall)
+	c.wall = t
+	switch {
+	case t.After(c.last):
+		c.last = t
+		if c.mark.Held() {
+			c.marked(t)
+		}
+	case t.Equal(c.last):
+	case !c.mark.Held() || stepped || t.Sub(c.mark.Wall) >= c.markEvery:
+		c.last = c.last.Add(time.Nanosecond)
+		c.marked(t)
+	}
+	return router.Instant{Stamp: c.last, Wall: t}
+}
+
+func (c *wallClock) marked(wall time.Time) {
+	c.mark = router.Instant{Stamp: c.last, Wall: wall}
+	c.expire(c.mark)
+}
+
+func (c *wallClock) lastMark() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.mark.Stamp
 }
 
 // Service is a running router: the embedded SDK, the routing policy, and the
@@ -48,6 +92,7 @@ type Options struct {
 type Service struct {
 	cfg       Config
 	token     string
+	clock     *wallClock
 	now       func() time.Time
 	router    *router.Router
 	store     *router.Store
@@ -103,12 +148,12 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 			TLSHandshakeTimeout: 10 * time.Second,
 		}
 	}
-	now := opts.Now
-	if now == nil {
-		now = time.Now
+	wall := opts.Now
+	if wall == nil {
+		wall = time.Now
 	}
 
-	s := &Service{cfg: cfg, token: token, now: now, authIDs: map[router.AccountID]string{}, retryBase: opts.ReadRetryBase}
+	s := &Service{cfg: cfg, token: token, authIDs: map[router.AccountID]string{}, retryBase: opts.ReadRetryBase}
 	if s.retryBase <= 0 {
 		s.retryBase = defaultReadRetryBase
 	}
@@ -125,14 +170,16 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	}
 	policy := router.DefaultConfig()
 	policy.OverageFreshFor = time.Duration(cfg.OverageFreshFor)
-	if s.router, err = router.New(policy, cfg.Accounts, s.store); err != nil {
+	if s.router, err = router.Open(policy, cfg.Accounts, s.store, wall().Round(0)); err != nil {
 		return nil, err
 	}
+	s.clock = &wallClock{read: wall, markEvery: policy.OverageFreshFor, expire: s.router.ExpireOverageChecks}
+	s.now = s.clock.now
 	s.overage = newOverageReader(s)
 	admit := func(account router.AccountID, model string) router.Reason {
-		return s.router.Admit(s.now(), account, model)
+		return s.router.Admit(s.clock.instant(), account, model)
 	}
-	s.transport = newTransport(inner, redirect, cfg.MaxUpstreamAttempts, cfg.Accounts, now, admit, s.observeHeaders)
+	s.transport = newTransport(inner, redirect, cfg.MaxUpstreamAttempts, cfg.Accounts, s.now, admit, s.observeHeaders)
 	if redirect != nil {
 		s.events.emit(Event{Kind: "test_upstream_in_use", Detail: redirect.Host})
 	}
@@ -225,7 +272,8 @@ func (s *Service) Close() {
 // one read per OverageCheckEvery, and after failed reads a re-read with
 // backoff (nextRead). Every read, scheduled or on demand, counts toward the
 // run of failed reads, and the next scheduled read is timed from the last
-// read of either kind.
+// read of either kind. It records the wall time of each scheduled read for
+// catchUp.
 func (s *Service) readOverage(ctx context.Context, account router.AccountID) {
 	defer s.bgDone.Done()
 	every := time.Duration(s.cfg.OverageCheckEvery)
@@ -236,7 +284,9 @@ func (s *Service) readOverage(ctx context.Context, account router.AccountID) {
 		default:
 		}
 		streak := s.overage.failedReads(account)
-		t := time.NewTimer(nextRead(streak.failures, streak.last, every, s.retryBase))
+		delay := nextRead(streak.failures, streak.last, every, s.retryBase)
+		s.overage.schedule(account, s.now().Add(delay))
+		t := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			t.Stop()

@@ -3,6 +3,7 @@ package claude
 import (
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -88,11 +89,12 @@ func TestStaleReadingIsRecheckedBeforeDispatch(t *testing.T) {
 	}
 }
 
-func TestWaitRechecksAStaleAccountThatCouldServe(t *testing.T) {
+func TestWaitRereadsAnAccountWhoseSettingsReadFailed(t *testing.T) {
 	e := newEnv(t, "acct-a", "acct-b")
 	t0 := time.Now()
 	e.clock.set(t0)
-	e.start()
+	e.upstream.setUsage("acct-b", usageReply{Status: http.StatusInternalServerError})
+	e.startWith(Options{ReadRetryBase: time.Hour})
 	exhausted := exhaustedHeaders(time.Now().Add(2 * time.Hour))
 	exhausted["anthropic-ratelimit-unified-overage-status"] = "rejected"
 	exhausted["anthropic-ratelimit-unified-overage-disabled-reason"] = "org_level_disabled"
@@ -100,14 +102,15 @@ func TestWaitRechecksAStaleAccountThatCouldServe(t *testing.T) {
 
 	e.clock.set(t0.Add(25 * time.Minute))
 	blocked := e.send(msg{Session: sessionID(1)})
-	e.clock.set(t0.Add(31 * time.Minute))
+	e.upstream.setUsage("acct-b", usageReply{Enabled: boolPtr(false)})
+	e.clock.set(t0.Add(29 * time.Minute))
 	r := e.send(msg{Session: sessionID(2)})
 
 	if blocked.Status != http.StatusTooManyRequests {
 		t.Fatalf("request on the exhausted account got %d, want the local 429", blocked.Status)
 	}
 	if r.Status != 200 || r.Text != served("acct-b") {
-		t.Fatalf("new conversation got %d %q, want 200 from acct-b after rechecking its stale reading", r.Status, r.Text)
+		t.Fatalf("new conversation got %d %q, want 200 from acct-b after rereading its setting", r.Status, r.Text)
 	}
 }
 
@@ -115,12 +118,14 @@ func TestPaidUseRecheckClearedByADisabledReadingServesOnTheSameAccount(t *testin
 	e := newEnv(t, "acct-a", "acct-b")
 	t0 := time.Now()
 	e.clock.set(t0)
-	e.start()
+	e.startWith(Options{ReadRetryBase: time.Hour})
 	e.upstream.script("acct-a", reply{Header: map[string]string{"anthropic-ratelimit-unified-overage-in-use": "true"}})
+	e.upstream.setUsage("acct-b", usageReply{Status: http.StatusInternalServerError})
 
 	e.clock.set(t0.Add(25 * time.Minute))
 	shown := e.send(msg{Session: sessionID(1)})
 	e.clock.set(t0.Add(31 * time.Minute))
+	before := len(e.upstream.usageReads())
 	r := e.send(msg{Session: sessionID(1)})
 
 	if shown.Status != 200 || shown.Text != served("acct-a") {
@@ -130,11 +135,11 @@ func TestPaidUseRecheckClearedByADisabledReadingServesOnTheSameAccount(t *testin
 		t.Fatalf("after a disabled reread got %d %q, want 200 from acct-a", r.Status, r.Text)
 	}
 	var reads []string
-	for _, u := range e.upstream.usageReads() {
+	for _, u := range e.upstream.usageReads()[before:] {
 		reads = append(reads, u.Account)
 	}
-	if len(reads) != 3 || reads[2] != "acct-a" {
-		t.Fatalf("settings reads %v, want the two start reads and one reread of acct-a", reads)
+	if n := len(reads); n == 0 || reads[n-1] != "acct-a" || slices.Index(reads, "acct-a") != n-1 {
+		t.Fatalf("settings reads during the request %v, want catch-up reads of acct-b only, then one reread of acct-a", reads)
 	}
 }
 
@@ -155,8 +160,14 @@ func TestResponseHeadersRefreshTheReading(t *testing.T) {
 	if r.Status != 200 {
 		t.Fatalf("got %d, want 200 on a reading refreshed by the previous response", r.Status)
 	}
-	if n := len(e.upstream.usageReads()); n != 1 {
-		t.Fatalf("settings reads %d, want only the start read", n)
+	succeeded := 0
+	for _, ev := range e.events() {
+		if ev.Kind == "overage_read" && ev.Outcome == "read" {
+			succeeded++
+		}
+	}
+	if succeeded != 1 {
+		t.Fatalf("%d successful settings reads, want only the start read: every later read fails, so the fresh reading came from the response", succeeded)
 	}
 }
 
