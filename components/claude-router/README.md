@@ -55,9 +55,9 @@ on Linux. It never changes client settings. From the repository root:
 ./install.sh --component claude-router
 ```
 
-Linux is tested on a real Linux kernel with a systemd user manager in a
-container (Debian 13, systemd 257, arm64), with fake accounts. It is not yet
-tested with real accounts on a Linux machine.
+Linux is tested with fake accounts on a real Linux kernel with a systemd user
+manager in a container (Debian 13, systemd 257, arm64), not yet with real
+accounts on a Linux machine.
 
 | Path | Contents |
 | --- | --- |
@@ -70,12 +70,14 @@ tested with real accounts on a Linux machine.
 
 `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `XDG_CONFIG_HOME` move these paths, as
 they do for the rest of astack. The install neither starts the router nor puts
-`claude-router` on PATH. To run the commands below by name, run this line and
-add it to `~/.zshrc` on macOS or `~/.bashrc` on Linux:
+`claude-router` on PATH. To run the commands below by name, run this line:
 
 ```sh
 export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/astack/claude-router/bin:$PATH"
 ```
+
+To keep it in new shells, add the same line to `~/.zshrc` on macOS or
+`~/.bashrc` on Linux.
 
 The commands below default `-state` to the state directory above. The
 installer seeds `config.json` with `127.0.0.1:18787` and no accounts, and
@@ -108,8 +110,8 @@ the switch back on and also leaves that job running.
 
 ## Enroll accounts and start
 
-To sign in each account, add it, start the router, and point Claude Code at
-it in one step, run `setup` with one `-account` per account:
+To sign in each account, add it, start the router, and activate the router in
+one step, run `setup` with one `-account` per account:
 
 ```sh
 claude-router setup -account work -account alumni
@@ -122,8 +124,9 @@ refuses, and Claude Code stays direct, when an account has paid overflow on.
 It then activates the router with the installed acceptance record and runs
 `claude-router check`, as [Activate the router](#activate-the-router)
 describes. `setup` refuses when Claude Code already routes through the
-router. After `claude-router direct`, run `claude-router setup` with no
-`-account` to start the router and route through it again. After a
+router. After `claude-router direct`, run `claude-router setup` to start
+the router and activate it again. It reuses the accounts in `config.json`.
+After a
 paid-overflow refusal, turn paid overflow off on claude.ai, run
 `claude-router stop`, then run `setup` again. The running router keeps its
 reading for up to 10 minutes, so a rerun without the `stop` can refuse again.
@@ -183,7 +186,7 @@ account in `config.json`.
 
 ## Activate the router
 
-Activation points Claude Code at the router. It refuses unless an acceptance
+Activation points Claude Code's settings at the router. It refuses unless an acceptance
 record matches the router code, the installed helper scripts, and the pinned
 SDK, and the running binary is the installed one. The router code digest
 covers the tracked files under `components/claude-router/` except `*.md`,
@@ -257,6 +260,9 @@ To go back to a direct connection later, run `claude-router direct`. It also
 undoes an activation that was interrupted or whose settings record is gone.
 Uninstall refuses until then.
 
+After activation and after `direct`, start a new Claude Code session. A new
+session reads the changed settings when it starts.
+
 ## Check the router
 
 `claude-router check` prints one line per check: the router runs, every
@@ -276,6 +282,15 @@ ok        code matches the accepted record (darwin/arm64)
 ok        test message answered 200 on alumni in 6.2s
 check     passed
 ```
+
+On Linux, the first line ends with `(systemd)`. The fifth line names the
+platform the record was accepted on, not this machine, so it reads
+`(darwin/arm64)` on Linux too. When the two differ, activation and `setup`
+also print a line such as
+`note      accepted on darwin/arm64, this is linux/arm64, not yet tested on real Linux`.
+The router helper prints that text. It predates the Linux container run
+described in [Install the service](#install-the-service), and it changes only
+with the helper.
 
 When a check fails, `check` skips the test message, exits 1, and prints the
 next step. With the router stopped, it marks the checks that need the router
@@ -312,7 +327,7 @@ beyond what `status` shows:
 | --- | --- | --- |
 | Service | launchd agent `dev.astack.claude-router` | systemd user unit `dev.astack.claude-router.service` |
 | State | `launchctl print gui/$(id -u)/dev.astack.claude-router` | `systemctl --user status dev.astack.claude-router` |
-| Logs | `~/.local/state/astack/claude-router/service.log` | `journalctl --user -u dev.astack.claude-router` |
+| Logs | `${XDG_STATE_HOME:-$HOME/.local/state}/astack/claude-router/service.log` | `journalctl --user -u dev.astack.claude-router` |
 
 On Linux, run `sudo loginctl enable-linger "$USER"` once, before or after
 `setup`. With linger, the systemd user unit starts at boot and runs without a
@@ -411,7 +426,9 @@ home's install recorded. It refuses a `--service` that differs from it.
 
 ## How the service routes
 
-The service dispatches to an account only while it holds a reading, at most
+Paid overflow is the claude.ai setting that bills usage past the plan's
+included allowance, shown there as extra usage or usage credits. The service
+dispatches to an account only while it holds a reading, at most
 30 minutes old, that the account's paid overflow is disabled. It stops
 routing to an account as soon as a response shows paid use. One gap remains:
 if paid overflow is turned on outside the router after the last reading,

@@ -32,7 +32,7 @@ prompt.
 | Command | Use it for |
 | --- | --- |
 | `claude-router status` | The service, one line per account, problem lines, and a `next` line with the step to take. |
-| `claude-router check` | Whether this machine routes Claude Code. Exits 0 when every line passes. It can take 2 minutes, so give Bash a timeout of 180 seconds. |
+| `claude-router check` | Whether this machine routes Claude Code. Exits 0 when every line passes. It can take 2 minutes, so give the command a 180-second timeout. |
 | `claude-router cache` | Each account's cache hit rate, then the account moves of the last 24 hours and the cache writes they caused. `-since 6h` sets another window. |
 
 To answer "is the router working", run `check` and report its lines. For each
@@ -42,21 +42,21 @@ To answer "is the router working", run `check` and report its lines. For each
 
 Give the user every other command in a code block, to run in their own
 terminal. Claude Code sessions, possibly this one, send their requests
-through the router. A command that stops, restarts, or rewires the router cuts
-off every routed session in the middle of a turn. A sign-in waits on a browser
+through the router. A command that stops or restarts the router, activates it,
+or rolls it back cuts off every routed session in the middle of a turn. A sign-in waits on a browser
 window that only the user can use. Keep `start` and the commands in
 [Find the service](#find-the-service) with the user too, as the setup and
 rollback commands are. Say which reason applies.
 
 | Command | What it does |
 | --- | --- |
-| `claude-router setup -account NAME ...` | Opens a browser to sign in each account, restarts the router, and points Claude Code's settings at it. |
+| `claude-router setup -account NAME ...` | Opens a browser to sign in each account, restarts the router, and activates it. Activation points Claude Code's settings at the router. |
 | `claude-router account add NAME` | Stops the router, opens a browser to sign in, and starts the router again. |
 | `claude-router account remove NAME` | Stops the router and starts it again. |
 | `claude-router login -account NAME` | Opens a browser to sign in again. It runs only while the router is stopped. |
 | `claude-router stop` | Stops the router. |
 | `claude-router start` | Starts the router and turns it on at login. |
-| `claude-router direct` | Stops the router and rewrites Claude Code's settings. |
+| `claude-router direct` | Stops the router and rolls back activation by restoring Claude Code's settings. |
 | `./install.sh --component claude-router` | Builds the router. Over an activated router it restarts the service. |
 
 `NAME` is the user's own label for an account, such as `work`. With
@@ -83,7 +83,7 @@ router and needs no step of its own.
 | `NAMES not signed in` | Run `status`. For an account that needs a login, give `claude-router stop`, `claude-router login -account NAME`, and `claude-router start`. |
 | `paid overflow on for NAMES` | Ask the user to turn off paid overflow for those accounts on claude.ai. The router reads it again within 10 minutes by default. Run `check` after that, or give `claude-router stop` and `claude-router start` for an immediate reading. |
 | `paid overflow not read yet for NAMES` | Run `status` and report the account's reading. The router reads paid overflow every 10 minutes by default. Run `check` again after the next reading. |
-| `Claude Code settings do not point at the router` | Give `claude-router setup -account NAME ...` with the user's account labels. See the list below the table. |
+| `Claude Code settings do not point at the router` | Give `claude-router setup`. See the list below the table. |
 | `no accepted record at PATH` | Give `cd CHECKOUT && ./install.sh --component claude-router`, from a checkout whose `components/claude-router/accepted.json` matches its code. |
 | `code differs from the accepted record` | Report the indented lines below it. For `binary: installed X, running Y` or `code: accepted X, running Y`, give `claude-router stop` and `claude-router start`. For any other line, give `cd CHECKOUT && ./install.sh --component claude-router`, from a checkout whose `accepted.json` matches its code. |
 | `test message got no answer through the router (timed out after 120 s)` | Run `status` and report its problem lines. |
@@ -92,7 +92,9 @@ router and needs no step of its own.
 
 For the settings line:
 
-- Accounts already added skip the sign-in in `setup`.
+- `setup` with no `-account` reuses the accounts in `config.json`. If it
+  refuses with `config.json lists no accounts`, give
+  `claude-router setup -account NAME ...` with the user's account labels.
 - If `setup` refuses with `Claude Code already routes through the router`,
   the settings changed after activation. Give `claude-router direct`, then
   the same `setup`. If `direct` refuses, give its `next` line.
@@ -125,9 +127,9 @@ response can happen before the router sees it.
 
 Give the user these steps, with the checkout's absolute path for `CHECKOUT` and
 the user's account labels in place of `work` and `alumni`. Linux adds step 6.
-Linux is tested on a real Linux kernel with a systemd user manager in a
-container (Debian 13, systemd 257, arm64), with fake accounts. It is not yet
-tested with real accounts on a Linux machine.
+Linux is tested with fake accounts on a real Linux kernel with a systemd user
+manager in a container (Debian 13, systemd 257, arm64), not yet with real
+accounts on a Linux machine.
 
 1. Install Go 1.26 or newer from <https://go.dev/dl/>, Python 3.10 or newer,
    and Claude Code. `go version` and `claude --version` must work in the shell.
@@ -150,11 +152,14 @@ tested with real accounts on a Linux machine.
    cd CHECKOUT && ./install.sh --component claude-router
    ```
 
-5. Run this line, and add it to `~/.zshrc` on macOS or `~/.bashrc` on Linux:
+5. Run this line:
 
    ```sh
    export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/astack/claude-router/bin:$PATH"
    ```
+
+   To keep it in new shells, add the same line to `~/.zshrc` on macOS or
+   `~/.bashrc` on Linux.
 
 6. On Linux, let the router run without a login session:
 
@@ -174,24 +179,27 @@ tested with real accounts on a Linux machine.
    `activated Claude Code routes through the router` and
    `next      claude-router status`. When this machine's platform differs from
    the accepted record's, as on Linux, it also prints a `note` line that names
-   both. The `code matches` check line names the record's platform, so it
-   reads `(darwin/arm64)` on Linux too.
+   both, such as
+   `note      accepted on darwin/arm64, this is linux/arm64, not yet tested on real Linux`.
+   The router helper prints that text, which predates the Linux container
+   run above. The `code matches` check line names the record's platform, so
+   it reads `(darwin/arm64)` on Linux too.
 
 If `setup` refuses because an account has paid overflow on, ask the user to
 turn it off on claude.ai, then give `claude-router stop` and
-`claude-router setup`.
-The running router keeps its reading for up to 10 minutes, so a rerun without
-the `stop` can refuse again.
+`claude-router setup`. The running router keeps its reading for up to 10
+minutes, so a rerun without the `stop` can refuse again.
 
-After the user reports that `setup` finished, run `check`.
+After `setup` and after `direct`, tell the user to start a new Claude Code
+session. A new session reads the changed settings when it starts. After the
+user reports that `setup` finished, run `check`.
 
 ## Roll back
 
 Give the user `claude-router direct`. It stops the router and restores the
 Claude Code settings that activation changed. Tell the user that if it prints
 `after   claude needs its own /login`, they run `/login` in Claude Code.
-To route again, give `claude-router setup -account NAME ...` with the
-user's account labels. To remove the router, give
+To activate the router again, give `claude-router setup`. To remove the router, give
 `cd CHECKOUT && ./uninstall.sh --component claude-router`. `direct` and
 uninstall both keep logins and assignments.
 
