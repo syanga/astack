@@ -26,10 +26,10 @@ router is not installed. Follow [Set up from nothing](#set-up-from-nothing).
 
 Run `status`, `check`, and `cache` yourself. When `status` does not explain a
 failure, also run the state and log commands in
-[Find the service](#find-the-service). These commands change nothing, and
-`check` also sends one short test message on one account's plan. Show their
-lines as printed. The router's tests check that its status, events, and
-service logs hold no token or prompt.
+[Find the service](#find-the-service). These commands do not stop, restart,
+or reconfigure the router. `check` sends one short test message on one
+account's plan. Show their lines as printed. The router's tests check that its
+status, events, and service logs hold no token.
 
 | Command | Use it for |
 | --- | --- |
