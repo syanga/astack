@@ -1,0 +1,2 @@
+router  stopped  127.0.0.1:18787  launchd                            14:20 PDT
+next    claude-router start

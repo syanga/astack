@@ -10,7 +10,7 @@ The module has six parts.
 
 | Path | Contents |
 | --- | --- |
-| `cmd/claude-router/` | The `claude-router` command: `serve`, `status`, `start`, `stop`, `login`, `move`, `direct`, and `token`. |
+| `cmd/claude-router/` | The `claude-router` command: `serve`, `status`, `cache`, `start`, `stop`, `login`, `move`, `direct`, and `token`. |
 | `internal/claude/` | The local service. It embeds the pinned CLIProxyAPI SDK, authenticates clients, binds conversations through `internal/router`, and pins every upstream attempt to the bound account. |
 | `probes/` | Feasibility probes. They embed the pinned CLIProxyAPI SDK, serve two or more fake accounts from an in-process fake Anthropic API, and refuse every other host. |
 | `internal/router/` | The production routing policy and the durable assignment journal. It uses only the standard library. |
@@ -117,6 +117,9 @@ the switch back on and also leaves that job running.
    failure gets a 503 that asks the client to retry, so the client may resend
    a request that the provider already ran. The router still retries a
    connection that failed before the request was written, for up to 25 s.
+   `move_cache_warn_percent` (0 to 100, default 10) sets the share of the
+   last 24 hours' cache writes that account moves may cause before `status`
+   warns. 0 turns the warning off.
 
 3. Start the service. `start` waits until the service answers:
 
@@ -205,8 +208,9 @@ Uninstall refuses until then.
 
 | Command | What it does |
 | --- | --- |
-| `claude-router status` | One line for the service, one per account, and one per problem: a recent move, a quota or paid-overflow reading older than 15 minutes, or a conversation that waits, is refused, is held for login, or could not reach the provider. The last line names the next command to run. A stopped service shows its last start error, or that it cannot record a start. |
+| `claude-router status` | One line for the service, one per account, and one per problem. A problem is a recent move, a quota or paid-overflow reading older than 15 minutes, or a conversation that waits, is refused, is held for login, or could not reach the provider. A `cache` line warns when account moves caused more than `move_cache_warn_percent` of the last 24 hours' cache writes, also while the service is stopped. The last line names the next command to run. A stopped service shows its last start error, or that it cannot record a start. |
 | `claude-router status -v` | Every reading with its age, cache counters per account, every assigned conversation, and the migrations, newest first. |
+| `claude-router cache [-since 24h]` | For the window, each account's cache hit rate and token counters, then the number of account moves, the cache writes those moves caused, their share of all cache writes, and the moves per reason. It reads only `events.jsonl` and `config.json`, so it works while the service is stopped. |
 | `claude-router stop` | Stops the service and keeps it off, across logins and restarts, until `claude-router start`. Assignments stay. |
 | `claude-router start` | Clears the start history, turns the job back on, and starts it. It also starts at each login until the next `stop`. |
 | `claude-router login -account ID` | Logs in again after a revoked login. It refuses while the service runs, because the service would write its old credential back. Run `stop`, `login`, then `start`. |

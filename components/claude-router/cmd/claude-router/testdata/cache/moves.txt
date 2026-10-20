@@ -1,0 +1,6 @@
+window    last 24h, 23:05 PDT yesterday to now
+work      hit 95%  input 18k  write 2.10M  read 41.30M
+alumni    hit 94%  input 18k  write 2.32M  read 41.25M
+personal  hit 95%  input 18k  write 2.00M  read 41.25M
+moves     4  cost 412k  of 6.41M writes  share 6.4%
+reasons   exhausted 3, manual 1

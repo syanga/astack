@@ -76,6 +76,9 @@ func statusReport(in installation, now time.Time) (report, error) {
 		return r, nextError{err: err, next: fmt.Sprintf("remove %s, then claude-router start", filepath.Join(dir, supervisionFile))}
 	}
 	cfg, err := in.config()
+	if err == nil {
+		r.MoveWarnPercent, err = cfg.MoveCacheWarn()
+	}
 	if err != nil {
 		r.ConfigErr, r.Running = err.Error(), locked(in.State)
 	} else {
@@ -89,7 +92,7 @@ func statusReport(in installation, now time.Time) (report, error) {
 			r.SaveErr = fmt.Sprintf("cannot record a start in %s: %v", filepath.Join(dir, supervisionFile), err)
 		}
 	}
-	r.Digest, err = readDigest(filepath.Join(in.State, "events.jsonl"))
+	r.Digest, err = readDigest(filepath.Join(in.State, "events.jsonl"), now.Add(-statusCacheWindow))
 	return r, err
 }
 
@@ -234,7 +237,7 @@ func move(args []string) error {
 		return nil
 	}
 	line := fmt.Sprintf("moved   %s  %s to %s, manual", m.Conversation, m.From, m.Account)
-	if d, err := readDigest(filepath.Join(in.State, "events.jsonl")); err == nil {
+	if d, err := readDigest(filepath.Join(in.State, "events.jsonl"), time.Now()); err == nil {
 		if c := d.Conversations[m.Conversation]; c != nil && c.Context > 0 {
 			line += fmt.Sprintf("; next request writes %s cache", tokens(c.Context))
 		}

@@ -33,7 +33,7 @@ func main() {
 	}
 	commands := map[string]func([]string) error{
 		"serve": serve, "login": login, "token": token, "status": status,
-		"start": start, "stop": stop, "move": move, "direct": direct,
+		"start": start, "stop": stop, "move": move, "direct": direct, "cache": cacheCommand,
 	}
 	cmd, ok := commands[os.Args[1]]
 	if !ok {
@@ -65,6 +65,7 @@ func (e nextError) Error() string { return e.err.Error() }
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
   claude-router status [-v] [-state DIR]
+  claude-router cache [-since 24h] [-state DIR]
   claude-router start [-state DIR]
   claude-router stop [-state DIR]
   claude-router login -account ID [-no-browser] [-state DIR]

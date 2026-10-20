@@ -1986,7 +1986,7 @@ each from sample state.
 
 | Command | Contract |
 | --- | --- |
-| `status` | Reads `GET /claude-router/status`, `events.jsonl`, `supervision.json`, and `service.json`. It marks a quota observation or paid-overflow reading older than 15 minutes with a `stale` line. A service that does not answer is `stopped`, or `failed` when supervision gave up. When `config.json` does not load, status prints `config error:` with the error, and `running` or `stopped` from the assignment lock. Once supervision gives up, `failed` takes precedence, and the configuration error shows as `last error:`. A stopped service whose state directory the router cannot write shows `last error: cannot record a start in <file>: <error>` and `next    fix the error, then claude-router start` (`TestStatusShowsThatTheRouterCannotRecordAStart`). An unreadable `supervision.json` makes status exit 1 naming the file, with `next    remove <file>, then claude-router start` (`TestStatusNamesAnUnreadableSupervisionRecord`). |
+| `status` | Reads `GET /claude-router/status`, `events.jsonl`, `supervision.json`, `service.json`, and the `config.json` that `service.json` names, or the state directory's `config.json` when there is no `service.json`. It marks a quota observation or paid-overflow reading older than 15 minutes with a `stale` line. A service that does not answer is `stopped`, or `failed` when supervision gave up. When `config.json` does not load, status prints `config error:` with the error, and `running` or `stopped` from the assignment lock. Once supervision gives up, `failed` takes precedence, and the configuration error shows as `last error:`. A stopped service whose state directory the router cannot write shows `last error: cannot record a start in <file>: <error>` and `next    fix the error, then claude-router start` (`TestStatusShowsThatTheRouterCannotRecordAStart`). An unreadable `supervision.json` makes status exit 1 naming the file, with `next    remove <file>, then claude-router start` (`TestStatusNamesAnUnreadableSupervisionRecord`). |
 | `status -v` | Adds every reading with its age, cache counters per account, each assigned conversation, and the migrations, newest first, at most 20. |
 | `start`, `stop` | launchd: `enable` when disabled, then `bootstrap` or `kickstart`; `disable`, then `bootout`. systemd: `daemon-reload`, `enable`, `reset-failed`, and `start`; `disable`, then `stop`. When status already answers, `start` only turns the switch on and prints `router  running  <listen>  <manager>`. Each acts only on this installation's job (Service name, Off until start, and Shared label switch, above). `start` waits up to 90 s for status to answer or for a start error; `stop` waits until the assignment lock is free and prints `router  stopped until claude-router start; assignments kept`. Foreground installations refuse both. |
 | `login` | Unchanged flow. It refuses while a process holds the state directory, names that process's pid when status answers, and prints `next    claude-router stop`. |
@@ -2423,3 +2423,124 @@ so the retirement requirement stays blocked (Verification, below).
 | Cutover (PR6.live.3, final part) | On the daily driver at `35075a7`, with Claude Code 2.1.302 and T3 build 0.1.1-nightly.20261016.3218, whose bundled Agent SDK is 0.3.276: the preflight, install, and readiness checks named the accepted head, binary, and helpers, and both accounts read `disabled`. `activate` verified a terminal continuation and an Agent SDK continuation, 1 routed request each, and reached `active`. The router then restarted without `test_upstream`, and a T3 message routed one request to the provider, 200 in 1 attempt. The leak scan found 0 token hits in 59 files. | `evidence/PR6/cutover/` (`default-routing.json`, `activate.json`, `t3.json`, `leaks.json`), `reports/PR6-verify/cutover-35075a7/receipt.md` |
 | Legacy switcher retirement | Blocked: nobody has inspected the switcher (Legacy account switcher, above). | |
 | PR6.live.1 and PR6.live.3 on Linux | Blocked: no Linux host. The user deferred Linux on 2026-10-16 (PR6 go, item 3b), so these rows do not block merge readiness. | |
+
+## Cache cost of account moves (PR7)
+
+`claude-router cache` reports how much of the cache writes in a window come
+from conversations that changed accounts. It reads only `events.jsonl` and
+`config.json`, so it works while the router is stopped and with a missing or
+malformed `service.json`. `claude-router status` warns when that share for
+the last 24 hours exceeds `move_cache_warn_percent`. It computes the share
+from `events.jsonl`, so the warning also shows while the router is stopped.
+
+### Definitions
+
+- **Move.** A `request` event with status 200 on an account other than the
+  account of the same conversation's previous `request` event with status
+  200, at any earlier point in the log. The move is that status-200 request
+  itself. A request that fails on the new account first is not a move, and
+  neither is a `request` event without an account, such as a wait. The
+  digest reads the whole log to find the previous account and counts a move
+  only when its own `at` falls in the window.
+- **Placement.** The first status-200 request of a conversation. It is not a
+  move, even after a `migrated` event with reason `never_served_relogin`.
+- **Counted request.** A `request` event with an account, in the window,
+  whose usage reports the input, cache write, and cache read counters, none of
+  them `null`. Every sum below uses counted requests only. The move cost and
+  all cache writes therefore come from the same requests, and the move share
+  cannot exceed 100%.
+- **Move cost.** The `cache_creation_input_tokens` of the move's own request,
+  when that request is a counted request. Later requests, and cold starts
+  after the cache expires, do not count.
+- **Unknown cost.** A move whose request is not a counted request has an
+  unknown cost. Its request reported no usage, or a `null` input, cache
+  write, or cache read counter. A later request on the new account does not
+  set the cost.
+- **Reason.** The reason of the conversation's latest `migrated` event since
+  its previous status-200 request, for example `exhausted` or `manual`. A move
+  without one takes the `reason` of its own `request` event.
+- **Unknown request.** A `request` event with an account, in the window, that
+  is not a counted request. It adds nothing to the sums, and `cache` shows the
+  account's count as `+ N unknown`. A failed request without usage is not an
+  unknown request. It counts nowhere and adds no account line.
+- **Hit rate.** read / (input + write + read) over the account's counted
+  requests, rounded down. With no counted request, or counted requests that
+  sum to 0 tokens, the hit rate is `--`. The lifetime `cache` rate in
+  `status` uses the same formula over a different set: every `request` event
+  in the log with a conversation, an account, and usage, with a `null`
+  counter read as 0.
+- **All cache writes.** The sum of the cache writes of the counted requests
+  on every account.
+- **Move share.** The sum of the known move costs divided by all cache writes.
+
+`status` keeps its per-account `cache` rate over the whole log. Only the move
+share in `status` and every number in `cache` use the window.
+
+### Output
+
+The layouts are the operator's picks: mock `cache A`, the `cache unknown`
+moves line, and mock `status warning A`. `cmd/claude-router/testdata/cache/`
+holds the `cache` screens, and `TestCacheMatchesTheSelectedLayout` renders
+them and checks that each line fits in 80 columns.
+
+```text
+window    last 24h, 23:05 PDT yesterday to now
+work      hit 95%  input 18k  write 2.10M  read 41.30M
+alumni    hit 94%  input 18k  write 2.32M  read 41.25M  + 1 unknown
+personal  hit 95%  input 18k  write 2.00M  read 41.25M
+moves     5  cost 412k + 1 unknown  of 6.41M writes  share 6.4% or more
+reasons   exhausted 3, manual 2
+```
+
+- `cache` lists the accounts in `config.json` in order, then any other
+  account with a counted or unknown request in the window.
+- `+ N unknown` on an account line counts its unknown requests. On the
+  `moves` line it counts the moves with an unknown cost, and the share then
+  ends in `or more`. The share counts known move costs only.
+- With no cache write in the window, the share is `--`. The `reasons` line
+  appears only when there is a move.
+- `-since` takes a Go duration, default `24h`, and must be positive.
+
+`status` shows the warning line when all of these hold:
+
+- `config.json` loads.
+- `move_cache_warn_percent` is above 0.
+- All cache writes in the last 24 hours are above 0.
+- The move share exceeds the setting. A share equal to the setting does not
+  warn.
+
+When a move in the last 24 hours has an unknown cost, the share in the line
+ends in `or more`, as in `cache`. On a running router the line follows the
+recent moves, as the last problem line. On a stopped router it follows the
+`router  stopped` line and any `last error:` line. Three screens do not show
+it: a configuration error, a start that status cannot record, and
+`router  failed`. `status -v` does not show it either.
+
+```text
+cache   account moves wrote 14.0% of all cache writes in 24h, over 10%
+next    claude-router cache
+```
+
+```text
+router  stopped  127.0.0.1:18787  launchd                            14:20 PDT
+cache   account moves wrote 14.0% of all cache writes in 24h, over 10%
+next    claude-router start
+```
+
+The `next` line names `claude-router cache` only when no other next step
+applies. On a stopped router the next step stays `claude-router start`.
+
+### Setting
+
+| Field | Contract |
+| --- | --- |
+| `move_cache_warn_percent` | An integer from 0 to 100. Absent or `null` means 10. 0 turns the warning off. For an integer outside 0 to 100, `status` shows `config error: move_cache_warn_percent: <value> is outside 0 to 100`, and `serve` refuses to start with the same error. A value that is not an integer does not decode. For `1.5`, `status` shows `config error: <config.json path>: json: cannot unmarshal number 1.5 into Go struct field Config.move_cache_warn_percent of type int`, and `serve` refuses with the same error. `cache` ignores the value, even outside 0 to 100, but it decodes `config.json`, so for a value that is not an integer it exits 1 with the same decode error. |
+
+### Verification
+
+| Check | Tests |
+| --- | --- |
+| Moves and costs | `TestTheFirstRequestOfAConversationIsAPlacementNotAMove`, `TestAPolicyMoveCostsTheCacheWriteOfItsFirstRequestOnTheNewAccount`, `TestAManualMoveShowsTheReasonOfItsMigratedEvent`, `TestAMoveWhoseRequestHasNoUsageKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWhoseRequestHasANullCacheWriteKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWithNoUsageAfterItHasAnUnknownCost`, `TestAMoveCountsItsCostOnlyWhenItsRequestCountsTowardAllWrites`, `TestOnlyMovesWhoseRequestFallsInTheWindowCount`, `TestTwoConversationsThatMoveAtTheSameTimeEachCountTheirOwnCost`, `TestAFailedRequestOnAnotherAccountIsNotAMove`, `TestAFailedRequestWithoutUsageAddsNoAccountLine`, `TestCacheOfAnEmptyLogShowsEachAccountWithoutAShare` |
+| Inputs | `TestCacheIgnoresAMalformedServiceRecord` |
+| Layout | `TestCacheMatchesTheSelectedLayout`; `TestStatusMatchesTheSelectedLayout` cases `cache-warning`, `cache-warning-off`, `stopped-cache-warning`, and `stopped-cache-warning-verbose` |
+| Setting and warning | `TestStatusWarnsAboveTheDefaultMoveShareOfTenPercent`, `TestTheStatusWarningSaysOrMoreWhenAMoveCostIsUnknown`, `TestAMoveCacheWarnPercentOfZeroTurnsTheWarningOff`, `TestStatusAndServeRefuseAMoveCacheWarnPercentOutsideZeroToHundred` |

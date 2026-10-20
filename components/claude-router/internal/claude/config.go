@@ -51,6 +51,20 @@ type Config struct {
 	// URL. It exists for controlled-upstream lanes and is reported as an
 	// event at start.
 	TestUpstream string `json:"test_upstream,omitempty"`
+	// MoveCacheWarnPercent is the share of the last 24 hours' cache writes
+	// that account moves may cause before claude-router status warns. It
+	// runs from 0 to 100, and 0 turns the warning off. Default 10.
+	MoveCacheWarnPercent *int `json:"move_cache_warn_percent,omitempty"`
+}
+
+func (c Config) MoveCacheWarn() (int, error) {
+	if c.MoveCacheWarnPercent == nil {
+		return defaultMoveCacheWarn, nil
+	}
+	if p := *c.MoveCacheWarnPercent; p < 0 || p > 100 {
+		return 0, fmt.Errorf("move_cache_warn_percent: %d is outside 0 to 100", p)
+	}
+	return *c.MoveCacheWarnPercent, nil
 }
 
 // Duration is a time.Duration that reads and writes Go duration strings.
@@ -76,6 +90,7 @@ const (
 	defaultOverageCheckEvery = 10 * time.Minute
 	minClientTokenLength     = 32
 	defaultMaxAttempts       = 4
+	defaultMoveCacheWarn     = 10
 )
 
 // LoadConfig reads a JSON configuration file.
@@ -140,6 +155,9 @@ func (c Config) validate() error {
 	}
 	if c.MaxUpstreamAttempts < 1 || c.MaxUpstreamAttempts > defaultMaxAttempts {
 		return fmt.Errorf("max_upstream_attempts: %d is outside 1 to %d", c.MaxUpstreamAttempts, defaultMaxAttempts)
+	}
+	if _, err := c.MoveCacheWarn(); err != nil {
+		return err
 	}
 	if c.TestUpstream != "" {
 		u, err := url.Parse(c.TestUpstream)

@@ -1,0 +1,3 @@
+router  stopped  127.0.0.1:18787  launchd                            14:20 PDT
+cache   account moves wrote 14.0% of all cache writes in 24h, over 10%
+next    claude-router start
