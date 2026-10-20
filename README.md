@@ -102,7 +102,14 @@ To install and activate the router:
 
    It adds a launchd agent on macOS or a systemd user unit on Linux, both
    named `dev.astack.claude-router`.
-4. On Linux, let the router run without a login session:
+4. The installer does not put `claude-router` on PATH. Run this line, and add
+   it to `~/.zshrc` on macOS or `~/.bashrc` on Linux:
+
+   ```sh
+   export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/astack/claude-router/bin:$PATH"
+   ```
+
+5. On Linux, let the router run without a login session:
 
    ```sh
    sudo loginctl enable-linger "$USER"
@@ -110,15 +117,7 @@ To install and activate the router:
 
    With linger, the systemd user unit starts at boot. Without it, the unit
    starts at login and stops about 15 seconds after your last session ends,
-   so Claude Code in tmux over SSH loses its router when you log out. macOS
-   needs no such step.
-5. The installer does not put `claude-router` on PATH. Run this line, and add
-   it to `~/.zshrc` on macOS or `~/.bashrc` on Linux:
-
-   ```sh
-   export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/astack/claude-router/bin:$PATH"
-   ```
-
+   so Claude Code in tmux over SSH loses its router when you log out.
 6. Sign in each account, start the router, and point Claude Code at it. Name
    each account with your own label:
 
@@ -157,7 +156,6 @@ To install and activate the router:
    `(darwin/arm64)` on Linux too. When the two differ, `setup` also prints a
    line such as
    `note      accepted on darwin/arm64, this is linux/arm64, not yet tested on real Linux`.
-   The note's wording comes from the helper and predates the Linux test above.
 
 Use these commands day to day:
 

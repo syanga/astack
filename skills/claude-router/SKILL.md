@@ -44,9 +44,9 @@ Give the user every other command in a code block, to run in their own
 terminal. Claude Code sessions, possibly this one, send their requests
 through the router. A command that stops, restarts, or rewires the router cuts
 off every routed session in the middle of a turn. A sign-in waits on a browser
-window that only the user can use. The service manager is the user's, so
-`start` and the commands in [Find the service](#find-the-service) stay with
-the user too. Say which of these reasons applies.
+window that only the user can use. Keep `start` and the commands in
+[Find the service](#find-the-service) with the user too, as the setup and
+rollback commands are. Say which reason applies.
 
 | Command | What it does |
 | --- | --- |
@@ -81,7 +81,7 @@ router and needs no step of its own.
 | `router not answering on ADDRESS` | If the settings line also fails, follow its row, because `setup` starts the router. Otherwise give `claude-router start`. After the user runs it, run `check` again. |
 | `no accounts in config.json` | Give `claude-router setup -account NAME ...`. |
 | `NAMES not signed in` | Run `status`. For an account that needs a login, give `claude-router stop`, `claude-router login -account NAME`, and `claude-router start`. |
-| `paid overflow on for NAMES` | Ask the user to turn off paid overflow for those accounts on claude.ai. After the user does, run `check` again. |
+| `paid overflow on for NAMES` | Ask the user to turn off paid overflow for those accounts on claude.ai. The router reads it again within 10 minutes by default. Run `check` after that, or give `claude-router stop` and `claude-router start` for an immediate reading. |
 | `paid overflow not read yet for NAMES` | Run `status` and report the account's reading. The router reads paid overflow every 10 minutes by default. Run `check` again after the next reading. |
 | `Claude Code settings do not point at the router` | Give `claude-router setup -account NAME ...` with the user's account labels. See the list below the table. |
 | `no accepted record at PATH` | Give `cd CHECKOUT && ./install.sh --component claude-router`, from a checkout whose `components/claude-router/accepted.json` matches its code. |
@@ -177,8 +177,9 @@ tested with real accounts on a Linux machine.
    both. The `code matches` check line names the record's platform, so it
    reads `(darwin/arm64)` on Linux too.
 
-If `setup` refuses because an account has paid overflow on, the user turns it
-off on claude.ai, then runs `claude-router stop` and `claude-router setup`.
+If `setup` refuses because an account has paid overflow on, ask the user to
+turn it off on claude.ai, then give `claude-router stop` and
+`claude-router setup`.
 The running router keeps its reading for up to 10 minutes, so a rerun without
 the `stop` can refuse again.
 
@@ -204,7 +205,7 @@ commands for their system.
 | Service | launchd agent `dev.astack.claude-router` | systemd user unit `dev.astack.claude-router.service` |
 | State | `launchctl print gui/$(id -u)/dev.astack.claude-router` | `systemctl --user status dev.astack.claude-router` |
 | Logs | `${XDG_STATE_HOME:-$HOME/.local/state}/astack/claude-router/service.log` | `journalctl --user -u dev.astack.claude-router` |
-| Start | At each login | At boot with linger, otherwise at login until about 15 seconds after the last session ends |
+| Start | At each login | At boot with linger. Otherwise at login, and it stops about 15 seconds after the last session ends. |
 
 State lives in `${XDG_STATE_HOME:-$HOME/.local/state}/astack/claude-router/`
 on both systems.
