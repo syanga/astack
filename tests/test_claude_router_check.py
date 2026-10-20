@@ -110,17 +110,24 @@ class CheckTests(CheckFixture):
 class SetupActivationTests(CheckFixture):
     def test_brief_activation_through_the_recorded_manifest_prints_the_check_and_the_result(self):
         self.assertEqual(self.direct().returncode, 0)
+        record = json.loads((self.data / "accepted.json").read_text())
+        del record["platform"]
+        (self.data / "accepted.json").write_text(json.dumps(record))
         manifest = self.home / ".local/state/astack/manifest.json"
         command = [sys.executable, "-c", HELPER_WITH_MANAGED_SETTINGS, "activate", "--brief", "--manifest", str(manifest)]
 
         result = subprocess.run(command, capture_output=True, text=True, env=self.activate_env())
 
-        host = "{}/{}".format(*self.router().host_platform())
-        untested = ", not yet tested on real Linux" if host.startswith("linux") else ""
-        note = "" if host == "darwin/arm64" else "note      accepted on darwin/arm64, this is {}{}\n".format(host, untested)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.shown(result), note + self.golden("passed.txt").replace("check     passed\n",
-                                                                                      "activated Claude Code routes through the router\n"))
+        self.assertEqual(self.shown(result), "\n".join([
+            "ok        router running on 127.0.0.1:18787 (launchd)",
+            "ok        work, alumni, personal ready",
+            "ok        paid overflow off on all 3 accounts",
+            "ok        Claude Code settings point at the router",
+            "ok        code matches the accepted record",
+            "ok        test message answered 200 on alumni in 6.2s",
+            "activated Claude Code routes through the router",
+        ]) + "\n")
         self.assertEqual(self.base_url(), self.listen)
 
     def brief(self, *arguments, **env):
