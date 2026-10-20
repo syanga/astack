@@ -55,7 +55,9 @@ on Linux. It never changes client settings. From the repository root:
 ./install.sh --component claude-router
 ```
 
-Linux setup is tested offline against a fake `systemctl`, not yet on real Linux.
+Linux is tested on a real Linux kernel with a systemd user manager in a
+container (Debian 13, systemd 257, arm64), with fake accounts. It is not yet
+tested with real accounts on a Linux machine.
 
 | Path | Contents |
 | --- | --- |
@@ -117,6 +119,9 @@ Each sign-in opens a browser window. With `-no-browser`, `setup` prints the
 sign-in URL instead. `setup` adds each account to `config.json` with
 capacity 1, starts the router, and waits until every account is ready. It
 refuses, and Claude Code stays direct, when an account has paid overflow on.
+After you turn paid overflow off on claude.ai, run `claude-router stop`, then
+`setup` again. The running router keeps its reading for up to 10 minutes, so
+a rerun without the `stop` can refuse again.
 It then activates the router with the installed acceptance record and runs
 `claude-router check`, as [Activate the router](#activate-the-router)
 describes. `setup` refuses when Claude Code already routes through the
@@ -294,7 +299,7 @@ while `setup`, `account`, activation, or `claude-router direct` runs.
 | `claude-router status -v` | Every reading with its age, cache counters per account, every assigned conversation, and the migrations, newest first. |
 | `claude-router cache [-since 24h]` | For the window, each account's cache hit rate and token counters, then the number of account moves, the cache writes those moves caused, their share of all cache writes, and the moves per reason. It reads only `events.jsonl` and `config.json`, so it works while the service is stopped. |
 | `claude-router stop` | Stops the service and keeps it off, across logins and restarts, until `claude-router start`. Assignments stay. |
-| `claude-router start` | Clears the start history, turns the job back on, and starts it. It also starts at each login until the next `stop`. |
+| `claude-router start` | Clears the start history, turns the job back on, and starts it. Until the next `stop`, it also starts at each login, or on Linux with linger at boot. |
 | `claude-router login -account ID` | Logs in again after a revoked login. It refuses while the service runs, because the service would write its old credential back. Run `stop`, `login`, then `start`. |
 | `claude-router move -conversation HASH -to ID` | Moves a conversation, named by the hash that status shows, to another account. A prefix of 4 or more hex digits works if it matches one conversation. |
 | `claude-router direct -prepare` | Lists the client settings that router activation owns and that `direct` would restore, and the backup it would write. Changes nothing. |
@@ -309,10 +314,11 @@ beyond what `status` shows:
 | State | `launchctl print gui/$(id -u)/dev.astack.claude-router` | `systemctl --user status dev.astack.claude-router` |
 | Logs | `~/.local/state/astack/claude-router/service.log` | `journalctl --user -u dev.astack.claude-router` |
 
-A systemd user unit stops when your last session ends. To keep the router
-running after you log out, such as for Claude Code in tmux over SSH, run
-`loginctl enable-linger "$USER"` once. Neither the installer nor `setup` runs
-it.
+On Linux, run `sudo loginctl enable-linger "$USER"` once, before or after
+`setup`. With linger, the systemd user unit starts at boot and runs without a
+login session. Without it, the unit starts at login and stops about 15 seconds
+after your last session ends, so Claude Code in tmux over SSH loses its router
+when you log out. Neither the installer nor `setup` turns linger on.
 
 Status shows hashes, account names, counters, and times, never a token or a
 prompt. A `direct` backup is a copy of the activated settings file with mode
@@ -408,8 +414,8 @@ home's install recorded. It refuses a `--service` that differs from it.
 The service dispatches to an account only while it holds a reading, at most
 30 minutes old, that the account's paid overflow is disabled. It stops
 routing to an account as soon as a response shows paid use. One gap remains:
-if usage credits are turned on outside the router after the last reading,
-while the account's included windows are exhausted, one paid response can
+if paid overflow is turned on outside the router after the last reading,
+while the account's included allowance is used up, one paid response can
 happen before the router sees it.
 
 When an account's included allowance runs out before a response starts,

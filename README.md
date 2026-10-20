@@ -64,7 +64,9 @@ local proxy that routes Claude Code conversations across several Claude
 subscription accounts. With one Claude account, you do not need it. The
 default targets and `--target all` never install it.
 
-Linux setup is tested offline against a fake `systemctl`, not yet on real Linux.
+Linux is tested on a real Linux kernel with a systemd user manager in a
+container (Debian 13, systemd 257, arm64), with fake accounts. It is not yet
+tested with real accounts on a Linux machine.
 
 A conversation stays on its account until that account's included allowance
 runs out. The router then moves the conversation to another account. The next
@@ -72,8 +74,9 @@ request writes the conversation's prompt cache again on the new account.
 `claude-router cache` reports the moves and the cache writes they caused.
 
 Paid overflow is the claude.ai setting that bills usage past the plan's
-included allowance. The router sends requests only to accounts whose latest
-reading says paid overflow is off, and `setup` refuses an account with it on.
+included allowance, shown there as extra usage or usage credits. The router
+sends requests only to accounts whose latest reading says paid overflow is
+off, and `setup` refuses an account with it on.
 If you turn paid overflow on at claude.ai after the last reading, while the
 account's included allowance is used up, one paid response can happen before
 the router sees it.
@@ -99,14 +102,24 @@ To install and activate the router:
 
    It adds a launchd agent on macOS or a systemd user unit on Linux, both
    named `dev.astack.claude-router`.
-4. The installer does not put `claude-router` on PATH. Run this line, and add
+4. On Linux, let the router run without a login session:
+
+   ```sh
+   sudo loginctl enable-linger "$USER"
+   ```
+
+   With linger, the systemd user unit starts at boot. Without it, the unit
+   starts at login and stops about 15 seconds after your last session ends,
+   so Claude Code in tmux over SSH loses its router when you log out. macOS
+   needs no such step.
+5. The installer does not put `claude-router` on PATH. Run this line, and add
    it to `~/.zshrc` on macOS or `~/.bashrc` on Linux:
 
    ```sh
    export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/astack/claude-router/bin:$PATH"
    ```
 
-5. Sign in each account, start the router, and point Claude Code at it. Name
+6. Sign in each account, start the router, and point Claude Code at it. Name
    each account with your own label:
 
    ```sh
@@ -118,7 +131,12 @@ To install and activate the router:
    prints the `check` lines, then
    `activated Claude Code routes through the router` and
    `next      claude-router status`.
-6. Check the router at any time. It sends one short test message:
+
+   If `setup` refuses because an account has paid overflow on, turn it off on
+   claude.ai, then run `claude-router stop` and `claude-router setup`. The
+   running router keeps its reading for up to 10 minutes, so a rerun without
+   the `stop` can refuse again.
+7. Check the router at any time. It sends one short test message:
 
    ```sh
    claude-router check
@@ -134,13 +152,12 @@ To install and activate the router:
    check     passed
    ```
 
-   On Linux, the first line ends with `(systemd)`. The fifth line shows the
-   accepted record's platform. When that platform differs from this
-   machine's, `setup` prints a `note` line.
-
-On Linux, the router runs while you are logged in. To keep it running after
-your last session ends, such as for Claude Code in tmux over SSH, run
-`loginctl enable-linger "$USER"` once.
+   On Linux, the first line ends with `(systemd)`. The fifth line names the
+   platform the record was accepted on, not this machine, so it reads
+   `(darwin/arm64)` on Linux too. When the two differ, `setup` also prints a
+   line such as
+   `note      accepted on darwin/arm64, this is linux/arm64, not yet tested on real Linux`.
+   The note's wording comes from the helper and predates the Linux test above.
 
 Use these commands day to day:
 
