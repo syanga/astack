@@ -67,15 +67,16 @@ default targets and `--target all` never install it.
 Linux setup is tested offline against a fake `systemctl`, not yet on real Linux.
 
 A conversation stays on its account until that account's included allowance
-runs out. The router then moves the conversation to another account, and the
-next request writes the conversation's prompt cache again on that account.
+runs out. The router then moves the conversation to another account. The next
+request writes the conversation's prompt cache again on the new account.
 `claude-router cache` reports the moves and the cache writes they caused.
 
-The router sends requests only to accounts whose latest reading says paid
-overflow is off, and `setup` refuses an account with paid overflow on. If you
-turn on usage credits at claude.ai after the last reading, while the account's
-included windows are exhausted, one paid response can happen before the router
-sees it.
+Paid overflow is the claude.ai setting that bills usage past the plan's
+included allowance. The router sends requests only to accounts whose latest
+reading says paid overflow is off, and `setup` refuses an account with it on.
+If you turn paid overflow on at claude.ai after the last reading, while the
+account's included allowance is used up, one paid response can happen before
+the router sees it.
 
 To install and activate the router:
 
@@ -88,8 +89,8 @@ To install and activate the router:
    (cd components/claude-router && go mod download)
    ```
 
-3. Build and install the router. The install changes no agent settings and
-   does not start the router:
+3. Build and install the router. The install changes no Claude Code settings
+   and does not start the router:
 
    ```sh
    ./install.sh --component claude-router --dry-run
@@ -114,8 +115,9 @@ To install and activate the router:
 
    Each sign-in opens a browser window. Sign in to claude.ai with that
    account. With `-no-browser`, `setup` prints the sign-in URL instead. `setup`
-   ends with the `check` lines and
-   `activated Claude Code routes through the router`.
+   prints the `check` lines, then
+   `activated Claude Code routes through the router` and
+   `next      claude-router status`.
 6. Check the router at any time. It sends one short test message:
 
    ```sh
@@ -132,9 +134,9 @@ To install and activate the router:
    check     passed
    ```
 
-   On Linux, the first line ends with `(systemd)`. The platform in the fifth
-   line is the acceptance record's, and `setup` prints a `note` line when it
-   differs from this machine's.
+   On Linux, the first line ends with `(systemd)`. The fifth line shows the
+   accepted record's platform. When that platform differs from this
+   machine's, `setup` prints a `note` line.
 
 On Linux, the router runs while you are logged in. To keep it running after
 your last session ends, such as for Claude Code in tmux over SSH, run
@@ -155,11 +157,16 @@ conversations from the last 5 hours, unless you pass `-force`.
 
 To roll back to a direct connection, run `claude-router direct`. It stops the
 router and restores the Claude Code settings that activation changed. In a
-shell without the PATH line, run
-`~/.local/share/astack/claude-router/bin/claude-router direct`. Logins and
-assignments stay, and `claude-router setup` routes again. To remove the
-router, run `./uninstall.sh --component claude-router`. It keeps logins and
-assignments.
+shell without the PATH line, run:
+
+```sh
+"${XDG_DATA_HOME:-$HOME/.local/share}/astack/claude-router/bin/claude-router" direct
+```
+
+If `direct` prints `after   claude needs its own /login`, run `/login` in
+Claude Code. To route again, run `claude-router setup`. To remove the router,
+run `./uninstall.sh --component claude-router`. `direct` and uninstall both
+keep logins and assignments.
 
 The component README explains configuration, the service on each system,
 and every command.

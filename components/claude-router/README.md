@@ -55,6 +55,8 @@ on Linux. It never changes client settings. From the repository root:
 ./install.sh --component claude-router
 ```
 
+Linux setup is tested offline against a fake `systemctl`, not yet on real Linux.
+
 | Path | Contents |
 | --- | --- |
 | `~/.local/share/astack/claude-router/bin/claude-router` | The command. It keeps working after the checkout moves. |
@@ -87,9 +89,6 @@ can live in another home:
 ```sh
 python3 scripts/claude_router.py install --service dev.example.router --port 28787 --home /path/to/home
 ```
-
-Linux support is not yet tested on real Linux. Unit tests cover the systemd
-path against a fake `systemctl`.
 
 On Linux, a second home does not work: systemd reads user units only from the
 account's own directories, so it never loads a unit installed under another
@@ -310,9 +309,8 @@ beyond what `status` shows:
 | State | `launchctl print gui/$(id -u)/dev.astack.claude-router` | `systemctl --user status dev.astack.claude-router` |
 | Logs | `~/.local/state/astack/claude-router/service.log` | `journalctl --user -u dev.astack.claude-router` |
 
-Both start the router at each login until the next `stop`. A systemd user
-unit stops when your last session ends. To keep the router running after you
-log out, such as for Claude Code in tmux over SSH, run
+A systemd user unit stops when your last session ends. To keep the router
+running after you log out, such as for Claude Code in tmux over SSH, run
 `loginctl enable-linger "$USER"` once. Neither the installer nor `setup` runs
 it.
 
@@ -416,9 +414,11 @@ happen before the router sees it.
 
 When an account's included allowance runs out before a response starts,
 the router moves the conversation to another eligible account and answers
-the same request from there. When no account can serve, it answers with a
-429 that carries the earliest reset at which an account can serve again,
-and the client sleeps until then and sends again. A conversation never
+the same request from there. That request writes the conversation's prompt
+cache again on the new account. `claude-router cache` reports each move and
+the cache writes it caused. When no account can serve, it answers with a 429
+that carries the earliest reset at which an account can serve again, and the
+client sleeps until then and sends again. A conversation never
 returns to its first account on its own. When an account needs a new
 login, its conversations get an error that names `claude-router login`,
 and new conversations go elsewhere. `claude-router move` sends
