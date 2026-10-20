@@ -1,0 +1,18 @@
+{
+  "name": "equal-quota-unequal-capacity",
+  "description": "No quota observations. Eight conversations arrive a minute apart and all stay active, so placement minimizes (active+1)/capacity with ties to the earlier account. Capacities 1:2:1 give b a b c b a b c and a final 2:4:2 split under both rules.",
+  "start": "2026-10-05T09:00:00Z",
+  "accounts": [{"id": "acct-a", "capacity": 1}, {"id": "acct-b", "capacity": 2}, {"id": "acct-c", "capacity": 1}],
+  "steps": [
+    {"at_minutes": 0, "overage": {"state": "disabled"}},
+    {"at_minutes": 0, "route": {"conversation": "conv-0", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "place", "account": "acct-b"}}},
+    {"at_minutes": 1, "route": {"conversation": "conv-1", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "place", "account": "acct-a"}}},
+    {"at_minutes": 2, "route": {"conversation": "conv-2", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "place", "account": "acct-b"}}},
+    {"at_minutes": 3, "route": {"conversation": "conv-3", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "place", "account": "acct-c"}}},
+    {"at_minutes": 4, "route": {"conversation": "conv-4", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "place", "account": "acct-b"}}},
+    {"at_minutes": 5, "route": {"conversation": "conv-5", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "place", "account": "acct-a"}}},
+    {"at_minutes": 6, "route": {"conversation": "conv-6", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "place", "account": "acct-b"}}},
+    {"at_minutes": 7, "route": {"conversation": "conv-7", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "place", "account": "acct-c"}}},
+    {"at_minutes": 8, "route": {"conversation": "conv-0", "model": "claude-sonnet-4-5", "attempt": 1}, "expect": {"any": {"kind": "dispatch", "account": "acct-b"}}}
+  ]
+}
