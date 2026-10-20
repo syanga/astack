@@ -499,7 +499,10 @@ def shell_change(command, lay, old):
     shell_file = Path(owned["file"]) if owned else shell_file_for(lay.home, lay.use_env)
     if shell_file is None:
         return ShellChange(ShellAction.UNKNOWN_SHELL, None, lines)
-    text = shell_file.read_bytes().decode(errors="replace") if shell_file.is_file() else ""
+    try:
+        text = shell_file.read_bytes().decode(errors="replace")
+    except OSError:
+        text = ""
     if owned and "\n".join(lines) + "\n" in text:
         return ShellChange(ShellAction.KEEP, shell_file, lines)
     if old.get("shell_path_declined"):
@@ -586,11 +589,12 @@ def remove_block(path, block, separator, created):
             data = target.read_bytes()
         except FileNotFoundError:
             return False
-        if separator and b"\n" + block in data:
-            block = b"\n" + block
         if block not in data:
             return False
-        rest = data.replace(block, b"", 1)
+        if separator and data.endswith(b"\n" + block):
+            rest = data[:-len(block) - 1]
+        else:
+            rest = data.replace(block, b"", 1)
         mode = stat.S_IMODE(target.stat().st_mode)
         fd, temporary = tempfile.mkstemp(prefix=".astack-", dir=str(target.parent))
         try:

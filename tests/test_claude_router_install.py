@@ -329,6 +329,18 @@ class ShellPathTests(ComponentFixture):
         self.assertEqual(installed, original + b"\n" + self.block().encode())
         self.assertEqual(rc.read_bytes(), original)
 
+    def test_lines_added_below_the_path_lines_stay_separate_after_uninstall(self):
+        rc = self.bash_rc()
+        rc.parent.mkdir(parents=True)
+        rc.write_bytes(b"alias a=b")
+        self.component(SHELL="/bin/bash")
+        with open(rc, "ab") as stream:
+            stream.write(b"export Z=1\n")
+
+        self.component(command="uninstall", SHELL="/bin/bash")
+
+        self.assertEqual(rc.read_bytes(), b"alias a=b\nexport Z=1\n")
+
     def test_an_edit_saved_while_uninstall_removes_the_lines_is_kept(self):
         rc = self.bash_rc()
         self.component(SHELL="/bin/bash")
