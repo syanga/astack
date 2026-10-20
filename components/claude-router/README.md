@@ -68,10 +68,9 @@ Linux is tested on a real kernel in a Debian 13 arm64 container with systemd
 | `~/.config/systemd/user/dev.astack.claude-router.service` | The systemd user unit (Linux) |
 
 `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `XDG_CONFIG_HOME` move these paths, as
-they do for the rest of astack. The install neither starts the router nor puts
-`claude-router` on PATH. The root README's
-[install steps](../../README.md#install-the-optional-claude-router) give the
-PATH line.
+they do for the rest of astack. The install does not start the router. It
+offers to add the `bin` directory above to PATH, and uninstall removes the
+lines it added.
 
 The commands below default `-state` to the state directory above. The
 installer seeds `config.json` with `127.0.0.1:18787` and no accounts, and

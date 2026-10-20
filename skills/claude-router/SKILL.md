@@ -11,8 +11,8 @@ need it.
 
 ## Find the command
 
-The installer does not put `claude-router` on PATH. This prints its absolute
-path:
+An agent's shell may not have `claude-router` on PATH. This prints its
+absolute path:
 
 ```sh
 echo "${XDG_DATA_HOME:-$HOME/.local/share}/astack/claude-router/bin/claude-router"
@@ -59,7 +59,7 @@ terminal, and say which reason applies:
 | `claude-router stop` | Stops the router. |
 | `claude-router start` | Starts the router and turns it on at login. |
 | `claude-router direct` | Stops the router and restores Claude Code's settings. |
-| `cd CHECKOUT && ./install.sh --component claude-router` | Builds the router. Over an activated router, it restarts the service. |
+| `cd CHECKOUT && ./install.sh --component claude-router` | Builds the router. Over an activated router, it restarts the service. `astack-update` runs it itself, because invoking that skill authorizes the restart. |
 
 `NAME` is the user's label for an account, such as `work`. With `-no-browser`,
 `setup`, `account add`, and `login` print the sign-in URL. `account remove`
@@ -144,12 +144,8 @@ Give the user these steps. Put the checkout's absolute path in place of
    cd CHECKOUT && ./install.sh --component claude-router
    ```
 
-5. Put the router on PATH, and add the same line to `~/.zshrc` on macOS or
-   `~/.bashrc` on Linux:
-
-   ```sh
-   export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/astack/claude-router/bin:$PATH"
-   ```
+5. When the install asks `Add claude-router to PATH in FILE? [Y/n]`, press
+   Enter. Then open a new shell.
 
 6. On Linux only, let the router run without a login session:
 

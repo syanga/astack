@@ -11,3 +11,9 @@ Treat invocation as authorization to update and reinstall astack without another
 Fetch astack's upstream, then fast-forward its `main` worktree to remote main when possible. Leave unrelated untracked files and directories in place. If local edits, unpublished commits, or conflicting paths prevent the fast-forward, install from a separate clean worktree at remote main. Preserve the existing work and task branches.
 
 Run `./install.sh` from the updated checkout even when already current. Preserve installed harness targets unless the user specifies others. For installer conflicts, use the installer's `--force` option to back up conflicting files and complete the upgrade. Report any backup locations with the result.
+
+When the astack manifest, `${XDG_STATE_HOME:-$HOME/.local/state}/astack/manifest.json`, lists `claude-router` under `components`, update the router after the harness install succeeds:
+
+1. Run `python3 scripts/claude_router.py identity --code-only` in the updated checkout. When `components/claude-router/accepted.json` has a `result` other than `pass`, an `sdk` other than the CLIProxyAPI version in `components/claude-router/go.mod`, or a `code_sha256` or `helpers_sha256` other than the command printed, leave the router as it is and report the mismatch, because over an activated router the install's check would fail and switch Claude Code to direct.
+2. Otherwise run `./install.sh --component claude-router < /dev/null`, without `--force`, with a 600-second timeout. An activated router restarts, which ends requests other routed sessions have in flight.
+3. Report any `APPEND`, `SKIP`, or `RESTART` line, the check lines after `CHECK`, or the `astack:` line when it exits 1.

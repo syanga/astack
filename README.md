@@ -89,12 +89,8 @@ To install and activate the router:
    ./install.sh --component claude-router
    ```
 
-4. Put `claude-router` on PATH. The installer does not. To keep it in new
-   shells, add the same line to `~/.zshrc` on macOS or `~/.bashrc` on Linux:
-
-   ```sh
-   export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/astack/claude-router/bin:$PATH"
-   ```
+4. When the install asks `Add claude-router to PATH in FILE? [Y/n]`, press
+   Enter. Then open a new shell.
 
 5. On Linux, turn on linger so the router runs without a login session
    ([why](components/claude-router/README.md#operate-the-service)):

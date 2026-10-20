@@ -76,6 +76,7 @@ class Layout:
     service: str
     descriptor: Path | None
     port: int
+    use_env: bool = True
 
     @property
     def binary(self):
@@ -117,7 +118,7 @@ def layout(home, use_env, state_root, manager=None, service=None, port=None):
         descriptor = env_dir("XDG_CONFIG_HOME", ".config", home, use_env) / "systemd/user" / (service + ".service")
     data = env_dir("XDG_DATA_HOME", ".local/share", home, use_env) / "astack" / NAME
     return Layout(home=home, data=data, state=state_root / NAME, manifest=state_root / "manifest.json",
-                  manager=manager, service=service, descriptor=descriptor, port=port)
+                  manager=manager, service=service, descriptor=descriptor, port=port, use_env=use_env)
 
 
 def go_version(text):
@@ -369,6 +370,7 @@ class Plan:
     settings: list = field(default_factory=list)
     conflicts: list = field(default_factory=list)
     binary_changed: bool = False
+    shell: tuple | None = None
     code_sha256: str | None = None
     go: str | None = None
     lock: ActivationLock | None = None
@@ -386,7 +388,8 @@ def plan(command, state, lay, force, lock):
         recorded = old["layout"]
         lay = Layout(home=lay.home, data=Path(recorded["data"]), state=Path(recorded["state"]), manifest=lay.manifest,
                      manager=recorded["manager"], service=recorded["service"],
-                     descriptor=Path(recorded["descriptor"]) if recorded["descriptor"] else None, port=lay.port)
+                     descriptor=Path(recorded["descriptor"]) if recorded["descriptor"] else None, port=lay.port,
+                     use_env=lay.use_env)
     return planned(Plan(command=command, lay=lay, old=old, lock=lock), state, force)
 
 
@@ -444,11 +447,106 @@ def planned(result, state, force):
             action = "remove" if actual is not None and actual == created.get(filename) else "keep"
             payload = None
         result.seeds.append((path, action, payload, created.get(filename)))
+    result.shell = shell_change(command, lay, old)
     if command == "uninstall":
         previous = state.get("settings", {}).get(NAME, {})
         result.settings = astack_settings.prepare(NAME, previous, {}, force)
         result.conflicts.extend("{} [{}]".format(change.path, key) for change in result.settings for key in change.conflicts)
     return result
+
+
+PATH_MARKER = "# astack: claude-router on PATH"
+
+
+def shell_file(home, use_env):
+    shell = Path(os.environ.get("SHELL", "")).name
+    if shell not in ("bash", "zsh"):
+        shell = "zsh" if sys.platform == "darwin" else "bash"
+    if shell == "zsh":
+        zdotdir = os.environ.get("ZDOTDIR") if use_env else None
+        return Path(zdotdir or home) / ".zshrc"
+    if sys.platform != "darwin":
+        return home / ".bashrc"
+    # Terminal on macOS starts bash as a login shell, which reads the first of these that exists.
+    login = [home / name for name in (".bash_profile", ".bash_login", ".profile")]
+    return next((path for path in login if path.is_file()), login[0])
+
+
+def shell_change(command, lay, old):
+    """Return (action, shell file, lines) for the PATH lines, or None."""
+    owned = old.get("shell_path")
+    if command == "uninstall":
+        return ("remove", Path(owned["file"]), owned["lines"]) if owned else None
+    rc = Path(owned["file"]) if owned else shell_file(lay.home, lay.use_env)
+    directory = re.sub(r'([\\"$`])', r"\\\1", str(lay.binary.parent))
+    lines = [PATH_MARKER, 'export PATH="{}:$PATH"'.format(directory)]
+    text = rc.read_text() if rc.is_file() else ""
+    if owned and "\n".join(lines) + "\n" in text:
+        return ("keep", rc, lines)
+    if old.get("shell_path_declined"):
+        return ("declined", rc, lines)
+    active = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+    if any("astack/claude-router/bin" in line or str(lay.binary.parent) in line for line in active):
+        return ("present", rc, lines)
+    return ("add", rc, lines)
+
+
+def on_terminal():
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def ask_shell(change):
+    """Ask on a terminal whether to add the PATH lines; return the change to make."""
+    action, rc, lines = change
+    if action != "add" or not on_terminal():
+        return change
+    try:
+        answer = input("Add claude-router to PATH in {}? [Y/n] ".format(rc))
+    except EOFError:
+        answer = ""
+    return ("refused", rc, lines) if answer.strip().lower() in ("n", "no") else change
+
+
+def apply_shell(change, record, dry_run):
+    action, rc, lines = change
+    block = "\n".join(lines) + "\n"
+    if action == "keep":
+        print("KEEP {}".format(rc))
+        return
+    if action == "declined":
+        print("SKIP {} (declined at an earlier install; to add it yourself: {})".format(rc, lines[1]))
+        return
+    if action == "present":
+        print("KEEP {} (already puts claude-router on PATH)".format(rc))
+        record.pop("shell_path", None)
+        return
+    if dry_run:
+        print("{} {} {}".format("APPEND" if action == "add" else "REMOVE", rc, lines[1]))
+        return
+    target = rc.resolve() if rc.is_symlink() else rc
+    existed = target.is_file()
+    text = target.read_text() if existed else ""
+    mode = stat.S_IMODE(target.stat().st_mode) if existed else 0o644
+    if action == "remove":
+        if block in text:
+            text = text.replace(block, "", 1)
+            if text or not record.get("shell_path", {}).get("created"):
+                files.atomic_write(target, text.encode(), mode)
+            else:
+                target.unlink()
+            print("REMOVE {} {}".format(rc, lines[1]))
+        record.pop("shell_path", None)
+        return
+    if action == "refused":
+        print("SKIP {} (to add it yourself: {})".format(rc, lines[1]))
+        record.pop("shell_path", None)
+        record["shell_path_declined"] = True
+        return
+    if text and not text.endswith("\n"):
+        text += "\n"
+    files.atomic_write(target, (text + block).encode(), mode)
+    record["shell_path"] = {"file": str(rc), "lines": lines, "created": not existed}
+    print("APPEND {} {}".format(rc, lines[1]))
 
 
 def check_harness_settings(harness_values):
@@ -494,6 +592,8 @@ def apply(p, state, state_path, backup_root, dry_run=False):
     lay = p.lay
     if p.command == "uninstall" and not p.old and not p.settings:
         return
+    if p.shell and not dry_run:
+        p.shell = ask_shell(p.shell)
     if p.command == "uninstall":
         stop_service(lay, dry_run)
     elif not dry_run:
@@ -567,6 +667,9 @@ def apply(p, state, state_path, backup_root, dry_run=False):
     activated = p.command == "install" and is_activated(lay.state, state)
     if p.command == "install" and p.binary_changed and router_running(lay) and not activated:
         print("RESTART needed to run the new binary: claude-router stop; claude-router start")
+    if p.shell:
+        apply_shell(p.shell, record, dry_run)
+        save()
     for change in p.settings:
         change.apply(state, state_path, backup_root, dry_run=dry_run)
     if p.command == "uninstall":

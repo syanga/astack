@@ -254,6 +254,158 @@ class ComponentSelectionTests(ComponentFixture):
         self.assertTrue((self.state_dir / "auths/work.json").exists())
 
 
+class ShellPathTests(ComponentFixture):
+    def bash_rc(self):
+        return self.home / (".bash_profile" if sys.platform == "darwin" else ".bashrc")
+
+    def bin_dir(self):
+        return self.data / "bin"
+
+    def block(self):
+        return '# astack: claude-router on PATH\nexport PATH="{}:$PATH"\n'.format(self.bin_dir())
+
+    def on_path(self, rc):
+        result = subprocess.run(["sh", "-c", '. "$1"; command -v claude-router', "sh", str(rc)],
+                                capture_output=True, text=True, env=dict(self.env, HOME=str(self.home)))
+        return result.stdout.strip()
+
+    def test_install_puts_the_router_on_path_in_a_new_shell_file_and_uninstall_removes_it(self):
+        rc = self.bash_rc()
+
+        result = self.component(SHELL="/bin/bash")
+
+        self.assertIn("APPEND {}".format(rc), result.stdout)
+        self.assertEqual(rc.read_text(), self.block())
+        self.assertEqual(self.on_path(rc), str(self.bin_dir() / "claude-router"))
+        self.component(command="uninstall", SHELL="/bin/bash")
+        self.assertFalse(rc.exists())
+
+    def test_an_existing_shell_file_keeps_its_lines_and_a_repeat_install_adds_nothing(self):
+        rc = self.bash_rc()
+        rc.parent.mkdir(parents=True)
+        rc.write_text("alias ll='ls -l'")
+        rc.chmod(0o600)
+
+        self.component(SHELL="/bin/bash")
+        once = rc.read_text()
+        repeat = self.component(SHELL="/bin/bash")
+
+        self.assertEqual(once, "alias ll='ls -l'\n" + self.block())
+        self.assertEqual(rc.read_text(), once)
+        self.assertNotIn("APPEND", repeat.stdout)
+        self.assertEqual(stat.S_IMODE(rc.stat().st_mode), 0o600)
+        self.component(command="uninstall", SHELL="/bin/bash")
+        self.assertEqual(rc.read_text(), "alias ll='ls -l'\n")
+
+    def test_a_shell_file_that_already_lists_the_router_stays_as_it_is_through_uninstall(self):
+        rc = self.home / ".zshrc"
+        rc.parent.mkdir(parents=True)
+        line = 'export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/astack/claude-router/bin:$PATH"\n'
+        rc.write_text(line)
+
+        result = self.component(SHELL="/usr/bin/zsh")
+        self.component(command="uninstall", SHELL="/usr/bin/zsh")
+
+        self.assertIn("KEEP {} (already puts claude-router on PATH)".format(rc), result.stdout)
+        self.assertEqual(rc.read_text(), line)
+
+    def test_a_zsh_user_gets_the_line_in_zshrc(self):
+        self.component(SHELL="/bin/zsh")
+
+        self.assertEqual((self.home / ".zshrc").read_text(), self.block())
+        self.assertFalse((self.bash_rc()).exists())
+
+    def test_a_commented_out_line_does_not_count_as_on_path(self):
+        rc = self.bash_rc()
+        rc.parent.mkdir(parents=True)
+        rc.write_text('# export PATH="$HOME/.local/share/astack/claude-router/bin:$PATH"\n')
+
+        self.component(SHELL="/bin/bash")
+
+        self.assertTrue(rc.read_text().endswith(self.block()))
+
+    def test_zdotdir_names_the_zsh_file_unless_home_is_given(self):
+        router = self.router()
+        zdotdir = self.root / "zsh config"
+        with patch.dict(router.os.environ, {"SHELL": "/bin/zsh", "ZDOTDIR": str(zdotdir)}):
+            self.assertEqual(router.shell_file(self.home, True), zdotdir / ".zshrc")
+            self.assertEqual(router.shell_file(self.home, False), self.home / ".zshrc")
+
+        self.component(SHELL="/bin/zsh", ZDOTDIR=str(zdotdir))
+
+        self.assertEqual((self.home / ".zshrc").read_text(), self.block())
+        self.assertFalse(zdotdir.exists())
+
+    def test_bash_on_macos_writes_the_login_file_bash_reads(self):
+        router = self.router()
+        self.home.mkdir(parents=True)
+        (self.home / ".profile").write_text("export EDITOR=vi\n")
+        with patch.object(router.sys, "platform", "darwin"), patch.dict(router.os.environ, {"SHELL": "/bin/bash"}):
+            self.assertEqual(router.shell_file(self.home, False), self.home / ".profile")
+            (self.home / ".bash_profile").write_text("")
+            self.assertEqual(router.shell_file(self.home, False), self.home / ".bash_profile")
+
+    def test_ctrl_c_at_the_question_writes_nothing_and_ctrl_d_takes_the_default(self):
+        module = self.module()
+        with patch.object(module.claude_router, "on_terminal", return_value=True), \
+                patch("builtins.input", side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
+            self.run_module(module, {"SHELL": "/bin/bash"}, "install", "--home", str(self.home), "--component", "claude-router")
+        self.assertFalse((self.data / "bin/claude-router").exists())
+        self.assertFalse(self.bash_rc().exists())
+
+        module = self.module()
+        with patch.object(module.claude_router, "on_terminal", return_value=True), patch("builtins.input", side_effect=EOFError):
+            self.run_module(module, {"SHELL": "/bin/bash"}, "install", "--home", str(self.home), "--component", "claude-router")
+        self.assertEqual(self.bash_rc().read_text(), self.block())
+
+    def test_a_symlinked_shell_file_stays_a_link_to_the_file_that_gets_the_line(self):
+        target = self.home / "dotfiles/bashrc"
+        target.parent.mkdir(parents=True)
+        target.write_text("set -o vi\n")
+        rc = self.bash_rc()
+        rc.symlink_to(target)
+
+        self.component(SHELL="/bin/bash")
+
+        self.assertTrue(rc.is_symlink())
+        self.assertEqual(target.read_text(), "set -o vi\n" + self.block())
+
+    def test_a_preview_asks_nothing_and_writes_no_shell_file(self):
+        result = self.component("--dry-run", SHELL="/bin/bash")
+
+        self.assertIn("APPEND {}".format(self.bash_rc()), result.stdout)
+        self.assertFalse(self.home.exists())
+
+    def test_on_a_terminal_the_installer_asks_and_takes_yes_by_default(self):
+        for answer, added in (("", True), ("y", True), ("n", False), ("no", False)):
+            with self.subTest(answer=answer):
+                rc = self.bash_rc()
+                if rc.exists():
+                    rc.unlink()
+                module = self.module()
+                questions = []
+                with patch.object(module.claude_router, "on_terminal", return_value=True), \
+                        patch("builtins.input", side_effect=lambda q: questions.append(q) or answer):
+                    self.run_module(module, {"SHELL": "/bin/bash"}, "install", "--home", str(self.home), "--component", "claude-router")
+                self.assertEqual(questions, ["Add claude-router to PATH in {}? [Y/n] ".format(rc)])
+                self.assertEqual(rc.exists(), added)
+                if not added:
+                    state = json.loads((self.home / ".local/state/astack/manifest.json").read_text())
+                    self.assertNotIn("shell_path", state["components"]["claude-router"])
+                self.component(command="uninstall", SHELL="/bin/bash")
+
+    def test_a_declined_line_stays_out_at_later_installs_without_a_terminal(self):
+        rc = self.bash_rc()
+        module = self.module()
+        with patch.object(module.claude_router, "on_terminal", return_value=True), patch("builtins.input", return_value="n"):
+            self.run_module(module, {"SHELL": "/bin/bash"}, "install", "--home", str(self.home), "--component", "claude-router")
+
+        later = self.component(SHELL="/bin/bash")
+
+        self.assertFalse(rc.exists())
+        self.assertIn("SKIP {} (declined at an earlier install".format(rc), later.stdout)
+
+
 class TokenCreationTests(ComponentFixture):
     def test_an_install_killed_before_the_token_rename_leaves_none_and_the_next_one_cleans_up(self):
         token = self.state_dir / "client-token"
