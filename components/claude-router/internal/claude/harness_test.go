@@ -141,11 +141,8 @@ func (e *env) startWith(opts Options) *Service {
 		opts.Upstream = fixed(e.upstream)
 	}
 	opts.Now = e.clock.now
-	if opts.ModelCatalog == nil {
-		opts.ModelCatalog = noCatalog
-	}
 	startMu.Lock()
-	svc, err := Start(e.cfg, opts)
+	svc, err := Start(e.cfg, offline(opts))
 	startMu.Unlock()
 	if err != nil {
 		e.t.Fatalf("start: %v", err)
@@ -156,6 +153,13 @@ func (e *env) startWith(opts Options) *Service {
 }
 
 func noCatalog(context.Context) ([]byte, error) { return nil, errors.New("no catalog in tests") }
+
+func offline(opts Options) Options {
+	if opts.ModelCatalog == nil {
+		opts.ModelCatalog = noCatalog
+	}
+	return opts
+}
 
 func fixed(rt http.RoundTripper) func() http.RoundTripper {
 	return func() http.RoundTripper { return rt }

@@ -309,6 +309,12 @@ class ShellPathTests(ComponentFixture):
         self.assertIn("KEEP {} (already puts claude-router on PATH)".format(rc), result.stdout)
         self.assertEqual(rc.read_text(), line)
 
+    def test_another_shell_gets_no_file_and_the_line_to_add(self):
+        result = self.component(SHELL="/usr/bin/fish")
+
+        self.assertIn("SKIP PATH (no shell file known for SHELL=/usr/bin/fish", result.stdout)
+        self.assertEqual([p.name for p in self.home.iterdir() if p.name.startswith(".") and p.is_file()], [])
+
     def test_a_zsh_user_gets_the_line_in_zshrc(self):
         self.component(SHELL="/bin/zsh")
 
@@ -328,8 +334,8 @@ class ShellPathTests(ComponentFixture):
         router = self.router()
         zdotdir = self.root / "zsh config"
         with patch.dict(router.os.environ, {"SHELL": "/bin/zsh", "ZDOTDIR": str(zdotdir)}):
-            self.assertEqual(router.shell_file(self.home, True), zdotdir / ".zshrc")
-            self.assertEqual(router.shell_file(self.home, False), self.home / ".zshrc")
+            self.assertEqual(router.shell_file_for(self.home, True), zdotdir / ".zshrc")
+            self.assertEqual(router.shell_file_for(self.home, False), self.home / ".zshrc")
 
         self.component(SHELL="/bin/zsh", ZDOTDIR=str(zdotdir))
 
@@ -341,9 +347,9 @@ class ShellPathTests(ComponentFixture):
         self.home.mkdir(parents=True)
         (self.home / ".profile").write_text("export EDITOR=vi\n")
         with patch.object(router.sys, "platform", "darwin"), patch.dict(router.os.environ, {"SHELL": "/bin/bash"}):
-            self.assertEqual(router.shell_file(self.home, False), self.home / ".profile")
+            self.assertEqual(router.shell_file_for(self.home, False), self.home / ".profile")
             (self.home / ".bash_profile").write_text("")
-            self.assertEqual(router.shell_file(self.home, False), self.home / ".bash_profile")
+            self.assertEqual(router.shell_file_for(self.home, False), self.home / ".bash_profile")
 
     def test_ctrl_c_at_the_question_writes_nothing_and_ctrl_d_takes_the_default(self):
         module = self.module()

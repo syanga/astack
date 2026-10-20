@@ -14,6 +14,11 @@ Run `./install.sh` from the updated checkout even when already current. Preserve
 
 When the astack manifest, `${XDG_STATE_HOME:-$HOME/.local/state}/astack/manifest.json`, lists `claude-router` under `components`, update the router after the harness install succeeds:
 
-1. Run `python3 scripts/claude_router.py identity --code-only` in the updated checkout. When `components/claude-router/accepted.json` has a `result` other than `pass`, an `sdk` other than the CLIProxyAPI version in `components/claude-router/go.mod`, or a `code_sha256` or `helpers_sha256` other than the command printed, leave the router as it is and report the mismatch, because over an activated router the install's check would fail and switch Claude Code to direct.
+1. Run `python3 scripts/claude_router.py identity --code-only` in the updated checkout. Compare `components/claude-router/accepted.json` with it:
+   - `result` is `pass`.
+   - `sdk` equals the CLIProxyAPI version in `components/claude-router/go.mod`.
+   - `code_sha256` and `helpers_sha256` equal the printed digests.
+
+   When any of these differs, leave the router as it is and report the difference. Over an activated router, the install's check would fail and switch Claude Code to direct.
 2. Otherwise run `./install.sh --component claude-router < /dev/null`, without `--force`, with a 600-second timeout. An activated router restarts, which ends requests other routed sessions have in flight.
 3. Report any `APPEND`, `SKIP`, or `RESTART` line, the check lines after `CHECK`, or the `astack:` line when it exits 1.

@@ -314,7 +314,7 @@ func TestUpstreamAttemptCapOutsideOneToFourIsRefused(t *testing.T) {
 	for _, n := range []int{-1, 5} {
 		e := newEnv(t, "acct-a")
 		e.cfg.MaxUpstreamAttempts = n
-		if svc, err := Start(e.cfg, Options{ModelCatalog: noCatalog, Upstream: fixed(e.upstream)}); err == nil {
+		if svc, err := Start(e.cfg, offline(Options{Upstream: fixed(e.upstream)})); err == nil {
 			svc.Close()
 			t.Fatalf("max_upstream_attempts %d started, want a configuration error", n)
 		}

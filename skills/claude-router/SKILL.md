@@ -114,6 +114,11 @@ next request writes the conversation's prompt cache again there. `cache`
 reports these moves and their cache writes. `status` prints a `cache` line
 when moves caused more than 10% of the last 24 hours' cache writes.
 
+A Claude model newer than the router's model list gets a 503 that says the
+SDK refused the pinned account without an upstream attempt. The router
+reads the published model catalog at each start, so give
+`claude-router stop` and `claude-router start`.
+
 Paid overflow is the claude.ai setting that bills usage past the plan's
 included allowance, shown there as extra usage or usage credits. The router
 sends requests only to accounts whose latest reading shows paid overflow off.

@@ -8,6 +8,7 @@ descriptor, and a state directory. Installing it never changes client settings.
 import argparse
 from contextlib import nullcontext, redirect_stdout
 import fcntl
+from enum import Enum
 from dataclasses import dataclass, field
 import hashlib
 import io
@@ -360,6 +361,23 @@ class ActivationLock:
             self.opened = False
 
 
+class ShellAction(Enum):
+    ADD = "add"
+    KEEP = "keep"
+    ALREADY_ON_PATH = "already on PATH"
+    DECLINED_EARLIER = "declined earlier"
+    DECLINED = "declined"
+    UNKNOWN_SHELL = "unknown shell"
+    REMOVE = "remove"
+
+
+@dataclass(frozen=True)
+class ShellChange:
+    action: ShellAction
+    file: Path | None
+    lines: list
+
+
 @dataclass
 class Plan:
     command: str
@@ -370,7 +388,7 @@ class Plan:
     settings: list = field(default_factory=list)
     conflicts: list = field(default_factory=list)
     binary_changed: bool = False
-    shell: tuple | None = None
+    shell: ShellChange | None = None
     code_sha256: str | None = None
     go: str | None = None
     lock: ActivationLock | None = None
@@ -458,13 +476,13 @@ def planned(result, state, force):
 PATH_MARKER = "# astack: claude-router on PATH"
 
 
-def shell_file(home, use_env):
-    shell = Path(os.environ.get("SHELL", "")).name
-    if shell not in ("bash", "zsh"):
-        shell = "zsh" if sys.platform == "darwin" else "bash"
+def shell_file_for(home, use_env):
+    shell = Path(os.environ.get("SHELL", "")).name or ("zsh" if sys.platform == "darwin" else "bash")
     if shell == "zsh":
         zdotdir = os.environ.get("ZDOTDIR") if use_env else None
         return Path(zdotdir or home) / ".zshrc"
+    if shell != "bash":
+        return None
     if sys.platform != "darwin":
         return home / ".bashrc"
     # Terminal on macOS starts bash as a login shell, which reads the first of these that exists.
@@ -473,22 +491,23 @@ def shell_file(home, use_env):
 
 
 def shell_change(command, lay, old):
-    """Return (action, shell file, lines) for the PATH lines, or None."""
     owned = old.get("shell_path")
     if command == "uninstall":
-        return ("remove", Path(owned["file"]), owned["lines"]) if owned else None
-    rc = Path(owned["file"]) if owned else shell_file(lay.home, lay.use_env)
+        return ShellChange(ShellAction.REMOVE, Path(owned["file"]), owned["lines"]) if owned else None
     directory = re.sub(r'([\\"$`])', r"\\\1", str(lay.binary.parent))
     lines = [PATH_MARKER, 'export PATH="{}:$PATH"'.format(directory)]
-    text = rc.read_text() if rc.is_file() else ""
+    shell_file = Path(owned["file"]) if owned else shell_file_for(lay.home, lay.use_env)
+    if shell_file is None:
+        return ShellChange(ShellAction.UNKNOWN_SHELL, None, lines)
+    text = shell_file.read_text() if shell_file.is_file() else ""
     if owned and "\n".join(lines) + "\n" in text:
-        return ("keep", rc, lines)
+        return ShellChange(ShellAction.KEEP, shell_file, lines)
     if old.get("shell_path_declined"):
-        return ("declined", rc, lines)
+        return ShellChange(ShellAction.DECLINED_EARLIER, shell_file, lines)
     active = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
     if any("astack/claude-router/bin" in line or str(lay.binary.parent) in line for line in active):
-        return ("present", rc, lines)
-    return ("add", rc, lines)
+        return ShellChange(ShellAction.ALREADY_ON_PATH, shell_file, lines)
+    return ShellChange(ShellAction.ADD, shell_file, lines)
 
 
 def on_terminal():
@@ -496,57 +515,56 @@ def on_terminal():
 
 
 def ask_shell(change):
-    """Ask on a terminal whether to add the PATH lines; return the change to make."""
-    action, rc, lines = change
-    if action != "add" or not on_terminal():
+    if change.action is not ShellAction.ADD or not on_terminal():
         return change
     try:
-        answer = input("Add claude-router to PATH in {}? [Y/n] ".format(rc))
+        answer = input("Add claude-router to PATH in {}? [Y/n] ".format(change.file))
     except EOFError:
         answer = ""
-    return ("refused", rc, lines) if answer.strip().lower() in ("n", "no") else change
+    if answer.strip().lower() in ("n", "no"):
+        return ShellChange(ShellAction.DECLINED, change.file, change.lines)
+    return change
 
 
 def apply_shell(change, record, dry_run):
-    action, rc, lines = change
-    block = "\n".join(lines) + "\n"
-    if action == "keep":
-        print("KEEP {}".format(rc))
-        return
-    if action == "declined":
-        print("SKIP {} (declined at an earlier install; to add it yourself: {})".format(rc, lines[1]))
-        return
-    if action == "present":
-        print("KEEP {} (already puts claude-router on PATH)".format(rc))
+    shell_file, line = change.file, change.lines[1]
+    block = "\n".join(change.lines) + "\n"
+    action = change.action
+    if action is ShellAction.KEEP:
+        print("KEEP {}".format(shell_file))
+    elif action is ShellAction.ALREADY_ON_PATH:
+        print("KEEP {} (already puts claude-router on PATH)".format(shell_file))
         record.pop("shell_path", None)
-        return
-    if dry_run:
-        print("{} {} {}".format("APPEND" if action == "add" else "REMOVE", rc, lines[1]))
-        return
-    target = rc.resolve() if rc.is_symlink() else rc
-    existed = target.is_file()
-    text = target.read_text() if existed else ""
-    mode = stat.S_IMODE(target.stat().st_mode) if existed else 0o644
-    if action == "remove":
-        if block in text:
-            text = text.replace(block, "", 1)
-            if text or not record.get("shell_path", {}).get("created"):
-                files.atomic_write(target, text.encode(), mode)
-            else:
-                target.unlink()
-            print("REMOVE {} {}".format(rc, lines[1]))
-        record.pop("shell_path", None)
-        return
-    if action == "refused":
-        print("SKIP {} (to add it yourself: {})".format(rc, lines[1]))
+    elif action is ShellAction.UNKNOWN_SHELL:
+        print("SKIP PATH (no shell file known for SHELL={}; to add it yourself: {})".format(os.environ.get("SHELL", ""), line))
+    elif action is ShellAction.DECLINED_EARLIER:
+        print("SKIP {} (declined at an earlier install; to add it yourself: {})".format(shell_file, line))
+    elif action is ShellAction.DECLINED:
+        print("SKIP {} (to add it yourself: {})".format(shell_file, line))
         record.pop("shell_path", None)
         record["shell_path_declined"] = True
-        return
-    if text and not text.endswith("\n"):
-        text += "\n"
-    files.atomic_write(target, (text + block).encode(), mode)
-    record["shell_path"] = {"file": str(rc), "lines": lines, "created": not existed}
-    print("APPEND {} {}".format(rc, lines[1]))
+    elif dry_run:
+        print("{} {} {}".format("APPEND" if action is ShellAction.ADD else "REMOVE", shell_file, line))
+    else:
+        target = shell_file.resolve() if shell_file.is_symlink() else shell_file
+        existed = target.is_file()
+        text = target.read_text() if existed else ""
+        mode = stat.S_IMODE(target.stat().st_mode) if existed else 0o644
+        if action is ShellAction.REMOVE:
+            if block in text:
+                text = text.replace(block, "", 1)
+                if text or not record.get("shell_path", {}).get("created"):
+                    files.atomic_write(target, text.encode(), mode)
+                else:
+                    target.unlink()
+                print("REMOVE {} {}".format(shell_file, line))
+            record.pop("shell_path", None)
+            return
+        if text and not text.endswith("\n"):
+            text += "\n"
+        files.atomic_write(target, (text + block).encode(), mode)
+        record["shell_path"] = {"file": str(shell_file), "lines": change.lines, "created": not existed}
+        print("APPEND {} {}".format(shell_file, line))
 
 
 def check_harness_settings(harness_values):

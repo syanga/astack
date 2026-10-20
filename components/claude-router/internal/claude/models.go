@@ -23,10 +23,13 @@ var catalogURLs = []string{
 	"https://models.router-for.me/models.json",
 }
 
-const catalogReadFor = 5 * time.Second
+const (
+	catalogTimeout  = 5 * time.Second
+	catalogMaxBytes = 8 << 20
+)
 
 func fetchCatalog(ctx context.Context) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, catalogReadFor)
+	ctx, cancel := context.WithTimeout(ctx, catalogTimeout)
 	defer cancel()
 	var last error
 	for _, url := range catalogURLs {
@@ -39,7 +42,7 @@ func fetchCatalog(ctx context.Context) ([]byte, error) {
 			last = err
 			continue
 		}
-		data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		data, err := io.ReadAll(io.LimitReader(resp.Body, catalogMaxBytes))
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			last = fmt.Errorf("%s answered %d", url, resp.StatusCode)

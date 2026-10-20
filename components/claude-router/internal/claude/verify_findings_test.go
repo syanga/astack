@@ -116,7 +116,7 @@ func TestCredentialsThatChangeTheUpstreamPathAreRefused(t *testing.T) {
 	for name, extra := range cases {
 		e := newEnv(t, "acct-a")
 		writeRawCredential(t, e, "acct-a", extra)
-		_, err := Start(e.cfg, Options{ModelCatalog: noCatalog, Upstream: fixed(e.upstream)})
+		_, err := Start(e.cfg, offline(Options{Upstream: fixed(e.upstream)}))
 		if err == nil {
 			t.Fatalf("%s: start accepted the credential", name)
 		}
