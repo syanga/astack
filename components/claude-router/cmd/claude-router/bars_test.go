@@ -23,7 +23,7 @@ func withUsage(r report) report {
 		usageWindow(router.FiveHour, "", headerUsed(*work, router.FiveHour), 16, 40, 0),
 		usageWindow(router.Weekly, "", headerUsed(*work, router.Weekly), 9, 0, -3),
 		usageWindow(router.Weekly, "Fable", 0.12, 9, 0, -3)}}
-	work.Resets = claude.ResetsReading{At: at(0, 14, 0), Grants: []claude.ResetGrant{{Type: "weekly", Left: 2}}}
+	work.Resets = claude.ResetsReading{At: at(0, 14, 0), Grants: []claude.ResetGrant{{Type: claude.ResetWeekly, Left: 2}}}
 	alumni.Usage = claude.UsageReading{At: at(0, 14, 16), Windows: []claude.UsageWindow{
 		usageWindow(router.Weekly, "Fable", 0.40, 6, 0, -2)}}
 	return r
@@ -51,7 +51,7 @@ var sgr = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 func TestStatusDrawsLimitBarsOnATerminal(t *testing.T) {
 	waiting := withUsage(waitingReport())
-	waiting.Status.Accounts[0].Resets.Grants = []claude.ResetGrant{{Type: "session", Left: 1}, {Type: "weekly", Left: 2}}
+	waiting.Status.Accounts[0].Resets.Grants = []claude.ResetGrant{{Type: claude.ResetSession, Left: 1}, {Type: claude.ResetWeekly, Left: 2}}
 	for _, tc := range []struct {
 		fixture string
 		r       report

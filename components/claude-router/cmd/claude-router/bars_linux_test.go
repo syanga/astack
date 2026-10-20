@@ -45,6 +45,11 @@ func TestStatusDrawsBarsOnlyWhenItsOutputIsATerminal(t *testing.T) {
 	}
 	defer pr.Close()
 	defer pw.Close()
+	null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer null.Close()
 
 	for _, tc := range []struct {
 		name string
@@ -56,6 +61,7 @@ func TestStatusDrawsBarsOnlyWhenItsOutputIsATerminal(t *testing.T) {
 		{"terminal with NO_COLOR", tty, map[string]string{"NO_COLOR": "1"}, &screen{width: 132, color: false}},
 		{"terminal with TERM=dumb", tty, map[string]string{"TERM": "dumb"}, nil},
 		{"pipe", pw, nil, nil},
+		{os.DevNull, null, nil, nil},
 	} {
 		got := terminalScreen(tc.f, env(tc.vars))
 		if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {

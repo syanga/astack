@@ -44,7 +44,6 @@ const (
 	ResetFull ResetKind = "full"
 )
 
-// ResetKinds lists every ResetKind.
 var ResetKinds = []ResetKind{ResetSession, ResetWeekly, ResetFull}
 
 // ResetGrant is one grant of limit resets the account can redeem.
@@ -150,7 +149,7 @@ func (b usageBody) grants(now time.Time) ([]ResetGrant, bool) {
 		if kind == "" {
 			kind = clearedType(g.Clears)
 		}
-		if kind != "" {
+		if slices.Contains(ResetKinds, kind) {
 			out = append(out, ResetGrant{Type: kind, Left: g.ResetsLeft})
 		}
 	}

@@ -69,14 +69,15 @@ func TestTheServiceReadsResetsAtStartWithoutCountingThemAsSettingsReads(t *testi
 		{"id":"g1","resets_left":2,"type":"weekly","clears":["seven_day"]},
 		{"id":"g2","resets_left":1,"clears":["five_hour"]},
 		{"id":"g3","resets_left":0,"type":"session"},
-		{"id":"g4","resets_left":3,"type":"full","ends_at":"2020-01-01T00:00:00Z"}]}`)
+		{"id":"g4","resets_left":3,"type":"full","ends_at":"2020-01-01T00:00:00Z"},
+		{"id":"g5","resets_left":4,"type":"monthly"}]}`)
 	s := e.start()
 
 	got := waitForResets(t, s, "acct-a")
 
-	want := []ResetGrant{{Type: "weekly", Left: 2}, {Type: "session", Left: 1}}
+	want := []ResetGrant{{Type: ResetWeekly, Left: 2}, {Type: ResetSession, Left: 1}}
 	if !reflect.DeepEqual(got.Grants, want) {
-		t.Fatalf("grants %+v, want 2 weekly and 1 session: no spent or ended grant", got.Grants)
+		t.Fatalf("grants %+v, want 2 weekly and 1 session: no spent, ended, or unknown grant", got.Grants)
 	}
 	if n := len(e.upstream.usageReads()); n != 1 {
 		t.Fatalf("settings reads %d, want the start read only", n)

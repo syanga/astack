@@ -1489,8 +1489,9 @@ from `cedar_ember.grants` in
 every 30 minutes after, on a timer apart from the settings reads. Status
 counts the resets left in grants that have not ended, by `type`: `session`,
 `weekly`, or `full`. A grant without a `type` takes one from the windows in
-`clears`, and a grant of any other type is dropped. The resets read is separate from the settings read. It never counts
-toward the run of failed reads and never renews a credential. It skips an
+`clears`, and a grant of any other type is dropped. The resets read is
+separate from the settings read. It never counts toward the run of failed
+reads and never renews a credential. It skips an
 account whose access token the SDK is due to replace. A failed resets read
 records nothing and changes no routing
 (`TestTheServiceReadsResetsAtStartWithoutCountingThemAsSettingsReads`,
