@@ -2164,6 +2164,21 @@ refuses to build router code that differs from the commit.
 acceptance run at the router code it names. A change to the router code
 needs a new acceptance run and record.
 
+The record at `956b5e8` comes from a scoped run the operator chose for the
+limit bars (PR102). It ran on Linux 7.0 x86_64 with real accounts `work` and
+`alumni`, Claude Code 2.1.305, and a foreground router on its own port and
+state directory, beside the daily router. It reran the rows the change can
+affect: the identity at the start and end, stable routing, resume, a
+subagent, and a restart (A1 to A4), cache counters, every overage read
+`disabled`, the run budget, the limit windows and reset grants against the
+usage endpoint's own answers, and status on a terminal and in a pipe. The
+rows the change cannot affect, such as migration, waiting, Agent SDK
+placement, the cache comparison, and `apiKeyHelper` precedence, are
+`accepted` and cite the `5deafbd` record's evidence. The first run of this
+lane, at `5be4149`, found that the usage response has no `model_scoped`
+field and that the resets block needs a Claude Code user agent; `b67403b`
+fixed both.
+
 ### Check
 
 `claude_router.py check [--home DIR | --manifest FILE] [--claude PATH]
