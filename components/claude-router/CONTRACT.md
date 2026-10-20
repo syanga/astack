@@ -1480,23 +1480,28 @@ converted from a percentage to a fraction
 (`TestASettingsReadRecordsTheLimitWindowsForStatus`). Routing does not use
 them. It uses response headers only. The service decodes these fields apart
 from `extra_usage`, so a field of another shape drops out of status and
-leaves the paid-overflow reading unchanged
-(`TestMalformedLimitFieldsLeaveThePaidOverflowReadingIntact`).
+leaves the paid-overflow reading unchanged. A settings read with no readable
+window clears the last limit reading
+(`TestMalformedLimitFieldsLeaveThePaidOverflowReadingIntact`,
+`TestASettingsReadWithoutReadableLimitFieldsClearsTheLimitReading`).
 
 The service also reads each account's limit resets that Claude Code offers,
 from `cedar_ember.grants` in
 `GET /api/oauth/usage?cedar_ember=1&skip_spend=1`. It reads them at start and
 every 30 minutes after, on a timer apart from the settings reads. Status
-counts the resets left in grants that have not ended, by `type`: `session`,
-`weekly`, or `full`. A grant without a `type` takes one from the windows in
-`clears`, and a grant of any other type is dropped. The resets read is
-separate from the settings read. It never counts toward the run of failed
-reads and never renews a credential. It skips an account whose access token
-the SDK is due to replace. A failed resets read records nothing and changes no
-routing
+counts the resets left in grants whose `ends_at` has not passed when status
+runs, by `type`: `session`, `weekly`, or `full`
+(`TestStatusCountsOnlyResetGrantsThatHaveNotEnded`). A grant without a `type`
+takes one from the windows in `clears`, and a grant of any other type is
+dropped. The resets read is separate from the settings read. It never counts
+toward the run of failed reads and never renews a credential. It skips an
+account whose access token the SDK is due to replace. A failed resets read
+records nothing, and the account keeps serving
 (`TestTheServiceReadsResetsAtStartWithoutCountingThemAsSettingsReads`,
-`TestAFailedResetsReadChangesNoRouting`). The grants block and its query are
-undocumented. If they change, status shows no reset count.
+`TestAFailedResetsReadChangesNoRouting`). Like every response through the
+router's transport, a resets response's rate-limit and overage headers are
+readings for routing. The grants block and its query are undocumented. If
+they change, status shows no reset count.
 
 ### Configuration and credentials change only by restart
 

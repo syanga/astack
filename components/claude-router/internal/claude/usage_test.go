@@ -141,3 +141,29 @@ func sameWindows(got, want []UsageWindow) bool {
 	}
 	return true
 }
+
+func TestASettingsReadWithoutReadableLimitFieldsClearsTheLimitReading(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	e.cfg.OverageCheckEvery = Duration(50 * time.Millisecond)
+	e.upstream.setUsage("acct-a", usageReply{Enabled: boolPtr(false), Fields: map[string]any{
+		"five_hour": map[string]any{"utilization": 38.0, "resets_at": "2026-10-04T05:00:00Z"},
+	}})
+	s := e.start()
+	if got := accountStatus(t, s, "acct-a"); len(got.Usage.Windows) != 1 {
+		t.Fatalf("usage windows %+v after the start read, want the five-hour window", got.Usage.Windows)
+	}
+
+	e.upstream.setUsage("acct-a", usageReply{Enabled: boolPtr(false), Fields: map[string]any{"five_hour": "full"}})
+	reads := len(e.upstream.usageReads())
+	deadline := time.Now().Add(5 * time.Second)
+	for len(e.upstream.usageReads()) < reads+2 {
+		if time.Now().After(deadline) {
+			t.Fatal("no later settings reads")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if got := accountStatus(t, s, "acct-a"); len(got.Usage.Windows) != 0 || got.Overage.State != router.OverageDisabled {
+		t.Fatalf("usage %+v, overage %q, want no limit windows from the malformed read and the disabled reading", got.Usage, got.Overage.State)
+	}
+}

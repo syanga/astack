@@ -46,10 +46,12 @@ const (
 
 var ResetKinds = []ResetKind{ResetSession, ResetWeekly, ResetFull}
 
-// ResetGrant is one grant of limit resets the account can redeem.
+// ResetGrant is one grant of limit resets the account can redeem until
+// EndsAt, or with no end when EndsAt is zero.
 type ResetGrant struct {
-	Type ResetKind `json:"type"`
-	Left int       `json:"left"`
+	Type   ResetKind `json:"type"`
+	Left   int       `json:"left"`
+	EndsAt time.Time `json:"ends_at,omitzero"`
 }
 
 // ResetsReading holds an account's reset grants from its last successful
@@ -140,17 +142,21 @@ func (b usageBody) grants(now time.Time) ([]ResetGrant, bool) {
 		if g.ResetsLeft <= 0 {
 			continue
 		}
+		var end time.Time
 		if g.EndsAt != nil {
-			if end, err := time.Parse(time.RFC3339Nano, *g.EndsAt); err == nil && !end.After(now) {
-				continue
+			if t, err := time.Parse(time.RFC3339Nano, *g.EndsAt); err == nil {
+				end = t
 			}
+		}
+		if !end.IsZero() && !end.After(now) {
+			continue
 		}
 		kind := g.Type
 		if kind == "" {
 			kind = clearedType(g.Clears)
 		}
 		if slices.Contains(ResetKinds, kind) {
-			out = append(out, ResetGrant{Type: kind, Left: g.ResetsLeft})
+			out = append(out, ResetGrant{Type: kind, Left: g.ResetsLeft, EndsAt: end})
 		}
 	}
 	return out, true
@@ -170,11 +176,12 @@ func clearedType(clears []string) ResetKind {
 }
 
 func (o *overageReader) noteUsage(account router.AccountID, windows []UsageWindow, at time.Time) {
-	if len(windows) == 0 {
-		return
-	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if len(windows) == 0 {
+		delete(o.usage, account)
+		return
+	}
 	o.usage[account] = UsageReading{At: at, Windows: windows}
 }
 

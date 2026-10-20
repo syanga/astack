@@ -167,3 +167,17 @@ func TestAnOldModelReadingShowsTheStaleLine(t *testing.T) {
 		t.Fatalf("status\n%s\nwant a stale line for work's 12:00 Fable reading", got)
 	}
 }
+
+func TestStatusCountsOnlyResetGrantsThatHaveNotEnded(t *testing.T) {
+	r := withUsage(healthyReport())
+	r.Status.Accounts[0].Resets.Grants = []claude.ResetGrant{
+		{Type: claude.ResetWeekly, Left: 2, EndsAt: at(0, 14, 10)},
+		{Type: claude.ResetSession, Left: 1, EndsAt: at(0, 15, 0)},
+	}
+
+	got := render(onScreen(r, 100, false))
+
+	if !strings.Contains(got, "╰─ 1 session reset ─") || strings.Contains(got, "weekly reset") {
+		t.Fatalf("status at 14:20\n%s\nwant the session reset that ends at 15:00 and not the weekly resets that ended at 14:10", got)
+	}
+}
