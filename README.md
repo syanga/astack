@@ -72,8 +72,10 @@ Linux is tested on a real kernel in a Debian 13 arm64 container with systemd
 
 To install and activate the router:
 
-1. Install Go 1.26 or newer from <https://go.dev/dl/>, and Claude Code.
-   `go version` and `claude --version` must work in your shell.
+1. Install Python 3.10 or newer, Go 1.26 or newer from <https://go.dev/dl/>,
+   and Claude Code. `python3 --version`, `go version`, and `claude --version`
+   must work in your shell. The `python3` that ships with macOS is 3.9, and
+   the installer fails with a `TypeError` under it.
 2. From the checkout, download the pinned Go modules once, with network access:
 
    ```sh
