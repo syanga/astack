@@ -50,7 +50,7 @@ class InstallerLifecycleTests(InstallerFixture):
             excluded.parent.mkdir(exist_ok=True)
             excluded.write_text("Do not install")
         roots = [self.home / name / "test-skill" for name in (
-            ".claude/skills", ".agents/skills", ".config/opencode/skills"
+            ".claude/skills", ".agents/skills"
         )]
 
         self.run_installer("--target", "all")
@@ -135,14 +135,12 @@ class InstallerLifecycleTests(InstallerFixture):
         env = {
             "CLAUDE_CONFIG_DIR": str(custom / "claude"),
             "CODEX_HOME": str(custom / "codex"),
-            "XDG_CONFIG_HOME": str(custom / "xdg"),
             "XDG_STATE_HOME": str(custom / "state"),
         }
         self.run_with_config(module, env, "install", "--target", "all")
         expected = [
             custom / "claude/CLAUDE.md", custom / "claude/skills/test-skill/SKILL.md",
             custom / "codex/AGENTS.md", self.home / ".agents/skills/test-skill/SKILL.md",
-            custom / "xdg/opencode/AGENTS.md", custom / "xdg/opencode/skills/test-skill/SKILL.md",
         ]
         self.assertTrue(all(path.is_file() for path in expected))
         state = custom / "state/astack/manifest.json"
