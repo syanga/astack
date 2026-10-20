@@ -16,13 +16,13 @@
   "w6-pr4"
  ],
  "open": [],
- "evidence_root": "~/.local/state/astack/claude-router-lanes/pr102-5be4149/evidence/run-956b5e8",
+ "evidence_root": "~/.local/state/astack/claude-router-lanes/pr102-5be4149/evidence",
  "matrix": [
   {
    "scenario": "Identity at A0: running code and binary equal the built ones",
    "status": "pass",
    "evidence": [
-    "identity-start.json",
+    "run-956b5e8/identity-start.json",
     "code 78565b404b40 binary 8d6e4db9b17c"
    ]
   },
@@ -30,8 +30,8 @@
    "scenario": "Limit windows in status equal the usage endpoint's five_hour, seven_day, and weekly_scoped limits",
    "status": "pass",
    "evidence": [
-    "status-start.json",
-    "raw-*-usage.json",
+    "run-956b5e8/status-start.json",
+    "run-956b5e8/raw-*-usage.json",
     "alumni {'five_hour': 0.21, 'weekly': 0.89, 'weekly/Fable': 0}; work {'five_hour': 0.06, 'weekly': 0.36, 'weekly/Fable': 0}"
    ]
   },
@@ -39,8 +39,8 @@
    "scenario": "Reset grants in status equal the endpoint's eligible cedar_ember grants with resets left",
    "status": "pass",
    "evidence": [
-    "status-start.json",
-    "raw-*-resets.json",
+    "run-956b5e8/status-start.json",
+    "run-956b5e8/raw-*-resets.json",
     "alumni eligible True grants {'full': 1}; work eligible True grants {}"
    ]
   },
@@ -48,8 +48,8 @@
    "scenario": "A1 stable routing: a new conversation is placed and completes",
    "status": "pass",
    "evidence": [
-    "A1.out",
-    "A1.events.json",
+    "run-956b5e8/A1.out",
+    "run-956b5e8/A1.events.json",
     "conversation 8e9eaa533901 on work, 1.9 s"
    ]
   },
@@ -57,8 +57,8 @@
    "scenario": "A2 resume: the resumed conversation stays on its account",
    "status": "pass",
    "evidence": [
-    "A2.out",
-    "A2.events.json",
+    "run-956b5e8/A2.out",
+    "run-956b5e8/A2.events.json",
     "answer 'lantern', 1 requests on ['work']"
    ]
   },
@@ -66,8 +66,8 @@
    "scenario": "A3 subagent: the parent and its subagent's requests stay on the conversation's account",
    "status": "pass",
    "evidence": [
-    "A3.out",
-    "A3.events.json",
+    "run-956b5e8/A3.out",
+    "run-956b5e8/A3.events.json",
     "tools ['Agent'], 3 requests on ['work']"
    ]
   },
@@ -75,9 +75,9 @@
    "scenario": "A4 restart: after SIGTERM and a new start, the conversation keeps its account",
    "status": "pass",
    "evidence": [
-    "A4.out",
-    "A4.events.json",
-    "serve-2.log",
+    "run-956b5e8/A4.out",
+    "run-956b5e8/A4.events.json",
+    "run-956b5e8/serve-2.log",
     "answer 'lantern' on ['work']"
    ]
   },
@@ -85,8 +85,8 @@
    "scenario": "Status draws a box per account with the Fable row on a terminal, at 100 and 80 columns",
    "status": "pass",
    "evidence": [
-    "status-tty-100.txt",
-    "status-tty-80.txt",
+    "run-956b5e8/status-tty-100.txt",
+    "run-956b5e8/status-tty-80.txt",
     "re-evaluated on the saved output after fixing the lane check (escape codes between the border and the name; empty lines counted as box lines): 10 box lines, all 80 columns"
    ]
   },
@@ -94,16 +94,16 @@
    "scenario": "NO_COLOR drops the escapes; a pipe and TERM=dumb print the status lines",
    "status": "pass",
    "evidence": [
-    "status-tty-100-no-color.txt",
-    "status-piped.txt",
-    "status-tty-dumb.txt"
+    "run-956b5e8/status-tty-100-no-color.txt",
+    "run-956b5e8/status-piped.txt",
+    "run-956b5e8/status-tty-dumb.txt"
    ]
   },
   {
    "scenario": "Cache counters on every routed request",
    "status": "pass",
    "evidence": [
-    "events-lane.json",
+    "run-956b5e8/events-lane.json",
     "6 completed requests with all four counters; missing in []"
    ]
   },
@@ -111,7 +111,7 @@
    "scenario": "Overage reads disabled throughout the lane",
    "status": "pass",
    "evidence": [
-    "events-lane.json",
+    "run-956b5e8/events-lane.json",
     "4 overage reads, others []"
    ]
   },
@@ -119,7 +119,7 @@
    "scenario": "Every run within 12 attempts, 100,000 input, and 10,000 output tokens",
    "status": "pass",
    "evidence": [
-    "budgets.json",
+    "run-956b5e8/budgets.json",
     "over budget: []"
    ]
   },
@@ -127,8 +127,8 @@
    "scenario": "Identity at the end equals identity at A0",
    "status": "pass",
    "evidence": [
-    "identity-start.json",
-    "identity-end.json"
+    "run-956b5e8/identity-start.json",
+    "run-956b5e8/identity-end.json"
    ]
   },
   {
@@ -144,22 +144,28 @@
    "status": "pass",
    "evidence": [
     "events-lane.json: every overage read disabled at both starts",
-    "go test -count=1 ./... at 956b5e8 (IO-6 unit tests included): ok, evidence/gotest-956b5e8.txt"
+    "go test -count=1 ./... at 956b5e8 (IO-6 unit tests included): ok, gotest-956b5e8.txt"
    ]
   },
   {
-   "scenario": "Transient failure, partial stream, cancellation, crash, auth revocation (controlled upstream)",
+   "scenario": "Transient failure, partial stream, cancellation, crash, auth revocation: unit and probe suites at the head",
    "status": "pass",
    "evidence": [
-    "go test -count=1 ./... at 956b5e8: ok, evidence/gotest-956b5e8.txt",
-    "the controlled-upstream lane reruns (lane-1, lane-2) are carried: carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20"
+    "go test -count=1 ./... at 956b5e8: ok, gotest-956b5e8.txt"
+   ]
+  },
+  {
+   "scenario": "Transient failure, partial stream, cancellation, crash, auth revocation: controlled-upstream lane reruns",
+   "status": "accepted",
+   "evidence": [
+    "not rerun; carried from evidence/PR8/lane-3/lane-1/default.json and lane-2-controlled/recovery.json at 5deafbd (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host); the change touches overageReader.get only to add a user agent to the resets read, and the 401 refresh path passes none"
    ]
   },
   {
    "scenario": "Migration with tools and thinking (terminal, Agent SDK)",
    "status": "accepted",
    "evidence": [
-    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20",
+    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20 (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host)",
     "runs/A5/result.json",
     "runs/A7/result.json"
    ]
@@ -168,7 +174,7 @@
    "scenario": "CC-2 thinking half: the destination accepts the source's thinking blocks",
    "status": "accepted",
    "evidence": [
-    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20",
+    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20 (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host)",
     "runs/A5/result.json: exercised: the destination answered 200 to 4 thinking block(s) from the source"
    ]
   },
@@ -176,7 +182,7 @@
    "scenario": "Agent SDK with T3's options: placement",
    "status": "accepted",
    "evidence": [
-    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20",
+    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20 (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host)",
     "runs/A6/result.json"
    ]
   },
@@ -184,7 +190,7 @@
    "scenario": "Waiting, short (WC-1)",
    "status": "accepted",
    "evidence": [
-    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20",
+    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20 (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host)",
     "runs/A9/result.json"
    ]
   },
@@ -192,7 +198,7 @@
    "scenario": "Waiting, long (WC-6)",
    "status": "accepted",
    "evidence": [
-    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20",
+    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20 (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host)",
     "routing store .scratch/claude-account-routing: evidence/PR4/live-2-cc2.1.300/W6/ (PR4 head; the operator chose to skip A8, 2026-10-19, gate G6)"
    ]
   },
@@ -200,7 +206,7 @@
    "scenario": "Stable cache comparison (PR8.perf)",
    "status": "accepted",
    "evidence": [
-    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20",
+    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20 (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host)",
     "perf/comparison.json: pass",
     "perf/model/model.json: pass"
    ]
@@ -209,15 +215,23 @@
    "scenario": "apiKeyHelper wins over a stored login (Part C)",
    "status": "accepted",
    "evidence": [
-    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20",
+    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20 (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host)",
     "apikeyhelper-precedence.json: pass"
    ]
   },
   {
-   "scenario": "Linux",
+   "scenario": "Linux with real accounts: a foreground router (this lane) and the installed systemd service",
    "status": "pass",
    "evidence": [
-    "this lane: real accounts work and alumni on Linux 7.0 x86_64, foreground service, Claude Code 2.1.305; systemd management is unit-tested and covered by PR9's container lane"
+    "run-956b5e8/: the lane rows above, on Linux 7.0 x86_64 with real accounts work and alumni",
+    "post-install-check.txt: after ./install.sh on this host, the systemd service ran code 78565b404b40 and check passed every line, test message answered 200 on alumni"
+   ]
+  },
+  {
+   "scenario": "Linux service lifecycle: stop, start, crash-loop limit, linger, uninstall",
+   "status": "accepted",
+   "evidence": [
+    "not rerun at this code; PR9 Linux container lane at 2e61073 (evidence/PR9/linux/linux.json (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host))"
    ]
   },
   {

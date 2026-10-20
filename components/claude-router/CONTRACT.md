@@ -1491,8 +1491,8 @@ The service also reads each account's limit resets that Claude Code offers,
 from `cedar_ember.grants` in
 `GET /api/oauth/usage?cedar_ember=1&skip_spend=1`. It reads them at start and
 every 30 minutes after, on a timer apart from the settings reads, with the
-user agent `claude-cli/2.1.280 (external, cli)` that the pinned SDK sends on
-inference requests. Without a Claude Code user agent, the endpoint answers
+user agent `claude-cli/2.1.280 (external, cli)` that the pinned SDK, v8.0.11,
+sends on inference requests. Without a Claude Code user agent, the endpoint answers
 `"eligible": false, "ineligible_reason": "surface"` and no grants. Status
 counts the resets left in grants whose `ends_at` has not passed when status
 runs, by `type`: `session`, `weekly`, or `full`
@@ -2171,13 +2171,12 @@ state directory, beside the daily router. It reran the rows the change can
 affect: the identity at the start and end, stable routing, resume, a
 subagent, and a restart (A1 to A4), cache counters, every overage read
 `disabled`, the run budget, the limit windows and reset grants against the
-usage endpoint's own answers, and status on a terminal and in a pipe. The
-rows the change cannot affect, such as migration, waiting, Agent SDK
-placement, the cache comparison, and `apiKeyHelper` precedence, are
-`accepted` and cite the `5deafbd` record's evidence. The first run of this
-lane, at `5be4149`, found that the usage response has no `model_scoped`
-field and that the resets block needs a Claude Code user agent; `b67403b`
-fixed both.
+usage endpoint's own answers, and status on a terminal and in a pipe. After
+the install on the same host, the systemd service ran this code and `check`
+passed every line. The rows the change cannot affect, such as migration,
+waiting, Agent SDK placement, the cache comparison, `apiKeyHelper`
+precedence, the controlled-upstream lane reruns, and the Linux service
+lifecycle, are `accepted` and cite earlier records' evidence.
 
 ### Check
 
