@@ -1,0 +1,160 @@
+{
+ "result": "pass",
+ "head": "5deafbd433c33b0ae67ed87d625ac74662d5e57e",
+ "code_sha256": "bb34ab27dccc3809291ea04c7cf2d78d7bdceba67fec22959e718e94e8f2f425",
+ "binary_sha256": "d631c3f497eab2f53eda47af78d849ed0ac4c9a27e5785ec9fed7296774c7452",
+ "helpers_sha256": "3546a7ec171a27ef6e38c96a7de5cd488a5eb3baaf23e158c762a4cfad4157a4",
+ "sdk": "v8.0.11",
+ "go": "go1.26.8",
+ "platform": "darwin/arm64",
+ "clients": {
+  "claude_code": "2.1.303",
+  "agent_sdk": "0.3.276"
+ },
+ "accepted_limits": [
+  "linux",
+  "w6-pr4"
+ ],
+ "open": [],
+ "evidence_root": "evidence/PR8/lane-3",
+ "matrix": [
+  {
+   "scenario": "Identity at A0 equals identity at Part D, at the accepted head",
+   "status": "pass",
+   "evidence": [
+    "identity-start.json",
+    "identity-end.json"
+   ]
+  },
+  {
+   "scenario": "Record code_sha256 and helpers_sha256 equal the head's (identity --code-only)",
+   "status": "pass",
+   "evidence": [
+    "identity --code-only in the lane checkout: code bb34ab27dccc, helpers 3546a7ec171a",
+    "identity-end.json: code bb34ab27dccc, running code bb34ab27dccc, helpers 3546a7ec171a"
+   ]
+  },
+  {
+   "scenario": "Stable routing, resume, subagent, restart",
+   "status": "pass",
+   "evidence": [
+    "runs/A1/result.json",
+    "runs/A2/result.json",
+    "runs/A3/result.json",
+    "runs/A4/result.json"
+   ]
+  },
+  {
+   "scenario": "Migration with tools and thinking (terminal, Agent SDK)",
+   "status": "pass",
+   "evidence": [
+    "runs/A5/result.json",
+    "runs/A7/result.json"
+   ]
+  },
+  {
+   "scenario": "CC-2 thinking half: the destination accepts the source's thinking blocks",
+   "status": "pass",
+   "evidence": [
+    "runs/A5/result.json: exercised: the destination answered 200 to 4 thinking block(s) from the source"
+   ]
+  },
+  {
+   "scenario": "Agent SDK with T3's options: placement",
+   "status": "pass",
+   "evidence": [
+    "runs/A6/result.json"
+   ]
+  },
+  {
+   "scenario": "Waiting, short (WC-1)",
+   "status": "pass",
+   "evidence": [
+    "runs/A9/result.json"
+   ]
+  },
+  {
+   "scenario": "Waiting, long (WC-6)",
+   "status": "accepted",
+   "evidence": [
+    "routing store .scratch/claude-account-routing: evidence/PR4/live-2-cc2.1.300/W6/ (PR4 head; the operator chose to skip A8, 2026-10-19, gate G6)"
+   ]
+  },
+  {
+   "scenario": "Included-only reads and refusal",
+   "status": "pass",
+   "evidence": [
+    "runs/A0/result.json",
+    "evidence/PR8/fix-r3/unit-5deafbd/ (PR6.unit suite, IO-6 unit tests, at the record's digests): exit 0"
+   ]
+  },
+  {
+   "scenario": "Overage reads disabled throughout the lane",
+   "status": "pass",
+   "evidence": [
+    "events.jsonl: 32 overage reads, 32 disabled, others []"
+   ]
+  },
+  {
+   "scenario": "Transient failure, partial stream, cancellation, crash, auth revocation (controlled upstream)",
+   "status": "pass",
+   "evidence": [
+    "evidence/PR8/fix-r3/unit-5deafbd: pass",
+    "evidence/PR8/lane-3/lane-1/default.json at head: pass",
+    "evidence/PR8/lane-3/lane-2-controlled/recovery.json (PR4 lane 2 rerun at head): pass"
+   ]
+  },
+  {
+   "scenario": "Cache counters on every routed request",
+   "status": "pass",
+   "evidence": [
+    "11 completed requests in A1 to A7 with all four counters; missing in []"
+   ]
+  },
+  {
+   "scenario": "Stable cache comparison (PR8.perf)",
+   "status": "pass",
+   "evidence": [
+    "perf/comparison.json: pass",
+    "perf/model/model.json: pass"
+   ]
+  },
+  {
+   "scenario": "apiKeyHelper wins over a stored login (Part C)",
+   "status": "pass",
+   "evidence": [
+    "apikeyhelper-precedence.json: pass"
+   ]
+  },
+  {
+   "scenario": "Order 5: every run within 12 attempts, 100,000 input, and 10,000 output tokens",
+   "status": "pass",
+   "evidence": [
+    "21 runs with a result.json; over budget: []"
+   ]
+  },
+  {
+   "scenario": "Linux",
+   "status": "accepted",
+   "evidence": [
+    "no Linux host; the operator accepted the blocked rows, 2026-10-19, gate G7"
+   ]
+  },
+  {
+   "scenario": "Included-only gap: credits enabled outside the proxy while included windows are exhausted",
+   "status": "accepted",
+   "evidence": [
+    "G1, order 14 (user, 2026-10-04)"
+   ]
+  },
+  {
+   "scenario": "No step stopped the session",
+   "status": "pass",
+   "evidence": [
+    "no stopped file in the lane"
+   ]
+  }
+ ],
+ "written": "2026-10-20T04:00:46Z",
+ "activation_mismatches": []
+}
