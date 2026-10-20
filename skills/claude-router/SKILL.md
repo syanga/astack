@@ -22,12 +22,14 @@ Below, `claude-router` stands for that path. Write the path in every command
 you run and every command you give the user. If the file does not exist, the
 router is not installed. Follow [Set up from nothing](#set-up-from-nothing).
 
-## Run status, check, and cache yourself
+## Run the read-only commands yourself
 
-These three commands read state, and `check` also sends one short test
-message on one account's plan. Run them and show their lines as printed. The
-lines hold account names, hashes, counters, and times, never a token or a
-prompt.
+Run `status`, `check`, and `cache` yourself. When `status` does not explain a
+failure, also run the state and log commands in
+[Find the service](#find-the-service). These commands change nothing, and
+`check` also sends one short test message on one account's plan. Show their
+lines as printed. The router's tests check that its status, events, and
+service logs hold no token or prompt.
 
 | Command | Use it for |
 | --- | --- |
@@ -45,10 +47,7 @@ terminal. Claude Code sessions, possibly this one, send their requests
 through the router. A command that stops or restarts the router cuts off
 every routed session in the middle of a turn. A sign-in waits on a browser
 window that only the user can use. `start` also turns the router on at every
-login, a lasting change to the user's machine. The state and log commands in
-[Find the service](#find-the-service) print service-manager output that,
-unlike `status`, has no guarantee to omit tokens and prompts. Say which
-reason applies.
+login, a lasting change to the user's machine. Say which reason applies.
 
 | Command | What it does |
 | --- | --- |
@@ -89,7 +88,7 @@ router and needs no step of its own.
 | `no accepted record at PATH` | Give `cd CHECKOUT && ./install.sh --component claude-router`, from a checkout whose `components/claude-router/accepted.json` matches its code. |
 | `code differs from the accepted record` | Report the indented lines below it. For `binary: installed X, running Y` or `code: accepted X, running Y`, give `claude-router stop` and `claude-router start`. For any other line, give `cd CHECKOUT && ./install.sh --component claude-router`, from a checkout whose `accepted.json` matches its code. |
 | `test message got no answer through the router (timed out after 120 s)` | Run `status` and report its problem lines. |
-| `test message got no answer through the router (claude exited 0)` | Claude Code answered without the router. Another settings file or the environment overrides it. Ask the user to look for `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN` in project settings, managed settings, and the shell. |
+| `test message got no answer through the router (claude exited 0)` | The router recorded no completed 200 for the test session. Run `status` and report its problem lines, because the request may have reached the router and failed. If `status` shows no problem, Claude Code may have answered without the router. Ask the user to look for `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN` in project settings, managed settings, and the shell. |
 | `test message got no answer through the router (claude exited N)` | Report the exit status. 127 means `claude` is not on PATH. For other values, run `status` and report its problem lines. |
 
 For the settings line:
@@ -133,7 +132,8 @@ Linux is tested on a real kernel in a Debian 13 arm64 container with systemd
 257 and fake accounts, not yet with real accounts on a Linux machine.
 
 1. Install Go 1.26 or newer from <https://go.dev/dl/>, Python 3.10 or newer,
-   and Claude Code. `go version` and `claude --version` must work in the shell.
+   and Claude Code. `python3 --version`, `go version`, and `claude --version`
+   must work in the shell.
 2. Without an astack checkout, clone one. `CHECKOUT` is then the absolute
    path of the new `astack` directory:
 
@@ -206,14 +206,14 @@ the router, give `cd CHECKOUT && ./uninstall.sh --component claude-router`.
 
 ## Find the service
 
-When `status` does not explain a failure, give the user the state and log
-commands for their system.
+When `status` does not explain a failure, run the state and log commands for
+this system and report what they show.
 
 | | macOS | Linux |
 | --- | --- | --- |
 | Service | launchd agent `dev.astack.claude-router` | systemd user unit `dev.astack.claude-router.service` |
-| State | `launchctl print gui/$(id -u)/dev.astack.claude-router` | `systemctl --user status dev.astack.claude-router` |
-| Logs | `${XDG_STATE_HOME:-$HOME/.local/state}/astack/claude-router/service.log` | `journalctl --user -u dev.astack.claude-router` |
+| State | `launchctl print gui/$(id -u)/dev.astack.claude-router` | `systemctl --user status --no-pager dev.astack.claude-router` |
+| Logs | `tail -n 100 "${XDG_STATE_HOME:-$HOME/.local/state}/astack/claude-router/service.log"` | `journalctl --user -u dev.astack.claude-router --no-pager -n 100` |
 | Start | At each login | At boot with linger. Otherwise at login, and it stops about 15 seconds after the last session ends. |
 
 State lives in `${XDG_STATE_HOME:-$HOME/.local/state}/astack/claude-router/`

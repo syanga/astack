@@ -322,8 +322,8 @@ beyond what `status` shows:
 | | macOS | Linux |
 | --- | --- | --- |
 | Service | launchd agent `dev.astack.claude-router` | systemd user unit `dev.astack.claude-router.service` |
-| State | `launchctl print gui/$(id -u)/dev.astack.claude-router` | `systemctl --user status dev.astack.claude-router` |
-| Logs | `${XDG_STATE_HOME:-$HOME/.local/state}/astack/claude-router/service.log` | `journalctl --user -u dev.astack.claude-router` |
+| State | `launchctl print gui/$(id -u)/dev.astack.claude-router` | `systemctl --user status --no-pager dev.astack.claude-router` |
+| Logs | `tail -n 100 "${XDG_STATE_HOME:-$HOME/.local/state}/astack/claude-router/service.log"` | `journalctl --user -u dev.astack.claude-router --no-pager -n 100` |
 
 On Linux, run `sudo loginctl enable-linger "$USER"` once, before or after
 `setup`. With linger, the systemd user unit starts at boot and runs without a
