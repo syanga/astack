@@ -1491,9 +1491,9 @@ counts the resets left in grants that have not ended, by `type`: `session`,
 `weekly`, or `full`. A grant without a `type` takes one from the windows in
 `clears`, and a grant of any other type is dropped. The resets read is
 separate from the settings read. It never counts toward the run of failed
-reads and never renews a credential. It skips an
-account whose access token the SDK is due to replace. A failed resets read
-records nothing and changes no routing
+reads and never renews a credential. It skips an account whose access token
+the SDK is due to replace. A failed resets read records nothing and changes no
+routing
 (`TestTheServiceReadsResetsAtStartWithoutCountingThemAsSettingsReads`,
 `TestAFailedResetsReadChangesNoRouting`). The grants block and its query are
 undocumented. If they change, status shows no reset count.
