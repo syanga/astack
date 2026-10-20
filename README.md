@@ -63,19 +63,15 @@ For contribution rules, see [AGENTS.md](AGENTS.md).
 local proxy that routes Claude Code conversations across several Claude
 subscription accounts. With one Claude account, you do not need it. The
 default targets and `--target all` never install it. The component README
-explains [what an account move costs](components/claude-router/README.md#how-the-service-routes),
-how the router refuses paid overflow, and
-[the service on each system](components/claude-router/README.md#operate-the-service).
-
-Linux is tested on a real kernel in a Debian 13 arm64 container with systemd
-257 and fake accounts, not yet with real accounts on a Linux machine.
+explains [how routing works](components/claude-router/README.md#how-the-service-routes)
+and [the service on each system](components/claude-router/README.md#operate-the-service).
 
 To install and activate the router:
 
 1. Install Python 3.10 or newer, Go 1.26 or newer from <https://go.dev/dl/>,
    and Claude Code. `python3 --version`, `go version`, and `claude --version`
-   must work in your shell. The `python3` that ships with macOS is 3.9, and
-   the installer fails with a `TypeError` under it.
+   must work in your shell. The installer fails with a `TypeError` under the
+   Python 3.9 that ships with macOS.
 2. From the checkout, download the pinned Go modules once, with network access:
 
    ```sh
@@ -90,14 +86,13 @@ To install and activate the router:
    ./install.sh --component claude-router
    ```
 
-4. The installer does not put `claude-router` on PATH. Run this line:
+4. Put `claude-router` on PATH. The installer does not. To keep it in new
+   shells, add the same line to `~/.zshrc` on macOS or `~/.bashrc` on Linux:
 
    ```sh
    export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/astack/claude-router/bin:$PATH"
    ```
 
-   To keep it in new shells, add the same line to `~/.zshrc` on macOS or
-   `~/.bashrc` on Linux.
 5. On Linux, turn on linger so the router runs without a login session
    ([why](components/claude-router/README.md#operate-the-service)):
 
@@ -106,22 +101,20 @@ To install and activate the router:
    ```
 
 6. Sign in each account and activate the router, with your own labels for
-   the accounts:
+   the accounts. Each sign-in opens a browser window, or prints a URL with
+   `-no-browser`:
 
    ```sh
    claude-router setup -account work -account alumni
    ```
 
-   Each sign-in opens a browser window. Sign in to claude.ai with that
-   account. With `-no-browser`, `setup` prints the sign-in URL instead of
-   opening a browser. Activation points Claude Code's settings at the router.
-   `setup` ends with `activated Claude Code routes through the router`. If it
-   refuses because an account has paid overflow on, turn paid overflow off on
-   claude.ai. Then run `claude-router stop` before you run `setup` again. For
-   any other refusal, follow its `next` line and
-   [Enroll accounts and start](components/claude-router/README.md#enroll-accounts-and-start).
-7. Start a new Claude Code session. A new session reads the changed settings
-   when it starts.
+   Activation points Claude Code's settings at the router. `setup` ends with
+   `activated Claude Code routes through the router`. If it refuses because
+   an account has paid overflow on, turn paid overflow off on claude.ai, run
+   `claude-router stop`, and run `setup` again. For any other refusal, follow
+   its `next` line.
+7. Start a new Claude Code session, because a session reads its settings when
+   it starts.
 8. Check the router. It sends one short test message and ends with
    `check     passed`:
 
@@ -142,14 +135,14 @@ claude-router account remove school
 writes they caused.
 
 `account add`, `account remove`, `stop`, `direct`, and an install over an
-activated router stop or restart the router. Each one cuts off routed Claude
-Code sessions in the middle of a turn. Run them while no session is working.
+activated router stop or restart the router. That cuts off routed Claude Code
+sessions in the middle of a turn, so run them while no session is working.
 
-To roll back to a direct connection, run `claude-router direct`. Then start a
+To roll back to a direct connection, run `claude-router direct` and start a
 new Claude Code session. If `direct` prints
-`after   claude needs its own /login`, run `/login` in that session. To
-activate the router again, run `claude-router setup`. To remove the router,
-run `./uninstall.sh --component claude-router`. `direct` and uninstall both
+`after   claude needs its own /login`, run `/login` in that session.
+`claude-router setup` activates the router again.
+`./uninstall.sh --component claude-router` removes it. `direct` and uninstall
 keep logins and assignments.
 
 ## Find a skill

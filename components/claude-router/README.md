@@ -69,14 +69,9 @@ Linux is tested on a real kernel in a Debian 13 arm64 container with systemd
 
 `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `XDG_CONFIG_HOME` move these paths, as
 they do for the rest of astack. The install neither starts the router nor puts
-`claude-router` on PATH. To run the commands below by name, run this line:
-
-```sh
-export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/astack/claude-router/bin:$PATH"
-```
-
-To keep it in new shells, add the same line to `~/.zshrc` on macOS or
-`~/.bashrc` on Linux.
+`claude-router` on PATH. The root README's
+[install steps](../../README.md#install-the-optional-claude-router) give the
+PATH line.
 
 The commands below default `-state` to the state directory above. The
 installer seeds `config.json` with `127.0.0.1:18787` and no accounts, and
@@ -123,11 +118,11 @@ refuses, and Claude Code stays direct, when an account has paid overflow on.
 It then activates the router with the installed acceptance record and runs
 `claude-router check`, as [Activate the router](#activate-the-router)
 describes. `setup` refuses when Claude Code already routes through the
-router. After `claude-router direct`, run `claude-router setup` to start
-the router and activate it again. It reuses the accounts in `config.json`.
+router. With no `-account`, `setup` reuses the accounts in `config.json`, so
+`claude-router setup` after `claude-router direct` activates the router again.
 After a paid-overflow refusal, turn paid overflow off on claude.ai, run
-`claude-router stop`, then run `setup` again. The running router keeps its
-reading for up to 10 minutes, so a rerun without the `stop` can refuse again.
+`claude-router stop`, then run `setup` again. Without the `stop`, the running
+router keeps its old reading for up to 10 minutes and `setup` can refuse again.
 
 To add an account later, run `account add`. It stops the router, signs in,
 adds the account with capacity 1, starts the router again, and waits for the
@@ -257,8 +252,8 @@ To go back to a direct connection later, run `claude-router direct`. It also
 undoes an activation that was interrupted or whose settings record is gone.
 Uninstall refuses until then.
 
-After activation and after `direct`, start a new Claude Code session. A new
-session reads the changed settings when it starts.
+After activation and after `direct`, start a new Claude Code session, because
+a session reads its settings when it starts.
 
 ## Check the router
 
@@ -281,12 +276,10 @@ check     passed
 ```
 
 On Linux, the first line ends with `(systemd)`. The fifth line names the
-platform the record was accepted on, not this machine, so it reads
-`(darwin/arm64)` on Linux too. When the two differ, activation and `setup`
-also print a line such as
-`note      accepted on darwin/arm64, this is linux/arm64, not yet tested on real Linux`.
-The router helper prints that text. The text predates the Linux container
-run described in [Install the service](#install-the-service).
+record's platform, so it reads `(darwin/arm64)` on Linux too. When the record's
+platform differs from this machine's, activation and `setup` also print a
+`note` line that says `not yet tested on real Linux`. That text predates the
+Linux container run in [Install the service](#install-the-service).
 
 When a check fails, `check` skips the test message, exits 1, and prints the
 next step. With the router stopped, it marks the checks that need the router
@@ -316,8 +309,7 @@ while `setup`, `account`, activation, or `claude-router direct` runs.
 | `claude-router direct -prepare` | Lists the client settings that router activation owns and that `direct` would restore, and the backup it would write. Changes nothing. |
 | `claude-router direct` | Stops the service as `stop` does and restores those client settings, backing each file up to the path that `-prepare` printed. It restores the file of an interrupted activation, or of an activation whose settings record is gone, from its backup; if that file changed since, it refuses before it stops the service, and the edit is kept. Logins, assignments, the binary, and the job stay. A key edited after activation stops it, and the edit is kept. With no client settings to restore, it changes nothing and leaves the service running. A job loaded from another install keeps running, and `direct` does not say the router stopped. |
 
-The service has the same name on both systems. To see its state and logs
-beyond what `status` shows:
+These commands show the service's state and logs:
 
 | | macOS | Linux |
 | --- | --- | --- |
