@@ -9,6 +9,7 @@ type accountView struct {
 	needsLogin   bool
 	needsLoginAt time.Time
 	observation  Observation
+	weekly       weeklyPreference
 	rejections   []rejection
 	allowedAt    map[string]time.Time
 	check        Overage
@@ -168,7 +169,7 @@ func place(cfg Config, now Instant, v view, model string) Decision {
 		}
 		score := base
 		if cfg.Rule == ResetAware {
-			score = base / (1 + cfg.ResetBias*slack(cfg, now, a.observation, model))
+			score = base / (1 + cfg.ResetBias*slack(cfg, now, a, model))
 		}
 		if best < 0 || score < bestScore {
 			best, bestScore = i, score
@@ -237,12 +238,16 @@ func freshness(cfg Config, now time.Time, obs Observation) Freshness {
 	return Fresh
 }
 
-func slack(cfg Config, now Instant, obs Observation, model string) float64 {
+func slack(cfg Config, now Instant, a accountView, model string) float64 {
+	best := a.weekly.slack(cfg, now)
+	obs := a.observation
 	if freshness(cfg, now.Stamp, obs) != Fresh {
-		return 0
+		return best
 	}
-	best := 0.0
 	for _, w := range obs.Windows {
+		if w.Kind == Weekly && len(w.Models) == 0 {
+			continue
+		}
 		period := w.Kind.Period()
 		if period == 0 || w.Utilization == nil || w.ResetsAt.IsZero() || !w.ResetsAt.After(now.Wall) || !w.appliesTo(model) {
 			continue

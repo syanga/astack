@@ -191,10 +191,11 @@ func (o *overageReader) readLocked(ctx context.Context, account router.AccountID
 	delete(o.due, account)
 	o.mu.Unlock()
 	body, err := o.fetch(ctx, account)
-	end := o.s.now()
+	now := o.s.clock.instant()
+	end := now.Stamp
 	var state router.Overage
 	if err == nil {
-		o.noteUsage(account, body.windows(), end)
+		o.noteUsage(account, body.windows(), now)
 		state, err = body.overage()
 	}
 	dur := end.Sub(start).Milliseconds()

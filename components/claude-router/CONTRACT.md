@@ -523,6 +523,8 @@ calls the same `Router`; it has no second placement algorithm.
 | `Router.Route(now, Request) (Decision, error)` | `Decide`, then `Commit`, before dispatch, in a loop of at most 3 attempts. PR3 calls this. |
 | `Router.Report(Failure) Class` | Records a failure before output and returns the class the policy acts on. |
 | `Router.Observe(account, attemptStart, Observation)` | Records the quota headers of one response. |
+| `Router.ObserveWeeklyUsage(account, WeeklyUsage)` | Keeps the newest valid account-wide weekly usage in memory without changing rejection evidence. |
+| `Router.ObserveWeeklyCredits(account, WeeklyCredits)` | Keeps a successful reset reading in memory. An empty reading clears prior credit. |
 | `Router.Served(now, conv, account)` | Appends and syncs a mark that the conversation's current assignment has served a successful response. Written once per assignment. |
 | `Router.ObserveOverage`, `Relogin`, `Move` | The paid-overflow check or observed paid use, relogin, and the manual override. |
 | `Router.CommitAssignment` | Records an assignment without consulting the policy. For setup and tests only. |
@@ -563,11 +565,22 @@ score = (active + 1) / (capacity * (1 + ResetBias * slack))
 
 - `active` counts the account's conversations with a request or commit in the
   last `ActiveFor`, excluding the conversation being decided.
-- `slack` is the largest `elapsed fraction - utilization` over the account's
-  five-hour, weekly, and model windows that apply to the model, from an
-  observation no older than `FreshFor`. A window counts only with a known
-  utilization and a future reset. `slack` is 0 under `capacity_only` and for a
-  stale or missing observation.
+- Account-wide weekly slack is `max(0, elapsed fraction - utilization + N)`.
+  `N` counts available weekly and full resets from a successful reading no
+  older than one hour. Counts stack without a ceiling or time discount.
+  For example, 10% remaining plus two resets is 210% effective weekly
+  remaining. Each grant counts until its exact expiry. Session resets add
+  no weekly credit, and full resets add credit only to the weekly term.
+- Weekly usage comes from the newest valid account-wide weekly reading in
+  response headers or the usage body, no older than `FreshFor`. Utilization
+  must be a finite fraction from 0 through 1, with a known future reset.
+  A missing or invalid newer value preserves earlier valid evidence. Without
+  fresh usable weekly usage, no weekly preference or reset credit applies.
+- `slack` is the maximum of the account-wide weekly term and the existing
+  five-hour and model-scoped header terms that apply to the requested model.
+  Those header terms retain their freshness and reset rules. Body windows
+  other than account-wide weekly remain status readings only.
+  `capacity_only` ignores all preferences.
 - Ties go to the earlier enrolled account.
 - An account is blocked until the latest reset among its rejected windows that
   apply to the model. A five-hour reset therefore never unblocks an account
@@ -578,8 +591,9 @@ score = (active + 1) / (capacity * (1 + ResetBias * slack))
   observation stamped after it reports the same window, matched by kind and
   model scope in any prefix order, as not rejected. An observation that omits
   the window does not clear it. A rejection stamped before such an allowed
-  report is not recorded. Utilization and freshness come from the newest
-  observation only.
+  report is not recorded. Five-hour and model-scoped utilization and freshness
+  come from the newest header observation. Usage-body readings never clear
+  rejections.
 - Per window, the router keeps the newest rejection after it resets, when it
   no longer blocks, so that a delayed rejection stamped earlier is not
   recorded. Of two rejections stamped at the same time, the one that ends
@@ -596,7 +610,7 @@ score = (active + 1) / (capacity * (1 + ResetBias * slack))
 
 `Decision.Reason` is `reset_preference` when the reset-aware choice differs
 from the capacity-only choice for the same request, and `capacity` otherwise.
-`Decision.Observation` reports whether the chosen account's observation is
+`Decision.Observation` reports whether the chosen account's header observation is
 `fresh`, `stale`, or `absent`.
 
 ### Defaults
@@ -1508,8 +1522,9 @@ usage response for status, and each `limits` entry of kind `weekly_scoped`
 with a `scope.model.display_name`, such as `Fable`, as a model-scoped weekly
 window. The service converts `utilization` and `percent` from a percentage
 to a fraction, and drops an entry of another shape without dropping the
-others (`TestASettingsReadRecordsTheLimitWindowsForStatus`). Routing does
-not use them. It uses response headers only. The service decodes these
+others (`TestASettingsReadRecordsTheLimitWindowsForStatus`). Routing also
+uses the account-wide `seven_day` window for weekly preference. The other
+body windows remain status readings only. The service decodes these
 fields apart from `extra_usage`, so a field of another shape drops out of
 status and leaves the paid-overflow reading unchanged. A settings read with
 no readable window clears the last limit reading
@@ -1527,15 +1542,25 @@ counts the resets left in grants whose `ends_at` has not passed when status
 runs, by `type`: `session`, `weekly`, or `full`
 (`TestStatusCountsOnlyResetGrantsThatHaveNotEnded`). A grant without a `type`
 takes one from the windows in `clears`, and a grant of any other type is
-dropped. The resets read is separate from the settings read. It never counts
+dropped. Only a response with `eligible: true` supplies grants. A grant with
+a nonpositive count or malformed `ends_at` is dropped. A missing or null
+`ends_at` means no expiry. Weekly and full grants also supply weekly
+placement credit for at most one hour after the successful read. An empty
+or ineligible successful reading clears prior credit. The router never
+redeems a grant automatically.
+
+The resets read is separate from the settings read. It never counts
 toward the run of failed reads and never renews a credential. It skips an
 account whose access token the SDK is due to replace. A failed resets read
-records no resets reading, and the account keeps serving
+keeps the previous successful reading without renewing its timestamp, and
+the account keeps serving
 (`TestTheServiceReadsResetsAtStartWithoutCountingThemAsSettingsReads`,
 `TestAFailedResetsReadLeavesTheAccountServing`). Like every response through the
 router's transport, a resets response's rate-limit and overage headers are
 readings for routing. The grants block and its query are undocumented. If
-they change, status shows no reset count.
+they change, the router gains no new credit and status gains no new reset
+count. Weekly usage and reset credit live only in memory. They do not change
+admission, paid-overflow checks, or durable assignments.
 
 ### Configuration and credentials change only by restart
 
@@ -1652,6 +1677,13 @@ was stale by wall time.
   clock change or a large correction. Requests that read the clock at the
   same time never see a step that the wall clock did not take
   (`TestConcurrentCallersOfAForwardWallClockNeverExpireChecks`).
+- A hold also discards transient account-wide weekly usage and reset credit
+  at each `ExpireOverageChecks` marker. The router rejects weekly readings
+  stamped before the marker and suppresses new weekly preferences during
+  the hold. On recovery it requires new evidence, so a delayed pre-hold
+  reading cannot restore old credit
+  (`TestClockExpirationPreventsWeeklyEvidenceFromReturning`,
+  `TestWeeklyPreferencesExpireAcrossAServiceClockHold`).
 - **A restart keeps only a `disabled` check it can age.** After a restart,
   the router ages a saved check by the wall clock. `accounts.json`
   therefore holds no `disabled` check during a hold, and none stamped
