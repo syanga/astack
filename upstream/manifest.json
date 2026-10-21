@@ -432,5 +432,12 @@
     "path": "pstack/skills/typescript-best-practices",
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/typescript-best-practices/LICENSE-pstack"
+  },
+  "brag-slim": {
+    "repository": "https://github.com/latent-spaces/brag.git",
+    "path": "skills/brag-slim",
+    "commit": "069432cac935ed1895859df201c31436c07fb74e",
+    "license": "MIT, kept in skills/brag-slim/LICENSE",
+    "note": "Full /brag is not imported because it depends on Hyperframes and its bundled music has unverified redistribution terms. On Opus 5.5, /brag already runs brag-slim unless the user asks for `--full` or `--voice`. The description drops the /brag hand-off because astack does not install /brag. Step 2 waits for plan approval because a render takes minutes and the storyboard is the cheapest point to change direction."
   }
 }
