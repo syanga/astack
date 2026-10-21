@@ -15,6 +15,7 @@ import uuid
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
+import astack_codex_hooks
 import astack_files as files
 import astack_plugins
 import astack_settings
@@ -120,19 +121,44 @@ def desired_files(harness, home, use_env, skills):
     return result
 
 
+def settings_source(spec):
+    source = REPO / "settings" / spec["source"]
+    if source.is_symlink():
+        raise ValueError("Settings source symlinks are unsupported: {}".format(source))
+    return astack_settings.json_loads(source.read_text(encoding="utf-8"))
+
+
+def codex_trust_path(spec, args, use_env):
+    # Codex canonicalizes CODEX_HOME when it is set, and otherwise uses $HOME/.codex unresolved.
+    # With --home, Codex is assumed to run with HOME set to it.
+    override = os.environ.get(spec["env"]) if use_env else None
+    if override:
+        return os.path.join(os.path.realpath(os.path.expanduser(override)), spec["suffix"])
+    return os.path.join(os.path.abspath((args.home or Path.home()).expanduser()), spec["default"], spec["suffix"])
+
+
 def settings_operations(harnesses, selected, state, home, use_env, args):
     operations = []
     for target in selected:
-        old = state.get("settings", {}).get(target, {})
+        old = dict(state.get("settings", {}).get(target, {}))
         spec = harnesses[target].get("settings")
+        hooks_spec = harnesses[target].get("hooks")
         desired = {}
         if args.command == "install" and spec:
-            source = REPO / "settings" / spec["source"]
-            if source.is_symlink():
-                raise ValueError("Settings source symlinks are unsupported: {}".format(source))
-            values = astack_settings.json_loads(source.read_text(encoding="utf-8"))
+            values = settings_source(spec)
             if target == "claude":
                 claude_router.check_harness_settings(values)
+            if hooks_spec:
+                # Codex skips untrusted hooks, so trust each hook at the position the merge gives it.
+                hooks_path = str(destination(hooks_spec, home, use_env))
+                hooks = settings_source(hooks_spec)
+                previous = {hooks_path: old.pop(hooks_path)} if hooks_path in old else {}
+                change, = astack_settings.prepare(target, previous, {hooks_path: (hooks_spec["format"], hooks)}, args.force)
+                operations.append(change)
+                trust = astack_codex_hooks.trust(codex_trust_path(hooks_spec, args, use_env), change.rendered, hooks)
+                if trust and "hooks" in values:
+                    raise ValueError("Remove the hooks key from settings/{}. astack generates hook trust.".format(spec["source"]))
+                values.update(trust)
             if list(astack_settings.leaves(values)):
                 desired[str(destination(spec, home, use_env))] = (spec["format"], values)
             if old and str(destination(spec, home, use_env)) not in old:

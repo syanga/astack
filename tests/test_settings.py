@@ -1,12 +1,18 @@
 """Shared settings ownership, lossless TOML edits, and reversible installation."""
 
 import json
+import os
 import stat
 from pathlib import Path
+import subprocess
+import sys
 from unittest.mock import patch
 
 import test_install_lifecycle as lifecycle
 from test_install import InstallerFixture
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+from _vendor.tomllib import loads as toml_loads
 
 HOOK = {"matcher": "Bash", "hooks": [{"type": "command", "command": "check", "timeout": 10}]}
 OTHER = {"matcher": "Bash", "hooks": [{"type": "command", "command": "other"}]}
@@ -28,19 +34,14 @@ class SettingsTests(InstallerFixture):
         path.chmod(0o640)
         return path
 
-    def test_defaults_disable_claude_memory_and_never_read_codex_config(self):
-        codex = self.config("codex", "not even valid TOML; leave untouched\n")
-        before = codex.read_bytes(), codex.stat().st_mtime_ns
-        self.run_installer()
+    def test_defaults_disable_claude_memory(self):
+        self.run_installer("--target", "claude")
         hook = json.loads((self.repo / "settings/claude.json").read_text())["hooks"]["PreToolUse"]["$entries"]
         self.assertEqual(json.loads((self.home / ".claude/settings.json").read_text()),
                          {"autoMemoryEnabled": False, "hooks": {"PreToolUse": hook}})
-        self.assertEqual(before, (codex.read_bytes(), codex.stat().st_mtime_ns))
         self.assertEqual(self.manifest()["version"], 3)
-        self.assertNotIn("codex", self.manifest()["settings"])
-        self.run_installer(command="uninstall")
+        self.run_installer("--target", "claude", command="uninstall")
         self.assertFalse((self.home / ".claude/settings.json").exists())
-        self.assertEqual(codex.read_bytes(), before[0])
 
     def test_both_harnesses_install_update_and_exact_restore(self):
         self.source("codex", {"model_reasoning_effort": "high", "features": {"memories": False}})
@@ -160,8 +161,60 @@ class SettingsTests(InstallerFixture):
         self.run_installer("--target", "codex", command="uninstall")
         self.assertEqual(path.read_text(), original)
 
-    def test_absent_defaults_do_not_create_codex_config(self):
+    def test_codex_hooks_join_user_hooks_with_the_trust_codex_computes(self):
+        # Codex 0.163 reported this currentHash for this declaration through app-server hooks/list.
+        command = "python3 /opt/hooks/wake.py"
+        (self.repo / "settings/codex-hooks.json").write_text(json.dumps({"hooks": {"Stop": {"$entries": [
+            {"hooks": [{"type": "command", "command": command, "timeout": 30}]}]}}}))
+        mine = {"hooks": [{"type": "command", "command": "notify-send done"}]}
+        hooks = self.home / ".codex/hooks.json"
+        hooks.parent.mkdir(parents=True)
+        hooks_text = json.dumps({"hooks": {"Stop": [mine]}}) + "\n"
+        hooks.write_text(hooks_text)
+        config = self.config("codex", 'model = "gpt-6.1-sol"\n')
         self.run_installer("--target", "codex")
+        self.assertEqual(json.loads(hooks.read_text())["hooks"]["Stop"][1]["hooks"][0]["command"], command)
+        self.assertEqual(toml_loads(config.read_text())["hooks"]["state"], {
+            "{}:stop:1:0".format(hooks): {
+                "trusted_hash": "sha256:2fcebf228122ead290e47d806b5fb3c26357c5fbd34133d2ecf164ae542211a0"}})
+        self.run_installer("--target", "codex", command="uninstall")
+        self.assertEqual(hooks.read_text(), hooks_text)
+        self.assertEqual(config.read_text(), 'model = "gpt-6.1-sol"\n')
+
+    def test_codex_trust_uses_the_canonical_codex_home(self):
+        real = self.root / "real codex"
+        real.mkdir()
+        link = self.root / "linked codex"
+        link.symlink_to(real)
+        self.run_with_config(self.manager(), {"CODEX_HOME": str(link)}, "install", "--target", "codex")
+        state = toml_loads((real / "config.toml").read_text())["hooks"]["state"]
+        self.assertEqual(list(state), ["{}:stop:0:0".format(real / "hooks.json")])
+
+    def test_codex_trust_keeps_an_unresolved_home(self):
+        real = self.home
+        real.mkdir()
+        self.home = self.root / "linked home"
+        self.home.symlink_to(real)
+        self.run_with_config(self.manager(), {}, "install", "--target", "codex")
+        state = toml_loads((real / ".codex/config.toml").read_text())["hooks"]["state"]
+        self.assertEqual(list(state), ["{}:stop:0:0".format(self.home / ".codex/hooks.json")])
+
+    def test_codex_trust_key_is_absolute_for_a_relative_home(self):
+        relative = self.home.relative_to(self.root)
+        installer = subprocess.run([str(self.repo / "install.sh"), "--home", str(relative), "--target", "codex"],
+                                   cwd=str(self.root), capture_output=True, text=True,
+                                   env=dict(os.environ, PATH="/usr/bin:/bin"))
+        self.assertEqual(installer.returncode, 0, installer.stderr)
+        state = toml_loads((self.home / ".codex/config.toml").read_text())["hooks"]["state"]
+        self.assertEqual(list(state), ["{}:stop:0:0".format(self.home / ".codex/hooks.json")])
+
+    def test_codex_hook_files_created_by_install_are_removed_by_uninstall(self):
+        self.run_installer("--target", "codex")
+        hooks = json.loads((self.home / ".codex/hooks.json").read_text())["hooks"]["Stop"]
+        self.assertIn("subagent_wake.py", hooks[0]["hooks"][0]["command"])
+        self.assertIn("hooks.json:stop:0:0", (self.home / ".codex/config.toml").read_text())
+        self.run_installer("--target", "codex", command="uninstall")
+        self.assertFalse((self.home / ".codex/hooks.json").exists())
         self.assertFalse((self.home / ".codex/config.toml").exists())
 
     def test_toml_header_whitespace_preserved_on_update_and_restore(self):

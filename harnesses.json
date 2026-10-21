@@ -9,6 +9,7 @@
     "instructions": {"default": ".codex", "env": "CODEX_HOME", "suffix": "AGENTS.md"},
     "skills": {"default": ".agents", "suffix": "skills"},
     "settings": {"default": ".codex", "env": "CODEX_HOME", "suffix": "config.toml", "format": "toml", "source": "codex.json"},
+    "hooks": {"default": ".codex", "env": "CODEX_HOME", "suffix": "hooks.json", "format": "json", "source": "codex-hooks.json"},
     "overlay": "CODEX.md"
   }
 }

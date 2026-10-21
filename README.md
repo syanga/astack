@@ -58,6 +58,22 @@ In a JSON destination, a source value of `{"$entries": [...]}` adds its entries
 to the list at that key and keeps the list's other entries. Uninstall removes
 only the entries it added.
 
+For Codex, the installer adds the Stop hook in
+[settings/codex-hooks.json](settings/codex-hooks.json) to `hooks.json`. The hook
+starts a background watcher at the end of each turn. The watcher wakes an idle
+top-level thread when one of its subagents finishes. Codex runs a hook only when
+`config.toml` holds a matching trust record, so the installer writes the
+`trusted_hash` that Codex's `/hooks` review would write. The hash covers the
+hook's declaration, including its command, but not the script that the command
+runs, so an updated script runs without another review.
+
+Codex keys trust by a hook's position in its event's list. Adding, removing, or
+reordering entries moves hooks to positions whose trust records no longer match,
+and Codex skips them until you review them in `/hooks`. Reinstalling re-trusts
+astack's hook at its new position. If a review changed a trust record that astack
+wrote, the next install or uninstall reports a conflict and stops until you
+reconcile it or pass `--force`.
+
 For contribution rules, see [AGENTS.md](AGENTS.md).
 
 ## Install the optional Claude router
