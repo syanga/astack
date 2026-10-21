@@ -2195,19 +2195,21 @@ refuses to build router code that differs from the commit.
 acceptance run at the router code it names. A change to the router code
 needs a new acceptance run and record.
 
-The record at `956b5e8` comes from a scoped run the operator chose for the
-limit bars (PR102). It ran on Linux 7.0 x86_64 with real accounts `work` and
-`alumni`, Claude Code 2.1.305, and a foreground router on its own port and
-state directory, beside the daily router. It reran the rows the change can
-affect: the identity at the start and end, stable routing, resume, a
-subagent, and a restart (A1 to A4), cache counters, every overage read
-`disabled`, the run budget, the limit windows and reset grants against the
-usage endpoint's own answers, and status on a terminal and in a pipe. After
-the install on the same host, the systemd service ran this code and `check`
-passed every line. The rows the change cannot affect, such as migration,
-waiting, Agent SDK placement, the cache comparison, `apiKeyHelper`
-precedence, the controlled-upstream lane reruns, and the Linux service
-lifecycle, are `accepted` and cite earlier records' evidence.
+The record at `b5ef231` comes from a scoped run the operator chose for newer
+models and the installer PATH lines (PR103). Like the run for PR102 at
+`956b5e8`, it ran on Linux 7.0 x86_64 with real accounts `work` and `alumni`,
+Claude Code 2.1.305, and a foreground router on its own port and state
+directory, beside the daily router. It reran the identity at the start and end,
+stable routing, resume, a subagent, and a restart (A1 to A4), cache counters,
+every overage read `disabled`, the run budget, the limit windows and reset
+grants against the usage endpoint's own answers, and status on a terminal and
+in a pipe. It added two rows: the start read the model catalog and added
+`claude-haiku-5-5`, and a Claude Code request for `claude-haiku-5-5` completed
+with 200. The installer's PATH lines rest on the Python suite. The rows the
+change cannot affect, such as migration, waiting, Agent SDK placement, the
+cache comparison, `apiKeyHelper` precedence, the controlled-upstream lane
+reruns, and the Linux service lifecycle, are `accepted` and cite earlier
+records' evidence.
 
 ### Check
 
