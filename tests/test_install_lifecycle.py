@@ -195,6 +195,7 @@ class InstallerLifecycleTests(InstallerFixture):
         self.run_installer("--target", "claude")
         target = (self.home / ".claude/skills/test-skill/SKILL.md").resolve()
         original = target.read_bytes()
+        original_mode = stat.S_IMODE((self.skill / "SKILL.md").stat().st_mode)
         (self.skill / "SKILL.md").write_bytes(original + b"\nUpdated instructions.\n")
         module = self.manager()
         real_replace = module.os.replace
@@ -209,7 +210,7 @@ class InstallerLifecycleTests(InstallerFixture):
                 self.run_with_config(module, {}, "install", "--target", "claude")
         self.assertEqual(target.read_bytes(), original)
         self.assertEqual(self.manifest()["targets"]["claude"][str(target)],
-                         module.files.fingerprint(original, 0o644))
+                         module.files.fingerprint(original, original_mode))
         self.assertFalse(list(self.home.rglob(".astack-*")))
         self.run_installer("--target", "claude")
         self.assertEqual(target.read_bytes(), (self.skill / "SKILL.md").read_bytes())
