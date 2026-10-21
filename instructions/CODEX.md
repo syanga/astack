@@ -20,3 +20,11 @@ failure, input request, or suspected stall, not for routine progress updates.
 If neither mechanism exists, use one bounded watcher outside the model that
 returns on completion or an actionable change. Model-driven polling is a last
 resort: explain the limitation and back off between checks.
+
+A status question does not pause authorized work.
+
+Codex does not start a turn when a native subagent finishes. astack's Stop hook
+wakes an idle top-level thread when one of its subagents finishes, so a top-level
+thread may end its turn while its subagents run. The hook does not wake a
+subagent thread. As a subagent, wait with `wait_agent` for the subagents you
+started before giving your final answer.
