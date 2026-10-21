@@ -8,6 +8,9 @@ description: Run Codex background commands and queue completion to their thread.
 Use this workflow in a loaded Codex thread with `CODEX_THREAD_ID` and a CLI that
 supports `codex queue`. Keep the hosting session open until the job finishes.
 Other harnesses and interactive commands use their native process sessions.
+A subagent started with `spawn_agent` runs the command through
+[`run-job`](../run-job/SKILL.md) in a native session instead, because
+`codex queue` rejects its notifications.
 
 Run finite jobs, watchers, and long-lived processes through `scripts/run.py`,
 which wraps the [`run-job`](../run-job/SKILL.md) helper.
@@ -42,8 +45,7 @@ which wraps the [`run-job`](../run-job/SKILL.md) helper.
    resume.
 5. On notification, read the result and relevant output once. Continue the
    original task. A timeout, a nonzero exit, or `cleanup: failed` is a failure
-   to investigate. Answer status questions briefly, then continue the remaining
-   authorized work. Apply later cancellation or scope changes before acting on
+   to investigate. Apply later cancellation or scope changes before acting on
    delayed messages.
 
 The helper attempts one notification after success, failure, or timeout. When it
