@@ -1,289 +1,140 @@
 {
- "result": "pass",
- "head": "b5ef23190cce264d24c1f332dbc8e5d909da2255",
- "code_sha256": "1267a88d16dae04546498dec813dd7f4a004478dbcfbd6273f09a41059c051a3",
- "binary_sha256": "4a9ad95f432833d2b8457b4ba20acc62481f3139e84d4a92b11ea570b2edab80",
+ "head": "fe3a12a239879dab239fb88476f3af60fde7f416",
+ "code_sha256": "6cf562ff7466a098968218a5f32a9053c6b1bda62d0f8b3c0df0a1b2a2832577",
+ "binary_sha256": "3b9b13bef6a5bacd4275d475b281d35d9bf30daba2b783572a2cc4b1f76858d6",
  "helpers_sha256": "4bc4da547f346e0cf0ad12832eccfdcb972257e91876189234cab1e424400243",
  "sdk": "v8.0.11",
  "go": "go1.27.3",
  "platform": "linux/amd64",
  "clients": {
-  "claude_code": "2.1.305",
-  "agent_sdk": null
+  "claude_code": "2.1.305"
  },
- "accepted_limits": [
-  "pr103-scoped",
-  "w6-pr4"
- ],
- "open": [],
- "evidence_root": "~/.local/state/astack/claude-router-lanes/pr103/evidence",
+ "result": "pass",
+ "scope": "PR104 reset-aware account placement, real-account new/resume/restart checks; unchanged historical scenarios are references and were not rerun",
+ "evidence_root": "/home/alan/.local/state/astack/claude-router-lanes/pr104/evidence",
  "matrix": [
   {
-   "scenario": "Identity at A0: running code and binary equal the built ones",
+   "scenario": "work token is outside the four-hour refresh lead",
    "status": "pass",
-   "evidence": [
-    "run-b5ef231/identity-start.json",
-    "code 1267a88d16da binary 4a9ad95f4328"
-   ]
+   "detail": null
   },
   {
-   "scenario": "Limit windows in status equal the usage endpoint's five_hour, seven_day, and weekly_scoped limits",
+   "scenario": "alumni token is outside the four-hour refresh lead",
    "status": "pass",
-   "evidence": [
-    "run-b5ef231/status-start.json",
-    "run-b5ef231/raw-*-usage.json",
-    "alumni {'five_hour': 0.04, 'weekly': 0.93, 'weekly/Fable': 0}; work {'five_hour': 0.14, 'weekly': 0.38, 'weekly/Fable': 0}"
-   ]
+   "detail": null
   },
   {
-   "scenario": "Reset grants in status equal the endpoint's eligible cedar_ember grants with resets left",
+   "scenario": "Candidate code and executable match the merged build",
    "status": "pass",
-   "evidence": [
-    "run-b5ef231/status-start.json",
-    "run-b5ef231/raw-*-resets.json",
-    "alumni eligible True grants {'full': 1}; work eligible True grants {}"
-   ]
+   "detail": null
   },
   {
-   "scenario": "At start the service read the model catalog and added claude-haiku-5-5",
+   "scenario": "work is admissible with paid overflow disabled",
    "status": "pass",
-   "evidence": [
-    "run-b5ef231/events-lane.json",
-    "model_catalog read added ['claude-haiku-5-5']"
-   ]
+   "detail": null
   },
   {
-   "scenario": "A claude-haiku-5-5 request from Claude Code completes with 200 through the router",
+   "scenario": "work has fresh weekly usage and reset readings",
    "status": "pass",
-   "evidence": [
-    "run-b5ef231/N4.out",
-    "run-b5ef231/N4.events.json",
-    "answer 'pong', 1 completed requests on ['alumni']"
-   ]
+   "detail": null
   },
   {
-   "scenario": "A1 stable routing: a new conversation is placed and completes",
+   "scenario": "alumni is admissible with paid overflow disabled",
    "status": "pass",
-   "evidence": [
-    "run-b5ef231/A1.out",
-    "run-b5ef231/A1.events.json",
-    "conversation 108953295b3f on alumni, 3.5 s"
-   ]
+   "detail": null
   },
   {
-   "scenario": "A2 resume: the resumed conversation stays on its account",
+   "scenario": "alumni has fresh weekly usage and reset readings",
    "status": "pass",
-   "evidence": [
-    "run-b5ef231/A2.out",
-    "run-b5ef231/A2.events.json",
-    "answer 'lantern', 1 requests on ['alumni']"
-   ]
+   "detail": null
   },
   {
-   "scenario": "A3 subagent: the parent and its subagent's requests stay on the conversation's account",
+   "scenario": "Available reset changes the predicted initial account",
    "status": "pass",
-   "evidence": [
-    "run-b5ef231/A3.out",
-    "run-b5ef231/A3.events.json",
-    "tools ['Agent'], 3 requests on ['alumni']",
-    "run-b5ef231-try1/: the first try named the \"Task tool\", which Claude Code 2.1.305 read as TaskCreate; the prompt now names the Agent tool. run-b5ef231-try2-429/: the usage endpoint answered 429 to the lane logins after back-to-back starts; the third try waited out its retry-after"
+   "detail": [
+    {
+     "id": "work",
+     "weekly_used": 0.39,
+     "credits": 0,
+     "score": 0.3068844992134659,
+     "without_credit_score": 0.3068844992134659
+    },
+    {
+     "id": "alumni",
+     "weekly_used": 0.97,
+     "credits": 1,
+     "score": 0.2000197491774707,
+     "without_credit_score": 1.0
+    }
    ]
   },
   {
-   "scenario": "A4 restart: after SIGTERM and a new start, the conversation keeps its account",
+   "scenario": "new receives a routed 200",
    "status": "pass",
-   "evidence": [
-    "run-b5ef231/A4.out",
-    "run-b5ef231/A4.events.json",
-    "run-b5ef231/serve-2.log",
-    "answer 'lantern' on ['alumni']"
-   ]
+   "detail": null
   },
   {
-   "scenario": "Status draws a box per account with the Fable row on a terminal, at 100 and 80 columns",
+   "scenario": "New conversation chooses the account with reset credit",
    "status": "pass",
-   "evidence": [
-    "run-b5ef231/status-tty-100.txt",
-    "run-b5ef231/status-tty-80.txt"
-   ]
+   "detail": {
+    "expected": "alumni",
+    "without_credit": "work"
+   }
   },
   {
-   "scenario": "NO_COLOR drops the escapes; a pipe and TERM=dumb print the status lines",
+   "scenario": "resume receives a routed 200",
    "status": "pass",
-   "evidence": [
-    "run-b5ef231/status-tty-100-no-color.txt",
-    "run-b5ef231/status-piped.txt",
-    "run-b5ef231/status-tty-dumb.txt"
-   ]
+   "detail": null
   },
   {
-   "scenario": "Cache counters on every routed request",
+   "scenario": "Resume preserves account and conversation content",
    "status": "pass",
-   "evidence": [
-    "run-b5ef231/events-lane.json",
-    "7 completed requests with all four counters; missing in []"
-   ]
+   "detail": null
   },
   {
-   "scenario": "Overage reads disabled throughout the lane",
+   "scenario": "restart receives a routed 200",
    "status": "pass",
-   "evidence": [
-    "run-b5ef231/events-lane.json",
-    "4 overage reads, others []"
-   ]
+   "detail": null
   },
   {
-   "scenario": "Every run within 12 attempts, 100,000 input, and 10,000 output tokens",
+   "scenario": "Restart preserves the served conversation's account",
    "status": "pass",
-   "evidence": [
-    "run-b5ef231/budgets.json",
-    "over budget: []"
-   ]
+   "detail": null
   },
   {
-   "scenario": "Identity at the end equals identity at A0",
+   "scenario": "Identity and disabled paid overflow remain stable",
    "status": "pass",
-   "evidence": [
-    "run-b5ef231/identity-start.json",
-    "run-b5ef231/identity-end.json"
-   ]
+   "detail": null
   },
   {
-   "scenario": "Record code_sha256 and helpers_sha256 equal the head's (identity --code-only)",
+   "scenario": "No lane token refresh occurred",
    "status": "pass",
-   "evidence": [
-    "identity --code-only at b5ef231: code 1267a88d16da, helpers 4bc4da547f34",
-    "run-b5ef231/identity-start.json and identity-end.json: running code 1267a88d16da"
-   ]
+   "detail": null
   },
   {
-   "scenario": "Included-only reads and refusal",
+   "scenario": "Live checks remain within the scoped request budget",
    "status": "pass",
-   "evidence": [
-    "run-b5ef231/events-lane.json: every overage read disabled at both starts",
-    "gotest-ed06dcc.txt: go test -count=1 ./... ok at ed06dcc, whose router code equals b5ef231's (IO-6 unit tests included)",
-    "run-b5ef231-try2-429/: with the usage endpoint answering 429, the router held paid overflow unknown and dispatched nothing"
-   ]
+   "detail": {
+    "attempts": 3,
+    "input": 21753,
+    "output": 342
+   }
   },
   {
-   "scenario": "Transient failure, partial stream, cancellation, crash, auth revocation: unit and probe suites at the head",
+   "scenario": "Evidence contains no copied access token",
    "status": "pass",
-   "evidence": [
-    "gotest-ed06dcc.txt: ok at ed06dcc, whose router code equals b5ef231's"
-   ]
-  },
-  {
-   "scenario": "Installer PATH lines and the astack-update router step",
-   "status": "pass",
-   "evidence": [
-    "pytest-b5ef231.txt: 374 tests, 1 failure that also fails on main (test_failed_file_replace_preserves_old_file_and_retry_succeeds), 17 skipped; ShellPathTests 19 of 19",
-    "astack-update's router step was traced by two reviews and has not run end to end; the operator accepted that, 2026-10-20"
-   ]
-  },
-  {
-   "scenario": "Transient failure, partial stream, cancellation, crash, auth revocation: controlled-upstream lane reruns",
-   "status": "accepted",
-   "evidence": [
-    "carried again for PR103: the change adds a start-time model registration and installer PATH lines and leaves this path as it was; the operator chose a scoped rerun, 2026-10-20",
-    "not rerun; carried from evidence/PR8/lane-3/lane-1/default.json and lane-2-controlled/recovery.json at 5deafbd (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host); the change touches overageReader.get only to add a user agent to the resets read, and the 401 refresh path passes none"
-   ]
-  },
-  {
-   "scenario": "Migration with tools and thinking (terminal, Agent SDK)",
-   "status": "accepted",
-   "evidence": [
-    "carried again for PR103: the change adds a start-time model registration and installer PATH lines and leaves this path as it was; the operator chose a scoped rerun, 2026-10-20",
-    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20 (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host)",
-    "runs/A5/result.json",
-    "runs/A7/result.json"
-   ]
-  },
-  {
-   "scenario": "CC-2 thinking half: the destination accepts the source's thinking blocks",
-   "status": "accepted",
-   "evidence": [
-    "carried again for PR103: the change adds a start-time model registration and installer PATH lines and leaves this path as it was; the operator chose a scoped rerun, 2026-10-20",
-    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20 (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host)",
-    "runs/A5/result.json: exercised: the destination answered 200 to 4 thinking block(s) from the source"
-   ]
-  },
-  {
-   "scenario": "Agent SDK with T3's options: placement",
-   "status": "accepted",
-   "evidence": [
-    "carried again for PR103: the change adds a start-time model registration and installer PATH lines and leaves this path as it was; the operator chose a scoped rerun, 2026-10-20",
-    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20 (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host)",
-    "runs/A6/result.json"
-   ]
-  },
-  {
-   "scenario": "Waiting, short (WC-1)",
-   "status": "accepted",
-   "evidence": [
-    "carried again for PR103: the change adds a start-time model registration and installer PATH lines and leaves this path as it was; the operator chose a scoped rerun, 2026-10-20",
-    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20 (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host)",
-    "runs/A9/result.json"
-   ]
-  },
-  {
-   "scenario": "Waiting, long (WC-6)",
-   "status": "accepted",
-   "evidence": [
-    "carried again for PR103: the change adds a start-time model registration and installer PATH lines and leaves this path as it was; the operator chose a scoped rerun, 2026-10-20",
-    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20 (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host)",
-    "routing store .scratch/claude-account-routing: evidence/PR4/live-2-cc2.1.300/W6/ (PR4 head; the operator chose to skip A8, 2026-10-19, gate G6)"
-   ]
-  },
-  {
-   "scenario": "Stable cache comparison (PR8.perf)",
-   "status": "accepted",
-   "evidence": [
-    "carried again for PR103: the change adds a start-time model registration and installer PATH lines and leaves this path as it was; the operator chose a scoped rerun, 2026-10-20",
-    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20 (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host)",
-    "perf/comparison.json: pass",
-    "perf/model/model.json: pass"
-   ]
-  },
-  {
-   "scenario": "apiKeyHelper wins over a stored login (Part C)",
-   "status": "accepted",
-   "evidence": [
-    "carried again for PR103: the change adds a start-time model registration and installer PATH lines and leaves this path as it was; the operator chose a scoped rerun, 2026-10-20",
-    "carried from evidence/PR8/lane-3 at 5deafbd (code bb34ab27dccc); the operator chose a scoped rerun for PR102, 2026-10-20 (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host)",
-    "apikeyhelper-precedence.json: pass"
-   ]
-  },
-  {
-   "scenario": "Linux service lifecycle: stop, start, crash-loop limit, linger, uninstall",
-   "status": "accepted",
-   "evidence": [
-    "carried again for PR103: the change adds a start-time model registration and installer PATH lines and leaves this path as it was; the operator chose a scoped rerun, 2026-10-20",
-    "not rerun at this code; PR9 Linux container lane at 2e61073 (evidence/PR9/linux/linux.json (paths under evidence/ resolve from CLAUDE_ROUTER_STORE on the macOS host))"
-   ]
-  },
-  {
-   "scenario": "Included-only gap: credits enabled outside the proxy while included windows are exhausted",
-   "status": "accepted",
-   "evidence": [
-    "carried again for PR103: the change adds a start-time model registration and installer PATH lines and leaves this path as it was; the operator chose a scoped rerun, 2026-10-20",
-    "G1, order 14 (user, 2026-10-04)"
-   ]
-  },
-  {
-   "scenario": "Linux with real accounts: a foreground router (this lane)",
-   "status": "pass",
-   "evidence": [
-    "run-b5ef231/: the lane rows above, on Linux 7.0 x86_64 with real accounts work and alumni, Claude Code 2.1.305"
-   ]
-  },
-  {
-   "scenario": "No step stopped the session",
-   "status": "pass",
-   "evidence": [
-    "the lane ran on its own port and state directory; the daily router kept serving and reading disabled throughout"
-   ]
+   "detail": null
   }
  ],
- "written": "2026-10-21T00:26:39Z",
- "activation_mismatches": []
+ "open": [],
+ "prior_acceptance": {
+  "record": "/home/alan/.local/state/astack/claude-router-lanes/pr104/evidence/previous-acceptance.json",
+  "status": "historical reference, not rerun at this code"
+ },
+ "offline_verification": {
+  "head": "7295faff0aecd2090dec72c1dfbd5ac3520e0020",
+  "source_equal_to_merge": true,
+  "evidence": "/home/alan/.t3/worktrees/astack/t3-a30f00aa/.scratch/router-reset-selection/reports/verification.txt"
+ },
+ "written": "2026-10-21T01:57:07.532562+00:00"
 }
