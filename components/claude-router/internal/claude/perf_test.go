@@ -155,7 +155,7 @@ func TestPerf(t *testing.T) {
 		tok := e.writeCredential(a)
 		headUp.Bind(tok, a)
 	}
-	svc, err := Start(e.cfg, Options{Upstream: fixed(usageFront{up: headUp})})
+	svc, err := Start(e.cfg, offline(Options{Upstream: fixed(usageFront{up: headUp})}))
 	if err != nil {
 		t.Fatal(err)
 	}

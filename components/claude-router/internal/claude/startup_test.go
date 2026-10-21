@@ -18,7 +18,7 @@ func TestFailedStartReleasesTheStateDirectory(t *testing.T) {
 	}
 	e.cfg.Listen = busy.Addr().String()
 
-	_, failed := Start(e.cfg, Options{Upstream: fixed(e.upstream)})
+	_, failed := Start(e.cfg, offline(Options{Upstream: fixed(e.upstream)}))
 	busy.Close()
 	e.cfg.Listen = "127.0.0.1:0"
 	e.start()
@@ -35,10 +35,10 @@ func TestFailedStartReleasesTheStateDirectory(t *testing.T) {
 func TestStartRefusesUnsafeSettings(t *testing.T) {
 	e := newEnv(t, "acct-a")
 	e.cfg.OverageCheckEvery = Duration(-time.Minute)
-	_, negative := Start(e.cfg, Options{Upstream: fixed(e.upstream)})
+	_, negative := Start(e.cfg, offline(Options{Upstream: fixed(e.upstream)}))
 	e.cfg.OverageCheckEvery = 0
 	t.Setenv("MANAGEMENT_PASSWORD", " ")
-	_, management := Start(e.cfg, Options{Upstream: fixed(e.upstream)})
+	_, management := Start(e.cfg, offline(Options{Upstream: fixed(e.upstream)}))
 
 	if negative == nil || !strings.Contains(negative.Error(), "positive") {
 		t.Fatalf("negative interval: %v, want a refusal", negative)

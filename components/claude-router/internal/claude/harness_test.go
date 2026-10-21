@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -141,7 +142,7 @@ func (e *env) startWith(opts Options) *Service {
 	}
 	opts.Now = e.clock.now
 	startMu.Lock()
-	svc, err := Start(e.cfg, opts)
+	svc, err := Start(e.cfg, offline(opts))
 	startMu.Unlock()
 	if err != nil {
 		e.t.Fatalf("start: %v", err)
@@ -149,6 +150,15 @@ func (e *env) startWith(opts Options) *Service {
 	e.svc = svc
 	e.t.Cleanup(svc.Close)
 	return svc
+}
+
+func noCatalog(context.Context) ([]byte, error) { return nil, errors.New("no catalog in tests") }
+
+func offline(opts Options) Options {
+	if opts.ModelCatalog == nil {
+		opts.ModelCatalog = noCatalog
+	}
+	return opts
 }
 
 func fixed(rt http.RoundTripper) func() http.RoundTripper {

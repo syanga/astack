@@ -68,10 +68,9 @@ Linux is tested on a real kernel in a Debian 13 arm64 container with systemd
 | `~/.config/systemd/user/dev.astack.claude-router.service` | The systemd user unit (Linux) |
 
 `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `XDG_CONFIG_HOME` move these paths, as
-they do for the rest of astack. The install neither starts the router nor puts
-`claude-router` on PATH. The root README's
-[install steps](../../README.md#install-the-optional-claude-router) give the
-PATH line.
+they do for the rest of astack. The install does not start the router. It
+offers to add the `bin` directory above to PATH, and uninstall removes the
+lines it added.
 
 The commands below default `-state` to the state directory above. The
 installer seeds `config.json` with `127.0.0.1:18787` and no accounts, and
@@ -436,6 +435,13 @@ and new conversations go elsewhere. `claude-router move` sends
 `POST /claude-router/move` with the client token and
 `{"conversation": "<session id or hash>", "to": "<account>"}`. Exhaustion,
 login, and paid-overflow state survive a restart.
+
+At each start, the service reads the model catalog that its SDK's
+maintainers publish and adds the Claude models the SDK's built-in list lacks.
+Without that, a model newer than the pinned SDK, such as `claude-haiku-5-5`,
+gets a 503. A model released while the router runs works after the next
+`claude-router stop` and `claude-router start`. When the catalog does not
+answer within 5 seconds, the service serves the built-in list.
 
 `GET /claude-router/status` with the client token reports each account's
 registration, capacity, latest quota observation, paid-overflow reading,

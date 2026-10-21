@@ -20,7 +20,7 @@ func hasMonotonic(t time.Time) bool { return strings.Contains(t.String(), " m=")
 func TestThePolicyComparesStampsWithoutAMonotonicReading(t *testing.T) {
 	e := newEnv(t, "acct-a", "acct-b")
 	startMu.Lock()
-	svc, err := Start(e.cfg, Options{Upstream: fixed(e.upstream)})
+	svc, err := Start(e.cfg, offline(Options{Upstream: fixed(e.upstream)}))
 	startMu.Unlock()
 	if err != nil {
 		t.Fatal(err)

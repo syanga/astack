@@ -9,6 +9,7 @@ import argparse
 from contextlib import nullcontext, redirect_stdout
 import fcntl
 from dataclasses import dataclass, field
+from enum import Enum
 import hashlib
 import io
 import json
@@ -76,6 +77,7 @@ class Layout:
     service: str
     descriptor: Path | None
     port: int
+    use_env: bool = True
 
     @property
     def binary(self):
@@ -117,7 +119,7 @@ def layout(home, use_env, state_root, manager=None, service=None, port=None):
         descriptor = env_dir("XDG_CONFIG_HOME", ".config", home, use_env) / "systemd/user" / (service + ".service")
     data = env_dir("XDG_DATA_HOME", ".local/share", home, use_env) / "astack" / NAME
     return Layout(home=home, data=data, state=state_root / NAME, manifest=state_root / "manifest.json",
-                  manager=manager, service=service, descriptor=descriptor, port=port)
+                  manager=manager, service=service, descriptor=descriptor, port=port, use_env=use_env)
 
 
 def go_version(text):
@@ -359,6 +361,23 @@ class ActivationLock:
             self.opened = False
 
 
+class ShellAction(Enum):
+    ADD = "add"
+    KEEP = "keep"
+    ALREADY_ON_PATH = "already on PATH"
+    DECLINED_EARLIER = "declined earlier"
+    DECLINED = "declined"
+    UNKNOWN_SHELL = "unknown shell"
+    REMOVE = "remove"
+
+
+@dataclass(frozen=True)
+class ShellChange:
+    action: ShellAction
+    file: Path | None
+    lines: tuple[str, str]
+
+
 @dataclass
 class Plan:
     command: str
@@ -369,6 +388,7 @@ class Plan:
     settings: list = field(default_factory=list)
     conflicts: list = field(default_factory=list)
     binary_changed: bool = False
+    shell: ShellChange | None = None
     code_sha256: str | None = None
     go: str | None = None
     lock: ActivationLock | None = None
@@ -386,7 +406,8 @@ def plan(command, state, lay, force, lock):
         recorded = old["layout"]
         lay = Layout(home=lay.home, data=Path(recorded["data"]), state=Path(recorded["state"]), manifest=lay.manifest,
                      manager=recorded["manager"], service=recorded["service"],
-                     descriptor=Path(recorded["descriptor"]) if recorded["descriptor"] else None, port=lay.port)
+                     descriptor=Path(recorded["descriptor"]) if recorded["descriptor"] else None, port=lay.port,
+                     use_env=lay.use_env)
     return planned(Plan(command=command, lay=lay, old=old, lock=lock), state, force)
 
 
@@ -444,11 +465,153 @@ def planned(result, state, force):
             action = "remove" if actual is not None and actual == created.get(filename) else "keep"
             payload = None
         result.seeds.append((path, action, payload, created.get(filename)))
+    result.shell = shell_change(command, lay, old)
     if command == "uninstall":
         previous = state.get("settings", {}).get(NAME, {})
         result.settings = astack_settings.prepare(NAME, previous, {}, force)
         result.conflicts.extend("{} [{}]".format(change.path, key) for change in result.settings for key in change.conflicts)
     return result
+
+
+PATH_MARKER = "# astack: claude-router on PATH"
+
+
+def shell_file_for(home, use_env):
+    shell = Path(os.environ.get("SHELL", "")).name or ("zsh" if sys.platform == "darwin" else "bash")
+    if shell == "zsh":
+        zdotdir = os.environ.get("ZDOTDIR") if use_env else None
+        return Path(zdotdir or home) / ".zshrc"
+    if shell != "bash":
+        return None
+    if sys.platform != "darwin":
+        return home / ".bashrc"
+    # Terminal on macOS starts bash as a login shell, which reads the first of these that exists.
+    login = [home / name for name in (".bash_profile", ".bash_login", ".profile")]
+    return next((path for path in login if path.is_file()), login[0])
+
+
+def shell_change(command, lay, old):
+    owned = old.get("shell_path")
+    if command == "uninstall":
+        return ShellChange(ShellAction.REMOVE, Path(owned["file"]), tuple(owned["lines"])) if owned else None
+    directory = re.sub(r'([\\"$`])', r"\\\1", str(lay.binary.parent))
+    lines = (PATH_MARKER, 'export PATH="{}:$PATH"'.format(directory))
+    shell_file = Path(owned["file"]) if owned else shell_file_for(lay.home, lay.use_env)
+    if shell_file is None:
+        return ShellChange(ShellAction.UNKNOWN_SHELL, None, lines)
+    try:
+        text = shell_file.read_bytes().decode(errors="replace")
+    except OSError:
+        text = ""
+    if owned and "\n".join(lines) + "\n" in text:
+        return ShellChange(ShellAction.KEEP, shell_file, lines)
+    if old.get("shell_path_declined"):
+        return ShellChange(ShellAction.DECLINED_EARLIER, shell_file, lines)
+    active = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+    if any("astack/claude-router/bin" in line or str(lay.binary.parent) in line for line in active):
+        return ShellChange(ShellAction.ALREADY_ON_PATH, shell_file, lines)
+    return ShellChange(ShellAction.ADD, shell_file, lines)
+
+
+def on_terminal():
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def ask_shell(change):
+    if change.action is not ShellAction.ADD or not on_terminal():
+        return change
+    try:
+        answer = input("Add claude-router to PATH in {}? [Y/n] ".format(change.file))
+    except EOFError:
+        answer = ""
+    if answer.strip().lower() in ("n", "no"):
+        return ShellChange(ShellAction.DECLINED, change.file, change.lines)
+    return change
+
+
+def apply_shell(change, record, dry_run):
+    shell_file, line = change.file, change.lines[1]
+    block = "\n".join(change.lines) + "\n"
+    action = change.action
+    if action is ShellAction.KEEP:
+        print("KEEP {}".format(shell_file))
+    elif action is ShellAction.ALREADY_ON_PATH:
+        print("KEEP {} (already puts claude-router on PATH)".format(shell_file))
+        record.pop("shell_path", None)
+    elif action is ShellAction.UNKNOWN_SHELL:
+        print("SKIP PATH (no shell file known for SHELL={}; to add it yourself: {})".format(os.environ.get("SHELL", ""), line))
+    elif action is ShellAction.DECLINED_EARLIER:
+        print("SKIP {} (declined at an earlier install; to add it yourself: {})".format(shell_file, line))
+    elif action is ShellAction.DECLINED:
+        print("SKIP {} (to add it yourself: {})".format(shell_file, line))
+        record.pop("shell_path", None)
+        record["shell_path_declined"] = True
+    elif dry_run:
+        print("{} {} {}".format("APPEND" if action is ShellAction.ADD else "REMOVE", shell_file, line))
+    elif action is ShellAction.REMOVE:
+        owned = record.pop("shell_path", {})
+        try:
+            if remove_block(shell_file, block.encode(), owned.get("separator", False), owned.get("created", False)):
+                print("REMOVE {} {}".format(shell_file, line))
+        except OSError as error:
+            print("WARN {} ({}); remove these lines yourself: {}".format(shell_file, reason(error), " / ".join(change.lines)))
+    else:
+        try:
+            created, separator = append_block(shell_file, block.encode())
+        except OSError as error:
+            print("WARN {} ({}); to add it yourself: {}".format(shell_file, reason(error), line))
+            return
+        record["shell_path"] = {"file": str(shell_file), "lines": list(change.lines), "created": created,
+                                "separator": separator}
+        print("APPEND {} {}".format(shell_file, line))
+
+
+def reason(error):
+    return error.strerror or str(error)
+
+
+def append_block(path, block):
+    existed = path.exists()
+    fd = os.open(str(path), os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o644)
+    try:
+        size = os.fstat(fd).st_size
+        separator = size > 0 and os.pread(fd, 1, size - 1) != b"\n"
+        os.write(fd, (b"\n" if separator else b"") + block)
+    finally:
+        os.close(fd)
+    return not existed, separator
+
+
+def remove_block(path, block, separator, created):
+    target = path.resolve() if path.is_symlink() else path
+    for _ in range(3):
+        try:
+            data = target.read_bytes()
+        except FileNotFoundError:
+            return False
+        if block not in data:
+            return False
+        if separator and data.endswith(b"\n" + block):
+            rest = data[:-len(block) - 1]
+        else:
+            rest = data.replace(block, b"", 1)
+        mode = stat.S_IMODE(target.stat().st_mode)
+        fd, temporary = tempfile.mkstemp(prefix=".astack-", dir=str(target.parent))
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(rest)
+                os.fchmod(stream.fileno(), mode)
+            if target.read_bytes() != data:
+                continue
+            if created and not rest:
+                target.unlink()
+            else:
+                os.replace(temporary, target)
+            return True
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    raise OSError("the file kept changing during removal")
 
 
 def check_harness_settings(harness_values):
@@ -494,6 +657,8 @@ def apply(p, state, state_path, backup_root, dry_run=False):
     lay = p.lay
     if p.command == "uninstall" and not p.old and not p.settings:
         return
+    if p.shell and not dry_run:
+        p.shell = ask_shell(p.shell)
     if p.command == "uninstall":
         stop_service(lay, dry_run)
     elif not dry_run:
@@ -567,6 +732,9 @@ def apply(p, state, state_path, backup_root, dry_run=False):
     activated = p.command == "install" and is_activated(lay.state, state)
     if p.command == "install" and p.binary_changed and router_running(lay) and not activated:
         print("RESTART needed to run the new binary: claude-router stop; claude-router start")
+    if p.shell:
+        apply_shell(p.shell, record, dry_run)
+        save()
     for change in p.settings:
         change.apply(state, state_path, backup_root, dry_run=dry_run)
     if p.command == "uninstall":
