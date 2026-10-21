@@ -255,8 +255,9 @@ func fromAttempt(attemptStart time.Time, obs Observation) bool {
 // started at attemptStart. Evidence observed before the attempt started is
 // ignored, as in Report. A rejected window is remembered until its reset, or
 // until a newer observation reports the same window not rejected; a newer
-// observation that omits it does not clear it. Utilization comes from the
-// newest observation.
+// observation that omits it does not clear it. Account-wide weekly
+// preference keeps the newest valid usage from headers or ObserveWeeklyUsage.
+// Other utilization comes from the newest observation.
 func (r *Router) Observe(account AccountID, attemptStart time.Time, obs Observation) {
 	if !fromAttempt(attemptStart, obs) {
 		return
@@ -289,6 +290,11 @@ func (r *Router) observe(account AccountID, obs Observation) {
 		return
 	}
 	a := &r.accounts[idx]
+	for _, w := range obs.Windows {
+		if w.Kind == Weekly && len(w.Models) == 0 && w.Utilization != nil {
+			r.observeWeeklyUsage(a, WeeklyUsage{At: obs.At, ResetsAt: w.ResetsAt, Used: *w.Utilization})
+		}
+	}
 	if !obs.At.Before(a.observation.At) {
 		a.observation = obs
 	}
@@ -388,7 +394,8 @@ func (r *Router) ObserveOverage(account AccountID, state Overage, at time.Time) 
 // ExpireOverageChecks makes every disabled check stamped before at.Stamp
 // stale, so the policy dispatches to an account only on a disabled check
 // stamped at or after it. A caller calls it when its clock can no longer
-// measure the age of earlier checks.
+// measure the age of earlier checks. It also discards transient weekly
+// preferences and rejects pre-marker weekly readings.
 func (r *Router) ExpireOverageChecks(at Instant) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -396,6 +403,9 @@ func (r *Router) ExpireOverageChecks(at Instant) {
 		return
 	}
 	r.expiry = at
+	for i := range r.accounts {
+		r.accounts[i].weekly = weeklyPreference{}
+	}
 	r.persist()
 }
 

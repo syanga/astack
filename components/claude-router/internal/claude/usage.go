@@ -33,7 +33,7 @@ type UsageWindow struct {
 }
 
 // UsageReading holds an account's limit windows from its last usage
-// response that decoded. Status shows them; routing uses response headers only.
+// response that decoded. Routing also uses the account-wide weekly window.
 type UsageReading struct {
 	At      time.Time     `json:"at"`
 	Windows []UsageWindow `json:"windows"`
@@ -143,19 +143,28 @@ func (b usageBody) windows() []UsageWindow {
 
 func (b usageBody) grants(now time.Time) ([]ResetGrant, bool) {
 	var block *struct {
-		Grants []struct {
-			ResetsLeft int       `json:"resets_left"`
-			Type       ResetKind `json:"type"`
-			Clears     []string  `json:"clears"`
-			EndsAt     *string   `json:"ends_at"`
-		} `json:"grants"`
+		Eligible bool            `json:"eligible"`
+		Grants   json.RawMessage `json:"grants"`
 	}
 	if json.Unmarshal(b.CedarEmber, &block) != nil || block == nil {
 		return nil, false
 	}
 	out := []ResetGrant{}
-	for _, g := range block.Grants {
-		if g.ResetsLeft <= 0 {
+	if !block.Eligible {
+		return out, true
+	}
+	var grants []json.RawMessage
+	if len(block.Grants) > 0 && json.Unmarshal(block.Grants, &grants) != nil {
+		return nil, false
+	}
+	for _, raw := range grants {
+		var g struct {
+			ResetsLeft int       `json:"resets_left"`
+			Type       ResetKind `json:"type"`
+			Clears     []string  `json:"clears"`
+			EndsAt     *string   `json:"ends_at"`
+		}
+		if json.Unmarshal(raw, &g) != nil || g.ResetsLeft <= 0 {
 			continue
 		}
 		grant := ResetGrant{Type: g.Type, Left: g.ResetsLeft}
@@ -163,9 +172,11 @@ func (b usageBody) grants(now time.Time) ([]ResetGrant, bool) {
 			grant.Type = clearedType(g.Clears)
 		}
 		if g.EndsAt != nil {
-			if t, err := time.Parse(time.RFC3339Nano, *g.EndsAt); err == nil {
-				grant.EndsAt = t
+			t, err := time.Parse(time.RFC3339Nano, *g.EndsAt)
+			if err != nil || t.IsZero() {
+				continue
 			}
+			grant.EndsAt = t
 		}
 		if slices.Contains(ResetKinds, grant.Type) && grant.OpenAt(now) {
 			out = append(out, grant)
@@ -187,14 +198,22 @@ func clearedType(clears []string) ResetKind {
 	return ""
 }
 
-func (o *overageReader) noteUsage(account router.AccountID, windows []UsageWindow, at time.Time) {
+func (o *overageReader) noteUsage(account router.AccountID, windows []UsageWindow, at router.Instant) {
 	o.mu.Lock()
-	defer o.mu.Unlock()
 	if len(windows) == 0 {
 		delete(o.usage, account)
+	} else {
+		o.usage[account] = UsageReading{At: at.Stamp, Windows: windows}
+	}
+	o.mu.Unlock()
+	if at.Held() {
 		return
 	}
-	o.usage[account] = UsageReading{At: at, Windows: windows}
+	for _, w := range windows {
+		if w.Kind == router.Weekly && w.Model == "" && w.Used != nil {
+			o.s.router.ObserveWeeklyUsage(account, router.WeeklyUsage{At: at.Stamp, ResetsAt: w.ResetsAt, Used: *w.Used})
+		}
+	}
 }
 
 // readResets skips an access token the SDK is due to replace, because the
@@ -208,14 +227,24 @@ func (o *overageReader) readResets(ctx context.Context, account router.AccountID
 	if err != nil {
 		return
 	}
-	now := o.s.now()
-	grants, ok := body.grants(now)
+	now := o.s.clock.instant()
+	grants, ok := body.grants(now.Wall)
 	if !ok {
 		return
 	}
 	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.resets[account] = ResetsReading{At: now, Grants: grants}
+	o.resets[account] = ResetsReading{At: now.Stamp, Grants: grants}
+	o.mu.Unlock()
+	if now.Held() {
+		return
+	}
+	credits := router.WeeklyCredits{At: now.Stamp}
+	for _, g := range grants {
+		if g.Type == ResetWeekly || g.Type == ResetFull {
+			credits.Grants = append(credits.Grants, router.WeeklyCredit{Left: g.Left, EndsAt: g.EndsAt})
+		}
+	}
+	o.s.router.ObserveWeeklyCredits(account, credits)
 }
 
 func (o *overageReader) usageSnapshot() (map[router.AccountID]UsageReading, map[router.AccountID]ResetsReading) {

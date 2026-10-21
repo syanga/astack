@@ -234,7 +234,8 @@ type Rule string
 const (
 	// CapacityOnly places by capacity and assigned workload alone.
 	CapacityOnly Rule = "capacity_only"
-	// ResetAware also prefers fresh unused allowance approaching reset.
+	// ResetAware also prefers fresh unused allowance approaching reset and
+	// available weekly reset allowances.
 	ResetAware Rule = "reset_aware"
 )
 
@@ -243,8 +244,8 @@ const (
 type Config struct {
 	Rule Rule `json:"rule"`
 	// ResetBias scales an account's capacity by 1 + ResetBias*slack, where
-	// slack is the largest fraction of a fresh window's allowance that is
-	// behind an even pace.
+	// slack is the largest fresh window preference. Account-wide weekly
+	// slack includes available reset allowances and can exceed one.
 	ResetBias float64 `json:"reset_bias"`
 	// FreshFor is the age after which an observation no longer informs reset
 	// preference. Known rejections apply at any age.

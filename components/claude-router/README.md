@@ -475,6 +475,9 @@ Feed the router what it cannot see:
 
 - `Observe` for the quota headers of one response, with the start time of
   the attempt that produced it.
+- `ObserveWeeklyUsage` for account-wide weekly utilization from a usage
+  response, and `ObserveWeeklyCredits` for a successful reset-grants read.
+  Both keep preference data in memory and preserve rejection evidence.
 - `Report` for a failure before output. Pass the class it returns as
   `LastFailure` on the next attempt.
 - `ObserveOverage` for each paid-overflow check or observed paid use.
@@ -484,6 +487,14 @@ Feed the router what it cannot see:
 
 CONTRACT.md's PR2 section gives the placement rule, the defaults, and the
 journal rules.
+
+Reset-aware placement counts each eligible, unexpired weekly or full reset
+as another weekly allowance. For example, 10% remaining plus two resets is
+210% effective weekly remaining. Session resets add no weekly credit. The
+router uses the newest valid weekly usage from headers or the usage body,
+fresh for 15 minutes by default, and reset grants read within one hour.
+This preference affects new placements and necessary migration destinations.
+It preserves healthy assignments and never redeems a reset automatically.
 
 ## Run the simulator
 
