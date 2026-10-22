@@ -10,11 +10,17 @@ disable-model-invocation: true
 
 1. When the change is one or two files with an obvious approach, skip the plan. Say so and stop.
 2. Settle open questions before you write. Use [prototype](../prototype/SKILL.md) for questions an experiment can answer, [architect](../architect/SKILL.md) for code structure, and [wayfinder](../wayfinder/SKILL.md) when decisions span sessions. Reuse existing evidence. Keep the branch, the SHA, and the artifacts for Appendix A. Ask the operator only about a product or preference call that no run can settle.
-3. Explore independent areas in subagents when available and permitted, within the harness's capacity. Each returns file pointers, conventions, test commands, and entry points. No inlined dumps. Explore directly when delegation is unavailable or adds no value.
+3. Explore independent areas in subagents when available and permitted, within the harness's capacity. Each returns file pointers, conventions, test commands, and entry points. Each also names shared serial resources and their limits, such as test lock slots, a single migration chain, or a deploy lock. No inlined dumps. Explore directly when delegation is unavailable or adds no value.
 4. Copy the skeleton below into the plan file and fill every placeholder. Unless the operator names a path, write `.scratch/<program>/plan.md`. Keep every heading and every sub-block in the order shown. One section per PR. One PR is one change with its own evidence, per [Sequence Verifiable Units](../principles/sequence-verifiable-units.md). Name [orchestrate](../orchestrate/SKILL.md) as the execution skill. It uses the [shared execution-state convention](../orchestrate/STATE.md) and its [show-me-your-work](../show-me-your-work/SKILL.md) decision trail. Read the state convention and record the absolute store path in the plan. Record execution and merge authorization separately.
 5. Write under [technical-writing](../technical-writing/SKILL.md) in full, then [unslop](../unslop/SKILL.md). The body is one Diátaxis mode, how-to. Appendices hold explanation and reference. Each heading states the task or the finding. No long dashes. No mid-sentence colons.
 6. Run `python3 <this skill's directory>/scripts/check_plan.py <plan.md>` and fix every problem it prints. The checker validates structure, evidence fields, and probe references. Review the dependencies and the adequacy of the verification yourself.
 7. Hand back. Post the plan path and the script's output, then stop. Execution starts under the named skill when the user authorizes it. Honor authorization already given for execution after planning. For a requested transfer to another session, use [handoff](../handoff/SKILL.md) to link the plan and record remaining approvals. Planning alone does not initialize an execution store.
+
+**Schedule.** Shorten the critical path. Count it in merge rounds, the longest sequence of merges, each waiting on the one before, that some unit waits on before it can start. A stacked edge adds no wait, so a fully stacked or fully independent plan has 0. Each dependency names what the child consumes and the earliest PR that supplies it. When a child needs only an interface from a larger parent, split that interface into its own PR. Name each stack's order and one stacker per stack. Each stacked PR lists every PR below it under **Depends on.**, writing `stack order` for one it consumes nothing from. When each unit starts follows orchestrate's [Stack safety](../orchestrate/SKILL.md#stack-safety). A stack saves merge rounds but costs a bottom-up merge order and fresh verification of every child after each parent change.
+
+Limit each shared serial resource to its slots, among the PRs that use it. The limiting resource is the one whose queue most lengthens the schedule.
+
+A gate that needs no merged PR, such as UI selection before real component edits, copy, a taxonomy, or a data source, is a node in the dependency graph. Give it an ID and an owner who publishes its artifact, and open it as soon as the artifact exists.
 
 **Verification.** Tests alone are not sufficient verification. A PR is verified only when its applicable unit, live, and perf boxes are checked with evidence. Every verification block opens with that rule.
 
@@ -24,7 +30,7 @@ The live block is mandatory and exercises the real changed behavior. Use as many
 
 For performance-sensitive changes, both trunk and head must produce the named metric. If trunk lacks the feature, isolate the added work and set an absolute budget for that work plus the end-to-end state. Do not claim a ratio between unlike scenarios. Name the metric, interleaved probe, trunk baseline measured first, and numeric failure rule. Otherwise write `Not applicable. <specific reason>` in the perf block.
 
-Record human review gates required by the user or repository, including UI selection before real component edits. Evidence must be ready before requesting the remaining approval. A PR with no remaining human review gate writes `**Review gate.** None. <specific reason>` and no boxes under it.
+Record human review gates required by the user or repository. A PR blocked by a gate that needs no merged PR lists it under **Depends on.** Request every remaining approval only after the PR's evidence is ready. A PR whose only gates are listed under **Depends on.**, or that has none, writes `**Review gate.** None. <specific reason>` and no boxes under it.
 
 **Control skill.** Pick available tools by what the PR changes. Use [t3-preview](../t3-preview/SKILL.md) for HTML previews and browser checks, terminal tools for CLIs, and the repository's simulator tools for mobile. A PR that touches two interfaces exercises both. For documentation or configuration, run a representative consumer workflow. An unavailable verification environment is a risk in Appendix C and a blocked check, never a pass.
 
@@ -59,15 +65,17 @@ Select a probe with `python3 <installed skills directory>/multi-phase-plan/scrip
 ### Spawn owners
 
 - [ ] Assign one owner per PR with the full lifecycle the execution skill names. Spawn within available capacity, or run the units sequentially.
-- [ ] Follow this dependency graph. Start dependent work only after its parent merges, or base it on the parent branch when the plan uses a stack.
-  - [ ] <PR id> and <PR id> are independent and first. Both branch from `main`.
-  - [ ] <PR id> after <PR id>.
+- [ ] Follow this dependency graph. Start each unit under orchestrate's Stack safety.
+  - [ ] Start now. <PR ids, and each gate that needs no merged PR, whose owner builds and publishes its artifact now.> These PRs branch from `main`.
+  - [ ] <PR id> after <each PR or gate id>, consuming <what from each, or `stack order`>. <Its base, the PR below it in its stack or `main`. Or write No dependent PRs.>
+  - [ ] <Each stack's PR ids in order, and its stacker. Or write No stacks.>
+- [ ] Limit <each shared serial resource> to <its slots> among <the PRs that use it>. <Or write No shared serial resource.>
 - [ ] Hold the file boundaries. <PR id or class> touches only `<glob>`.
-- [ ] Hold the review gate. <PR ids and the existing user or repository requirements, including UI selection before real components. Record which approvals remain.>
+- [ ] Hold the review gate. <Each gate that needs no merged PR, with the owner who publishes its artifact and where the operator's decision is recorded before any dependent starts. Each remaining approval by PR id with its user or repository requirement. Record which approvals remain.>
 
 ### PR mechanics, for every PR
 
-- [ ] Follow the installed open-pr skill. Independent PRs target the default branch. A stack child targets its parent branch.
+- [ ] Follow the installed open-pr skill. Independent PRs target the default branch. A stack child targets its parent branch, and only its stacker retargets or restacks it.
 - [ ] Run required repository checks and push with hooks on.
 - [ ] Apply technical-writing and unslop to prose, and no-comments before review.
 - [ ] Address review findings within scope. Use harden-pr when the user requests hardening.
@@ -90,7 +98,7 @@ Each lane uses an isolated workspace at the PR head when it writes files or stat
 
 ## <Task as a verb phrase> (<PR id>)
 
-**Depends on.** <PR id, or None.>
+**Depends on.** <Each PR or gate id with what this PR consumes from it or `stack order`, or None.>
 
 **Files.**
 
@@ -151,7 +159,7 @@ Each lane uses an isolated workspace at the PR head when it writes files or stat
 
 ## Appendix B. Alternatives rejected
 
-<Each approach weighed and why it lost.>
+<Each approach weighed and why it lost. When the plan stacks, the unstacked schedule's merge rounds against this plan's.>
 
 ## Appendix C. Risks
 
@@ -162,4 +170,4 @@ Each lane uses an isolated workspace at the PR head when it writes files or stat
 <Docs to read before editing. Which PRs need how, grilling, or architect. The decision trail follows `<installed skills directory>/show-me-your-work/SKILL.md`. Link the trail, decision map, and execution store when present.>
 ````
 
-**Reply:** the plan path, the PR ids with their dependencies and the review-gated set, what the prototypes proved and what stays unproven, and the check script's output.
+**Reply:** the plan path, the PR ids with their dependencies and the review-gated set, the critical path in merge rounds, the limiting resource or None, what the prototypes proved and what stays unproven, and the check script's output.
