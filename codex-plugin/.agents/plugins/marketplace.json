@@ -1,0 +1,4 @@
+{
+  "name": "astack",
+  "plugins": [{"name": "astack", "source": {"source": "local", "path": "./plugins/astack"}}]
+}

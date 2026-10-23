@@ -29,6 +29,8 @@ if os.environ.get("FAKE_FAIL") and " ".join(argv).startswith(os.environ["FAKE_FA
 path = home / ".fake-{}.json".format(NAME)
 state = json.loads(path.read_text()) if path.exists() else {"marketplaces": [], "plugins": []}
 project = state.pop("project", [])
+sources_path = home / ".fake-{}-sources.json".format(NAME)
+sources = json.loads(sources_path.read_text()) if sources_path.exists() else {}
 markets, plugins = state["marketplaces"], state["plugins"]
 words = {"claude": {"refresh": "update", "install": "install", "remove": "uninstall"},
          "codex": {"refresh": "upgrade", "install": "add", "remove": "remove"}}[NAME]
@@ -42,7 +44,8 @@ def require(condition):
 
 if argv == ["plugin", "marketplace", "list", "--json"]:
     names = [{"name": name} for name in markets]
-    print(json.dumps(names if NAME == "claude" else {"marketplaces": names}))
+    print(json.dumps(names if NAME == "claude" else {"marketplaces": [
+        dict(item, marketplaceSource={"source": sources.get(item["name"])}) for item in names]}))
 elif argv == ["plugin", "list", "--json"]:
     if NAME == "claude":
         print(json.dumps([{"id": plugin, "scope": "user"} for plugin in plugins]
@@ -51,15 +54,22 @@ elif argv == ["plugin", "list", "--json"]:
         print(json.dumps({"installed": [{"pluginId": plugin, "installed": True} for plugin in plugins]
                           + [{"pluginId": "available@elsewhere", "installed": False}]}))
 elif command == "plugin marketplace add":
-    markets.append(argument.rsplit("/", 1)[-1])
+    manifest = Path(argument) / ".agents/plugins/marketplace.json"
+    name = json.loads(manifest.read_text())["name"] if manifest.exists() else argument.rsplit("/", 1)[-1]
+    require(name not in markets)
+    markets.append(name)
+    sources[name] = argument
 elif command == "plugin marketplace " + words["refresh"]:
     require(argument in markets)
 elif command == "plugin marketplace remove":
     require(argument in markets)
     markets.remove(argument)
+    sources.pop(argument, None)
 elif command == "plugin " + words["install"]:
-    require(argument.partition("@")[2] in markets and argument not in plugins)
-    plugins.append(argument)
+    # Codex adds an installed plugin again; Claude refuses.
+    require(argument.partition("@")[2] in markets and (NAME == "codex" or argument not in plugins))
+    if argument not in plugins:
+        plugins.append(argument)
 elif NAME == "claude" and command == "plugin update":
     require(argument in plugins)
 elif command == "plugin " + words["remove"]:
@@ -67,6 +77,7 @@ elif command == "plugin " + words["remove"]:
     plugins.remove(argument)
 else:
     sys.exit("fake {} does not know {}".format(NAME, " ".join(argv)))
+sources_path.write_text(json.dumps(sources))
 path.write_text(json.dumps(dict(state, project=project) if project else state))
 '''
 
@@ -137,6 +148,44 @@ class PluginTests(InstallerFixture):
             "plugin list --json",
             "plugin marketplace upgrade test-market",
         ])
+
+    def test_local_codex_marketplace_is_not_upgraded_and_its_plugin_is_added_again(self):
+        market = self.repo / "local-market"
+        (market / ".agents/plugins").mkdir(parents=True)
+        (market / ".agents/plugins/marketplace.json").write_text(json.dumps(
+            {"name": "local-market", "plugins": [{"name": "demo", "source": {"source": "local", "path": "./demo"}}]}))
+        (self.repo / "settings/plugins.json").write_text(json.dumps({
+            "marketplaces": {"local-market": "./local-market"}, "plugins": [],
+            "targets": {"codex": ["demo@local-market"]}}))
+        self.install()
+        self.assertEqual(self.take_calls("codex"), [
+            "plugin marketplace list --json",
+            "plugin list --json",
+            "plugin marketplace add {}".format(market.resolve()),
+            "plugin add demo@local-market",
+        ])
+        self.install()
+        self.assertEqual(self.take_calls("codex"), [
+            "plugin marketplace list --json",
+            "plugin list --json",
+            "plugin add demo@local-market",
+        ])
+        self.assertEqual(self.take_calls("claude"), [])
+        moved = self.repo / "moved-market"
+        market.rename(moved)
+        (self.repo / "settings/plugins.json").write_text(json.dumps({
+            "marketplaces": {"local-market": "./moved-market"}, "plugins": [],
+            "targets": {"codex": ["demo@local-market"]}}))
+        self.install()
+        self.assertEqual(self.take_calls("codex"), [
+            "plugin marketplace list --json",
+            "plugin list --json",
+            "plugin marketplace remove local-market",
+            "plugin marketplace add {}".format(moved.resolve()),
+            "plugin add demo@local-market",
+        ])
+        self.install(command="uninstall")
+        self.assertEqual(self.cli_state("codex"), {"marketplaces": [], "plugins": []})
 
     def test_uninstall_removes_only_what_astack_added(self):
         self.write_source({"demo@test-market": "example/test-market", "extra@other-market": "example/other-market"})

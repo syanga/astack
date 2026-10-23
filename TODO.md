@@ -9,5 +9,6 @@ background. A hook cannot tell a background job from a foreground command.
 When Codex adds that marker, add a hook like `claude-background-jobs` that denies
 background calls that skip `codex-background-jobs`.
 
-Add the hook as a `PreToolUse` entry in `settings/codex-hooks.json`. The
-installer adds it to `hooks.json` and trusts it in `config.toml`.
+Add the hook as a `PreToolUse` entry in
+`codex-plugin/plugins/astack/hooks/hooks.json` and raise the plugin's version. The
+installer trusts it in `config.toml`.

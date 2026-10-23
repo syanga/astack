@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -10,6 +11,7 @@ import unittest
 from test_run_job import SYSTEM_PYTHON, system_python_before_3_10
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'skills/codex-background-jobs/scripts/subagent_wake.py'
+FIXTURE = Path(__file__).resolve().parent / 'fixtures/codex-0.163-subagent'
 PARENT = '01a15a59-7963-74e3-acd6-de30cbdaf9b7'
 CHILD = '01a15a59-8ca4-7c12-9e1d-0c4be6f9a2d1'
 OTHER = '01a15a59-aaaa-7c12-9e1d-0c4be6f9a2d1'
@@ -19,12 +21,21 @@ def at(clock):
     return '2026-10-20T{}.000Z'.format(clock)
 
 
-def meta(clock, thread, parent=None):
-    return {'timestamp': at(clock), 'type': 'session_meta', 'payload': {'id': thread, 'parent_thread_id': parent}}
+def meta(clock, thread, parent=None, version='0.163.0'):
+    return {'timestamp': at(clock), 'type': 'session_meta',
+            'payload': {'id': thread, 'parent_thread_id': parent, 'cli_version': version}}
 
 
-def turn(clock, kind):
-    return {'timestamp': at(clock), 'type': 'event_msg', 'payload': {'type': kind}}
+def turn(clock, kind, message=None):
+    payload = {'type': kind}
+    if message is not None:
+        payload['last_agent_message'] = message
+    return {'timestamp': at(clock), 'type': 'event_msg', 'payload': payload}
+
+
+def asked_async(clock):
+    return {'timestamp': at(clock), 'type': 'response_item', 'payload': {
+        'type': 'function_call', 'name': 'request_user_input_async', 'arguments': '{}'}}
 
 
 def spawned(clock, thread, path):
@@ -60,10 +71,10 @@ class SubagentWakeTests(unittest.TestCase):
         path.write_text(''.join(json.dumps(event) + '\n' for event in events))
         return path
 
-    def coordinator(self, *later):
+    def coordinator(self, *later, ending=None, version='0.163.0'):
         return self.rollout(PARENT, [
-            meta('10:00:00', PARENT), turn('10:00:00', 'task_started'),
-            spawned('10:00:10', CHILD, '/root/audit'), turn('10:00:20', 'task_complete'), *later])
+            meta('10:00:00', PARENT, version=version), turn('10:00:00', 'task_started'),
+            spawned('10:00:10', CHILD, '/root/audit'), ending or turn('10:00:20', 'task_complete'), *later])
 
     def worker(self, *ending, parent=PARENT):
         return self.rollout(CHILD, [meta('10:00:10', CHILD, parent), meta('10:00:00', PARENT),
@@ -119,6 +130,49 @@ class SubagentWakeTests(unittest.TestCase):
                 self.worker(*ending, parent=OTHER if name == 'subagent belongs to another thread' else PARENT)
                 self.watch(self.coordinator(*later))
                 self.assertEqual(self.queued(), [])
+
+    def test_no_wake_after_a_turn_that_asked_the_user(self):
+        cases = {
+            'question in the last message': [turn('10:00:20', 'task_complete', 'Which dataset?\nRecommendation: A.')],
+            'request_user_input_async': [asked_async('10:00:15'), turn('10:00:20', 'task_complete', 'Asked.')],
+        }
+        for name, ending in cases.items():
+            with self.subTest(name):
+                self.worker(turn('10:05:00', 'task_complete'))
+                self.watch(self.rollout(PARENT, [
+                    meta('10:00:00', PARENT), turn('10:00:00', 'task_started'),
+                    spawned('10:00:10', CHILD, '/root/audit'), *ending]))
+                self.assertEqual(self.queued(), [])
+
+    def test_wakes_after_the_user_answers_or_a_question_mark_is_in_a_url(self):
+        cases = {
+            'answered': [turn('10:01:00', 'task_started'), turn('10:02:00', 'task_complete', 'Checking both.')],
+            'url': [],
+        }
+        for name, later in cases.items():
+            with self.subTest(name):
+                self.worker(turn('10:05:00', 'task_complete'))
+                ending = turn('10:00:20', 'task_complete',
+                              'Which one?' if name == 'answered' else 'See https://example.com/run?id=4.')
+                self.watch(self.coordinator(*later, ending=ending))
+                self.assertEqual([command[:3] for command in self.queued()], [['queue', '--thread', PARENT]])
+                (self.root / 'queued.jsonl').unlink()
+
+    def test_no_watch_before_codex_0_162(self):
+        for version in ('0.161.9', None):
+            with self.subTest(version):
+                self.worker(turn('10:05:00', 'task_complete'))
+                self.watch(self.coordinator(version=version))
+                self.assertEqual(self.queued(), [])
+
+    def test_wakes_from_a_real_codex_0_163_rollout(self):
+        day = self.home / 'sessions/2026/10/19'
+        shutil.copytree(FIXTURE, day)
+        (coordinator,) = [path for path in day.iterdir() if '01a15520-91d4' in path.name]
+        self.watch(coordinator)
+        (command,) = self.queued()
+        self.assertEqual(command[:3], ['queue', '--thread', '01a15520-91d4-79d0-bb1c-054925aedd85'])
+        self.assertIn('/root/sleep_then_done finished', command[4])
 
     def test_watcher_exits_when_the_thread_rollout_disappears(self):
         child = self.worker()

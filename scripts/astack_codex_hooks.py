@@ -1,15 +1,17 @@
-"""Trust records for astack's Codex hooks.
+"""Trust records for the hooks in astack's local Codex plugins.
 
-Codex 0.163 runs a hook from hooks.json only when config.toml stores a matching
-`hooks.state."<hooks.json path>:<snake_case event>:<group index>:<handler index>".trusted_hash`.
+Codex 0.163 runs a plugin hook only when config.toml stores a matching
+`hooks.state."<plugin>@<marketplace>:hooks/hooks.json:<snake_case event>:<group index>:<handler index>".trusted_hash`.
 The hash covers the hook declaration, not the script it runs.
 """
 
 import hashlib
 import json
+from pathlib import Path
 import re
 
 HANDLER_FIELDS = {"type", "command", "timeout"}
+HOOKS_FILE = "hooks/hooks.json"
 
 
 def event_label(event):
@@ -31,16 +33,24 @@ def declaration_hash(label, group, handler):
     return "sha256:" + hashlib.sha256(encoded.encode()).hexdigest()
 
 
-def trust(path, installed, source):
-    events = json.loads(installed)["hooks"] if installed else {}
+def plugin_root(marketplace, name):
+    manifest = json.loads((Path(marketplace) / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
+    for entry in manifest["plugins"]:
+        if entry["name"] == name:
+            return Path(marketplace) / entry["source"]["path"]
+    raise ValueError("Marketplace {} does not list plugin {}".format(marketplace, name))
+
+
+def trust(plugin, marketplace):
+    """Trust records for every hook in a local plugin's hooks/hooks.json."""
+    path = plugin_root(marketplace, plugin.partition("@")[0]) / HOOKS_FILE
+    if not path.exists():
+        return {}
     state = {}
-    for event, groups in source["hooks"].items():
+    for event, groups in json.loads(path.read_text(encoding="utf-8"))["hooks"].items():
         label = event_label(event)
-        for group in groups["$entries"]:
-            if group not in events.get(event, []):
-                continue
-            index = events[event].index(group)
+        for index, group in enumerate(groups):
             for position, handler in enumerate(group["hooks"]):
-                key = "{}:{}:{}:{}".format(path, label, index, position)
+                key = "{}:{}:{}:{}:{}".format(plugin, HOOKS_FILE, label, index, position)
                 state[key] = {"trusted_hash": declaration_hash(label, group, handler)}
-    return {"hooks": {"state": state}} if state else {}
+    return state

@@ -4,13 +4,15 @@
 Codex delivers a subagent's final answer with `trigger_turn: false`, so a thread
 that has ended its turn does not run again until something else starts a turn.
 The hook starts a detached watcher that runs `codex queue` to request a turn. The
-watcher needs `codex` on PATH, skips subagent threads, stops when the user
-interrupts the thread, and gives up after MAX_WATCH_SECONDS.
+watcher needs `codex` on PATH and Codex 0.162 or later. It skips subagent threads
+and turns that asked the user something, stops when the user interrupts the
+thread, and gives up after MAX_WATCH_SECONDS.
 """
 import fcntl
 import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,6 +21,9 @@ import time
 POLL_SECONDS = 5
 MAX_WATCH_SECONDS = 24 * 3600
 QUEUE_SECONDS = 60
+OLDEST_VERSION = (0, 162)
+MARKERS = (b'"session_meta"', b'"task_started"', b'"task_complete"', b'"turn_aborted"', b'SubAgentActivity',
+           b'"agent_message"', b'"request_user_input_async"')
 
 
 # Codex 0.163 rollouts are JSONL at $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread>.jsonl.
@@ -26,7 +31,8 @@ QUEUE_SECONDS = 60
 # subagent in a SubAgentActivity item and each delivered answer in an agent_message whose author
 # is the subagent's agent_path and whose text starts with "Message Type: FINAL_ANSWER". A
 # subagent's rollout starts with its own session_meta, then copies the parent's history,
-# including the parent's session_meta.
+# including the parent's session_meta. A turn asked the user something when its task_complete
+# last_agent_message contains "?" outside a URL or the turn called request_user_input_async.
 class Rollout:
     def __init__(self, path):
         self.path = path
@@ -34,7 +40,9 @@ class Rollout:
         self.missing = False
         self.id = None
         self.parent = None
+        self.version = ()
         self.running = False
+        self.asked = False
         self.interrupted = False
         self.started = ''
         self.completed = ''
@@ -49,6 +57,8 @@ class Rollout:
                     if not line.endswith(b'\n'):
                         break
                     self.offset += len(line)
+                    if not any(marker in line for marker in MARKERS):
+                        continue
                     try:
                         event = json.loads(line)
                     except ValueError:
@@ -68,15 +78,20 @@ class Rollout:
                 return
             self.id = payload.get('id')
             self.parent = payload.get('parent_thread_id')
+            self.version = tuple(int(part) for part in re.findall(r'\d+', str(payload.get('cli_version') or ''))[:2])
         elif kind == 'task_started':
             if not self.running:
                 self.started = timestamp
             self.running = True
             self.interrupted = False
+            self.asked = False
         elif kind in ('task_complete', 'turn_aborted'):
             self.running = False
             self.interrupted = kind == 'turn_aborted'
             self.completed = '' if self.interrupted else timestamp
+            self.asked = self.asked or '?' in re.sub(r'\S+://\S+', '', str(payload.get('last_agent_message') or ''))
+        elif kind == 'function_call' and payload.get('name') == 'request_user_input_async':
+            self.asked = True
         elif isinstance(item, dict) and item.get('type') == 'SubAgentActivity':
             if isinstance(item.get('agent_thread_id'), str) and isinstance(item.get('agent_path'), str):
                 self.subagents[item['agent_thread_id']] = item['agent_path']
@@ -116,6 +131,7 @@ class Watch:
 def message(paths):
     return ('Subagent notification: {} finished. Continue the existing task with the result unless the user '
             'paused or redirected it. If the result is not in the conversation, read it with list_agents. '
+            'If your last message asked the user something, say the subagent finished and stop. '
             'This automatic notification is not a user request.'.format(', '.join(paths)))
 
 
@@ -123,7 +139,7 @@ def watch(state):
     deadline = time.time() + MAX_WATCH_SECONDS
     while time.time() < deadline:
         running, finished = state.poll()
-        if state.thread.missing or state.thread.interrupted or not (running or finished):
+        if state.thread.missing or state.thread.interrupted or state.thread.asked or not (running or finished):
             return
         if finished and not state.thread.running:
             codex = shutil.which('codex')
@@ -148,7 +164,7 @@ def watch_once(transcript):
         try:
             state = Watch(transcript)
             state.thread.read()
-            if state.thread.id and not state.thread.parent:
+            if state.thread.id and not state.thread.parent and state.thread.version >= OLDEST_VERSION:
                 watch(state)
         finally:
             try:
