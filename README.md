@@ -68,6 +68,10 @@ by queuing a message with `codex queue`. It needs Codex 0.162 or later and
 either with a `?` outside a URL in its final message or with
 `request_user_input_async`, and it does not wake subagent threads.
 
+T3 Code does not show turns that `codex queue` starts, including these wakes
+and `codex-background-jobs` completion notifications. The thread keeps working in
+Codex, and your next message gets a reply with the full history.
+
 Codex runs a plugin hook only when `config.toml` holds a matching trust record,
 so the installer writes the `trusted_hash` that Codex's `/hooks` review would
 write. Installing astack is that review. The hash covers the hook's declaration,
