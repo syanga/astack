@@ -9,9 +9,6 @@ background. A hook cannot tell a background job from a foreground command.
 When Codex adds that marker, add a hook like `claude-background-jobs` that denies
 background calls that skip `codex-background-jobs`.
 
-- Each new Codex hook needs trust review in the TUI before it runs.
-- astack cannot manage a hook in a `config.toml` `[hooks]` table because it does
-  not manage TOML tables. The installer's `$entries` syntax can own one entry in
-  a JSON list, such as the `PreToolUse` list in `hooks.json`. Codex's only
-  settings target in `harnesses.json` is `config.toml`, so add a JSON settings
-  target for `hooks.json` first.
+Add the hook as a `PreToolUse` entry in
+`codex-plugin/plugins/astack/hooks/hooks.json` and raise the plugin's version. The
+installer trusts it in `config.toml`.

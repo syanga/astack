@@ -15,6 +15,7 @@ import uuid
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
+import astack_codex_hooks
 import astack_files as files
 import astack_plugins
 import astack_settings
@@ -120,7 +121,7 @@ def desired_files(harness, home, use_env, skills):
     return result
 
 
-def settings_operations(harnesses, selected, state, home, use_env, args):
+def settings_operations(harnesses, selected, state, home, use_env, args, plugins):
     operations = []
     for target in selected:
         old = state.get("settings", {}).get(target, {})
@@ -133,6 +134,17 @@ def settings_operations(harnesses, selected, state, home, use_env, args):
             values = astack_settings.json_loads(source.read_text(encoding="utf-8"))
             if target == "claude":
                 claude_router.check_harness_settings(values)
+            if target == "codex":
+                # Codex skips an untrusted hook, so trust the hooks of astack's local plugins.
+                trust = {}
+                for plugin in plugins[target].plugins:
+                    marketplace = plugins[target].marketplaces[astack_plugins.marketplace(plugin)]
+                    if astack_plugins.local(marketplace):
+                        trust.update(astack_codex_hooks.trust(plugin, marketplace))
+                if trust and "hooks" in values:
+                    raise ValueError("Remove the hooks key from settings/{}. astack generates hook trust.".format(spec["source"]))
+                if trust:
+                    values["hooks"] = {"state": trust}
             if list(astack_settings.leaves(values)):
                 desired[str(destination(spec, home, use_env))] = (spec["format"], values)
             if old and str(destination(spec, home, use_env)) not in old:
@@ -170,8 +182,9 @@ def deploy(args, harnesses, selected, home, use_env, state_root, state_path, sta
     state["version"] = MANIFEST_VERSION
 
     skills = skill_files() if args.command == "install" else []
-    plugins = astack_plugins.load(REPO / "settings/plugins.json") if args.command == "install" else astack_plugins.Source()
-    settings = settings_operations(harnesses, selected, state, home, use_env, args)
+    plugins = {target: astack_plugins.load(REPO / "settings/plugins.json", target) if args.command == "install"
+               else astack_plugins.Source() for target in selected}
+    settings = settings_operations(harnesses, selected, state, home, use_env, args, plugins)
     plugin_configs = {}
     for target in selected:
         spec = harnesses[target]["settings"]
@@ -283,7 +296,7 @@ def deploy(args, harnesses, selected, home, use_env, state_root, state_path, sta
     for change in settings:
         change.apply(state, state_path, backup_root, dry_run=args.dry_run)
     for target in selected:
-        astack_plugins.sync(target, plugins, state, state_path, plugin_configs[target], args.dry_run)
+        astack_plugins.sync(target, plugins[target], state, state_path, plugin_configs[target], args.dry_run)
     if component:
         claude_router.apply(component, state, state_path, backup_root, dry_run=args.dry_run)
     if args.command == "install" and not args.dry_run and selected:

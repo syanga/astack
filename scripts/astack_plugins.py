@@ -41,7 +41,7 @@ class PluginCli:
     update: tuple[str, ...] | None
     remove_plugin: tuple[str, ...]
     remove_marketplace: tuple[str, ...]
-    marketplace_names: Callable[[object], set[str]]
+    marketplace_sources: Callable[[object], dict[str, str | None]]
     plugin_ids: Callable[[object], set[str]]
     used_plugin_ids: Callable[[object], set[str]]
 
@@ -61,7 +61,7 @@ CLIS = {
         update=("plugin", "update"),
         remove_plugin=("plugin", "uninstall"),
         remove_marketplace=("plugin", "marketplace", "remove"),
-        marketplace_names=lambda data: {item["name"] for item in data},
+        marketplace_sources=lambda data: {item["name"]: None for item in data},
         plugin_ids=lambda data: {item["id"] for item in data if item.get("scope") == "user"},
         used_plugin_ids=lambda data: {item["id"] for item in data},
     ),
@@ -75,7 +75,8 @@ CLIS = {
         update=None,
         remove_plugin=("plugin", "remove"),
         remove_marketplace=("plugin", "marketplace", "remove"),
-        marketplace_names=lambda data: {item["name"] for item in data["marketplaces"]},
+        marketplace_sources=lambda data: {item["name"]: item.get("marketplaceSource", {}).get("source")
+                                          for item in data["marketplaces"]},
         plugin_ids=codex_plugin_ids,
         used_plugin_ids=codex_plugin_ids,
     ),
@@ -86,18 +87,32 @@ def marketplace(plugin):
     return plugin.partition("@")[2]
 
 
-def load(path):
+def local(source):
+    return Path(source).is_absolute()
+
+
+def load(path, target):
+    """Read the plugins for one harness: the shared list plus that harness's entry under targets.
+
+    A marketplace source that starts with ./ is a directory relative to the checkout.
+    """
     if not path.exists():
         return Source()
     data = json.loads(path.read_text(encoding="utf-8"))
     marketplaces = data.get("marketplaces", {}) if isinstance(data, dict) else None
     plugins = data.get("plugins", []) if isinstance(data, dict) else None
-    if not isinstance(marketplaces, dict) or not isinstance(plugins, list) or \
-            not all(isinstance(name, str) and isinstance(source, str) for name, source in marketplaces.items()):
-        raise ValueError("Plugin source needs a marketplaces object and a plugins list: {}".format(path))
+    targets = data.get("targets", {}) if isinstance(data, dict) else None
+    if not isinstance(marketplaces, dict) or not isinstance(plugins, list) or not isinstance(targets, dict) or \
+            not all(isinstance(name, str) and isinstance(source, str) for name, source in marketplaces.items()) or \
+            not all(isinstance(extra, list) for extra in targets.values()):
+        raise ValueError("Plugin source needs a marketplaces object, a plugins list, and lists under targets: {}".format(path))
+    plugins = plugins + targets.get(target, [])
     for plugin in plugins:
         if not isinstance(plugin, str) or not plugin.partition("@")[0] or marketplace(plugin) not in marketplaces:
             raise ValueError("Plugin must be name@marketplace with a listed marketplace: {!r}".format(plugin))
+    checkout = path.resolve().parent.parent
+    marketplaces = {name: str(checkout / source) if source.startswith("./") else source
+                    for name, source in marketplaces.items()}
     return Source(marketplaces, tuple(dict.fromkeys(plugins)))
 
 
@@ -160,16 +175,23 @@ def sync(target, source, state, state_path, config, dry_run):
             state.pop("plugins")
         files.save_manifest(state_path, state)
 
-    known = query(cli.list_marketplaces, cli.marketplace_names)
+    known = query(cli.list_marketplaces, cli.marketplace_sources)
     installed = query(cli.list_plugins, cli.plugin_ids)
     for name in needed:
+        if name in owned_marketplaces and local(source.marketplaces[name]) and \
+                known.get(name) not in (None, source.marketplaces[name]):
+            print("MOVE MARKETPLACE {} ({})".format(name, target))
+            run(cli.remove_marketplace, name)
+            known.pop(name)
         if name not in known:
             print("ADD MARKETPLACE {} ({})".format(name, target))
             run(cli.add_marketplace, source.marketplaces[name])
             owned_marketplaces.add(name)
             record()
-        print("REFRESH MARKETPLACE {} ({})".format(name, target))
-        run(cli.refresh_marketplace, name)
+        # A local marketplace is read from disk, and Codex cannot upgrade one.
+        if not local(source.marketplaces[name]):
+            print("REFRESH MARKETPLACE {} ({})".format(name, target))
+            run(cli.refresh_marketplace, name)
     for plugin in source.plugins:
         if plugin not in installed:
             print("INSTALL PLUGIN {} ({})".format(plugin, target))
@@ -179,6 +201,10 @@ def sync(target, source, state, state_path, config, dry_run):
         elif cli.update:
             print("UPDATE PLUGIN {} ({})".format(plugin, target))
             run(cli.update, plugin)
+        elif local(source.marketplaces[marketplace(plugin)]):
+            # Codex has no update command; adding an installed plugin again copies its current files.
+            print("UPDATE PLUGIN {} ({})".format(plugin, target))
+            run(cli.install, plugin)
     installed |= set(source.plugins)
     for plugin in sorted(owned_plugins - set(source.plugins)):
         if plugin in installed:

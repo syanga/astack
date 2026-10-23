@@ -52,11 +52,39 @@ The repository defines what gets installed:
 | [instructions/](instructions/) | Shared preferences and additions for each agent |
 | [skills/](skills/) | Available skills and their usage instructions |
 | [settings/](settings/) | Settings and plugins to manage |
+| [codex-plugin/](codex-plugin/) | Codex plugin that holds astack's hooks |
 | [harnesses.json](harnesses.json) | Supported agents, destinations, and configuration sources |
 
 In a JSON destination, a source value of `{"$entries": [...]}` adds its entries
 to the list at that key and keeps the list's other entries. Uninstall removes
 only the entries it added.
+
+For Codex, the installer also installs the `astack` plugin from
+[codex-plugin/](codex-plugin/), a local marketplace in this checkout. The
+plugin's Stop hook starts a background watcher at the end of each turn. The
+watcher wakes an idle top-level thread once when one of its subagents finishes,
+by queuing a message with `codex queue`. It needs Codex 0.162 or later and
+`codex` on `PATH`. It does not wake a thread whose last turn asked you something,
+either with a `?` outside a URL in its final message or with
+`request_user_input_async`, and it does not wake subagent threads.
+
+T3 Code does not show turns that `codex queue` starts, including these wakes
+and `codex-background-jobs` completion notifications. The thread keeps working in
+Codex, and your next message gets a reply with the full history.
+
+Codex runs a plugin hook only when `config.toml` holds a matching trust record,
+so the installer writes the `trusted_hash` that Codex's `/hooks` review would
+write. Installing astack is that review. The hash covers the hook's declaration,
+including its command, but not the script that the command runs, so an updated
+script runs without another review. Uninstall removes the plugin, its
+marketplace, and the trust record. The trust key names the plugin, not a
+position in your `hooks.json`, so astack never changes your own hooks or their
+trust.
+
+Codex copies the plugin into its cache. Raise the version in
+`codex-plugin/plugins/astack/.codex-plugin/plugin.json` when you change the
+plugin, then reinstall. After moving the checkout, reinstall so Codex reads the
+marketplace from its new path.
 
 For contribution rules, see [AGENTS.md](AGENTS.md).
 

@@ -1,12 +1,17 @@
 """Shared settings ownership, lossless TOML edits, and reversible installation."""
 
 import json
+import os
 import stat
 from pathlib import Path
+import sys
 from unittest.mock import patch
 
 import test_install_lifecycle as lifecycle
 from test_install import InstallerFixture
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+from _vendor.tomllib import loads as toml_loads
 
 HOOK = {"matcher": "Bash", "hooks": [{"type": "command", "command": "check", "timeout": 10}]}
 OTHER = {"matcher": "Bash", "hooks": [{"type": "command", "command": "other"}]}
@@ -28,19 +33,14 @@ class SettingsTests(InstallerFixture):
         path.chmod(0o640)
         return path
 
-    def test_defaults_disable_claude_memory_and_never_read_codex_config(self):
-        codex = self.config("codex", "not even valid TOML; leave untouched\n")
-        before = codex.read_bytes(), codex.stat().st_mtime_ns
-        self.run_installer()
+    def test_defaults_disable_claude_memory(self):
+        self.run_installer("--target", "claude")
         hook = json.loads((self.repo / "settings/claude.json").read_text())["hooks"]["PreToolUse"]["$entries"]
         self.assertEqual(json.loads((self.home / ".claude/settings.json").read_text()),
                          {"autoMemoryEnabled": False, "hooks": {"PreToolUse": hook}})
-        self.assertEqual(before, (codex.read_bytes(), codex.stat().st_mtime_ns))
         self.assertEqual(self.manifest()["version"], 3)
-        self.assertNotIn("codex", self.manifest()["settings"])
-        self.run_installer(command="uninstall")
+        self.run_installer("--target", "claude", command="uninstall")
         self.assertFalse((self.home / ".claude/settings.json").exists())
-        self.assertEqual(codex.read_bytes(), before[0])
 
     def test_both_harnesses_install_update_and_exact_restore(self):
         self.source("codex", {"model_reasoning_effort": "high", "features": {"memories": False}})
@@ -160,9 +160,24 @@ class SettingsTests(InstallerFixture):
         self.run_installer("--target", "codex", command="uninstall")
         self.assertEqual(path.read_text(), original)
 
-    def test_absent_defaults_do_not_create_codex_config(self):
-        self.run_installer("--target", "codex")
-        self.assertFalse((self.home / ".codex/config.toml").exists())
+    def test_codex_plugin_hook_gets_the_trust_codex_computes_and_leaves_user_hooks_alone(self):
+        (self.repo / "settings/plugins.json").write_text(json.dumps({
+            "marketplaces": {"astack": "./codex-plugin"}, "plugins": [], "targets": {"codex": ["astack@astack"]}}))
+        hooks = self.home / ".codex/hooks.json"
+        hooks.parent.mkdir(parents=True)
+        hooks_text = json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "notify-send done"}]}]}})
+        hooks.write_text(hooks_text)
+        config = self.config("codex", 'model = "gpt-6.1-sol"\n')
+        installer = {"env": dict(os.environ, PATH="/usr/bin:/bin")}
+        self.run_installer("--target", "codex", **installer)
+        # Codex 0.163 reported this key and currentHash for astack's plugin hook through app-server hooks/list.
+        self.assertEqual(toml_loads(config.read_text())["hooks"]["state"], {
+            "astack@astack:hooks/hooks.json:stop:0:0": {
+                "trusted_hash": "sha256:10c9325a6dc2f7d7638d1a884a17c15762601d6ce23f804858b2bd9df02b0865"}})
+        self.assertEqual(hooks.read_text(), hooks_text)
+        self.run_installer("--target", "codex", command="uninstall", **installer)
+        self.assertEqual(hooks.read_text(), hooks_text)
+        self.assertEqual(config.read_text(), 'model = "gpt-6.1-sol"\n')
 
     def test_toml_header_whitespace_preserved_on_update_and_restore(self):
         self.source("codex", {"features": {"memories": False, "apps": True}})

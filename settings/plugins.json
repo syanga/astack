@@ -1,4 +1,5 @@
 {
-  "marketplaces": {"claude-plugins-official": "anthropics/claude-plugins-official"},
-  "plugins": ["frontend-design@claude-plugins-official"]
+  "marketplaces": {"claude-plugins-official": "anthropics/claude-plugins-official", "astack": "./codex-plugin"},
+  "plugins": ["frontend-design@claude-plugins-official"],
+  "targets": {"codex": ["astack@astack"]}
 }
