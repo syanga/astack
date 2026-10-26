@@ -15,15 +15,15 @@ If the question is about logic/state rather than what something looks like, this
 
 A UI prototype is much easier to judge when it's **butting up against the rest of the app**: real header, real sidebar, real data, real density. A throwaway route on its own is a vacuum: every variant looks fine in isolation. Default to sub-shape A whenever there's a plausible existing page to host the variants. Only reach for sub-shape B if the prototype genuinely has no nearby home.
 
-Build the prototype in a **scratch copy of the app** and run it there. Create the copy with `git worktree add -b prototype/<topic> <path> HEAD` outside the current checkout, record the base commit, and install its dependencies there. If the target files have uncommitted changes, apply them to the copy or ask. The working branch stays unchanged. A hand-built copy of the page drops whatever its author didn't notice, such as background scenes and animation.
+Build the prototype in a **scratch copy of the app** and run it there. Create the copy outside the current checkout with `git worktree add -b prototype/<topic> <path> HEAD`. Record its base commit in the preview cleanup record, then install its dependencies. If the target files have uncommitted changes, apply them to the copy or ask. The working branch stays unchanged. A hand-built copy of the page drops whatever its author didn't notice, such as background scenes and animation.
 
-Before starting the scratch app, list its outbound origins: data, auth, analytics, error reporting, feature flags, and build-time fetches such as hosted fonts. Copy only the env keys the page needs. Point any origin that would reach production at a local server or at fixtures with representative data. If the page can't render without a production origin, name it and ask before running.
+Before starting the scratch app, list its outbound origins: data, auth, analytics, error reporting, feature flags, and build-time fetches such as hosted fonts. Copy only the env keys the page needs. Point any origin that would reach production at a local server or at fixtures with representative data. If the page can't render without a production origin, name it and ask before running. Serve the scratch app only on a local or already private URL, because it holds env keys. When the preview browser can't reach that URL, run the checks with Playwright.
 
-When there is no app, or it can't run locally, build one self-contained HTML file in a scratch directory instead. Give each variant a `data-variant` section and switch with `history.replaceState`. If a real page exists, include a `current` section that reproduces it and compare that with a screenshot of the real page; name the URL and ask before loading a production site. Report every stand-in for runtime behavior (canvas, animation, live data) as unverified.
+When there is no app, build one self-contained HTML file in a scratch directory instead. When the app exists but can't run locally, report why and ask before using this fallback. Give each variant a `data-variant` section and switch with `history.replaceState`. If a real page exists, include a `current` section that reproduces it. Compare that section with a screenshot of the real page, and name the URL and ask before loading a production site. Report every stand-in for runtime behavior (canvas, animation, live data) as unverified.
 
 ### Sub-shape A: adjustment to an existing page (preferred)
 
-The route already exists. Variants are rendered **on the same route**, gated by a `?variant=` URL search param. The existing data fetching, params, and auth all stay. Only the rendering swaps. Keep the unchanged page reachable as `?variant=current`; it does not count toward N.
+The route already exists. Variants are rendered **on the same route**, gated by a `?variant=` URL search param. The existing data fetching, params, and auth all stay. Only the rendering swaps. Keep the unchanged page reachable as `?variant=current`. It does not count toward N.
 
 If the prototype is for something that doesn't yet have a page but *would naturally live inside one* (a new section of the dashboard, a new card on the settings screen, a new step in an existing flow), it's still sub-shape A. Mount the variants inside the host page.
 
@@ -51,7 +51,7 @@ This works whether the user is here to push back or not.
 
 ### 2. Generate radically different variants
 
-Before drafting, read the code around the target that draws, animates, or measures layout, such as canvas or WebGL scenes and scroll anchors. Keep each variant connected to that code so the page still runs it. When the user references an earlier design, find it in git history and port its markup and styles; cite the commit.
+Before drafting, read the code around the target that draws, animates, or measures layout, such as canvas or WebGL scenes and scroll anchors. Keep each variant connected to that code so the page still runs it. When the user references an earlier design, find it in git history and port its markup and styles. Cite the commit.
 
 Draft each variant. Hold each one to:
 
@@ -61,7 +61,7 @@ Draft each variant. Hold each one to:
 
 Variants must be **structurally different**: different layout, different information hierarchy, different primary affordance, not just different colours. Three slightly-tweaked card grids isn't a UI prototype, it's wallpaper. If two drafts come out too similar, redo one with explicit "do not use a card grid" guidance.
 
-Match the project's colors, typography, spacing, and component conventions unless the user requests a redesign. New pages within an existing product follow the same conventions. For standalone work, follow the user's visual preferences. Add no continuously repainting animations.
+Match the project's colors, typography, spacing, and component conventions unless the user requests a redesign. New pages within an existing product follow the same conventions. For standalone work, follow the user's visual preferences. Avoid continuously repainting animations.
 
 ### 3. Wire them together
 
@@ -101,11 +101,13 @@ Put the switcher in a single shared component so both sub-shapes can reuse it.
 
 ### 5. Hand it over
 
-Commit the variants on the scratch branch. Build a self-contained HTML gallery from the check screenshots: one view per variant, cycled with the same arrows and keys, showing every theme and viewport. Inline the images, compressed, and deliver the gallery through [t3-preview](../t3-preview/SKILL.md)'s direct HTML route. Also hand over a live URL only when the question depends on motion or interaction and the scratch app is reachable without a public tunnel; otherwise stop the scratch app. Report the gallery link (and the `?variant=` keys), checks performed, and any unverified visual behavior. Stop for the user's selection before editing real components. The user will flip through whenever they get to it. The interesting feedback is usually **"I want the header from B with the sidebar from C"**, which is the actual design they want.
+Commit the variants on the scratch branch. Build a self-contained HTML gallery from the screenshots taken for rule 6 of the [SKILL](SKILL.md). Give it one view per variant, including `current`, cycled with the same arrows and keys. Each view shows light and dark at desktop and phone width. Inline the images as compressed files. Deliver the gallery through [t3-preview](../t3-preview/SKILL.md)'s direct HTML route. In the HTML-file fallback, deliver that file instead.
+
+Add a live URL only when the question depends on motion or interaction and the user's browser can reach the scratch app without a public tunnel. Otherwise, stop the scratch app. Report the gallery link (and the `?variant=` keys), checks performed, and any unverified visual behavior. Stop for the user's selection before editing real components. The user will flip through whenever they get to it. The interesting feedback is usually **"I want the header from B with the sidebar from C"**, which is the actual design they want.
 
 ### 6. Capture the answer and clean up
 
-Once a variant has won, capture the answer (which variant and why), then capture the prototype the way the [SKILL](SKILL.md) describes. Record any combination the user chose across variants. Hand the selected design to [implement](../implement/SKILL.md) for authorized production work. The scratch branch stays the primary source for the alternatives; it does not become production code.
+Once a variant has won, capture the answer (which variant and why), then capture the prototype the way the [SKILL](SKILL.md) describes. Record any combination the user chose across variants. Hand the selected design to [implement](../implement/SKILL.md) for authorized production work. The scratch branch stays the primary source for the alternatives. It does not become production code.
 
 ## Anti-patterns
 
