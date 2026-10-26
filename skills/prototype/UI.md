@@ -17,9 +17,9 @@ A UI prototype is much easier to judge when it's **butting up against the rest o
 
 Build the prototype in a **scratch copy of the app** and run it there. Create the copy outside the current checkout with `git worktree add -b prototype/<topic> <path> HEAD`. Record its base commit in the preview cleanup record, then install its dependencies. If the target files have uncommitted changes, apply them to the copy or ask. The working branch stays unchanged. A hand-built copy of the page drops whatever its author didn't notice, such as background scenes and animation.
 
-Before starting the scratch app, list its outbound origins: data, auth, analytics, error reporting, feature flags, and build-time fetches such as hosted fonts. Copy only the env keys the page needs. Point any origin that would reach production at a local server or at fixtures with representative data. If the page can't render without a production origin, name it and ask before running. Serve the scratch app only on a local or already private URL, because it holds env keys. When the preview browser can't reach that URL, run the checks with Playwright.
+Before starting the scratch app, list its outbound origins: data, auth, analytics, error reporting, feature flags, and build-time fetches such as hosted fonts. Copy only the env keys the page needs. Point any origin that would reach production at a local server or at fixtures with representative data. If the page needs a production origin to render or to show representative content, name it and ask before running. Serve the scratch app only on a local or already private URL, because it holds env keys. When the preview browser can't reach that URL, run the checks with Playwright.
 
-When there is no app, build one self-contained HTML file in a scratch directory instead. When the app exists but can't run locally, report why and ask before using this fallback. Give each variant a `data-variant` section and switch with `history.replaceState`. If a real page exists, include a `current` section that reproduces it. Compare that section with a screenshot of the real page, and name the URL and ask before loading a production site. Report every stand-in for runtime behavior (canvas, animation, live data) as unverified.
+When there is no app, build one self-contained HTML file in a scratch directory instead. When the app exists but can't run locally, report why and ask before using this fallback. Give each variant a `data-variant` section and switch with `history.replaceState`. If a real page exists, include a `current` section that reproduces it. Compare that section with a screenshot of the real page. Before loading a production site for that screenshot, name the URL and ask. Report every stand-in for runtime behavior (canvas, animation, live data) as unverified.
 
 ### Sub-shape A: adjustment to an existing page (preferred)
 
@@ -51,7 +51,7 @@ This works whether the user is here to push back or not.
 
 ### 2. Generate radically different variants
 
-Before drafting, read the code around the target that draws, animates, or measures layout, such as canvas or WebGL scenes and scroll anchors. Keep each variant connected to that code so the page still runs it. When the user references an earlier design, find it in git history and port its markup and styles. Cite the commit.
+Before drafting, read the code that draws, animates, or measures layout around the target, such as canvas or WebGL scenes and scroll anchors. Keep each variant connected to that code so the page still runs it. When the user references an earlier design, find it in git history and port its markup and styles. Cite the commit.
 
 Draft each variant. Hold each one to:
 
@@ -101,9 +101,9 @@ Put the switcher in a single shared component so both sub-shapes can reuse it.
 
 ### 5. Hand it over
 
-Commit the variants on the scratch branch. Build a self-contained HTML gallery from the screenshots taken for rule 6 of the [SKILL](SKILL.md). Give it one view per variant, including `current`, cycled with the same arrows and keys. Each view shows light and dark at desktop and phone width. Inline the images as compressed files. Deliver the gallery through [t3-preview](../t3-preview/SKILL.md)'s direct HTML route. In the HTML-file fallback, deliver that file instead.
+Commit the variants on the scratch branch. Build a self-contained HTML gallery from the theme and width check screenshots. Give it one view per variant, including `current`, cycled with the same arrows and keys. Each view shows light and dark at desktop and phone width. Inline the images as JPEG data URIs. Deliver the gallery through [t3-preview](../t3-preview/SKILL.md)'s direct HTML route. In the static fallback, deliver that file instead.
 
-Add a live URL only when the question depends on motion or interaction and the user's browser can reach the scratch app without a public tunnel. Otherwise, stop the scratch app. Report the gallery link (and the `?variant=` keys), checks performed, and any unverified visual behavior. Stop for the user's selection before editing real components. The user will flip through whenever they get to it. The interesting feedback is usually **"I want the header from B with the sidebar from C"**, which is the actual design they want.
+Add a live URL only when the question depends on motion or interaction and the user's browser can reach the scratch app without a public tunnel. Otherwise, stop the scratch app. Report the gallery link, the `?variant=` keys with any live URL, the checks performed, and any unverified visual behavior. Stop for the user's selection before editing real components. The user will flip through whenever they get to it. The interesting feedback is usually **"I want the header from B with the sidebar from C"**, which is the actual design they want.
 
 ### 6. Capture the answer and clean up
 
