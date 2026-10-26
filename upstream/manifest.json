@@ -235,7 +235,7 @@
       "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
     ],
     "license": "MIT, kept in skills/prototype/LICENSE-pstack and skills/prototype/LICENSE-mattpocock",
-    "note": "Matt supplies logic and UI exploration. Pstack supplies scratch isolation. Static mocks precede real component edits to preserve the user's design-selection workflow."
+    "note": "Matt supplies logic and UI exploration. Pstack supplies scratch isolation. Variants run in a scratch copy of the app, so the working branch stays unchanged until the user picks one."
   },
   "diagnosing-bugs": {
     "repository": "https://github.com/mattpocock/skills.git",
