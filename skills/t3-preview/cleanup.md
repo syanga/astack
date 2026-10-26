@@ -1,5 +1,5 @@
 # Preview cleanup record
 
-Keep `preview-cleanup.md` outside the served directory. Record the owning worktree and thread, generated paths and retention decisions, preview URL, and tab ID when available. For processes, include PID, start time, command without secrets, working directory, port, and supervisor. Mark HTML-only previews as having none.
+Keep `preview-cleanup.md` outside the served directory. Record the owning worktree and thread, generated paths and retention decisions, preview URL, and tab ID when available. For processes, include PID, start time, command without secrets, working directory, port, and supervisor. Mark HTML-only previews as having none. For a scratch worktree, record its path, branch, commit, and any dependency or browser installs outside it.
 
 Update after restarts. When cleanup is authorized, follow [worktree-cleanup](../worktree-cleanup/SKILL.md) and record the outcome.

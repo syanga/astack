@@ -18,3 +18,11 @@ The `preview_*` tools drive the browser tab, not the file panel.
 For a backend, dev server, or browser automation, follow [server previews](server.md).
 
 For either route, report unverified visual, interaction, or backend checks and link the [preview cleanup record](cleanup.md).
+
+## Viewport and theme checks
+
+Use `preview_resize` and `preview_set_appearance` on the browser route. Without that route, install Playwright outside the project lockfile and use its `viewport`, `isMobile`, and `colorScheme` options. Headless Chrome's `--window-size` does not narrow the layout below about 500px.
+
+Each preview screenshot also returns the page's accessibility tree and logs. Capture large screenshot sets with Playwright, and use the preview browser for interaction and spot checks.
+
+Set each `prefers-color-scheme` value before load, or reload after changing it, because scripts and canvas scenes often read it once. If the product sets its theme with a class or stored setting, switch it through the product's own toggle. Before trusting a canvas screenshot, confirm that the headless browser created a WebGL context. If it did not, relaunch with software GL (`--use-angle=swiftshader --enable-unsafe-swiftshader`) or run headed.

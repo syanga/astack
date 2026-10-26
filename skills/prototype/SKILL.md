@@ -12,7 +12,7 @@ A prototype is **throwaway code that answers a question**. The question decides 
 Identify which question is being answered, using the user's prompt, the surrounding code, or by asking if the user is around:
 
 - **"Does this logic / state model feel right?"** → [LOGIC.md](LOGIC.md). Build a single shareable HTML file (free-play buttons plus tabbed guided walkthroughs) that pushes the state machine through cases that are hard to reason about on paper, and that a non-developer can drive.
-- **"What should this look like?"** → [UI.md](UI.md). Generate several radically different static UI variations, switchable via a URL search param and a floating bottom bar.
+- **"What should this look like?"** → [UI.md](UI.md). Generate several radically different UI variations in a running scratch copy of the app, switchable via a URL search param and a floating bottom bar.
 - **"Which behavior or timing works better?"** Build the smallest isolated script that exercises the question and records comparable outputs or timings.
 
 These branches produce very different artifacts, so getting this wrong wastes the whole prototype. If the question is genuinely ambiguous and the user isn't reachable, default to whichever branch better matches the surrounding code (a backend module → logic; a page or component → UI) and state the assumption at the top of the prototype.
@@ -20,11 +20,11 @@ These branches produce very different artifacts, so getting this wrong wastes th
 ## Rules that apply to every branch
 
 1. **Throwaway from day one, and clearly marked as such.** Build throwaway in an isolated scratch dir, separate from production source. Name the artifact and identify the module or page it explores so the context is clear.
-2. **Trivial to run.** A UI or logic demo is a self-contained HTML file. Deliver it through [t3-preview](../t3-preview/SKILL.md), including its cleanup record. A behavioral experiment runs with one command.
+2. **Trivial to run.** A logic demo is a self-contained HTML file. A UI prototype runs as [UI.md](UI.md) describes. Deliver either through [t3-preview](../t3-preview/SKILL.md), including its cleanup record. A behavioral experiment runs with one command.
 3. **No persistence by default.** State lives in memory. Persistence is the thing the prototype is _checking_, not something it should depend on. If the question explicitly involves a database, hit a scratch DB or a local file with a clear "PROTOTYPE, wipe me" name.
 4. **Skip the polish.** No tests, no error handling beyond what makes the prototype _runnable_, no abstractions. The point is to learn something fast.
 5. **Surface the state.** After every action (logic) or on every variant switch (UI), print or render the full relevant state so the user can see what changed.
-6. **Verify on the matching surface.** For a visual decision, inspect each variant and drive the interaction using t3-preview's browser route when available. For a behavioral or timing decision, observe the thing you are deciding by logging the timing, printing the output, or watching the render. Report checks that remain unverified.
+6. **Verify on the matching surface.** For a visual decision, check each variant in light and dark at desktop and phone width, following t3-preview's [viewport and theme checks](../t3-preview/SKILL.md#viewport-and-theme-checks). Drive the interaction using t3-preview's browser route when available. If a theme or width can't be checked, report it as a blocker with the reason instead of handing over. For a behavioral or timing decision, observe the thing you are deciding by logging the timing, printing the output, or watching the render. Report checks that remain unverified.
 7. **Capture it when done.** Record the verdict, the question it settled, and a pointer to the prototype in the task record or spec. For a visual decision, stop for the user's selection before editing real components. Hand the chosen direction to [implement](../implement/SKILL.md) for authorized production work and normal verification. Archive branches and external issue updates follow the task's delivery scope.
 
 When another session will continue the exploration or implement the chosen direction, read [handoff](../handoff/SKILL.md). Link the prototype, the recorded selection or pending decision, and its preview cleanup record.
