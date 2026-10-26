@@ -15,9 +15,9 @@ If the question is about logic/state rather than what something looks like, this
 
 A UI prototype is much easier to judge when it's **butting up against the rest of the app**: real header, real sidebar, real data, real density. A throwaway route on its own is a vacuum: every variant looks fine in isolation. Default to sub-shape A whenever there's a plausible existing page to host the variants. Only reach for sub-shape B if the prototype genuinely has no nearby home.
 
-Build the prototype in a **scratch copy of the app** and run it there. Create the copy with `git worktree add -b prototype/<topic> <path> HEAD` outside the current checkout, and install its dependencies there. If the target files have uncommitted changes, apply them to the copy or ask. The working branch stays unchanged. A hand-built copy of the page drops whatever its author didn't notice, such as background scenes and animation.
+Build the prototype in a **scratch copy of the app** and run it there. Create the copy with `git worktree add -b prototype/<topic> <path> HEAD` outside the current checkout, record the base commit, and install its dependencies there. If the target files have uncommitted changes, apply them to the copy or ask. The working branch stays unchanged. A hand-built copy of the page drops whatever its author didn't notice, such as background scenes and animation.
 
-Before starting the scratch app, list its outbound origins: data, auth, analytics, error reporting, and feature flags. Copy only the env keys the page needs. Point any origin that would reach production at a local server or at fixtures with representative data. If the page can't render without a production origin, name it and ask before running.
+Before starting the scratch app, list its outbound origins: data, auth, analytics, error reporting, feature flags, and build-time fetches such as hosted fonts. Copy only the env keys the page needs. Point any origin that would reach production at a local server or at fixtures with representative data. If the page can't render without a production origin, name it and ask before running.
 
 When there is no app, or it can't run locally, build one self-contained HTML file in a scratch directory instead. Give each variant a `data-variant` section and switch with `history.replaceState`. If a real page exists, include a `current` section that reproduces it and compare that with a screenshot of the real page; name the URL and ask before loading a production site. Report every stand-in for runtime behavior (canvas, animation, live data) as unverified.
 
@@ -93,8 +93,8 @@ A small fixed-position bar at the bottom-centre of the screen with three pieces:
 
 Behaviour:
 
-- Clicking an arrow updates the URL search param (use the framework's router, e.g. `router.replace` on Next, `navigate` on React Router, etc) so the variant is shareable and reload-stable.
-- Keyboard: `←` and `→` arrow keys also cycle. Don't intercept arrow keys when an `<input>`, `<textarea>`, or `[contenteditable]` is focused.
+- Clicking an arrow updates the URL search param (use the framework's router, e.g. `router.replace` on Next, `navigate` on React Router, etc) so the variant is shareable and reload-stable. If page code measures layout once on mount, remount the page on each switch so it measures the new variant.
+- Keyboard: `←` and `→` arrow keys also cycle. Don't intercept arrow keys when an `<input>`, `<textarea>`, `[contenteditable]`, or horizontally scrolling element is focused.
 - Visually distinct from the page through a plain border and label, so it's obviously not part of the design being evaluated.
 
 Put the switcher in a single shared component so both sub-shapes can reuse it.

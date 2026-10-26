@@ -21,7 +21,7 @@ For either route, report unverified visual, interaction, or backend checks and l
 
 ## Viewport and theme checks
 
-Use `preview_resize` and `preview_set_appearance` on the browser route. Without that route, use Playwright's `viewport`, `isMobile`, and `colorScheme` options, installed outside the project lockfile. Headless Chrome's `--window-size` does not narrow the layout below about 500px.
+Use `preview_resize` and `preview_set_appearance` on the browser route. Without that route, use Playwright's `viewport`, `isMobile`, and `colorScheme` options, installed outside the project lockfile. Headless Chrome's `--window-size` does not narrow the layout below about 500px. Each preview screenshot also returns the page's accessibility tree and logs, so capture a full variant matrix with Playwright and use the preview browser for interaction and spot checks.
 
 Set the color scheme before load, or reload after changing it, because scripts and canvas scenes often read it once. If the product sets its theme with a class or stored setting, switch it through the product's own toggle. Before trusting a canvas screenshot, confirm that the headless browser created a WebGL context. If it did not, relaunch with software GL (`--use-angle=swiftshader --enable-unsafe-swiftshader`) or run headed.
 
