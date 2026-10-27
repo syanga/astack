@@ -24,4 +24,6 @@ Remove only merged or explicitly abandoned worktrees. Check ignored and untracke
 
 Recheck before `git worktree remove`. Force removal requires explicit disposal authorization for the affected files. Verify teardown before deleting recovery records. Report removals, retired links, holds, and failures.
 
+When cleanup of the current T3 thread's own lane completes, including any program closeout, settle this thread with `t3_thread_organize` without asking. Leave it active after an early stop, a failure, or a hold awaiting the user's decision.
+
 Expand to simulators or caches only when requested. Editor backups may contain otherwise unrecorded work.
