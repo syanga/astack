@@ -258,9 +258,9 @@
   "wizard": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/engineering/wizard",
-    "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+    "commit": "59db609eb1e18aaf59b63284d0e52255aff0c63c",
     "license": "MIT, kept in skills/wizard/LICENSE-mattpocock",
-    "note": "Retains the upstream process, Bash template, example stage, and Codex metadata. Makes invocation explicit with a human-facing description and matching Codex policy, reuses agreed scope instead of requiring repeated confirmation, and limits CI and local writes to their agreed destinations. Adds secret redaction guidance and documents the literal single-line dotenv subset. The template preserves input whitespace, stops on EOF, quotes supported dotenv values, decodes existing quotes without evaluation, and rejects unsupported syntax before writes. Removes narration and decorative comments while retaining public helper contracts and the stage marker. Offline tests cover reruns, captured secret payloads, EOF, unsupported values, and action-only stages."
+    "note": "Retains the upstream process, Bash template, example stage, and Codex metadata. Makes invocation explicit with a human-facing description and matching Codex policy, reuses agreed scope instead of requiring repeated confirmation, and limits CI and local writes to their agreed destinations. Adds secret redaction guidance and documents the literal single-line dotenv subset. write_env keeps writing that subset instead of upstream's single-quoted form, whose `'\\''` escape is shell syntax rather than dotenv, and does not set $KEY. ask uses Readline only when input is a terminal, with completion off so Tab cannot splice file names into a value. The template preserves input whitespace, stops on EOF, quotes supported dotenv values, decodes existing quotes without evaluation, and rejects unsupported syntax before writes. Removes narration and decorative comments while retaining public helper contracts and the stage marker. Offline tests cover reruns, captured secret payloads, EOF, unsupported values, and action-only stages."
   },
   "orchestrate": {
     "repository": "https://github.com/cursor/plugins.git",
@@ -294,7 +294,7 @@
     ],
     "commit": "032be146865d973682535de75f2287da438550bf",
     "license": "MIT, kept in skills/multi-phase-plan/LICENSE-pstack",
-    "note": "The checker uses the Python standard library for astack portability. Risk-sized scenarios replace fixed lane and model quotas. Performance exemptions need reasons. Stable probe IDs connect plan checks to executable commands without making the checker judge their adequacy.",
+    "note": "The checker uses the Python standard library for astack portability. Risk-sized scenarios replace fixed lane and model quotas. Performance exemptions need reasons. Stable probe IDs connect plan checks to executable commands without making the checker judge their adequacy. The checker also carries pstack 87c8103 and 86c2448, so a backtick in a backtick fence's info string does not open a fence and inline code closes only on a matching backtick run.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/multi-phase-plan.md": "skills/multi-phase-plan/SKILL.md",
       "pstack/skills/poteto-mode/scripts/check-plan.mjs": "skills/multi-phase-plan/scripts/check_plan.py"
