@@ -19,7 +19,8 @@ SKIPPED=()
 
 _clear() {
   [[ -t 1 ]] || return 0
-  if command -v tput >/dev/null 2>&1; then tput clear; else printf '\033[2J\033[3J\033[H'; fi
+  if command -v tput >/dev/null 2>&1 && tput clear 2>/dev/null; then return 0; fi
+  printf '\033[2J\033[3J\033[H'
 }
 
 # banner "Title" shows the opening frame: what this wizard does.
@@ -56,7 +57,7 @@ open_url() {
     elif command -v explorer.exe >/dev/null 2>&1; then explorer.exe "$url"
     elif command -v xdg-open    >/dev/null 2>&1; then xdg-open "$url"
     elif command -v open        >/dev/null 2>&1; then open "$url"
-    else warn "couldn't open a browser; visit it manually: $url"; fi
+    else false; fi
   } >/dev/null 2>&1 || warn "couldn't open a browser, so visit it manually: $url"
 }
 
@@ -125,16 +126,29 @@ _existing() {
 }
 
 # ask KEY "Prompt" reads a value into $KEY. Offers the existing .env value as
-# a default on re-runs (Enter keeps it). Visible input (non-secret).
+# a default on re-runs (Enter keeps it). Visible input (non-secret), edited with Readline.
 ask() {
-  local key="$1" prompt="$2" current input
+  local key="$1" prompt="$2" current input p s=$'\001' e=$'\002' rc user
   current=$(_existing "$key") || exit $?
-  if [[ -n "$current" ]]; then
-    printf '  %s%s%s %s[Enter keeps current]%s ' "$BOLD" "$prompt" "$RESET" "$DIM" "$RESET"
+  if [[ -t 0 ]]; then
+    # Readline needs the colour codes wrapped in \001..\002 to place the cursor.
+    p="  $s$BOLD$e$prompt$s$RESET$e "
+    [[ -n "$current" ]] && p+="$s$DIM$e[Enter keeps current]$s$RESET$e "
+    # Tab completion would splice file names into the value; bash 3.2 ignores bind here.
+    rc=$(mktemp) user=${INPUTRC:-${HOME:-}/.inputrc}
+    [[ -n "${INPUTRC:-}" || -r "$user" ]] || user=/etc/inputrc
+    printf '$include %s\nset disable-completion on\n' "$user" > "$rc"
+    local INPUTRC="$rc"
+    IFS= read -e -r -p "$p" input || { rm -f "$rc"; _input_ended; }
+    rm -f "$rc"
   else
-    printf '  %s%s%s ' "$BOLD" "$prompt" "$RESET"
+    if [[ -n "$current" ]]; then
+      printf '  %s%s%s %s[Enter keeps current]%s ' "$BOLD" "$prompt" "$RESET" "$DIM" "$RESET"
+    else
+      printf '  %s%s%s ' "$BOLD" "$prompt" "$RESET"
+    fi
+    IFS= read -r input || _input_ended
   fi
-  IFS= read -r input || _input_ended
   [[ -z "$input" && -n "$current" ]] && input="$current"
   printf -v "$key" '%s' "$input"
 }
@@ -154,16 +168,18 @@ ask_secret() {
   printf -v "$key" '%s' "$input"
 }
 
-# write_env KEY VALUE upserts KEY=VALUE into ENV_FILE (creates it; replaces
-# any existing line). Idempotent.
+# write_env KEY VALUE upserts KEY=VALUE into ENV_FILE (replaces any existing
+# line). Idempotent. Creates ENV_FILE at mode 0600; writes through a symlink and
+# keeps an existing file's mode.
 write_env() {
   local key="$1" value="$2" tmp encoded
   encoded=$(_quote_env "$value") || exit $?
-  touch "$ENV_FILE"
+  [[ -e "$ENV_FILE" ]] || (umask 077 && : > "$ENV_FILE")
   tmp=$(mktemp)
   grep -vE "^${key}=" "$ENV_FILE" > "$tmp" || true
   printf '%s=%s\n' "$key" "$encoded" >> "$tmp"
-  mv "$tmp" "$ENV_FILE"
+  cat "$tmp" > "$ENV_FILE"
+  rm -f "$tmp"
   WRITTEN_ENV+=("$key")
   printf '  %s✓ wrote%s %s → %s\n' "$GREEN" "$RESET" "$key" "$ENV_FILE"
 }
@@ -210,6 +226,10 @@ finish() {
 }
 
 # STAGES: author this section. One stage() per step the human takes.
+# Keep every stage inside run_wizard and the last line as is: bash then parses
+# the whole file before the first prompt, so an edit mid-run can't break it.
+
+run_wizard() {
 
 TOTAL_STAGES=1
 
@@ -227,3 +247,6 @@ write_env STRIPE_SECRET_KEY "$STRIPE_SECRET_KEY"
 set_secret STRIPE_SECRET_KEY "$STRIPE_SECRET_KEY"
 
 finish
+}
+
+run_wizard "$@"; exit
