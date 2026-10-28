@@ -18,6 +18,14 @@ Examples of the pattern:
 - User describes a flaky test the agent could have queried via an observability MCP. Routing: the debugging skill should mention the observability MCP.
 - User links a chat thread the agent could have fetched via a chat MCP. Routing: the relevant skill should mention the chat MCP.
 
+## Lens addition: environment guardrails
+
+Look for changes to the agent's environment that would have prevented or shortened the session's problems:
+
+- **Automated checks.** Read the repo's own check command first (its build tool's `lint` or `check` scripts, its CI workflow), so a check that already exists but sits unwired or silently broken is the finding, not a reinvention. A repo with no **guardrail** (no pre-commit hook and no CI job running its lint, typecheck, or test command) is itself a finding.
+- **No-ops.** Flag instructions in steering files that don't change the agent's behavior.
+- **Information access.** Flag a crucial piece of information the agent could not reach, such as dev server logs or read-only access to a third-party service, and propose how to give the agent access.
+
 Read the active transcript at <ABSOLUTE_PATH> (or use the digest below if no path is given).
 
 Scan for:

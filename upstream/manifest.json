@@ -161,9 +161,29 @@
   "reflect": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/reflect",
-    "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, copied from pstack/LICENSE to skills/reflect/LICENSE",
-    "note": "Preserves the upstream three review lenses, separate reviewer and synthesizer prompts, durable-learning criteria, and selected-edit workflow. Adapts transcript discovery and delegation to the active harness with direct fallbacks. Removes the finding quota, limits missed-trigger tuning to model-invoked skills, and files backlog issues only when requested. Routes authoring through writing-for-agents, shared lessons to principles, and approved astack improvements through the source-editing PR workflow. Honors prior edit authorization. Updates the synthesizer's trigger examples for astack metadata."
+    "note": "Preserves the upstream three review lenses, separate reviewer and synthesizer prompts, durable-learning criteria, and selected-edit workflow. Adapts transcript discovery and delegation to the active harness with direct fallbacks. Removes the finding quota, limits missed-trigger tuning to model-invoked skills, and files backlog issues only when requested. Routes authoring through writing-for-agents, shared lessons to principles, and approved astack improvements through the source-editing PR workflow. Honors prior edit authorization. Updates the synthesizer's trigger examples for astack metadata. Keeps the text upstream 00b14f1 and ce649c0 cut; astack trims its own copies without dropping rules. The tooling lens adds Matt Pocock retro's guardrail, no-op, and information-access categories, recorded under retro."
+  },
+  "correct": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/correct",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
+    "license": "MIT, copied from pstack/LICENSE to skills/correct/LICENSE-pstack",
+    "files": {
+      "SKILL.md": "skills/correct/SKILL.md"
+    },
+    "note": "Commits each fix only when commits are in scope, since astack skills honor the caller's delivery scope."
+  },
+  "retro": {
+    "repository": "https://github.com/mattpocock/skills.git",
+    "path": "skills/engineering/retro",
+    "commit": "59db609eb1e18aaf59b63284d0e52255aff0c63c",
+    "license": "MIT, kept in skills/reflect/LICENSE-mattpocock",
+    "files": {
+      "SKILL.md": "skills/reflect/references/tooling-reviewer.md"
+    },
+    "note": "Only the automated-checks, no-ops, and information-access categories are imported, as a tooling-lens addition in reflect. Reflect's lenses and routing already cover the rest of the retrospective."
   },
   "create-verification-skill": {
     "repository": "https://github.com/cursor/plugins.git",
