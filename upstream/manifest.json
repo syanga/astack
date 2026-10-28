@@ -2,35 +2,35 @@
   "writing-for-agents": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/productivity/writing-for-agents",
-    "commit": "959a8e9f1edc3adbe2f7e3054bb6fbefa6696260",
+    "commit": "59db609eb1e18aaf59b63284d0e52255aff0c63c",
     "license": "MIT, kept in skills/writing-for-agents/LICENSE",
     "note": "SOURCE-EDITS.md is astack-authored and locates the owning repository before handing off to its local workflow. Astack authoring and delivery are repository-local so installed writing guidance remains usable in other repositories. A user-invoked description may keep one trigger clause because astack-help routes on installed frontmatter. Harness notes drop OpenCode because astack does not install it. That also drops the rule to write every description for the model, which only OpenCode required."
   },
   "unslop": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/unslop",
-    "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/unslop/LICENSE",
-    "note": "Rules verbatim; rule numbers are stable ids other skills cite. Description shortened to a human-facing line; disable-model-invocation set, from which the installer generates the Codex policy."
+    "note": "Rules verbatim as of c1c0a32; rule numbers are stable ids other skills cite. Description shortened to a human-facing line. Step 1 adds a done condition. Keeps the text that upstream 00b14f1 and 70b2dc8 cut; astack trims its own copies without dropping rules."
   },
   "principles": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/principle-*",
-    "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/principles/LICENSE",
-    "note": "All 23 principle skills as plain files under one user-invoked index. Frontmatter removed, applicability retained in the bodies, links adapted to local files, and unavailable skill references removed. Headings use sentence case and duplicate applicability statements are removed. Adaptations put migration preconditions before the rule, bound root-cause fixes to the task's scope, preserve external-constraint explanations, clarify boundary guarantees, and consolidate the mechanism hierarchy. Autonomy follows the user's authorization and approval preferences; context guidance follows writing-for-agents. Other edits correct the assertion-pattern heading, group failing-test and fix commits into one verified unit, allow reuse of a concrete tool, and narrow attack-the-premise to actor imbalances without treating an even census as proof. Earlier astack-added completion tests and one-off reply notes are removed. Upstream examples for pure functions, idempotency, and the reader-load/context-window cross-reference are retained. Minimize Reader Load links to Deep Modules, whose Matt Pocock provenance is recorded under codebase-design."
+    "note": "The 23 principle skills present at c1c0a32 as plain files under one user-invoked index; Explain the Number, added upstream later, is imported separately. Frontmatter removed, applicability retained in the bodies, links adapted to local files, and unavailable skill references removed. Headings use sentence case and duplicate applicability statements are removed. Adaptations put migration preconditions before the rule, bound root-cause fixes to the task's scope, preserve external-constraint explanations, clarify boundary guarantees, and consolidate the mechanism hierarchy. Autonomy follows the user's authorization and approval preferences; context guidance follows writing-for-agents. Other edits group failing-test and fix commits into one verified unit, allow reuse of a concrete tool, and narrow attack-the-premise to actor imbalances without treating an even census as proof. Earlier astack-added completion tests and one-off reply notes are removed. Upstream examples for pure functions, idempotency, and the reader-load/context-window cross-reference are retained. Minimize Reader Load links to Deep Modules, whose Matt Pocock provenance is recorded under codebase-design. Keeps the text that upstream 00b14f1, 08bd59b, 99743e9, b0b9c7a, and 70b2dc8 cut. Several of those cuts, in 08bd59b and 99743e9, leave a rule only in the frontmatter description astack removed; astack trims its own copies without dropping rules. Against e5136d8, keeps the five assertion shapes as an inspection list, the idempotency pattern list with a lock bullet safe from PID reuse, the attack-the-premise actor narrowing, and the fix-root-causes scope bound."
   },
   "open-pr": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/poteto-mode/playbooks/opening-a-pr.md",
-    "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/open-pr/LICENSE",
     "note": "Adapted under the global Pull Requests policy. Keeps narrow PRs, stack relationships, coherent commits, no-comments, technical-writing, unslop, title guidance, and default description sections. Cursor forge and deslop removed; Gitleaks hook install and T3 Code PR linking added. Links shared astack guidance for reusing and publishing PR test results, including delegated runs and the tested commit."
   },
   "review-pr": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/engineering/code-review",
-    "commit": "74ca5fe077456a0b3b2f5310cf9430999fd0b5fd",
+    "commit": "59db609eb1e18aaf59b63284d0e52255aff0c63c",
     "license": "MIT, kept in skills/review-pr/LICENSE-mattpocock",
     "note": "Preserves the independent Standards and Spec axes and Fowler smell baseline. Parent-owned repairs address implementation handoffs that previously stopped after reporting findings. An outside-provider Correctness axis gives delegated implementations cross-model bug review without full hardening.",
     "files": {
@@ -40,9 +40,9 @@
   "technical-writing": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/technical-writing",
-    "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/technical-writing/LICENSE",
-    "note": "Verbatim apart from a shorter description, the unslop pointer as a sibling link, and one pstack-specific formatting line removed."
+    "note": "Verbatim as of c1c0a32 apart from a shorter description, unslop pointers as sibling links, a rule 26 citation without the line against editing unslop, \"swarm logs\" shortened to \"logs\", and the tab-indentation rule removed. Keeps the text that upstream 00b14f1, 23e4138, and 70b2dc8 cut; astack trims its own copies without dropping rules."
   },
   "no-comments": {
     "repository": "https://github.com/cursor/plugins.git",
@@ -50,7 +50,7 @@
       "pstack/skills/no-comments",
       "pstack/agents/comment-sicko.md"
     ],
-    "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/no-comments/LICENSE",
     "note": "The Comment Sicko subagent is gone; its keep list and flag rules are the skill body, applied by the agent itself. The /how, /why, and /architect calls became read-the-history and sketch-the-shape instructions; principle references point at ../principles files."
   },
@@ -67,17 +67,17 @@
       "review/"
     ],
     "commit": [
-      "c1c0a32802223f4be824112dd83d33ad29a8b26c",
-      "959a8e9f1edc3adbe2f7e3054bb6fbefa6696260",
+      "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
+      "153fc1b93de6584562765cdce299324e1ff9e661",
       "a6b3a57512ca6d5c6aa5b68f74f736195021f96e"
     ],
     "license": "MIT, kept in skills/harden-pr/LICENSE-pstack, LICENSE-mattpocock, and LICENSE-gstack",
-    "note": "Uses generated gstack review Markdown without its generator or global runtime. Scope follows current user requirements. Findings require evidence rather than numerical scores. PR transport retains earlier pstack and Matt material."
+    "note": "Uses generated gstack review Markdown without its generator or global runtime. Scope follows current user requirements. Findings require evidence rather than numerical scores. PR transport retains earlier pstack and Matt material. Keeps the merge-authorization rules that upstream 08bd59b cut. The Matt element pins 153fc1b (daa01d8^), the last commit with resolving-merge-conflicts; its substance lives in pr-work.md."
   },
   "grilling": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/productivity/grilling",
-    "commit": "74ca5fe077456a0b3b2f5310cf9430999fd0b5fd",
+    "commit": "59db609eb1e18aaf59b63284d0e52255aff0c63c",
     "license": "MIT, kept in skills/grilling/LICENSE-mattpocock",
     "note": "Preserves the design-tree interview, frontier rounds, recommendations, and shared-understanding checkpoint. Removes decorative emoji from the question template. Makes invocation explicit with matching Codex policy. Adds a trigger to the description so astack-help can recommend grilling. Allows direct factual lookups and delegates independent exploration that can run alongside the interview.",
     "files": {
@@ -126,35 +126,35 @@
   "worktree-cleanup": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/poteto-mode/playbooks/worktree-cleanup.md",
-    "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/worktree-cleanup/LICENSE",
     "note": "Adapted for model invocation on cleanup, resource audits, and lane closeout. Checks unfinished work first and reports blockers before cleanup or handoff writes. Uses Git inventory, T3 thread ownership, and task resource evidence instead of Cursor-specific auditing. Covers processes, Docker storage, disposable test databases, and t3-preview HTML and quick tunnels. Preserves shared resources and the daily-driver T3 connection. Adds preview ownership records; simulator and cache cleanup remains optional. Prose trimmed to task-specific rules and teardown hazards."
   },
   "ship-pr": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/poteto-mode/playbooks/shipping.md",
-    "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/ship-pr/LICENSE",
     "note": "Adapted as ship-pr, a model-invoked entry point for landing an existing PR or stack. Reuses the shared PR follow-through procedure and existing review evidence. Removes the mandatory independent verification pass and separate verdict protocol; refreshes verification when evidence is missing or changes invalidate it. Retains safeguards against merging unverified head changes."
   },
   "how": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/how",
-    "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, copied from pstack/LICENSE to skills/how/LICENSE",
-    "note": "Preserves the upstream opening directive, simple and complex delegation paths, separate explorer and explainer prompts, and explanation structure. Shortens the description to the 200-character cap. Replaces Cursor Task parameters and fixed models with available subagent tools and a read-only direct fallback. Uses portable file-search instructions, validated reference links, and sentence-case headings. Makes explorer findings conditional in the explainer prompt so the direct-explain path works."
+    "note": "Preserves the upstream opening directive, simple and complex delegation paths, separate explorer and explainer prompts, and explanation structure. Shortens the description to the 200-character cap. Replaces Cursor Task parameters and fixed models with available subagent tools and a read-only direct fallback. Uses portable file-search instructions, validated reference links, and sentence-case headings. Makes explorer findings conditional in the explainer prompt so the direct-explain path works. Keeps the text that upstream 00b14f1 and 08bd59b cut; astack trims its own copies without dropping rules."
   },
   "why": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/why",
-    "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, copied from pstack/LICENSE to skills/why/LICENSE",
-    "note": "Preserves the upstream investigation workflow, default parallel source sweep, confidence framework, separate investigator and synthesizer prompts, and all source playbooks. Shortens the description, adapts tool discovery and delegation to the active harness, permits explicitly scoped investigations, and reports unavailable sources as gaps. Treats provider tools and warehouse schemas as examples to verify. Uses validated links and sentence-case headings."
+    "note": "Preserves the upstream investigation workflow, default parallel source sweep, confidence framework, separate investigator and synthesizer prompts, and all source playbooks. Shortens the description, adapts tool discovery and delegation to the active harness, permits explicitly scoped investigations, and reports unavailable sources as gaps. Treats provider tools and warehouse schemas as examples to verify. Uses validated links and sentence-case headings. Keeps the text that upstream 00b14f1 and 08bd59b cut; astack trims its own copies without dropping rules."
   },
   "teach": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/teach",
-    "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, copied from pstack/LICENSE to skills/teach/LICENSE",
     "note": "Preserves the upstream teaching directive, five-step conversational workflow, progressive diagrams, and concrete examples. Shortens the description, reads how and why by sibling paths, scopes investigation before dispatch, and returns findings for a single teaching explanation. Adapts image generation to available tools and the user's requested colors. Links the existing unslop skill."
   },
@@ -171,14 +171,14 @@
       "pstack/skills/create-verification-skill",
       "pstack/skills/maintain-verification-skill"
     ],
-    "commit": "1f84288b2c047b6d39952da23f51cf486f3b2f7a",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, copied from pstack/LICENSE to skills/create-verification-skill/LICENSE",
     "note": "Preserves the upstream creation workflow, complete feature-map examples, and maintenance procedure under one entry point. Shortens the description and replaces Cursor-only paths with project skill conventions. Adds shared authoring guidance and conditional verification, automation, idempotency, and testing principle links. Adapts delegation with a direct fallback, respects startup scope and isolation, reports unreachable features as unverified, and opens maintenance PRs when requested. Splits the maintenance live-pass paragraph so its health, evidence, and cleanup requirements are readable."
   },
   "architect": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/architect",
-    "commit": "032be146865d973682535de75f2287da438550bf",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/architect/LICENSE-pstack",
     "note": "Arena owns candidate comparison. Architect retains design criteria and returns to the caller before implementation. UI exploration follows astack static-mock selection."
   },
@@ -192,11 +192,11 @@
       "skills/engineering/implement"
     ],
     "commit": [
-      "032be146865d973682535de75f2287da438550bf",
-      "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
+      "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
+      "59db609eb1e18aaf59b63284d0e52255aff0c63c"
     ],
     "license": "MIT, kept in skills/implement/LICENSE-pstack and skills/implement/LICENSE-mattpocock",
-    "note": "The pstack Feature playbook supplies task ownership and delegation. Matt supplies TDD and implementation checks. Multi-phase work reuses the existing execution store so switching owners or workflows does not create competing state."
+    "note": "The pstack Feature playbook supplies task ownership and delegation. Matt supplies TDD and implementation checks. Multi-phase work reuses the existing execution store so switching owners or workflows does not create competing state. Keeps the text that upstream 70b2dc8 and b0b9c7a cut; astack trims its own copies without dropping rules."
   },
   "tdd": {
     "repository": [
@@ -208,16 +208,16 @@
       "skills/engineering/tdd"
     ],
     "commit": [
-      "032be146865d973682535de75f2287da438550bf",
-      "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
+      "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
+      "59db609eb1e18aaf59b63284d0e52255aff0c63c"
     ],
     "license": "MIT, kept in skills/tdd/LICENSE-pstack and skills/tdd/LICENSE-mattpocock",
-    "note": "Matt supplies the main skill and test-quality references. Pstack supplies BUG-FIX.md. Existing agreed test boundaries carry forward. Refactoring after green is allowed when it simplifies code without changing behavior."
+    "note": "Matt supplies the main skill and test-quality references. Pstack supplies BUG-FIX.md. Existing agreed test boundaries carry forward. Refactoring after green is allowed when it simplifies code without changing behavior. Keeps the text that upstream b0b9c7a and 70b2dc8 cut; astack trims its own copies without dropping rules."
   },
   "to-spec": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/engineering/to-spec",
-    "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+    "commit": "59db609eb1e18aaf59b63284d0e52255aff0c63c",
     "license": "MIT, kept in skills/to-spec/LICENSE-mattpocock",
     "note": "Uses the agreed destination instead of Matt-specific setup and tracker labels. Story coverage scales to the feature instead of a quota that could invent requirements."
   },
@@ -231,8 +231,8 @@
       "skills/engineering/prototype"
     ],
     "commit": [
-      "032be146865d973682535de75f2287da438550bf",
-      "c55ee46073ed923f86ce59a5eb3b6d895095d1b7"
+      "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
+      "59db609eb1e18aaf59b63284d0e52255aff0c63c"
     ],
     "license": "MIT, kept in skills/prototype/LICENSE-pstack and skills/prototype/LICENSE-mattpocock",
     "note": "Matt supplies logic and UI exploration. Pstack supplies scratch isolation. Variants run in a scratch copy of the real app, and the user views a static screenshot gallery so no server has to stay up."
@@ -240,14 +240,14 @@
   "diagnosing-bugs": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/engineering/diagnosing-bugs",
-    "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+    "commit": "59db609eb1e18aaf59b63284d0e52255aff0c63c",
     "license": "MIT, kept in skills/diagnosing-bugs/LICENSE-mattpocock",
     "note": "Captured-artifact analysis bypasses the runnable-reproduction gate, but does not verify a fix. Early code reading can help build a loop. Theories remain provisional. Diagnosis-only completion requires findings and probe cleanup, not a code fix. Pstack references are recorded under debugging-forensics."
   },
   "implementation-slicing": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/engineering/to-tickets",
-    "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+    "commit": "59db609eb1e18aaf59b63284d0e52255aff0c63c",
     "license": "MIT, retained in skills/principles/LICENSE-mattpocock",
     "note": "Only vertical-slice and blocking-dependency guidance is retained in the existing Sequence Verifiable Units principle. No standalone to-tickets skill, tracker workflow, or ticket templates are installed. The rest of the principle retains its pstack provenance under principles.",
     "files": {
@@ -273,9 +273,9 @@
       "pstack/skills/poteto-mode/scripts/package.json",
       "pstack/skills/poteto-mode/scripts/bun.lock"
     ],
-    "commit": "032be146865d973682535de75f2287da438550bf",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/orchestrate/LICENSE-pstack",
-    "note": "Retains the original Bun runtime and lockfile as an exception to astack's Python convention. Adds a GitHub adapter beside Graphite. Shared ownership, retained drain batches, and verifier precedence support recovery across sessions without losing evidence. The CLI records claims. The coordinator still judges them.",
+    "note": "Retains the original Bun runtime and lockfile as an exception to astack's Python convention. Keeps Graphite, which upstream ce649c0 removed, and adds a GitHub adapter beside it. Shared ownership, retained drain batches, and verifier precedence support recovery across sessions without losing evidence. The CLI records claims. The coordinator still judges them.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/orchestrate.md": "skills/orchestrate/SKILL.md",
       "pstack/skills/poteto-mode/scripts/orch/orch.ts": "skills/orchestrate/scripts/orch/orch.ts",
@@ -292,7 +292,7 @@
       "pstack/skills/poteto-mode/playbooks/multi-phase-plan.md",
       "pstack/skills/poteto-mode/scripts/check-plan.mjs"
     ],
-    "commit": "032be146865d973682535de75f2287da438550bf",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/multi-phase-plan/LICENSE-pstack",
     "note": "The checker uses the Python standard library for astack portability. Risk-sized scenarios replace fixed lane and model quotas. Performance exemptions need reasons. Stable probe IDs connect plan checks to executable commands without making the checker judge their adequacy.",
     "files": {
@@ -306,7 +306,7 @@
       "skills/engineering/wayfinder",
       "skills/engineering/setup-matt-pocock-skills/issue-tracker-local.md"
     ],
-    "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+    "commit": "59db609eb1e18aaf59b63284d0e52255aff0c63c",
     "license": "MIT, kept in skills/wayfinder/LICENSE-mattpocock",
     "note": "TRACKER.md retains only wayfinding operations from Matt's local tracker. A coordinator serializes local claims because Markdown lacks atomic tracker operations. Cancellation does not satisfy dependents, and invalidated decisions retain their history.",
     "files": {
@@ -322,9 +322,9 @@
       "pstack/skills/show-me-your-work/references/decision-log-template.tsv",
       "pstack/skills/show-me-your-work/scripts/log.sh"
     ],
-    "commit": "032be146865d973682535de75f2287da438550bf",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/show-me-your-work/LICENSE-pstack",
-    "note": "Corrective rows resolve the upstream conflict between append-only history and deleting errors. Incompatible headers are rejected to preserve older four-column logs. The execution owner serializes writes because the helper has no lock.",
+    "note": "Corrective rows resolve the upstream conflict between append-only history and deleting errors. Incompatible headers are rejected to preserve older four-column logs. The execution owner serializes writes because the helper has no lock. Keeps rejecting an existing empty log, which upstream 70b2dc8 treats as new.",
     "files": {
       "pstack/skills/show-me-your-work/SKILL.md": "skills/show-me-your-work/SKILL.md",
       "pstack/skills/show-me-your-work/references/decision-log-template.tsv": "skills/show-me-your-work/references/decision-log-template.tsv",
@@ -342,8 +342,8 @@
       "pstack/skills/poteto-mode/playbooks/session-pickup.md"
     ],
     "commit": [
-      "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
-      "032be146865d973682535de75f2287da438550bf"
+      "59db609eb1e18aaf59b63284d0e52255aff0c63c",
+      "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17"
     ],
     "license": "MIT, kept in skills/handoff/LICENSE-mattpocock and skills/handoff/LICENSE-pstack",
     "note": "Standalone tasks retain Matt's temporary note. Planned execution and decision maps reuse their existing records to avoid competing state. Pickup reuses evidence only when it still applies, resolving upstream tension between avoiding repeated checks and proving inherited claims.",
@@ -357,7 +357,7 @@
   "investigation": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/poteto-mode/playbooks/investigation.md",
-    "commit": "032be146865d973682535de75f2287da438550bf",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/investigation/LICENSE-pstack",
     "note": "Extends the original how/why routing to diagnosis and captured artifacts because technical questions may arrive as failure reports or profiles. The inquiry remains read-only.",
     "files": {
@@ -367,9 +367,9 @@
   "bug-fix": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/poteto-mode/playbooks/bug-fix.md",
-    "commit": "032be146865d973682535de75f2287da438550bf",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/bug-fix/LICENSE-pstack",
-    "note": "Reuses diagnosing-bugs and tdd rather than defining a second diagnosis loop. Failing-before evidence is required without mandating a separate failing commit. Delivery stays within the task authorization.",
+    "note": "Reuses diagnosing-bugs and tdd rather than defining a second diagnosis loop. Failing-before evidence is required without mandating a separate failing commit. Delivery stays within the task authorization. Keeps the text that upstream b0b9c7a cut; astack trims its own copies without dropping rules.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/bug-fix.md": "skills/bug-fix/SKILL.md"
     }
@@ -390,7 +390,7 @@
       "pstack/skills/poteto-mode/playbooks/trace-forensics.md",
       "pstack/skills/poteto-mode/playbooks/runtime-forensics.md"
     ],
-    "commit": "032be146865d973682535de75f2287da438550bf",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/diagnosing-bugs/LICENSE-pstack",
     "note": "Native queries can replace mandatory SQLite conversion. Retention alone does not establish a leak. Paired captures alone do not prove causality. Runtime instrumentation is a write and needs the corresponding scope, despite the upstream read-only label.",
     "files": {
@@ -401,12 +401,12 @@
   "arena": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/arena/SKILL.md",
-    "commit": "032be146865d973682535de75f2287da438550bf",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/arena/LICENSE-pstack",
     "files": {
       "pstack/skills/arena/SKILL.md": "skills/arena/SKILL.md"
     },
-    "note": "Provider CLI tasks return read-only proposals that the parent materializes in isolated worktrees. Same-provider and direct fallbacks disclose missing diversity or independence."
+    "note": "Provider CLI tasks return read-only proposals that the parent materializes in isolated worktrees. Same-provider and direct fallbacks disclose missing diversity or independence. Keeps the same-provider judge fallback that upstream ab1f702 removed, and the text that upstream 00b14f1 cut; astack trims its own copies without dropping rules."
   },
   "hillclimb": {
     "repository": "https://github.com/cursor/plugins.git",
@@ -421,16 +421,17 @@
   "refactoring": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/poteto-mode/playbooks/refactoring.md",
-    "commit": "032be146865d973682535de75f2287da438550bf",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/refactoring/LICENSE-pstack",
     "mapping": {
       "pstack/skills/poteto-mode/playbooks/refactoring.md": "skills/refactoring/SKILL.md"
-    }
+    },
+    "note": "Keeps the text that upstream b0b9c7a cut; astack trims its own copies without dropping rules."
   },
   "typescript-best-practices": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/typescript-best-practices",
-    "commit": "032be146865d973682535de75f2287da438550bf",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/typescript-best-practices/LICENSE-pstack"
   },
   "brag-slim": {

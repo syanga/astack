@@ -30,7 +30,7 @@ Use these sections in this order by default. Omit sections that have nothing use
 - `## Why`. State the problem or goal and the approach in one or two short paragraphs. For a bug fix, explain what went wrong and what happens now.
 - `## Scope`. Name the symbols and paths that define the boundary, including both sides of a rename or retarget. State what is in and out when that distinction matters.
 - `## Tradeoffs`. Explain rejected alternatives a reviewer would reasonably ask about. Omit this section when there was no real choice.
-- `## Blast radius`. In one to three sentences, name who or what the change affects and why it is safe or risky. Include the cost of leaving the problem unresolved when it helps assess the change.
+- `## Blast radius`. In one to three sentences, name who or what the change affects and why it is safe or risky, including whether it is a two-way door that is cheap to reverse or a one-way door that is not. Include the cost of leaving the problem unresolved when it helps assess the change.
 - `## Verification`. Name the commands or real run paths and their results. For a performance change, give a primary measured result with its unit, before and after.
 
 When screenshots or recordings demonstrate the change, upload them as GitHub attachments using `gh pr edit --attach` or GitHub's editor.

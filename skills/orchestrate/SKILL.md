@@ -74,7 +74,9 @@ Size the brief to the unit. A one-command unit gets the template collapsed to a 
 
 A sub-coordinator brief adds its track boundary and unit list, its spawn budget and workspace requirements, the drain protocol, and the rollup format (per child: name, status, PR, head SHA, verdict, absolute receipt or failure-report path, one line, plus track status, each open gate's decision request, and frontier delta).
 
-Pass upstream findings to dependent workers before dispatch. Audit one sampled worker brief per sub-coordinator per wave, concurrently with the wave it samples, never as a gate in front of it. If a brief fails the audit, pause new dispatch for that track and correct the sub-coordinator's instructions. Start a fresh worker with consolidated scope when earlier briefs have become fragmented.
+Pass upstream findings to dependent workers before dispatch. Audit one sampled worker brief per sub-coordinator per wave, concurrently with the wave it samples, never as a gate in front of it. If a brief fails the audit, pause new dispatch for that track and correct the sub-coordinator's instructions.
+
+**Fresh workers by default.** Give new work to a fresh worker with consolidated scope, meaning the original brief, every later directive, and the prior worker's report and branch. This holds for a fix round, a follow-up, a retry, and the next queue item. Resume, message, or queue a follow-up on an existing worker only when the new work strictly needs state that lives in that worker and is costly to move: its local checkout, its uncommitted changes, or a process it still runs, such as a dev server or a simulator. A stop or hold order to a running worker is not reuse. A role such as a PR owner outlives its worker. Once that worker returns, a fresh worker takes the role's next round. Interrupt-chained resumes silently drop directives, so start a fresh worker with consolidated scope rather than trusting a resumed worker's "done" summary.
 
 ## Steps
 
