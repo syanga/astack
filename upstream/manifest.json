@@ -377,9 +377,9 @@
   "perf-issue": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/poteto-mode/playbooks/perf-issue.md",
-    "commit": "032be146865d973682535de75f2287da438550bf",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/perf-issue/LICENSE-pstack",
-    "note": "Repeated comparable measurements distinguish improvements from noise. Correctness checks accompany performance measurements.",
+    "note": "Repeated comparable measurements distinguish improvements from noise. Correctness checks accompany performance measurements. Keeps the eight strategy families that upstream e43c7ee replaced with bare performance mantras, because each family names the trace signal that earns it an attempt; the families take the mantras' cheapest-first order and stop rule.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/perf-issue.md": "skills/perf-issue/SKILL.md"
     }
@@ -411,12 +411,31 @@
   "hillclimb": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/poteto-mode/playbooks/hillclimb.md",
-    "commit": "032be146865d973682535de75f2287da438550bf",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/hillclimb/LICENSE-pstack",
     "files": {
       "pstack/skills/poteto-mode/playbooks/hillclimb.md": "skills/hillclimb/SKILL.md"
     },
     "note": "Minimum attempts apply when requested. Repeated confirmation guards early wins otherwise. Existing logs and handoffs preserve progress without promising automatic wake."
+  },
+  "benchmark-checklist": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/benchmark-checklist/SKILL.md",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
+    "license": "MIT, kept in skills/perf-issue/LICENSE-pstack",
+    "files": {
+      "pstack/skills/benchmark-checklist/SKILL.md": "skills/perf-issue/BENCHMARK-CHECKLIST.md"
+    },
+    "note": "A reference file for perf-issue and hillclimb rather than a separate skill."
+  },
+  "explain-the-number": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/principle-explain-the-number/SKILL.md",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
+    "license": "MIT, kept in skills/principles/LICENSE",
+    "files": {
+      "pstack/skills/principle-explain-the-number/SKILL.md": "skills/principles/explain-the-number.md"
+    }
   },
   "refactoring": {
     "repository": "https://github.com/cursor/plugins.git",
