@@ -184,7 +184,7 @@
       "SKILL.md": "skills/reflect/references/tooling-reviewer.md",
       "agents/openai.yaml": null
     },
-    "note": "Imports only the automated-checks, no-ops, and information-access categories, as a tooling-lens addition in reflect. Reflect is transcript-scoped, so each finding needs session evidence, and a no-op uses writing-for-agents' default-behavior test so a broken rule is not deleted."
+    "note": "Imports only the automated-checks, no-ops, and information-access categories, as a tooling-lens addition in reflect. Reflect is transcript-scoped, so each finding needs session evidence, and a no-op must be an instruction the agent followed so a broken rule is not deleted."
   },
   "create-verification-skill": {
     "repository": "https://github.com/cursor/plugins.git",

@@ -31,6 +31,6 @@ Then fix the most frequent classes now, one commit each when commits are in scop
 
 ## Keep the rule table
 
-Last, keep a table in the repo's agent instruction file (`AGENTS.md`, or `CLAUDE.md` when there is no `AGENTS.md`) that pairs each rule with what enforces it. When the operator corrects you, fix the mistake and add the rule. If the rule was already there and nothing enforces it, that's a repeat, so fix it at the highest level in the same change. Drop a rule once its mistake can't happen. Deliver through [open-pr](../open-pr/SKILL.md) within the task's delivery scope, and honor a request for local edits only.
+Last, keep a table in the repo's agent instruction file (`AGENTS.md`, or `CLAUDE.md` when there is no `AGENTS.md`) that pairs each rule with what enforces it. When the operator corrects you, fix the mistake and add the rule. If the rule was already there and nothing enforces it, that's a repeat, so fix it at the highest level in the same change. Drop a rule once its mistake can't happen. Deliver through [open-pr](../open-pr/SKILL.md) within the task's delivery scope.
 
 **Reply:** each class with its evidence, the level you picked, and why a higher level didn't work.
