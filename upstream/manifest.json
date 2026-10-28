@@ -379,7 +379,7 @@
     "path": "pstack/skills/poteto-mode/playbooks/perf-issue.md",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/perf-issue/LICENSE-pstack",
-    "note": "Repeated comparable measurements distinguish improvements from noise. Correctness checks accompany performance measurements. Keeps the eight strategy families that upstream e43c7ee replaced with bare performance mantras, because each family names the trace signal that earns it an attempt. The families take the mantras' cheapest-first order, with Divide and conquer and Redundancy both under do it concurrently, and the mantras' stop rule. That rule needs a target, which defaults to the complaint no longer reproducing.",
+    "note": "Repeated comparable measurements distinguish improvements from noise. Correctness checks accompany performance measurements. Keeps the eight strategy families that upstream e43c7ee replaced with bare performance mantras, because each family names the signal that earns it an attempt. The families take the mantras' cheapest-first order and stop rule, with Divide and conquer and Redundancy both under \"Do it concurrently\".",
     "files": {
       "pstack/skills/poteto-mode/playbooks/perf-issue.md": "skills/perf-issue/SKILL.md"
     }
@@ -426,7 +426,7 @@
     "files": {
       "pstack/skills/benchmark-checklist/SKILL.md": "skills/perf-issue/BENCHMARK-CHECKLIST.md"
     },
-    "note": "Kept as a perf-issue reference rather than a separate user-invoked skill, so performance measurement has one entry point. Drops the section on how perf-issue and hillclimb use it, which both skills state, and stops only the agent's own competing processes."
+    "note": "A perf-issue reference rather than its own skill, because its only callers are perf-issue, hillclimb, and Explain the Number. Drops the section on how perf-issue and hillclimb use it, which both skills state, stops only the agent's own competing processes, and keeps read-only work read-only."
   },
   "explain-the-number": {
     "repository": "https://github.com/cursor/plugins.git",

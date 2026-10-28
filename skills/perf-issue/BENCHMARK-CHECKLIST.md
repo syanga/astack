@@ -8,6 +8,7 @@ For a quick ballpark the user asked for, one run is enough. Still check question
 
 - Write down the claim you expect to make, in the words you would ship ("export is 30% faster at p50 on the 60k-row dataset"). The questions test that sentence.
 - Read the measurement script. Note what it times, counts, and ignores.
+- In read-only work, use existing output and counters, and name what you could not check.
 - Check the load average with `uptime` and the core count with `nproc`. If the machine is busy, find out what is running. Stop it only if it is yours to stop. Otherwise interleave the sides so both see the same noise, and say so in the report.
 
 ## The questions

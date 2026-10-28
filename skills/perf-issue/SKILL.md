@@ -8,13 +8,13 @@ disable-model-invocation: true
 
 **You own the measurements. Plan, review, verify the numbers.** Tie every fix to a measurement.
 
-For sustained improvement against a metric, use [hillclimb](../hillclimb/SKILL.md). Pass the workload, baseline evidence, measurement command, correctness checks, and existing authorization. Hillclimb owns the repeated experiments and stopping criteria.
+For sustained improvement against a metric, use [hillclimb](../hillclimb/SKILL.md). Pass the workload, target, baseline evidence, measurement command, correctness checks, and existing authorization. Hillclimb owns the repeated experiments and stopping criteria.
 
 For a diagnosis-only request, stop before implementation with the measurements, supported cause, and proposed next experiment. A read-only request also excludes instrumentation and code edits.
 
-1. Reproduce the reported slowness in an authorized environment and capture a baseline through the affected UI, CLI, or API. Name the metric, unit, target, workload, revision, configuration, and repeatable command. Without a target from the user, the target is that the complaint no longer reproduces. Record warmup, trial count, and variation so later comparisons can distinguish a change from noise. Vet the baseline, and each later number, with the [benchmark checklist](BENCHMARK-CHECKLIST.md). For live capture and mechanism checks, follow [runtime forensics](../diagnosing-bugs/RUNTIME-FORENSICS.md). For an existing capture, follow [trace forensics](../diagnosing-bugs/TRACE-FORENSICS.md). If the baseline does not reproduce the complaint, report the gap before optimizing.
+1. Reproduce the reported slowness in an authorized environment and capture a baseline through the affected UI, CLI, or API. Name the metric, unit, target, workload, revision, configuration, and repeatable command. Without a target from the user, use the metric value at which the complaint no longer reproduces. Record warmup, trial count, and variation so later comparisons can distinguish a change from noise. Vet the baseline, and each later number, with the [benchmark checklist](BENCHMARK-CHECKLIST.md). For live capture and mechanism checks, follow [runtime forensics](../diagnosing-bugs/RUNTIME-FORENSICS.md). For an existing capture, follow [trace forensics](../diagnosing-bugs/TRACE-FORENSICS.md). If the baseline does not reproduce the complaint, report the gap before optimizing.
 2. Use [how](../how/SKILL.md) to ground hypotheses. Measure the workload before claiming a performance limit.
-   Most fixes come from eight strategy families. Try them in order, cheapest first. A family earns an attempt only when the trace shows the signal it names. When an earlier family meets the target, stop.
+   Most fixes come from eight strategy families. Try them in order, cheapest first. A family earns an attempt only when the trace or the `how` pass shows the signal it names. When an earlier family meets the target, stop.
    1. **Elimination.** Before optimizing the hot path, ask whether it needs to exist: a computation nobody consumes, a feature gate that's always off for this user, a sync that redundantly mirrors state, a legacy path kept "just in case". The trace shows what's slow, never that it's deletable, so this family needs the `how` pass, not the profiler.
    2. **Caching.** The same computation or fetch repeats on identical inputs. Store and reuse the result. Name what invalidates it before claiming the win.
    3. **Batching.** Many small operations each pay a fixed overhead (RPC, query, syscall, draw call). Coalesce them to pay the overhead once per batch.
@@ -31,4 +31,4 @@ For a diagnosis-only request, stop before implementation with the measurements, 
 
 For a unit in a multi-phase plan, follow [the shared execution-state convention](../orchestrate/STATE.md). Reuse its store. Delegated workers return evidence to the coordinator. For a session transfer, read [handoff](../handoff/SKILL.md) and include the measurement command, workload, results, and artifact paths.
 
-**Reply:** verdict, metric, baseline number, post-fix number, delta, variation and run count, limiter, correctness checks, and artifact paths. State when the evidence is inconclusive.
+**Reply:** verdict, metric, baseline number, post-fix number, delta, variation and run count, limiter, whether the target was met, correctness checks, and artifact paths.
