@@ -15,7 +15,7 @@ The phases below apply to a runnable failure. Reuse reproduction evidence alread
 
 For a session transfer, read [handoff](../handoff/SKILL.md). Include the reproduction command or capture, hypotheses tested, remaining probes, and cleanup state.
 
-When exploring the codebase, read `GLOSSARY.md` (if it exists; [GLOSSARY-FORMAT.md](../domain-modeling/GLOSSARY-FORMAT.md) lists its locations and earlier names) to get a clear mental model of the relevant modules, and check ADRs in the area you're touching.
+When exploring the codebase, read the project's domain glossary, located per [GLOSSARY-FORMAT.md](../domain-modeling/GLOSSARY-FORMAT.md), if one exists, to get a clear mental model of the relevant modules, and check ADRs in the area you're touching.
 
 ## Redact
 

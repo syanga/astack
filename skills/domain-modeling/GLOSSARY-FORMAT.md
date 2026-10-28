@@ -57,12 +57,12 @@ _Avoid_: Client, buyer, account
 - **Ordering ↔ Billing**: Shared types for `CustomerId` and `Money`
 ```
 
+`CONTEXT.md` and `CONTEXT-MAP.md` are this convention's earlier names. An existing `CONTEXT.md` stands in for `GLOSSARY.md`, and an existing `CONTEXT-MAP.md` for `GLOSSARY-MAP.md`. Read and update the existing file in place, and never create a second glossary beside it. New files use the new names. If both names exist, read both and ask which to keep before writing.
+
 For the default layout:
 
 - If `GLOSSARY-MAP.md` exists, read it to find contexts
 - If only a root `GLOSSARY.md` exists, single context
 - If neither exists, use the root `GLOSSARY.md` location for the first glossary
-
-An existing `CONTEXT.md` or `CONTEXT-MAP.md`, this convention's earlier names, takes the place of `GLOSSARY.md` or `GLOSSARY-MAP.md`. Read and update it in place, and never create a second glossary beside it. New files use the new names.
 
 When multiple contexts exist, infer which one the current topic relates to. If unclear, ask.
