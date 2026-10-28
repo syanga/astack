@@ -8,7 +8,7 @@ For a quick ballpark the user asked for, one run is enough. Still check question
 
 - Write down the claim you expect to make, in the words you would ship ("export is 30% faster at p50 on the 60k-row dataset"). The questions test that sentence.
 - Read the measurement script. Note what it times, counts, and ignores.
-- Check the load average with `uptime` and the core count with `nproc`. If the machine is busy, find out what is running. If you cannot stop it, interleave the sides so both see the same noise, and say so in the report.
+- Check the load average with `uptime` and the core count with `nproc`. If the machine is busy, find out what is running. Stop it only if it is yours to stop. Otherwise interleave the sides so both see the same noise, and say so in the report.
 
 ## The questions
 
@@ -26,8 +26,3 @@ For a quick ballpark the user asked for, one run is enough. Still check question
 - Give the number with its unit, the run count, the range, and the limiter. For example, "p50 41 ms → 33 ms, median of 7 runs per side, range 32 to 35 ms after, bound by JSON parsing on one core."
 - Call the verdict inconclusive when you claim a difference but cannot name the limiter, when a side ran untuned, or when you could not check questions 4 and 7. Name the gap.
 - Keep a PR body to one primary number, per [open-pr](../open-pr/SKILL.md). Put the runs, range, and limiter evidence in a linked artifact or notes file.
-
-## Other perf material
-
-- Vet [perf-issue](SKILL.md)'s baseline before it plans from that baseline, and every number after that.
-- Vet [hillclimb](../hillclimb/SKILL.md)'s harness before it is frozen. The frozen harness then prints error and work counts, so each keep-or-revert checks questions 4 and 7 for free.
