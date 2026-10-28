@@ -7,7 +7,7 @@ description: Test-driven development. Use for test-first features, red-green-ref
 
 TDD is the red → green loop. This skill is the reference that makes that loop produce tests worth keeping: what a good test is, where tests go, the anti-patterns, and the rules of the loop. Every section applies on every cycle: consult them before and during the loop, not after.
 
-When exploring the codebase, read the project's domain glossary, located per [GLOSSARY-FORMAT.md](../domain-modeling/GLOSSARY-FORMAT.md), if one exists, so test names and interface vocabulary match the project's domain language, and respect ADRs in the area you're touching.
+When exploring the codebase, if the project has a domain glossary (located per [GLOSSARY-FORMAT.md](../domain-modeling/GLOSSARY-FORMAT.md)), read it so test names and interface vocabulary match the project's domain language, and respect ADRs in the area you're touching.
 
 For bug fixes, follow [BUG-FIX.md](BUG-FIX.md) for the focused regression workflow and its practical fallback. The test-quality references below apply to both features and fixes.
 
