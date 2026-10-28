@@ -104,7 +104,7 @@ Candidate name, one sentence on why, and an anchor link to its section.
 
 ## Tone
 
-**Use the project's domain glossary for domain vocabulary, and Deep Modules for architecture vocabulary.** If `CONTEXT.md` defines "Order," talk about "the Order intake module," not "the FooBarHandler," and not "the Order service."
+**Use the project's domain glossary for domain vocabulary, and Deep Modules for architecture vocabulary.** If `GLOSSARY.md` defines "Order," talk about "the Order intake module," not "the FooBarHandler," and not "the Order service."
 
 Plain English, concise, but the architectural nouns and verbs come straight from [Deep Modules](../principles/deep-modules.md). Concision is not an excuse to drift.
 
