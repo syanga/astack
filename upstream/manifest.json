@@ -426,7 +426,7 @@
     "files": {
       "pstack/skills/benchmark-checklist/SKILL.md": "skills/perf-issue/BENCHMARK-CHECKLIST.md"
     },
-    "note": "A perf-issue reference rather than its own skill, because its only callers are perf-issue, hillclimb, and Explain the Number. Drops the section on how perf-issue and hillclimb use it, which both skills state, stops only the agent's own competing processes, and keeps read-only work read-only."
+    "note": "A perf-issue reference rather than its own skill, because its only callers are perf-issue, hillclimb, and Explain the Number. Drops the section on how perf-issue and hillclimb use it, which both skills state. The busy-machine and read-only lines follow astack's scope rules: stopping another owner's process is destructive, and read-only work excludes instrumentation."
   },
   "explain-the-number": {
     "repository": "https://github.com/cursor/plugins.git",
