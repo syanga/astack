@@ -22,11 +22,9 @@ Examples of the pattern:
 
 Look for changes to the agent's environment that would have prevented or shortened the session's problems:
 
-- **Automated checks.** Read the repo's own check command first (its build tool's `lint` or `check` scripts, its CI workflow), without running it, so a check that already exists but sits unwired or silently broken is the finding, not a reinvention. When the session changed code, a repo with no guardrail (no pre-commit hook and no CI job running its lint, typecheck, or test command) is itself a finding, with the missing configuration as its evidence.
-- **No-ops.** When the session read large agent instruction files, flag instructions in them that didn't change the agent's behavior. Route each deletion as an instructions edit.
-- **Information access.** Flag a crucial piece of information the agent could not reach at all, such as dev server logs or read-only access to a third-party service. This differs from self-sufficiency above, which covers access the agent had and did not use.
-
-Route a repository change such as a hook, CI job, or log capture to Backlog as an implementation proposal.
+- **Automated checks.** When the agent made a mistake an automated check could have caught, read the repo's own check command first (its build tool's `lint` or `check` scripts, its CI workflow), without running it, so a check that already exists but sits unwired or silently broken is the finding, not a reinvention. When the session changed code, a repo with no guardrail (no pre-commit hook and no CI job running its lint, typecheck, or test command) is itself a finding, with the missing configuration as its evidence.
+- **No-ops.** When the session read large agent instruction files, flag an instruction the agent followed that only restates its default behavior or something it read from the repo, per the no-op test in [writing-for-agents](../../writing-for-agents/SKILL.md#pruning). Route each deletion as an instructions edit. An instruction the agent broke is a missed rule, not a no-op, and one the session never exercised is not evidence either way.
+- **Information access.** Flag a crucial piece of information the agent could not reach at all, such as dev server logs or read-only access to a third-party service, and route it to the repository or the agent's own setup that would provide it. This differs from self-sufficiency above, which covers access the agent had and did not use.
 
 Read the active transcript at <ABSOLUTE_PATH> (or use the digest below if no path is given).
 
@@ -45,7 +43,7 @@ Read [Route learnings](../SKILL.md#route-learnings), resolving the path relative
 Return durable learnings that meet these criteria, without a quota. For each:
 - Principle: one sentence naming the convention or technical fact. Concrete enough that a future agent recognizes when it applies.
 - Evidence: the exact moment in the transcript (turn number or short quote, including the command or flag).
-- Routing: the owning repository and source path, using the Route learnings rules. State whether this edits existing guidance, tunes a description, creates a skill, or updates instructions.
+- Routing: the owning repository and source path, using the Route learnings rules. State whether this edits existing guidance, tunes a description, creates a skill, updates instructions, or is a Backlog proposal for a repository or setup change such as a hook, CI job, or log capture.
 
 Skip trivial things (typos, retries). Skip anything already obvious from the existing skill the parent followed. For general lessons, skip implementation details that drift: specific SHAs, current file paths, version numbers, exact byte counts. For workflow capture, apply Route learnings' retention criteria.
 
