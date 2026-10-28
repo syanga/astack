@@ -416,7 +416,7 @@
     "files": {
       "pstack/skills/poteto-mode/playbooks/hillclimb.md": "skills/hillclimb/SKILL.md"
     },
-    "note": "Minimum attempts apply when requested. Repeated confirmation guards early wins otherwise. Existing logs and handoffs preserve progress without promising automatic wake. The harness counts tried, failed, and completed inputs, and every attempt checks them, because upstream's error and work counts leave the unit open, and a cache or a fixed-duration run then reads as skipped work."
+    "note": "Minimum attempts apply when requested. Repeated confirmation guards early wins otherwise. Existing logs and handoffs preserve progress without promising automatic wake. The accept step applies the checklist's questions 4 and 7 to the harness counts, which upstream states only in the checklist. A fixed rule on the raw counts misjudged caches and fixed-duration runs in review."
   },
   "benchmark-checklist": {
     "repository": "https://github.com/cursor/plugins.git",
