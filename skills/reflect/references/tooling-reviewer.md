@@ -22,9 +22,11 @@ Examples of the pattern:
 
 Look for changes to the agent's environment that would have prevented or shortened the session's problems:
 
-- **Automated checks.** Read the repo's own check command first (its build tool's `lint` or `check` scripts, its CI workflow), so a check that already exists but sits unwired or silently broken is the finding, not a reinvention. A repo with no **guardrail** (no pre-commit hook and no CI job running its lint, typecheck, or test command) is itself a finding.
-- **No-ops.** Flag instructions in steering files that don't change the agent's behavior.
-- **Information access.** Flag a crucial piece of information the agent could not reach, such as dev server logs or read-only access to a third-party service, and propose how to give the agent access.
+- **Automated checks.** Read the repo's own check command first (its build tool's `lint` or `check` scripts, its CI workflow), without running it, so a check that already exists but sits unwired or silently broken is the finding, not a reinvention. When the session changed code, a repo with no guardrail (no pre-commit hook and no CI job running its lint, typecheck, or test command) is itself a finding, with the missing configuration as its evidence.
+- **No-ops.** When the session read large agent instruction files, flag instructions in them that didn't change the agent's behavior. Route each deletion as an instructions edit.
+- **Information access.** Flag a crucial piece of information the agent could not reach at all, such as dev server logs or read-only access to a third-party service. This differs from self-sufficiency above, which covers access the agent had and did not use.
+
+Route a repository change such as a hook, CI job, or log capture to Backlog as an implementation proposal.
 
 Read the active transcript at <ABSOLUTE_PATH> (or use the digest below if no path is given).
 
