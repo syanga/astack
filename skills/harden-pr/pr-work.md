@@ -4,6 +4,8 @@ Use `python3 "<harden-pr directory>/scripts/pr.py" status --pr <n>` for a GitHub
 
 Reuse applicable reviews. Follow [test results](../open-pr/test-results.md) to reuse verification and publish any new test results on the PR. Use targeted review for missing evidence or changes that invalidate earlier reviews. Run the full [review-pr](../review-pr/SKILL.md) or [harden-pr](SKILL.md) workflow only when requested.
 
+When several PRs will merge together, test them once as a batch after their heads are final, instead of once per PR. Merge their heads onto the latest base in a scratch branch and run the test suite there. One run costs less, and it tests the combined tree that will land. For a stack, include only its highest PR if that PR contains every lower head. When the batch fails and the base passes, bisect the batch to the failing PR or combination. Publish the result on each PR under [test results](../open-pr/test-results.md), listing the base SHA and every head SHA. Before each merge, confirm that since the tested base, the target branch has gained only merged batch members and the remaining heads have changed only by conflict-free rebases; otherwise, retest the remaining batch.
+
 ## Address findings and CI
 
 Verify review claims against current code using [the review checklist](checklist.md). Fix real defects within scope, explain supported dismissals, and report deferred work. Earlier dismissals are context; new evidence can reopen them. Review bodies can contain actionable findings that GitHub could not place inline, so read them as well as threads.
