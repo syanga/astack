@@ -4,6 +4,8 @@ Use `python3 "<harden-pr directory>/scripts/pr.py" status --pr <n>` for a GitHub
 
 Reuse applicable reviews. Follow [test results](../open-pr/test-results.md) to reuse verification and publish any new test results on the PR. Use targeted review for missing evidence or changes that invalidate earlier reviews. Run the full [review-pr](../review-pr/SKILL.md) or [harden-pr](SKILL.md) workflow only when requested.
 
+When several PRs will merge together, merge their heads onto the latest base in a scratch branch and run the test suite once, instead of once per PR. One run costs less, and it tests the combined tree that will land. For a stack, include only its highest PR, which contains the PRs below it. On failure, bisect the batch to the failing PR or combination. Publish the result on each PR under [test results](../open-pr/test-results.md), listing the base SHA and every head SHA. A conflict-free rebase onto merged batch members keeps the result.
+
 ## Address findings and CI
 
 Verify review claims against current code using [the review checklist](checklist.md). Fix real defects within scope, explain supported dismissals, and report deferred work. Earlier dismissals are context; new evidence can reopen them. Review bodies can contain actionable findings that GitHub could not place inline, so read them as well as threads.
@@ -33,8 +35,6 @@ Honor explicit report-only, read-only, or local-only limits. If publication, ver
 ## Finish or merge
 
 When hardening was requested, confirm its assessment covers the final head, refreshing affected coverage through [harden-pr](SKILL.md) as needed. For a narrower follow-through request, finish when its findings and checks are addressed. Report each PR's URL and final head SHA, what changed, remaining findings, CI, required approvals, and unavailable coverage.
-
-To merge several PRs, merge their heads onto the latest base in a scratch branch and run the tests once. One run costs less than one per PR, and it tests the combined tree that will land. Treat a stack as its top child. On failure, bisect the batch to the failing PR or combination. Publish the result on each PR under [test results](../open-pr/test-results.md), naming the batch.
 
 Before an authorized merge, take a fresh snapshot, confirm that findings and user decisions are addressed and required checks and approvals pass on the intended head, and use `gh pr merge <n> --squash --match-head-commit <sha>`. Respect the user's merge disposition. If it is absent, stop with the finalized PRs open. For stacked PRs, retarget children to the parent's base before deleting the parent branch.
 
