@@ -4,7 +4,7 @@ Use `python3 "<harden-pr directory>/scripts/pr.py" status --pr <n>` for a GitHub
 
 Reuse applicable reviews. Follow [test results](../open-pr/test-results.md) to reuse verification and publish any new test results on the PR. Use targeted review for missing evidence or changes that invalidate earlier reviews. Run the full [review-pr](../review-pr/SKILL.md) or [harden-pr](SKILL.md) workflow only when requested.
 
-When several PRs will merge together, merge their heads onto the latest base in a scratch branch and run the test suite once, instead of once per PR. One run costs less, and it tests the combined tree that will land. For a stack, include only its highest PR, which contains the PRs below it. On failure, bisect the batch to the failing PR or combination. Publish the result on each PR under [test results](../open-pr/test-results.md), listing the base SHA and every head SHA. A conflict-free rebase onto merged batch members keeps the result.
+When several PRs will merge together, test them once as a batch after their heads are final, instead of once per PR. Merge their heads onto the latest base in a scratch branch and run the test suite there. One run costs less, and it tests the combined tree that will land. For a stack, include only its highest PR, which contains the PRs below it. When the batch fails and the base passes, bisect the batch to the failing PR or combination. Publish the result on each PR under [test results](../open-pr/test-results.md), listing the base SHA and every head SHA.
 
 ## Address findings and CI
 
@@ -18,7 +18,7 @@ Correct a title or description finding with `gh pr edit`.
 
 Read failing job logs before choosing a fix, rebase, or retry. A failure outside the diff can be an interaction, an existing base failure, or infrastructure trouble. Determine which. Retry a suspected transient failure when the evidence supports it; repeated failure calls for investigation. Report unavailable checks and external blockers accurately.
 
-For conflicts, read the intent on both sides and preserve it through the resolution. Ask only when the intents require a product decision. After a push, rebase, or retarget, compare the patch and integration assumptions with the reviewed version and refresh affected verification. After squash-merging a parent, replay only the child's commits from the previous parent tip onto the new base.
+For conflicts, read the intent on both sides and preserve it through the resolution. Ask only when the intents require a product decision. After a push, rebase, or retarget, compare the patch and integration assumptions with the reviewed version and refresh affected verification. A batch result still applies after a conflict-free rebase whose new base adds only merged batch members. After squash-merging a parent, replay only the child's commits from the previous parent tip onto the new base.
 
 ## Push and wait
 
