@@ -11,7 +11,7 @@ Surface architectural friction and propose **deepening opportunities**: refactor
 This command is _informed_ by the project's domain model and built on a shared design vocabulary:
 
 - Read [Deep Modules](../principles/deep-modules.md) for the architecture vocabulary (**module**, **interface**, **depth**, **seam**, **adapter**, **leverage**, **locality**) and its principles (the deletion test, "the interface is the test surface", "one adapter = hypothetical seam, two = real"). Use these terms exactly in every suggestion, and don't drift into "component," "service," or "API."
-- The project's domain glossary, such as `CONTEXT.md`, gives names to good seams; its ADRs record decisions this command should not re-litigate.
+- The project's domain glossary, located per [GLOSSARY-FORMAT.md](../domain-modeling/GLOSSARY-FORMAT.md), gives names to good seams; its ADRs record decisions this command should not re-litigate.
 
 ## Process
 
