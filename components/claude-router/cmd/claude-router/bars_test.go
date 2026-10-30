@@ -195,6 +195,14 @@ func TestANewerHeaderReadingShowsTheFiveHourWindowAgain(t *testing.T) {
 	if !strings.Contains(got, "work    ready        5h 38% (16:40)") {
 		t.Fatalf("status\n%s\nwant work's 14:15 header reading of the 5-hour window", got)
 	}
+
+	work.Quota.Windows[0] = router.Window{Kind: router.FiveHour, ResetsAt: at(0, 16, 40)}
+
+	got = render(r)
+
+	if !strings.Contains(got, "work    ready        5h --         ") {
+		t.Fatalf("status\n%s\nwant work's 5-hour window, reported at 14:15 without a share used, as no reading", got)
+	}
 }
 
 func TestAnOldModelReadingShowsTheStaleLine(t *testing.T) {

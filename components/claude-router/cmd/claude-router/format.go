@@ -218,13 +218,14 @@ type shownReading struct {
 func shownWindow(a claude.AccountStatus, kind router.WindowKind) (shownReading, bool) {
 	var shown shownReading
 	found := false
-	if w, ok := quotaWindow(a, kind); ok && w.Utilization != nil {
-		shown, found = shownReading{used: *w.Utilization, resetsAt: w.ResetsAt, seen: a.Quota.At}, true
+	header, inHeader := quotaWindow(a, kind)
+	if inHeader && header.Utilization != nil {
+		shown, found = shownReading{used: *header.Utilization, resetsAt: header.ResetsAt, seen: a.Quota.At}, true
 	}
 	if found && !a.Usage.At.After(shown.seen) {
 		return shown, true
 	}
-	reported, weekly := false, false
+	reported, weekly := inHeader && !a.Usage.At.After(a.Quota.At), false
 	for _, w := range a.Usage.Windows {
 		if w.Model != "" {
 			continue
