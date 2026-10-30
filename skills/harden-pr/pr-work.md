@@ -34,6 +34,8 @@ Honor explicit report-only, read-only, or local-only limits. If publication, ver
 
 When hardening was requested, confirm its assessment covers the final head, refreshing affected coverage through [harden-pr](SKILL.md) as needed. For a narrower follow-through request, finish when its findings and checks are addressed. Report each PR's URL and final head SHA, what changed, remaining findings, CI, required approvals, and unavailable coverage.
 
+To merge several PRs, merge their heads onto the latest base in a scratch branch and run the tests once. One run costs less than one per PR, and it tests the combined tree that will land. Treat a stack as its top child. On failure, bisect the batch to the failing PR or combination. Publish the result on each PR under [test results](../open-pr/test-results.md), naming the batch.
+
 Before an authorized merge, take a fresh snapshot, confirm that findings and user decisions are addressed and required checks and approvals pass on the intended head, and use `gh pr merge <n> --squash --match-head-commit <sha>`. Respect the user's merge disposition. If it is absent, stop with the finalized PRs open. For stacked PRs, retarget children to the parent's base before deleting the parent branch.
 
 For merge-when-ready, wait and merge the verified head explicitly. Use auto-merge only when requested and repository controls prevent unverified head changes while pending. Matching the head at scheduling time alone is insufficient. Confirm the merged state before reporting the PR as landed.
