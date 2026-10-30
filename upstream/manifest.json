@@ -377,9 +377,9 @@
   "perf-issue": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/poteto-mode/playbooks/perf-issue.md",
-    "commit": "032be146865d973682535de75f2287da438550bf",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/perf-issue/LICENSE-pstack",
-    "note": "Repeated comparable measurements distinguish improvements from noise. Correctness checks accompany performance measurements.",
+    "note": "Repeated comparable measurements distinguish improvements from noise. Correctness checks accompany performance measurements. Keeps the eight strategy families that upstream e43c7ee replaced with bare performance mantras, because each family names the signal that earns it an attempt. The families take the mantras' cheapest-first order and stop rule, with Divide and conquer and Redundancy both under \"Do it concurrently\".",
     "files": {
       "pstack/skills/poteto-mode/playbooks/perf-issue.md": "skills/perf-issue/SKILL.md"
     }
@@ -411,12 +411,31 @@
   "hillclimb": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/poteto-mode/playbooks/hillclimb.md",
-    "commit": "032be146865d973682535de75f2287da438550bf",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/hillclimb/LICENSE-pstack",
     "files": {
       "pstack/skills/poteto-mode/playbooks/hillclimb.md": "skills/hillclimb/SKILL.md"
     },
-    "note": "Minimum attempts apply when requested. Repeated confirmation guards early wins otherwise. Existing logs and handoffs preserve progress without promising automatic wake."
+    "note": "Minimum attempts apply when requested. Repeated confirmation guards early wins otherwise. Existing logs and handoffs preserve progress without promising automatic wake. The accept step applies the checklist's questions 4 and 7 to the harness counts, which upstream states only in the checklist."
+  },
+  "benchmark-checklist": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/benchmark-checklist/SKILL.md",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
+    "license": "MIT, kept in skills/perf-issue/LICENSE-pstack",
+    "files": {
+      "pstack/skills/benchmark-checklist/SKILL.md": "skills/perf-issue/BENCHMARK-CHECKLIST.md"
+    },
+    "note": "A perf-issue reference rather than its own user-invoked skill, which drops upstream's direct /benchmark-checklist entry point. Other measurement reaches it through Explain the Number. Drops the section on how perf-issue and hillclimb use it, which both skills state. The busy-machine line and question 4's read-only exception follow astack's scope rules: stopping another owner's process is destructive, and read-only work excludes instrumentation."
+  },
+  "explain-the-number": {
+    "repository": "https://github.com/cursor/plugins.git",
+    "path": "pstack/skills/principle-explain-the-number/SKILL.md",
+    "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
+    "license": "MIT, kept in skills/principles/LICENSE",
+    "files": {
+      "pstack/skills/principle-explain-the-number/SKILL.md": "skills/principles/explain-the-number.md"
+    }
   },
   "refactoring": {
     "repository": "https://github.com/cursor/plugins.git",
