@@ -1537,7 +1537,9 @@ a usage reading with the account-wide weekly window and no `five_hour`
 window, status shows `5h none`, `no limit on this plan` with `-v`, and no
 5-hour bar (`TestAPlanWithoutAFiveHourWindowShowsNoFiveHourLimit`). A
 header reading of the 5-hour window newer than that usage reading shows
-instead (`TestANewerHeaderReadingShowsTheFiveHourWindowAgain`). Routing
+instead (`TestANewerHeaderReadingShowsTheFiveHourWindowAgain`). A
+`five_hour` field of another shape drops out of the reading the same way,
+so it also shows as no limit. Routing
 needs no change for such a plan: it reads only the windows a response
 reports.
 

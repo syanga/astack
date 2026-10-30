@@ -122,9 +122,9 @@ func limitRows(r report, a claude.AccountStatus) []limitRow {
 		row := limitRow{label: win.label, period: win.kind.Period()}
 		if rj, ok := activeRejection(r.Now, a, win.kind); ok {
 			row.out, row.resetsAt = true, rejectionEnd(rj)
-		} else if noLimit(a, win.kind) {
+		} else if w, ok := shownWindow(a, win.kind); ok && w.none {
 			continue
-		} else if w, ok := shownWindow(a, win.kind); ok {
+		} else if ok {
 			row.left, row.resetsAt = leftOf(w.used), w.resetsAt
 		}
 		rows = append(rows, row)

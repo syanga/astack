@@ -160,6 +160,9 @@ func TestAPlanWithoutAFiveHourWindowShowsNoFiveHourLimit(t *testing.T) {
 	work.Quota = router.Observation{At: at(0, 14, 15), Windows: []router.Window{window(router.Weekly, 0.25, at(-3, 9, 0))}}
 	work.Usage = claude.UsageReading{At: at(0, 14, 16), Windows: []claude.UsageWindow{
 		usageWindow(router.Weekly, "", 0.25, 9, 0, -3)}}
+	alumni := &r.Status.Accounts[1]
+	alumni.Usage = claude.UsageReading{At: at(0, 14, 16), Windows: []claude.UsageWindow{
+		{Kind: router.FiveHour, Used: util(0)}, usageWindow(router.Weekly, "", 0.64, 6, 0, -2)}}
 
 	lines := render(r)
 	var verbose bytes.Buffer
@@ -168,7 +171,7 @@ func TestAPlanWithoutAFiveHourWindowShowsNoFiveHourLimit(t *testing.T) {
 
 	for _, want := range []struct{ out, line string }{
 		{lines, "work    ready        5h none         wk 25% (Sun)"},
-		{lines, "alumni  ready        5h  9% (17:55)"},
+		{lines, "alumni  ready        5h  0%          wk 64% (Sat)"},
 		{verbose.String(), "5-hour       no limit on this plan                           seen 14:16 (4m)"},
 		{boxes, "cache 93% ─╮\n│ weekly " + strings.Repeat("█", 15) + "│" + strings.Repeat("█", 12) + "▌" + strings.Repeat("╱", 9) + "   75% left  Sun 09:00 (2d 18h) │\n╰"},
 	} {
