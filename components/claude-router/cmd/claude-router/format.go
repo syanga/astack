@@ -206,6 +206,30 @@ func quotaWindow(a claude.AccountStatus, kind router.WindowKind) (router.Window,
 	return router.Window{}, false
 }
 
+// The usage endpoint reports the five_hour window even when it is unused,
+// and omits it for a plan without a 5-hour limit.
+func noLimit(a claude.AccountStatus, kind router.WindowKind) bool {
+	if kind != router.FiveHour {
+		return false
+	}
+	if _, ok := quotaWindow(a, kind); ok && !a.Quota.At.Before(a.Usage.At) {
+		return false
+	}
+	weekly := false
+	for _, w := range a.Usage.Windows {
+		if w.Model != "" {
+			continue
+		}
+		switch w.Kind {
+		case kind:
+			return false
+		case router.Weekly:
+			weekly = true
+		}
+	}
+	return weekly
+}
+
 type shownReading struct {
 	used     float64
 	resetsAt time.Time
@@ -246,6 +270,8 @@ func compactWindow(r report, a claude.AccountStatus, kind router.WindowKind, lab
 	var s string
 	if rj, ok := activeRejection(r.Now, a, kind); ok {
 		s = fmt.Sprintf("%s out (%s)", label, resetShort(r.Now, rejectionEnd(rj)))
+	} else if noLimit(a, kind) {
+		s = label + " none"
 	} else if w, ok := shownWindow(a, kind); ok {
 		s = fmt.Sprintf("%s %2d%%", label, percent(w.used))
 		if !w.resetsAt.IsZero() {
@@ -464,6 +490,8 @@ func writeAccountDetail(w io.Writer, r report, a claude.AccountStatus, width int
 			if rj.ResetsAt.IsZero() {
 				value = fmt.Sprintf("rejected at %s, reset unknown, recheck %s", when(r.Now, rj.At), when(r.Now, rejectionEnd(rj)))
 			}
+		} else if noLimit(a, win.kind) {
+			value, seen = "no limit on this plan", a.Usage.At
 		} else if q, ok := shownWindow(a, win.kind); ok {
 			value, seen = used(q.used, q.resetsAt), q.seen
 		}

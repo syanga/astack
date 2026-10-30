@@ -1531,6 +1531,16 @@ no readable window clears the last limit reading
 (`TestMalformedLimitFieldsLeaveThePaidOverflowReadingIntact`,
 `TestASettingsReadWithoutReadableLimitFieldsClearsTheLimitReading`).
 
+The usage response reports `five_hour` even when that window is unused, and
+omits it for a plan without a 5-hour limit. When the newest limit reading is
+a usage reading with the account-wide weekly window and no `five_hour`
+window, status shows `5h none`, `no limit on this plan` with `-v`, and no
+5-hour bar (`TestAPlanWithoutAFiveHourWindowShowsNoFiveHourLimit`). A
+header reading of the 5-hour window newer than that usage reading shows
+instead (`TestANewerHeaderReadingShowsTheFiveHourWindowAgain`). Routing
+needs no change for such a plan: it reads only the windows a response
+reports.
+
 The service also reads each account's limit resets that Claude Code offers,
 from `cedar_ember.grants` in
 `GET /api/oauth/usage?cedar_ember=1&skip_spend=1`. It reads them at start and
