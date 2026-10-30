@@ -7,15 +7,19 @@ Examples for [TypeScript best practices](../SKILL.md). Shared rules live in [typ
 ```ts
 type AgentId = string & { readonly __brand: "AgentId" };
 
+function isAgentId(input: string): input is AgentId {
+  return isUUID(input);
+}
+
 function parseAgentId(input: string): AgentId {
-  if (!isUUID(input)) throw new Error(`Invalid agent id: ${input}`);
-  return input as AgentId;
+  if (!isAgentId(input)) throw new Error(`Invalid agent id: ${input}`);
+  return input;
 }
 
 declare function focusAgent(id: AgentId): void;
 ```
 
-This example uses a string brand. Reuse an existing brand convention when the repository has one.
+A brand comes from a verifying type guard (`input is AgentId`), never from `as`. This example uses a string brand. Reuse an existing brand convention when the repository has one.
 
 ## Discriminated unions
 
@@ -65,11 +69,15 @@ A time range can use a start plus a validated duration:
 ```ts
 type DurationMs = number & { readonly __brand: "DurationMs" };
 
+function isDurationMs(value: number): value is DurationMs {
+  return Number.isFinite(value) && value >= 0;
+}
+
 function parseDurationMs(value: number): DurationMs {
-  if (!Number.isFinite(value) || value < 0) {
+  if (!isDurationMs(value)) {
     throw new Error("expected a finite nonnegative duration");
   }
-  return value as DurationMs;
+  return value;
 }
 
 type TimeRange = { start: Date; durationMs: DurationMs };
@@ -139,6 +147,14 @@ type User = z.infer<typeof UserSchema>;
 function parseUser(input: unknown): User {
   return UserSchema.parse(input);
 }
+```
+
+When the type comes first, annotate the validator with the type it proves. The compiler then rejects a validator that proves less than the type. Remove `name` from the object below and the assignment fails to compile.
+
+```ts
+type User = { id: string; name: string };
+
+const UserSchema: z.ZodType<User> = z.object({ id: z.string(), name: z.string() });
 ```
 
 Use `safeParse` when failure is an expected branch. Use the equivalent inference helper when the repository uses another schema library. Do not add a new schema dependency for one guard.

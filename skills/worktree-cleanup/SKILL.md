@@ -20,7 +20,7 @@ Stop disposable resources before removing their worktrees:
 - Docker: verify the daemon and container ownership. Compose names can span worktrees. Inspect volume consumers, including stopped containers. Avoid global pruning.
 - Test databases: derive the exact target from test setup. Stop clients before scoped teardown. Preserve shared servers and data.
 
-Remove only merged or explicitly abandoned worktrees. Check ignored and untracked files and post-squash commits. Retain detached commits through a branch. Keep main, current, locked, active, and open-PR worktrees. Preserve branch refs unless deletion was requested.
+Remove only merged or explicitly abandoned worktrees. Judge merged against the PR's base branch, not a literal `origin/main`. Check ignored and untracked files and post-squash commits. Retain detached commits through a branch. Keep main, current, locked, active, and open-PR worktrees. Preserve branch refs unless deletion was requested.
 
 Recheck before `git worktree remove`. Force removal requires explicit disposal authorization for the affected files. Verify teardown before deleting recovery records. Report removals, retired links, holds, and failures.
 

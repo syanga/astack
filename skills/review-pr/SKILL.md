@@ -40,7 +40,7 @@ Look for the originating spec, in this order:
 
 ### 3. Identify the standards sources
 
-Anything in the repo that documents how code should be written, such as `CODING_STANDARDS.md` or `CONTRIBUTING.md`.
+Search the repo for every file that documents how code should be written. When `CODING_STANDARDS.md` or `CONTRIBUTING.md` exists, it must be on the list.
 
 For TypeScript changes, include [TypeScript guidance](../typescript-best-practices/SKILL.md) in the Standards review. Separate demonstrated defects from optional style advice. Advice does not authorize a refactor.
 
