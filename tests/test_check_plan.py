@@ -202,6 +202,28 @@ class CheckPlanTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1)
                 self.assertIn(diagnostic, result.stderr)
 
+    def test_backtick_info_string_with_a_backtick_does_not_open_a_fence(self):
+        result = self.run_plan(PLAN + "```markdown `invalid`\n## Example only\n```\n")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('"## Example only"', result.stderr)
+        self.assertIn("is not an appendix", result.stderr)
+
+    def test_prose_punctuation_inside_matching_multi_backtick_spans_is_ignored(self):
+        for count in (2, 3, 4):
+            with self.subTest(count=count):
+                delimiter = "`" * count
+                line = f"Use {delimiter}echo `x`: “quoted” — example{delimiter}.\n"
+                result = self.run_plan(PLAN + line)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_prose_after_a_multi_backtick_span_and_unmatched_delimiters_is_checked(self):
+        for line in ("Use ``echo `x`: y``. Bad: prose.\n", "Use ``unclosed: bad` here.\n",
+                     "Use `single: bad`` here.\n"):
+            with self.subTest(line=line):
+                result = self.run_plan(PLAN + line)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("mid-sentence colon", result.stderr)
+
     def test_gate_requires_operator_decision(self):
         gate = "Approval of the CLI wording before merge.\n- [ ] Publish the CLI output for review.\n- [ ] Record the operator's decision."
         plan = PLAN.replace("None. No user review remains for this CLI fix.", gate)
