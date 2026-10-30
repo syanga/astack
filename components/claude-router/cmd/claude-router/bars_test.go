@@ -139,9 +139,8 @@ func TestStatusHidesResetsFromAReadingOverAnHourOld(t *testing.T) {
 func TestABoxShowsAWindowWithNoReadingAsDashes(t *testing.T) {
 	r := healthyReport()
 	work := &r.Status.Accounts[0]
-	work.Quota = router.Observation{}
-	work.Usage = claude.UsageReading{At: at(0, 14, 16), Windows: []claude.UsageWindow{
-		{Kind: router.Weekly, Used: util(0.25)}}}
+	work.Quota = router.Observation{At: at(0, 14, 15), Windows: []router.Window{
+		{Kind: router.Weekly, Utilization: util(0.25)}}}
 
 	got := render(onScreen(r, 80, false))
 
@@ -152,6 +151,57 @@ func TestABoxShowsAWindowWithNoReadingAsDashes(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status\n%s\nwant the line\n%s", got, want)
 		}
+	}
+}
+
+func TestAPlanWithoutAFiveHourWindowShowsNoFiveHourLimit(t *testing.T) {
+	r := healthyReport()
+	work := &r.Status.Accounts[0]
+	work.Quota = router.Observation{At: at(0, 14, 15), Windows: []router.Window{window(router.Weekly, 0.25, at(-3, 9, 0))}}
+	work.Usage = claude.UsageReading{At: at(0, 14, 16), Windows: []claude.UsageWindow{
+		usageWindow(router.Weekly, "", 0.25, 9, 0, -3)}}
+	alumni := &r.Status.Accounts[1]
+	alumni.Usage = claude.UsageReading{At: at(0, 14, 16), Windows: []claude.UsageWindow{
+		{Kind: router.FiveHour, Used: util(0)}, usageWindow(router.Weekly, "", 0.64, 6, 0, -2)}}
+
+	lines := render(r)
+	var verbose bytes.Buffer
+	writeStatus(&verbose, r, true)
+	boxes := render(onScreen(r, 80, false))
+
+	for _, want := range []struct{ out, line string }{
+		{lines, "work    ready        5h none         wk 25% (Sun)"},
+		{lines, "alumni  ready        5h  0%          wk 64% (Sat)"},
+		{verbose.String(), "5-hour       no limit on this plan                           seen 14:16 (4m)"},
+		{boxes, "cache 93% ─╮\n│ weekly " + strings.Repeat("█", 15) + "│" + strings.Repeat("█", 12) + "▌" + strings.Repeat("╱", 9) + "   75% left  Sun 09:00 (2d 18h) │\n╰"},
+	} {
+		if !strings.Contains(want.out, want.line) {
+			t.Fatalf("status\n%s\nwant the line\n%s", want.out, want.line)
+		}
+	}
+	if n := strings.Count(boxes, "│ 5-hour "); n != 1 {
+		t.Fatalf("status\n%s\nwant a 5-hour bar for alumni only, got %d", boxes, n)
+	}
+}
+
+func TestANewerHeaderReadingShowsTheFiveHourWindowAgain(t *testing.T) {
+	r := healthyReport()
+	work := &r.Status.Accounts[0]
+	work.Usage = claude.UsageReading{At: at(0, 14, 10), Windows: []claude.UsageWindow{
+		usageWindow(router.Weekly, "", 0.21, 9, 0, -3)}}
+
+	got := render(r)
+
+	if !strings.Contains(got, "work    ready        5h 38% (16:40)") {
+		t.Fatalf("status\n%s\nwant work's 14:15 header reading of the 5-hour window", got)
+	}
+
+	work.Quota.Windows[0] = router.Window{Kind: router.FiveHour, ResetsAt: at(0, 16, 40)}
+
+	got = render(r)
+
+	if !strings.Contains(got, "work    ready        5h --         ") {
+		t.Fatalf("status\n%s\nwant work's 5-hour window, reported at 14:15 without a share used, as no reading", got)
 	}
 }
 

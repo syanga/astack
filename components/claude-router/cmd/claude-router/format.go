@@ -208,20 +208,36 @@ func quotaWindow(a claude.AccountStatus, kind router.WindowKind) (router.Window,
 
 type shownReading struct {
 	used     float64
+	none     bool
 	resetsAt time.Time
 	seen     time.Time
 }
 
+// The usage endpoint reports the five_hour window even when it is unused,
+// and omits it for a plan without a 5-hour limit.
 func shownWindow(a claude.AccountStatus, kind router.WindowKind) (shownReading, bool) {
 	var shown shownReading
 	found := false
-	if w, ok := quotaWindow(a, kind); ok && w.Utilization != nil {
-		shown, found = shownReading{used: *w.Utilization, resetsAt: w.ResetsAt, seen: a.Quota.At}, true
+	header, inHeader := quotaWindow(a, kind)
+	if inHeader && header.Utilization != nil {
+		shown, found = shownReading{used: *header.Utilization, resetsAt: header.ResetsAt, seen: a.Quota.At}, true
 	}
+	if found && !a.Usage.At.After(shown.seen) {
+		return shown, true
+	}
+	reported, weekly := inHeader && !a.Usage.At.After(a.Quota.At), false
 	for _, w := range a.Usage.Windows {
-		if w.Kind == kind && w.Model == "" && w.Used != nil && (!found || a.Usage.At.After(shown.seen)) {
-			shown, found = shownReading{used: *w.Used, resetsAt: w.ResetsAt, seen: a.Usage.At}, true
+		if w.Model != "" {
+			continue
 		}
+		if w.Kind == kind && w.Used != nil {
+			return shownReading{used: *w.Used, resetsAt: w.ResetsAt, seen: a.Usage.At}, true
+		}
+		reported = reported || w.Kind == kind
+		weekly = weekly || w.Kind == router.Weekly
+	}
+	if kind == router.FiveHour && weekly && !reported {
+		return shownReading{none: true, seen: a.Usage.At}, true
 	}
 	return shown, found
 }
@@ -246,7 +262,9 @@ func compactWindow(r report, a claude.AccountStatus, kind router.WindowKind, lab
 	var s string
 	if rj, ok := activeRejection(r.Now, a, kind); ok {
 		s = fmt.Sprintf("%s out (%s)", label, resetShort(r.Now, rejectionEnd(rj)))
-	} else if w, ok := shownWindow(a, kind); ok {
+	} else if w, ok := shownWindow(a, kind); ok && w.none {
+		s = label + " none"
+	} else if ok {
 		s = fmt.Sprintf("%s %2d%%", label, percent(w.used))
 		if !w.resetsAt.IsZero() {
 			s += " (" + resetShort(r.Now, w.resetsAt) + ")"
@@ -464,7 +482,9 @@ func writeAccountDetail(w io.Writer, r report, a claude.AccountStatus, width int
 			if rj.ResetsAt.IsZero() {
 				value = fmt.Sprintf("rejected at %s, reset unknown, recheck %s", when(r.Now, rj.At), when(r.Now, rejectionEnd(rj)))
 			}
-		} else if q, ok := shownWindow(a, win.kind); ok {
+		} else if q, ok := shownWindow(a, win.kind); ok && q.none {
+			value, seen = "no limit on this plan", q.seen
+		} else if ok {
 			value, seen = used(q.used, q.resetsAt), q.seen
 		}
 		reading(win.label, value, seen)
