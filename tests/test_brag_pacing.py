@@ -10,16 +10,15 @@ SCRIPT = Path(__file__).resolve().parents[1] / "skills/brag-slim/scripts/check_p
 LINES = [{"at": 0, "text": "Your build:"}, {"at": 0.33, "text": "two clicks,"}, {"at": 0.67, "text": "zero config."}]
 
 
-def run(timeline):
+def run(timeline, *args):
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "timeline.json"
         path.write_text(timeline if isinstance(timeline, str) else json.dumps(timeline))
-        return subprocess.run([sys.executable, str(SCRIPT), str(path)], capture_output=True, text=True)
+        return subprocess.run([sys.executable, str(SCRIPT), *args, str(path)], capture_output=True, text=True)
 
 
 class CheckPacingTest(unittest.TestCase):
-    def test_lines_read_in_order_count_against_the_beat(self):
-        # Each line alone has time to be read once it appears; read in order, the last one is cut off.
+    def test_lines_each_readable_alone_fail_when_read_in_order(self):
         result = run({"launch": [{"start": 4, "end": 5.33, "items": LINES}]})
         self.assertEqual(result.returncode, 1)
         self.assertEqual(
@@ -31,8 +30,7 @@ class CheckPacingTest(unittest.TestCase):
         result = run({"launch": [{"start": 4, "end": 6.33, "items": LINES}]})
         self.assertEqual((result.returncode, result.stdout), (0, ""))
 
-    def test_a_late_item_waits_for_its_entrance(self):
-        # Items arrive out of order in the file; the viewer reads the early line, then waits for the icon.
+    def test_items_listed_out_of_order_are_read_by_entrance_and_wait_for_it(self):
         items = [{"at": 1.5, "seconds": 0.2}, {"at": 0, "text": "Ship it today."}]
         result = run({"end": [{"start": 0, "end": 1.6, "items": items}]})
         self.assertEqual(
@@ -65,6 +63,13 @@ class CheckPacingTest(unittest.TestCase):
             result = run(bad)
             self.assertEqual(result.returncode, 2, bad)
             self.assertIn("cannot read timeline", result.stderr)
+
+    def test_a_rate_that_removes_reading_time_is_rejected(self):
+        timeline = {"launch": [{"start": 0, "end": 1, "items": [{"at": 0, "text": "one two three four"}]}]}
+        for rate in ("nan", "0", "-1"):
+            result = run(timeline, f"--rate={rate}")
+            self.assertEqual(result.returncode, 2, rate)
+            self.assertIn("--rate must be a positive number", result.stderr)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 ---
 name: brag-slim
-description: Turn a project directory or a website URL into a short, shareable launch video or a set of social ads, with music, motion, and share copy. Use when someone wants to show off what they built.
+description: Turn a project directory or a website URL into short, shareable videos that sell it, with music, motion, and share copy. Use when someone wants to show off what they built.
 disable-model-invocation: true
 ---
 
@@ -38,7 +38,10 @@ Read the code: the main page, styles (exact colors and fonts), README, routes an
 
 You have the source, so use it directly: import or render the project's real components, stylesheets, fonts, images and animations in the video instead of rebuilding them.
 
-Capture the project's pages from a local production build only, even when the project has a live site. Unset the backend and analytics origins, block requests to the live backend and analytics hosts, and serve the API from the repo's API fixtures, fictional responses, or a local backend with sandboxed payment and a mail sink. A visit to the live site writes real analytics, and its forms act on real data.
+Capture the project's pages from a local production build only, even when the project has a live site. A visit to the live site writes real analytics, and its forms act on real data. In the build:
+
+- Unset the backend and analytics origins, and block requests to their live hosts.
+- Serve the API from the repo's API fixtures, fictional responses, or a local backend with sandboxed payment and a mail sink.
 
 Don't read build output (`dist/`, `.next/`, `build/`), lock files, test files other than API fixtures you serve, `.git/`, env and secret files (`.env`, `.env.*`), key and credential material (`.pem`, `.key`, `id_rsa`, service-account JSON, anything under `secrets/` or `credentials/`), local config that commonly holds tokens, or anything `.gitignore` excludes for those reasons.
 
@@ -54,27 +57,23 @@ Get the site as a visitor sees it. Many sites build their page with JavaScript, 
 
 ### Then, for every input
 
-The result is the scene that sells. When the product delivers a per-customer artifact, such as a report, an export or a result page, film one the product generated for fictional inputs. If none exists and you have the code, generate one with the local setup described under Project. When that spends money, such as paid model calls, or writes outside the machine, first list the fictional inputs and the spend, and generate only after the user says yes, even if they asked to skip plan approval. If you end up without a generated result, name its absence as the plan's main weakness.
+When the product delivers a per-customer artifact, such as a report, an export or a result page, film one the product generated for fictional inputs. If none exists and you have the code, generate one with the local setup described under Project. If generating spends money, such as paid model calls, or writes outside the machine, list the fictional inputs and the spend, and wait for the user's yes even if they asked to skip plan approval. If you end up without a generated result, name its absence as the plan's main weakness.
 
 Before planning, answer: What is it (one sentence)? Who is it for, and what does it do for them? What sets it apart? What's the most impressive or funniest claim? What's the visual hook? What real UI or flow should be shown? What tone fits? What's the one-line share caption?
 
-Everything gathered here can end up in a public video. Never carry secrets, API keys, tokens, internal hostnames or URLs, real customer or user names, email addresses, or other personal data into the plan, the video, or the share copy. If the real UI shows such data, swap in plausible fictional stand-ins and say so in the plan. Use fictional names only inside product UI.
+Everything gathered here can end up in a public video. Never carry secrets, API keys, tokens, internal hostnames or URLs, real customer or user names, email addresses, or other personal data into the plan, the video, or the share copy. If the real UI shows such data, swap in plausible fictional stand-ins and say so in the plan. In on-screen text, call the viewer "you" and anyone else by pronoun; fictional names appear only inside product UI.
 
 Pitch every word and visual at the customer from "Who is it for", not at the person asking for the video.
 
 ## 2. Plan
 
-Write `brag-plan.md` in the output directory: the angle, the hook, 2–3 highlights, the punchline, tone, visual identity, and a scene-by-scene storyboard with durations that sum to the target.
+Write `brag-plan.md` in the output directory: the angle, tone, visual identity, and for each video a scene-by-scene storyboard with durations that sum to the target.
 
 If the user points at one part — a new version, a new feature, one angle — make this the focus of the video.
 
-**Shape:** Hook (2–3s) → Reveal (2–4s) → 2–3 sharp highlights → Punchline/outro (2–4s). A starting shape, not a template.
+**Shape:** one video per feature, unless the user asks for one combined video. Each opens on the viewer's own question in big type (2–3s), then shows what sets the product apart in the product's own words, the real result as proof, 2–3 payoffs, and a call to action. Each payoff quotes a revealing detail from the result, such as a specific finding, rather than its overall verdict. The shape sets the scenes, and the tone sets their feel. A starting shape, not a template.
 
-**Ads:** when the user asks for ads, make one video per feature. Name each `brag-<feature>.mp4` with the poster `brag-<feature>.jpg`, and use those names wherever steps 3 and 4 say `brag.mp4` and `brag.jpg`. Put one caption of 1–3 sentences per ad in `share-copy.txt`. Each ad opens on the viewer's own question in big type, then shows the differentiator, the generated result as proof, 2–3 payoffs, and a call to action. This shape replaces the Shape above and the tone's scene count. Each payoff quotes a revealing detail from the result, such as a specific finding, rather than its overall verdict. On-screen text addresses the viewer as "you", so the result reads as theirs.
-
-**Differentiator:** when what sets the product apart is a mechanism viewers have never heard of, give it its own scene that explains it in the product's own words.
-
-Then show the user `brag-plan.md` and the format, and wait for their approval. Update the plan with any edits before building. If the user asked to skip plan approval, build without waiting. Plan approval is the video's design checkpoint, so build without separate design mocks. Before rendering a kind of visual the approved plan did not describe, show the user a still and wait for approval. If the user asked to skip plan approval, skip this check too.
+Then show the user `brag-plan.md` and the format, and wait for their approval. Update the plan with any edits before building. Plan approval is the video's design checkpoint, so build without separate design mocks. Before rendering a kind of visual the approved plan did not describe, show the user a still and wait for approval. If the user asked to skip plan approval, build without waiting at either point.
 
 ## Creative laws
 
@@ -82,9 +81,9 @@ Then show the user `brag-plan.md` and the format, and wait for their approval. U
 - **Clear to a stranger.** After one viewing, someone who's never heard of it knows what it does, who it's for, and how to get it. Lead with that, not with how it's built.
 - **The hook is everything.** The first 2 seconds decide whether anyone keeps watching. Plan it first.
 - **Show the thing.** Reuse the real thing from the source — its UI, components, copy, images, videos and animations — rather than re-creating it. Rebuild only what you can't reuse. Prefer the working app doing its job over a landing page describing it. Small illustrative UI text is fine when showing the product in use (a filename, an "Exported" toast); invented claims, numbers, or testimonials are not. Never abstract filler. New graphics use the product's own icons.
-- **Footage for the general public.** When the viewer is the general public, put footage of people and objects behind type, under a brand-tinted scrim, instead of a plain background, chart or diagram. Product icons stay in front of it. When the source has none that fits, use stock clips licensed for commercial use, with no recognizable logos and nobody who appears to endorse the product.
+- **Footage behind type.** Put footage behind type, under a brand-tinted scrim, instead of a plain background. For the general public, footage of people and objects beats charts and diagrams. Product icons stay in front of it. When the source has no fitting footage, use stock clips licensed for commercial use, with no recognizable logos and nobody who appears to endorse the product.
 - **Specific.** It must feel made for this exact project. Use its own copy and claims; no generic SaaS language ("streamline your workflow" is banned).
-- **Readable.** Pace comes from motion and cuts, not from pulling text away early. Each scene says one thing in a few words. Any line the viewer is meant to read stays fully visible and settled long enough to read it (roughly 0.3s per word), counted from when the whole line is on screen and the lines before it are read. Text that's only texture doesn't need to be read, but stays legible enough to show what it is: a spotlight on one line of real output dims the rest without hiding it.
+- **Readable.** Pace comes from motion and cuts, not from pulling text away early. Each scene says one thing in a few words. Any line the viewer is meant to read stays fully visible and settled long enough to read it (roughly 0.3s per word), counted from when the whole line is on screen. Text that's only texture doesn't need to be read, but stays legible enough to show what it is: a spotlight on one line of real output dims the rest without hiding it.
 - **Make it alive.** Things that appear one by one, simulated clicks, swipes, and typing beat static slides.
 - **Funny earns its place.** Humor comes from the project's own absurdity, not from trying.
 - **Every frame postable.** Any frozen frame should be worth sharing.
@@ -113,11 +112,11 @@ Build it with whatever works on this machine. If you draw the video in a browser
 
 Write a pacing timeline, one beat per scene, from the same data that drives the render. Before each full render, run `python3 <this skill's directory>/scripts/check_pacing.py <timeline.json>`, and lengthen scenes or cut words until it exits 0. Its `--help` describes the format.
 
-Before the full render, look at stills from every scene *and* from mid-transition, and fix overflow, collisions, and low contrast. Stills cannot show shake, so for each camera move, track one element's position across consecutive frames, and fix any move where the element jumps or reverses. A plain crossfade between two busy layouts makes a muddy double exposure; stagger it (old content out, then new content in) or dip through the background. Then render `brag.mp4`.
+Before the full render, look at stills from every scene *and* from mid-transition, and fix overflow, collisions, and low contrast. Stills cannot show shake, so for each camera move, track one element's position across consecutive frames, and fix any move where the element jumps or reverses. A plain crossfade between two busy layouts makes a muddy double exposure; stagger it (old content out, then new content in) or dip through the background. Then render each video as `brag-<feature>.mp4`.
 
 ## 4. Deliver
 
-- **Poster:** pull the strongest *settled* frame (text fully in, not mid-transition) to `brag.jpg`, and bake it in as frame 0 of `brag.mp4` so every platform's thumbnail shows it. Replace frame 0 rather than adding a frame, so the duration and audio sync stay the same.
-- **`share-copy.txt`:** 1–3 sentences, postable as-is, specific, matching the tone. No "excited to share."
+- **Poster:** pull each video's strongest *settled* frame (text fully in, not mid-transition) to `brag-<feature>.jpg`, and bake it in as frame 0 of that video so every platform's thumbnail shows it. Replace frame 0 rather than adding a frame, so the duration and audio sync stay the same.
+- **`share-copy.txt`:** for each video, 1–3 sentences, postable as-is, specific, matching the tone. No "excited to share."
 - **`credits.txt`:** the source and license of every stock clip, when a video uses any.
 - **Tell the user** where the video and copy are, give one sentence on the creative angle, and offer to re-roll a scene or try another tone.

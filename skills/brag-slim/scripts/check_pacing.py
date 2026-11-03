@@ -33,7 +33,7 @@ WORD = re.compile(r"\w+(?:['’]\w+)*")
 TAG = re.compile(r"</?[A-Za-z][^>]*>")
 
 
-def need(item, rate):
+def reading_time(item, rate):
     if "seconds" in item:
         seconds = float(item["seconds"])
         if not math.isfinite(seconds) or seconds < 0:
@@ -52,16 +52,16 @@ def check(timeline, rate):
         for n, beat in enumerate(beats, 1):
             where = f"{video} beat {n} ({beat['start']:g}s to {beat['end']:g}s)"
             length = beat["end"] - beat["start"]
-            times = [length] + [float(i["at"]) for i in beat["items"]]
-            if not all(map(math.isfinite, times)) or length <= 0:
+            entrances = [float(i["at"]) for i in beat["items"]]
+            if not all(map(math.isfinite, [length, *entrances])) or length <= 0:
                 raise ValueError(f"{where} has an invalid time")
-            late = [t for t in times[1:] if not 0 <= t < length]
-            if late:
-                problems.append(f"{where}: an item appears at {late[0]:g}s, outside the beat; `at` counts from the beat's start")
+            outside = [t for t in entrances if not 0 <= t < length]
+            if outside:
+                problems.append(f"{where}: an item appears at {outside[0]:g}s, outside the beat; `at` counts from the beat's start")
                 continue
             done = 0.0
             for item in sorted(beat["items"], key=lambda i: float(i["at"])):
-                done = max(done, float(item["at"])) + need(item, rate)
+                done = max(done, float(item["at"])) + reading_time(item, rate)
             if done - length >= 0.005:
                 problems.append(
                     f"{where}: reading takes {done:.2f}s but the beat lasts {length:.2f}s; "
@@ -74,10 +74,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("timeline", help="path to the timeline JSON")
     ap.add_argument("--rate", type=float, default=0.3, help="seconds per word (default 0.3)")
-    a = ap.parse_args()
+    args = ap.parse_args()
+    if not math.isfinite(args.rate) or args.rate <= 0:
+        ap.error("--rate must be a positive number of seconds")
     try:
-        with open(a.timeline) as f:
-            problems = check(json.load(f), a.rate)
+        with open(args.timeline) as f:
+            problems = check(json.load(f), args.rate)
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
         print(f"cannot read timeline: {e}", file=sys.stderr)
         return 2
