@@ -104,13 +104,13 @@ Presets are defaults; freeform direction ("fake Series A launch from 2016") refi
 
 ## Sound
 
-Write the music and sound effects as one piece: effects in the same key and the same space as the music, blended in rather than laid on top. Give it a basic, proper mix, the way a real track is mixed: effects sit softly under the music, nothing harsh or spiky, and repeated little sounds stay in the background.
+Write the music and sound effects as one piece: effects in the same key and the same space as the music, blended in rather than laid on top. Give it a basic, proper mix, the way a real track is mixed: effects sit softly under the music, nothing harsh or spiky, and repeated little sounds stay in the background. Every cut, text entrance, footage switch, camera move and sound effect lands on the music's eighth-note grid, so picture and sound move together.
 
 ## 3. Build, check, render
 
 Build it with whatever works on this machine. If you draw the video in a browser, make every frame a pure function of time and wait for fonts and images to load before capturing each one. Measure the position of each element a camera move targets once, before you apply any transform. A position measured after a zoom is already scaled, so the camera drifts. When shared render code changes, re-render every video built from it.
 
-Write a pacing timeline, one beat per scene, from the same data that drives the render. Before each full render, run `python3 <this skill's directory>/scripts/check_pacing.py <timeline.json>`, and lengthen scenes or cut words until it exits 0. Its `--help` describes the format.
+Write a pacing timeline of every scene and timed event from the same data that drives the render. Before each full render, run `python3 <this skill's directory>/scripts/check_pacing.py --bpm <the music's tempo> <timeline.json>`, and fix what it prints until it exits 0. Its `--help` describes the format.
 
 Before the full render, look at stills from every scene *and* from mid-transition, and fix overflow, collisions, and low contrast. Stills cannot show shake, so for each camera move, track one element's position across consecutive frames, and fix any move where the element jumps or reverses. A plain crossfade between two busy layouts makes a muddy double exposure; stagger it (old content out, then new content in) or dip through the background. Then render each video as `brag-<feature>.mp4`, or `brag.mp4` for one combined video.
 

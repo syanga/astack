@@ -1,26 +1,30 @@
 #!/usr/bin/env python3
-"""Check that a viewer can read every beat of a brag timeline before it cuts.
+"""Check that a viewer can read every scene of a brag timeline before it cuts,
+and that every timed event lands on the music's grid.
 
-The timeline is JSON: an object mapping each video's name to its beats.
+The timeline is JSON: an object mapping each video's name to its scenes.
 
     {"launch": [
         {"start": 0, "end": 2, "items": [
             {"at": 0, "text": "Ship it"},
             {"at": 0.33, "text": "<em>today.</em>"},
-            {"at": 0.9, "seconds": 0.2}
-        ]}
+            {"at": 1, "seconds": 0.2}
+        ], "hits": [1.33]}
     ]}
 
-A beat runs from `start` to `end` in seconds; `end` is when its text starts to
+A scene runs from `start` to `end` in seconds; `end` is when its text starts to
 leave. Each item is something the viewer must take in: a line of text, a
 highlighted phrase, a labeled icon. `at` is required: when the item is fully on
-screen, in seconds after the beat starts. A text item needs the reading rate for
+screen, in seconds after the scene starts. A text item needs the reading rate for
 each word; HTML tags and entities are ignored. Give `seconds` instead for an item
 that is not plain words, such as an icon or text in a script written without
-spaces. Leave texture out of the timeline.
+spaces. Leave texture out of the items. `hits` lists every other timed event in
+the scene, such as a footage switch or a sound effect, in seconds after its start.
 
 The viewer reads items in the order they appear and can start an item only once
-it is on screen. A beat passes when the viewer finishes before it ends.
+it is on screen. A scene passes when the viewer finishes before it ends, and its
+start, end, item entrances and hits all fall on the music's eighth-note grid,
+worked out from --bpm.
 """
 import argparse
 import html
@@ -31,6 +35,7 @@ import sys
 
 WORD = re.compile(r"\w+(?:['’]\w+)*")
 TAG = re.compile(r"</?[A-Za-z][^>]*>")
+TOLERANCE = 0.005
 
 
 def reading_time(item, rate):
@@ -42,29 +47,45 @@ def reading_time(item, rate):
     return rate * len(WORD.findall(html.unescape(TAG.sub(" ", item["text"]))))
 
 
-def check(timeline, rate):
+def nearest(t, grid):
+    return grid * math.floor(t / grid + 0.5)
+
+
+def check(timeline, rate, grid):
     if not isinstance(timeline, dict) or not timeline:
         raise ValueError("the timeline has no videos")
     problems = []
-    for video, beats in timeline.items():
-        if not beats:
-            raise ValueError(f"{video} has no beats")
-        for n, beat in enumerate(beats, 1):
-            where = f"{video} beat {n} ({beat['start']:g}s to {beat['end']:g}s)"
-            length = beat["end"] - beat["start"]
-            entrances = [float(i["at"]) for i in beat["items"]]
-            if not all(map(math.isfinite, [length, *entrances])) or length <= 0:
+    for video, scenes in timeline.items():
+        if not scenes:
+            raise ValueError(f"{video} has no scenes")
+        for n, scene in enumerate(scenes, 1):
+            start, end = float(scene["start"]), float(scene["end"])
+            where = f"{video} scene {n} ({start:g}s to {end:g}s)"
+            length = end - start
+            entrances = [float(i["at"]) for i in scene["items"]]
+            if not isinstance(scene.get("hits", []), list):
+                raise ValueError(f"{where} has hits that are not a list")
+            hits = [float(t) for t in scene.get("hits", [])]
+            if not all(map(math.isfinite, [start, end, *entrances, *hits])) or length <= 0:
                 raise ValueError(f"{where} has an invalid time")
-            outside = [t for t in entrances if not 0 <= t < length]
+            outside = [t for t in entrances + hits if not 0 <= t < length]
             if outside:
-                problems.append(f"{where}: an item appears at {outside[0]:g}s, outside the beat; `at` counts from the beat's start")
+                problems.append(f"{where}: an event at {outside[0]:g}s falls outside the scene; times count from the scene's start")
                 continue
+            for label, t in (("start", start), ("end", end)):
+                if abs(t - nearest(t, grid)) > TOLERANCE:
+                    problems.append(f"{where}: the scene's {label} is off the {grid:.3f}s grid; move it to {nearest(t, grid):.3f}s")
+            for label, t in [("item", t) for t in entrances] + [("hit", t) for t in hits]:
+                if abs(start + t - nearest(start + t, grid)) > TOLERANCE:
+                    to = nearest(start + t, grid) - start
+                    to = to - grid if to >= length else to + grid if to < 0 else to
+                    problems.append(f"{where}: the {label} at {t:.3f}s is off the {grid:.3f}s grid; move it to {to:.3f}s")
             done = 0.0
-            for item in sorted(beat["items"], key=lambda i: float(i["at"])):
+            for item in sorted(scene["items"], key=lambda i: float(i["at"])):
                 done = max(done, float(item["at"])) + reading_time(item, rate)
-            if done - length >= 0.005:
+            if done - length >= TOLERANCE:
                 problems.append(
-                    f"{where}: reading takes {done:.2f}s but the beat lasts {length:.2f}s; "
+                    f"{where}: reading takes {done:.2f}s but the scene lasts {length:.2f}s; "
                     f"add {done - length:.2f}s or cut words"
                 )
     return problems
@@ -73,13 +94,15 @@ def check(timeline, rate):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("timeline", help="path to the timeline JSON")
+    ap.add_argument("--bpm", type=float, required=True, help="the music's tempo in beats per minute")
     ap.add_argument("--rate", type=float, default=0.3, help="seconds per word (default 0.3)")
     args = ap.parse_args()
-    if not math.isfinite(args.rate) or args.rate <= 0:
-        ap.error("--rate must be a positive number of seconds")
+    for name in ("bpm", "rate"):
+        if not math.isfinite(getattr(args, name)) or getattr(args, name) <= 0:
+            ap.error(f"--{name} must be a positive number")
     try:
         with open(args.timeline) as f:
-            problems = check(json.load(f), args.rate)
+            problems = check(json.load(f), args.rate, 30 / args.bpm)
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
         print(f"cannot read timeline: {e}", file=sys.stderr)
         return 2
