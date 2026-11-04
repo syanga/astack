@@ -6,12 +6,12 @@ disable-model-invocation: true
 
 # Full send
 
-**You own the task from prompt to landed PRs. The user is not watching.** Invoking this skill authorizes execution, PR delivery, merging, follow-up issues, and lane cleanup, and delegates every pick a later PR can undo. With "no merge" in the request, stop each PR at merge-ready. A linked skill's hand-back, or its stop for one of these authorizations, is a step to continue through. Every other stop in a linked skill still holds.
+**You own the task from prompt to landed PRs. The user is not watching.** Invoking this skill authorizes execution, PR delivery, merging, follow-up issues, and lane cleanup, and delegates every pick a later PR can undo. With "no merge" in the request, stop each PR at merge-ready. When a linked skill ends with its report, or stops for one of these authorizations, continue to the next step. Every other stop in a linked skill still holds.
 
 ## 1. Start
 
-1. For a simple task, or one already settled, for example by [grilling](../grilling/SKILL.md), skip to step 2. Otherwise ask one round of questions, each with a recommended answer. Cover open questions that block the work. Also cover production deploys, live systems, destructive actions, and secrets, when the task touches one and the request leaves it open. After this step, reach the user only through gates.
-2. Create `assumed-decisions.md` in the task's store, `.scratch/<task>/` per [Locate the store](../orchestrate/STATE.md#locate-the-store), and post its absolute path in the thread.
+1. For a simple task, or one already settled, for example by [grilling](../grilling/SKILL.md), skip the questions. Otherwise ask one round of questions, each with a recommended answer. Cover open questions that block the work. Also cover production deploys, live systems, destructive actions, and secrets, when the task touches one and the request leaves it open. After this step, reach the user only through gates.
+2. Create `assumed-decisions.md` in the task's store, `.scratch/<task>/` per [Locate the store](../orchestrate/STATE.md#locate-the-store). Start it with the request and whether merging is authorized. Post its absolute path in the thread.
 
 ## 2. Route
 
@@ -31,11 +31,11 @@ An **assumed decision** is a delegated pick, such as an architect candidate, a s
 
 In each PR body, list that PR's entries under "Assumed decisions", one line each.
 
-When the user overrides an assumed decision, apply the change at the next checkpoint, or before the next commit on the implement route, and update the entry. If the decision has merged, deliver the change as a new PR under this skill.
+When the user sends a message that steers the work, apply it at the next checkpoint on the orchestrate route. On the implement route, apply it before the next commit. When it overrides an assumed decision, update the entry. When the affected work has merged, deliver the change as a new PR under this skill.
 
 ## 4. Gates
 
-A gate is any of:
+Each of these conditions is a gate:
 
 - a deploy, live-system, destructive, or secrets action the start round left open
 - missing access
@@ -50,10 +50,10 @@ On the orchestrate route, park it through [orchestrate's escalation](../orchestr
 Before merging, or before reporting merge-ready under "no merge":
 
 1. Get a clean [review-pr](../review-pr/SKILL.md) fix-and-review pass on the final head. A commit after the last pass needs a new pass. Treat a consequential PR as a hardening request for [harden-pr](../harden-pr/SKILL.md).
-2. Wait for a review of the final head from each review bot seen on this PR or recent merged PRs. In T3 Code, call `watch_pull_request` once per PR and end the turn while checks are pending. When checks pass and a bot has not yet reviewed the final head, start a 30-minute timer as a background job ([run-job](../run-job/SKILL.md) or [codex-background-jobs](../codex-background-jobs/SKILL.md)), and check `pr.py status` when it fires or a review arrives. When the timer fires first, request a re-review where the bot supports one and start a second timer.
+2. Wait for a review of the final head from each review bot seen on this PR or recent merged PRs. In T3 Code, call `watch_pull_request` once per PR and end the turn while checks are pending. When checks pass and a bot has not yet reviewed the final head, start a 30-minute timer as a background job ([run-job](../run-job/SKILL.md) or [codex-background-jobs](../codex-background-jobs/SKILL.md)). Check [`pr.py status`](../harden-pr/pr-work.md) when the timer fires or a review arrives. When the timer fires first, request a re-review where the bot supports one and start a second timer.
 3. File each actionable follow-up, including `followups.md` entries, as a GitHub issue linked from the PR. List other notes under `Deferred follow-ups` in the PR body.
 
 ## 6. Close
 
-1. When the default branch runs CI after merges, wait for the run on each merge commit as a background job. If the PR broke it, ship a fix or a revert under this skill. On the orchestrate route, orchestrate's retro watcher covers this step.
+1. When the default branch runs CI after merges, wait for the run on each merge commit as a background job. If the PR broke it, ship a fix or a revert under this skill. On the orchestrate route, orchestrate's retro watcher does the waiting.
 2. Follow [worktree-cleanup](../worktree-cleanup/SKILL.md). If it stops with work remaining, or a gate is still open, send a push notification naming what remains.
