@@ -23,17 +23,17 @@ The target defaults to 9 out of 10 and the budget to 10 rounds.
 1. Inspect the inputs and fix broken ones, such as a blank screenshot or a stale build. This replaces the sensitivity proof in hillclimb step 2.
 2. Make a new temporary directory outside the repository. Put the new version, the current best, and each reference in its own randomly named subdirectory. Start fresh judges from [council's members](../council/SKILL.md#members), read-only. Outside T3 Code, start each judge's CLI in the temporary directory. Give each judge the brief and the temporary path, with no repository paths, and tell it to read only that path. Ask for a score out of 10 and the biggest flaw for each subdirectory. The judges must not learn the target, earlier scores, the round number, or which version is new.
 3. Keep the new version only when every judge scores it above the current best. This replaces the noise threshold in hillclimb step 5. The current best's scores in round 1 are the baseline.
-4. Ground the next hypothesis in the judges' flaws, and hand them on with it. After a round that keeps nothing, pivot category per hillclimb step 6.
+4. Ground the next hypothesis in the judges' flaws, and pass the flaws to the implementer. After a round that keeps nothing, pivot category per hillclimb step 6.
 
-If a judge fails or returns no score, pause the run and ask the user.
+If a judge fails or returns no score, pause the run and ask the user. Vote only with every judge.
 
 ## Stop
 
-This replaces hillclimb step 7 and the plateau rule in step 6. Stop at the first of:
+This replaces hillclimb step 7 and the plateau rule in step 6. After any requested minimum rounds, stop at the first of:
 
 - Every judge scores the accepted version at or above the target and above every reference. This vote also serves as the recheck in hillclimb step 8, so rerun only the correctness checks.
 - The budget runs out.
-- Two rounds in a row keep nothing, the second after a pivot.
+- Two rounds in a row keep nothing.
 
 ## Report
 
