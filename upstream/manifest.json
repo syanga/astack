@@ -445,6 +445,6 @@
     "path": "skills/full-send",
     "commit": "1085050f3baed1ac724caa4a8166145fb2ac88af",
     "license": "MIT, kept in skills/full-send/LICENSE",
-    "note": "astack-authored skill. Adopts tstack's ask-first test permission, its unverifiable-change gate, and its gate on human change requests. Omits tstack's proof and scope rules because prove-it-works, implement, bug-fix, and laziness-protocol already cover them. Reverses tstack's ban on --admin at the user's choice, limited to merges where only required approvals are missing."
+    "note": "astack-authored skill. Omits tstack's proof and scope rules because prove-it-works, implement, bug-fix, and laziness-protocol cover them. Allows --admin, which tstack bans, at the user's choice."
   }
 }
