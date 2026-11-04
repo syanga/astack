@@ -103,7 +103,7 @@ Put the switcher in a single shared component so both sub-shapes can reuse it.
 
 Commit the variants on the scratch branch. Build a self-contained HTML gallery from the theme and width check screenshots. Give it one view per variant, including `current`, cycled with the same arrows and keys. Each view shows light and dark at desktop and phone width. Inline the images as JPEG data URIs. Deliver the gallery through [t3-preview](../t3-preview/SKILL.md)'s direct HTML route. In the static fallback, deliver that file instead.
 
-Add a live URL only when the question depends on motion or interaction and the user's browser can reach the scratch app without a public tunnel. Otherwise, stop the scratch app. Report the gallery link, the `?variant=` keys with any live URL, the checks performed, and any unverified visual behavior. Stop for the user's selection before editing real components. The user will flip through whenever they get to it. The interesting feedback is usually **"I want the header from B with the sidebar from C"**, which is the actual design they want.
+Add a live URL only when the question depends on motion or interaction and the user's browser can reach the scratch app without a public tunnel. Otherwise, stop the scratch app. Report the gallery link, the `?variant=` keys with any live URL, the checks performed, and any unverified visual behavior. Unless the user delegated the pick, stop for the user's selection before editing real components. The user will flip through whenever they get to it. The interesting feedback is usually **"I want the header from B with the sidebar from C"**, which is the actual design they want.
 
 ### 6. Capture the answer and clean up
 
