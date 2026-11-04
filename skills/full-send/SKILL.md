@@ -20,7 +20,7 @@ disable-model-invocation: true
 
 ## 3. Assumed decisions
 
-An **assumed decision** is a delegated pick, such as an architect candidate, a scope call, or a [prototype](../prototype/SKILL.md) UI variant. Take the recommended option and append it to `assumed-decisions.md`. On the orchestrate route, workers report their picks and the coordinator appends them.
+An **assumed decision** is a delegated pick, such as an architect candidate, a scope call, a [prototype](../prototype/SKILL.md) UI variant, or a choice a reviewer or bot asks for. Take the recommended option and append it to `assumed-decisions.md`. On the orchestrate route, workers report their picks and the coordinator appends them.
 
 ```markdown
 ## D<n>. <question>
@@ -49,8 +49,8 @@ On the orchestrate route, park it through [orchestrate's escalation](../orchestr
 
 Before merging, or before reporting merge-ready under "no merge":
 
-1. Treat a consequential PR as a hardening request for [harden-pr](../harden-pr/SKILL.md).
-2. Wait for a review of the final head from each review bot seen on this PR or recent merged PRs. In T3 Code, call `watch_pull_request` once per PR and end the turn while checks are pending. Once only bot reviews remain, start a 30-minute timer as a background job ([run-job](../run-job/SKILL.md) or [codex-background-jobs](../codex-background-jobs/SKILL.md)), and check `pr.py status` when it fires or a review arrives. When the timer fires first, request a re-review where the bot supports one and start a second timer.
+1. Get a clean [review-pr](../review-pr/SKILL.md) fix-and-review pass on the final head. A commit after the last pass needs a new pass. Treat a consequential PR as a hardening request for [harden-pr](../harden-pr/SKILL.md).
+2. Wait for a review of the final head from each review bot seen on this PR or recent merged PRs. In T3 Code, call `watch_pull_request` once per PR and end the turn while checks are pending. When checks pass and a bot has not yet reviewed the final head, start a 30-minute timer as a background job ([run-job](../run-job/SKILL.md) or [codex-background-jobs](../codex-background-jobs/SKILL.md)), and check `pr.py status` when it fires or a review arrives. When the timer fires first, request a re-review where the bot supports one and start a second timer.
 3. File each actionable follow-up, including `followups.md` entries, as a GitHub issue linked from the PR. List other notes under `Deferred follow-ups` in the PR body.
 
 ## 6. Close
