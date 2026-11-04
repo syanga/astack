@@ -71,7 +71,7 @@ Write `brag-plan.md` in the output directory: the angle, tone, visual identity, 
 
 If the user points at one part — a new version, a new feature, one angle — make this the focus of the videos.
 
-**Shape:** one video per feature, unless the user asks for one combined video. Each opens on the viewer's own question in big type (2–3s), then shows what sets the product apart in the product's own words, the generated result as proof, 2–3 payoffs, and a call to action. Each payoff quotes a revealing detail from the generated result, such as a specific finding, rather than only a date or an overall verdict. The shape sets the scenes, and the tone sets their feel.
+**Shape:** one video per feature, unless the user asks for one combined video. Each opens on the viewer's own question in big type (2–3s), then shows what sets the product apart in the product's own words, the generated result as proof, 2–3 payoffs, and a call to action. Each payoff quotes a revealing detail from the generated result, such as a specific finding, rather than only a date or an overall verdict. At least one payoff is what the result tells the viewer to do, such as a fix or a next step, so the video shows how the product helps and not only what is wrong. The shape sets the scenes, and the tone sets their feel.
 
 Then show the user `brag-plan.md` and the format, and wait for their approval. Update the plan with any edits before building. Plan approval is the video's design checkpoint, so build without separate design mocks. Before rendering a kind of visual the approved plan did not describe, show the user a still and wait for approval. If the user asked to skip plan approval, build without waiting at either point.
 
