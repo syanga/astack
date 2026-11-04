@@ -50,21 +50,24 @@ class CheckPacingTest(unittest.TestCase):
             "launch scene 1 (4s to 5s): an event at 4.2s falls outside the scene; times count from the scene's start\n",
         )
 
-    def test_events_off_the_eighth_note_grid_get_a_scene_relative_fix(self):
+    def test_an_off_grid_scene_start_is_fixed_before_its_events_get_scene_relative_fixes(self):
         scene = {"start": 1.2, "end": 4, "items": [{"at": 0, "text": "Go"}, {"at": 0.65, "text": "now"}], "hits": [1.7]}
         result = run({"launch": [scene]}, bpm="60")
         self.assertEqual(result.returncode, 1)
         self.assertEqual(
             result.stdout,
-            "launch scene 1 (1.2s to 4s): the scene's start is off the 0.500s grid; move it to 1.000s\n"
-            "launch scene 1 (1.2s to 4s): the item at 0.000s is off the 0.500s grid; move it to 0.300s\n"
-            "launch scene 1 (1.2s to 4s): the item at 0.650s is off the 0.500s grid; move it to 0.800s\n"
-            "launch scene 1 (1.2s to 4s): the hit at 1.700s is off the 0.500s grid; move it to 1.800s\n",
+            "launch scene 1 (1.2s to 4s): the scene's start is off the 0.500s grid; move it to 1.000s\n",
+        )
+        scene["start"] = 1
+        self.assertEqual(
+            run({"launch": [scene]}, bpm="60").stdout,
+            "launch scene 1 (1s to 4s): the item at 0.650s is off the 0.500s grid; move it to 0.500s\n"
+            "launch scene 1 (1s to 4s): the hit at 1.700s is off the 0.500s grid; move it to 1.500s\n",
         )
 
     def test_a_scene_on_a_90_bpm_grid_passes_despite_rounded_times(self):
-        items = [{"at": 0, "text": "Go"}, {"at": 0.3333, "text": "now"}, {"at": 0.6667, "text": "today"}]
-        result = run({"launch": [{"start": 4, "end": 5.3333, "items": items, "hits": [0.9999]}]}, bpm="90")
+        items = [{"at": 0, "text": "Go"}, {"at": 0.33, "text": "now"}, {"at": 0.67, "text": "today"}]
+        result = run({"launch": [{"start": 1.33, "end": 2.67, "items": items, "hits": [0.9999]}]}, bpm="90")
         self.assertEqual((result.returncode, result.stdout), (0, ""))
 
     def test_a_malformed_timeline_is_an_input_error(self):

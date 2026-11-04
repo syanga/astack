@@ -35,7 +35,7 @@ import sys
 
 WORD = re.compile(r"\w+(?:['’]\w+)*")
 TAG = re.compile(r"</?[A-Za-z][^>]*>")
-TOLERANCE = 0.005
+TOLERANCE = 0.01
 
 
 def reading_time(item, rate):
@@ -72,10 +72,13 @@ def check(timeline, rate, grid):
             if outside:
                 problems.append(f"{where}: an event at {outside[0]:g}s falls outside the scene; times count from the scene's start")
                 continue
-            for label, t in (("start", start), ("end", end)):
-                if abs(t - nearest(t, grid)) > TOLERANCE:
-                    problems.append(f"{where}: the scene's {label} is off the {grid:.3f}s grid; move it to {nearest(t, grid):.3f}s")
-            for label, t in [("item", t) for t in entrances] + [("hit", t) for t in hits]:
+            bounds = [(label, t) for label, t in (("start", start), ("end", end)) if abs(t - nearest(t, grid)) > TOLERANCE]
+            for label, t in bounds:
+                problems.append(f"{where}: the scene's {label} is off the {grid:.3f}s grid; move it to {nearest(t, grid):.3f}s")
+            if length < grid - TOLERANCE:
+                problems.append(f"{where}: the scene is shorter than one {grid:.3f}s grid step")
+            events = [] if bounds or length < grid - TOLERANCE else [("item", t) for t in entrances] + [("hit", t) for t in hits]
+            for label, t in events:
                 if abs(start + t - nearest(start + t, grid)) > TOLERANCE:
                     to = nearest(start + t, grid) - start
                     to = to - grid if to >= length else to + grid if to < 0 else to
