@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Full send
 
-**You own the task from prompt to landed PRs. The user is not watching.** Invoking this skill authorizes execution, PR delivery, merging, an [admin merge](#5-merge), follow-up issues, and lane cleanup, and delegates every pick a later PR can undo. It also grants the ask-first test methods this task's checks need, such as running the app, browser automation, or screenshots. [Gate](#4-gates) actions and harness approval prompts still stop. With "no merge" in the request, stop each PR at merge-ready. When a linked skill ends with its report, or stops for one of these authorizations, continue to the next step. Every other stop in a linked skill still holds.
+**You own the task from prompt to landed PRs. The user is not watching.** Invoking this skill authorizes execution, PR delivery, merging, an [admin merge](#5-merge), follow-up issues, and lane cleanup, and delegates every pick a later PR can undo. It also lifts the ask-first step from any test method that verification needs, such as running the app, browser automation, or screenshots. [Gate](#4-gates) actions and harness approval prompts still stop. With "no merge" in the request, stop each PR at merge-ready. When a linked skill ends with its report, or stops for one of these authorizations, continue to the next step. Every other stop in a linked skill still holds.
 
 ## 1. Start
 
@@ -40,7 +40,8 @@ Each of these conditions is a gate:
 - a deploy, live-system, destructive, or secrets action the start round left open
 - missing access
 - a change you cannot verify on the matching surface
-- a human approval or change request that the [admin merge](#5-merge) does not clear
+- a human change request
+- a missing approval that the [admin merge](#5-merge) does not clear
 - in-scope review defects after three fix-and-review passes
 - a review bot silent through both timers in [Merge](#5-merge) step 2
 
