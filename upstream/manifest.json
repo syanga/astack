@@ -439,5 +439,12 @@
     "commit": "069432cac935ed1895859df201c31436c07fb74e",
     "license": "MIT, kept in skills/brag-slim/LICENSE",
     "note": "Full /brag is not imported because it depends on Hyperframes and its bundled music has unverified redistribution terms. On Opus 5.5, /brag already runs brag-slim unless the user asks for `--full` or `--voice`. The description drops the /brag hand-off because astack does not install /brag. Step 2 waits for plan approval because a render takes minutes and the storyboard is the cheapest point to change direction. The output directory ignores itself because a run inside a repository otherwise leaves about 0.5 GB of untracked frames that `git add -A` would commit. astack makes the ad shape the only shape because it uses brag-slim to sell products to customers. The checker reads lines in order because checking each line alone at 0.3s per word passes multi-line beats that viewers find too fast."
+  },
+  "full-send": {
+    "repository": "https://github.com/t3dotgg/tstack.git",
+    "path": "skills/full-send",
+    "commit": "1085050f3baed1ac724caa4a8166145fb2ac88af",
+    "license": "MIT, kept in skills/full-send/LICENSE",
+    "note": "astack-authored skill. Adopts tstack's ask-first test permission, its unverifiable-change gate, and its gate on human change requests. Omits tstack's proof and scope rules because prove-it-works, implement, bug-fix, and laziness-protocol already cover them. Reverses tstack's ban on --admin at the user's choice, limited to merges where only required approvals are missing."
   }
 }
