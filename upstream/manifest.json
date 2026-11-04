@@ -452,6 +452,6 @@
     "path": "skills/council",
     "commit": "1085050f3baed1ac724caa4a8166145fb2ac88af",
     "license": "MIT, kept in skills/council/LICENSE",
-    "note": "User-invoked, like most astack skills. Default members are Claude Opus 5.5 and GPT-6.1 Sol at xhigh, at the user's choice, because the user's providers are Claude and Codex. Outside T3 Code, dispatch follows arena's provider execution because a harness's own subagents cannot reach another provider. The Members and Review headings let hillclimb-council link to them."
+    "note": "User-invoked, like most astack skills. Default members are Claude Opus 5.5 and GPT-6.1 Sol at xhigh, at the user's choice, because the user's providers are Claude and Codex. Outside T3 Code, dispatch follows arena's provider execution because a harness's own subagents cannot reach another provider. The Members and Review headings let hillclimb-council link to them. The loop also ends when only declined requests remain, because a delegate that keeps asking for out-of-scope work would otherwise stop it from ending."
   }
 }

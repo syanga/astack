@@ -53,7 +53,8 @@ If there is no PR, put the same results in the final reply only.
 
 If you agree with their recommendations, make the changes and request a fresh
 review after. Continue this process until all delegates are satisfied with the
-outcome.
+outcome, or until their remaining requests are ones you decline. Report each
+declined request with your reason.
 
 Do not let repeated reviews result in scope creep. It is your job to fight to
 keep scope limited.
