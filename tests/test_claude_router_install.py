@@ -257,7 +257,7 @@ class ComponentSelectionTests(ComponentFixture):
 
 class ShellPathTests(ComponentFixture):
     def bash_rc(self):
-        return self.home / (".bash_profile" if sys.platform == "darwin" else ".bashrc")
+        return self.home.resolve() / (".bash_profile" if sys.platform == "darwin" else ".bashrc")
 
     def bin_dir(self):
         return self.data / "bin"
@@ -299,7 +299,7 @@ class ShellPathTests(ComponentFixture):
         self.assertEqual(rc.read_text(), "alias ll='ls -l'")
 
     def test_a_shell_file_that_already_lists_the_router_stays_as_it_is_through_uninstall(self):
-        rc = self.home / ".zshrc"
+        rc = self.home.resolve() / ".zshrc"
         rc.parent.mkdir(parents=True)
         line = 'export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/astack/claude-router/bin:$PATH"\n'
         rc.write_text(line)
