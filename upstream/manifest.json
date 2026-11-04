@@ -446,5 +446,12 @@
     "commit": "1085050f3baed1ac724caa4a8166145fb2ac88af",
     "license": "MIT, kept in skills/full-send/LICENSE",
     "note": "astack-authored skill. Omits tstack's proof and scope rules because prove-it-works, implement, bug-fix, and laziness-protocol cover them. Allows --admin, which tstack bans, at the user's choice."
+  },
+  "council": {
+    "repository": "https://github.com/t3dotgg/tstack.git",
+    "path": "skills/council",
+    "commit": "1085050f3baed1ac724caa4a8166145fb2ac88af",
+    "license": "MIT, kept in skills/council/LICENSE",
+    "note": "User-invoked, like most astack skills. Default members are Claude Opus 5.5 and GPT-6.1 Sol at xhigh, at the user's choice, because the user's providers are Claude and Codex. The Members and Review headings let hillclimb-council link to them."
   }
 }
