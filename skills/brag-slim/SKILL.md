@@ -63,7 +63,7 @@ Before planning, answer: What is it (one sentence)? Who is it for, and what does
 
 Everything gathered here can end up in a public video. Never carry secrets, API keys, tokens, internal hostnames or URLs, real customer or user names, email addresses, or other personal data into the plan, the video, or the share copy. If the real UI shows such data, swap in plausible fictional stand-ins and say so in the plan. On screen, including filmed product UI, call the viewer "you" and anyone else by pronoun, and crop or blank any name the UI shows.
 
-Pitch every word and visual at the customer from "Who is it for", not at the person asking for the video.
+Pitch every word and visual at the customer from "Who is it for", even when the person asking for the video knows the product far better.
 
 ## 2. Plan
 
@@ -71,7 +71,7 @@ Write `brag-plan.md` in the output directory: the angle, tone, visual identity, 
 
 If the user points at one part — a new version, a new feature, one angle — make this the focus of the videos.
 
-**Shape:** one video per feature, unless the user asks for one combined video. Each opens on the viewer's own question in big type (2–3s), then shows what sets the product apart in the product's own words, the generated result as proof, 2–3 payoffs, and a call to action. Each payoff quotes a revealing detail from the generated result, such as a specific finding, rather than only a date or an overall verdict. At least one payoff is what the result tells the viewer to do, such as a fix or a next step, so the video shows how the product helps and not only what is wrong. The shape sets the scenes, and the tone sets their feel.
+**Shape:** one video per feature, unless the user asks for one combined video. Each opens on the viewer's own question in big type (2–3s), then shows what sets the product apart in the product's own words, the generated result as proof, 2–3 payoffs, and a call to action. Each payoff quotes a specific finding from the generated result. At least one is what the result tells the viewer to do, such as a fix or a next step, so the video shows how the product helps. The shape sets the scenes, and the tone sets their feel.
 
 Then show the user `brag-plan.md` and the format, and wait for their approval. Update the plan with any edits before building. Plan approval is the video's design checkpoint, so build without separate design mocks. Before rendering a kind of visual the approved plan did not describe, show the user a still and wait for approval. If the user asked to skip plan approval, build without waiting at either point.
 
@@ -83,7 +83,7 @@ Then show the user `brag-plan.md` and the format, and wait for their approval. U
 - **Show the thing.** Reuse the real thing from the source — its UI, components, copy, images, videos and animations — rather than re-creating it. Rebuild only what you can't reuse. Prefer the working app doing its job over a landing page describing it. Small illustrative UI text is fine when showing the product in use (a filename, an "Exported" toast); invented claims, numbers, or testimonials are not. Never abstract filler. New graphics use the product's own icons.
 - **Footage behind type.** Put footage behind type, under a brand-tinted scrim, instead of a plain background. For the general public, footage of people and objects beats charts and diagrams. Product icons stay in front of it. When the source has no fitting footage, use stock clips licensed for commercial use, with no recognizable logos and nobody who appears to endorse the product.
 - **Specific.** It must feel made for this exact project. Use its own copy and claims; no generic SaaS language ("streamline your workflow" is banned).
-- **Readable.** Pace comes from motion and cuts, not from pulling text away early. Each scene says one thing in a few words. Any line the viewer is meant to read stays fully visible and settled long enough to read it (roughly 0.3s per word), counted from when the whole line is on screen and the scene's earlier lines are read. Step 3's checker tests this. Text that's only texture doesn't need to be read, but stays legible enough to show what it is: a spotlight on one line of real output dims the rest without hiding it.
+- **Readable.** Pace comes from motion and cuts. Each scene says one thing in a few words and stays until the viewer has read it, which step 3's checker measures. Text that is only texture stays legible enough to show what it is: a spotlight on one line of real output dims the rest without hiding it.
 - **Make it alive.** Things that appear one by one, simulated clicks, swipes, and typing beat static slides.
 - **Funny earns its place.** Humor comes from the project's own absurdity, not from trying.
 - **Every frame postable.** Any frozen frame should be worth sharing.
