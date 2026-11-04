@@ -2237,7 +2237,10 @@ refuses to build router code that differs from the commit.
 
 `components/claude-router/accepted.json` holds the record of the live
 acceptance run at the router code it names. A change to the router code
-needs a new acceptance run and record.
+needs a new acceptance run and record, in the same PR. Until the record
+matches, the Python suite fails
+(`test_the_accepted_record_covers_the_router_code_in_this_checkout`), because
+install and activation would refuse that code.
 
 The record at `b5ef231` comes from a scoped run the operator chose for newer
 models and the installer PATH lines (PR103). Like the run for PR102 at

@@ -1,108 +1,129 @@
 {
- "head": "fe3a12a239879dab239fb88476f3af60fde7f416",
- "code_sha256": "6cf562ff7466a098968218a5f32a9053c6b1bda62d0f8b3c0df0a1b2a2832577",
- "binary_sha256": "3b9b13bef6a5bacd4275d475b281d35d9bf30daba2b783572a2cc4b1f76858d6",
+ "head": "94d348486afc3ab25287852b1ea6cc98b939e537",
+ "code_sha256": "eb77ad7e9dc1dd0375f3e0669d8b1fcbb31e32c8fbcce55b66dba1cedc1f24e5",
+ "binary_sha256": "7e097a28ef8c03ee63ebfd389836a64a32f99caede83c5ba605798e733505a39",
  "helpers_sha256": "4bc4da547f346e0cf0ad12832eccfdcb972257e91876189234cab1e424400243",
  "sdk": "v8.0.11",
  "go": "go1.27.3",
- "platform": "linux/amd64",
+ "platform": "darwin/arm64",
  "clients": {
-  "claude_code": "2.1.305"
+  "claude_code": "2.1.318"
  },
  "result": "pass",
- "scope": "PR104 reset-aware account placement, real-account new/resume/restart checks; unchanged historical scenarios are references and were not rerun",
- "evidence_root": "/home/alan/.local/state/astack/claude-router-lanes/pr104/evidence",
+ "scope": "PR119 status display for plans without a 5-hour limit, real-account new/resume/restart checks; unchanged historical scenarios are references and were not rerun",
+ "evidence_root": "/Users/alan/.local/state/astack/claude-router-lanes/pr119/evidence",
  "matrix": [
   {
    "scenario": "work token is outside the four-hour refresh lead",
    "status": "pass",
-   "detail": null
+   "detail": {
+    "expires_in_min": 479
+   }
   },
   {
-   "scenario": "alumni token is outside the four-hour refresh lead",
+   "scenario": "personal token is outside the four-hour refresh lead",
    "status": "pass",
-   "detail": null
+   "detail": {
+    "expires_in_min": 425
+   }
   },
   {
-   "scenario": "Candidate code and executable match the merged build",
+   "scenario": "Lane code and executable match the build at 94d3484",
    "status": "pass",
-   "detail": null
+   "detail": {
+    "code_sha256": "eb77ad7e9dc1dd0375f3e0669d8b1fcbb31e32c8fbcce55b66dba1cedc1f24e5",
+    "binary_sha256": "7e097a28ef8c03ee63ebfd389836a64a32f99caede83c5ba605798e733505a39",
+    "sdk": "v8.0.11"
+   }
   },
   {
    "scenario": "work is admissible with paid overflow disabled",
    "status": "pass",
-   "detail": null
+   "detail": {
+    "state": "disabled",
+    "source": "settings"
+   }
   },
   {
-   "scenario": "work has fresh weekly usage and reset readings",
+   "scenario": "personal is admissible with paid overflow disabled",
    "status": "pass",
-   "detail": null
+   "detail": {
+    "state": "disabled",
+    "source": "settings"
+   }
   },
   {
-   "scenario": "alumni is admissible with paid overflow disabled",
+   "scenario": "work's usage reading reports no five_hour window",
    "status": "pass",
-   "detail": null
+   "detail": {
+    "windows": [
+     "weekly",
+     "weekly"
+    ]
+   }
   },
   {
-   "scenario": "alumni has fresh weekly usage and reset readings",
+   "scenario": "Status shows 5h none for work, the plan without a 5-hour limit",
    "status": "pass",
-   "detail": null
+   "detail": {
+    "line": "work      ready        5h none         wk 44% (Fri)  cap 1  0/0 active  cache --"
+   }
   },
   {
-   "scenario": "Available reset changes the predicted initial account",
+   "scenario": "Status -v says no limit on this plan",
    "status": "pass",
-   "detail": [
-    {
-     "id": "work",
-     "weekly_used": 0.39,
-     "credits": 0,
-     "score": 0.3068844992134659,
-     "without_credit_score": 0.3068844992134659
-    },
-    {
-     "id": "alumni",
-     "weekly_used": 0.97,
-     "credits": 1,
-     "score": 0.2000197491774707,
-     "without_credit_score": 1.0
-    }
-   ]
+   "detail": null
   },
   {
    "scenario": "new receives a routed 200",
    "status": "pass",
-   "detail": null
-  },
-  {
-   "scenario": "New conversation chooses the account with reset credit",
-   "status": "pass",
    "detail": {
-    "expected": "alumni",
-    "without_credit": "work"
+    "exit": 0,
+    "requests": 2
    }
   },
   {
    "scenario": "resume receives a routed 200",
    "status": "pass",
-   "detail": null
+   "detail": {
+    "exit": 0,
+    "requests": 1
+   }
   },
   {
    "scenario": "Resume preserves account and conversation content",
    "status": "pass",
-   "detail": null
+   "detail": {
+    "account": "work",
+    "answer": "kumquat"
+   }
   },
   {
    "scenario": "restart receives a routed 200",
    "status": "pass",
-   "detail": null
+   "detail": {
+    "exit": 0,
+    "requests": 1
+   }
   },
   {
    "scenario": "Restart preserves the served conversation's account",
    "status": "pass",
-   "detail": null
+   "detail": {
+    "account": "work"
+   }
   },
   {
-   "scenario": "Identity and disabled paid overflow remain stable",
+   "scenario": "Identity is the same at the start and the end",
+   "status": "pass",
+   "detail": {
+    "code_sha256": "eb77ad7e9dc1dd0375f3e0669d8b1fcbb31e32c8fbcce55b66dba1cedc1f24e5",
+    "binary_sha256": "7e097a28ef8c03ee63ebfd389836a64a32f99caede83c5ba605798e733505a39",
+    "sdk": "v8.0.11"
+   }
+  },
+  {
+   "scenario": "Paid overflow remains disabled",
    "status": "pass",
    "detail": null
   },
@@ -115,26 +136,29 @@
    "scenario": "Live checks remain within the scoped request budget",
    "status": "pass",
    "detail": {
-    "attempts": 3,
-    "input": 21753,
-    "output": 342
+    "attempts": 4,
+    "input": 86010,
+    "output": 289
    }
   },
   {
    "scenario": "Evidence contains no copied access token",
    "status": "pass",
-   "detail": null
+   "detail": {
+    "files_scanned": 10,
+    "hits": []
+   }
   }
  ],
  "open": [],
  "prior_acceptance": {
-  "record": "/home/alan/.local/state/astack/claude-router-lanes/pr104/evidence/previous-acceptance.json",
+  "record": "components/claude-router/accepted.json at 839fb98",
   "status": "historical reference, not rerun at this code"
  },
  "offline_verification": {
-  "head": "7295faff0aecd2090dec72c1dfbd5ac3520e0020",
-  "source_equal_to_merge": true,
-  "evidence": "/home/alan/.t3/worktrees/astack/t3-a30f00aa/.scratch/router-reset-selection/reports/verification.txt"
+  "head": "94d348486afc3ab25287852b1ea6cc98b939e537",
+  "go_test_race": "pass",
+  "evidence": "/Users/alan/.local/state/astack/claude-router-lanes/pr119/evidence/go-test.txt"
  },
- "written": "2026-10-21T01:57:07.532562+00:00"
+ "written": "2026-11-04T08:14:47.623134+00:00"
 }
