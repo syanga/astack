@@ -18,7 +18,7 @@ Usage: `/brag-slim [input] [options]`. Options (flags or plain language):
 | `--format landscape\|vertical\|square` | landscape (1920×1080; vertical 1080×1920, square 1080×1080), 30fps |
 | `--duration <s>` | about 20s |
 
-Write the deliverables to `brag-output/` in the current directory (timestamped `brag-output-YYYY-MM-DD-HHmmss/` if it already exists). A revision in the same session overwrites the files in that session's output directory. Keep every intermediate file (frames, downloads, scripts, stems) in a `work/` subfolder inside it. Put a `.gitignore` containing `*` in the output directory when you create it, so Git ignores everything in it inside any repository.
+Write the deliverables to `brag-output/` in the current directory (timestamped `brag-output-YYYY-MM-DD-HHmmss/` if it already exists). A revision overwrites the files it revises. Keep every intermediate file (frames, downloads, scripts, stems) in a `work/` subfolder inside it. Put a `.gitignore` containing `*` in the output directory when you create it, so Git ignores everything in it inside any repository.
 
 ## 1. Inspect
 
@@ -57,11 +57,11 @@ Get the site as a visitor sees it. Many sites build their page with JavaScript, 
 
 ### Then, for every input
 
-When the product delivers a per-customer artifact, such as a report, an export or a result page, film one the product generated for fictional inputs. If none exists and you have the code, generate one with the local setup described under Project. If generating spends money, such as paid model calls, or writes outside the machine, list the fictional inputs and the spend, and wait for the user's yes even if they asked to skip plan approval. If you end up without a generated result, name its absence as the plan's main weakness.
+When the product delivers a per-customer artifact, such as a report, an export or a result page, film one the product generated for fictional inputs: the generated result. If none exists and you have the code, generate one with the local setup described under Project. If generating spends money, such as paid model calls, or writes outside the machine, list the fictional inputs and the spend, and wait for the user's yes even if they asked to skip plan approval. If you end up without a generated result, name its absence as the plan's main weakness.
 
 Before planning, answer: What is it (one sentence)? Who is it for, and what does it do for them? What sets it apart? What's the most impressive or funniest claim? What's the visual hook? What real UI or flow should be shown? What tone fits? What's the one-line share caption?
 
-Everything gathered here can end up in a public video. Never carry secrets, API keys, tokens, internal hostnames or URLs, real customer or user names, email addresses, or other personal data into the plan, the video, or the share copy. If the real UI shows such data, swap in plausible fictional stand-ins and say so in the plan. In on-screen text, call the viewer "you" and anyone else by pronoun; fictional names appear only inside product UI.
+Everything gathered here can end up in a public video. Never carry secrets, API keys, tokens, internal hostnames or URLs, real customer or user names, email addresses, or other personal data into the plan, the video, or the share copy. If the real UI shows such data, swap in plausible fictional stand-ins and say so in the plan. On screen, including filmed product UI, call the viewer "you" and anyone else by pronoun, and crop or blank any name the UI shows.
 
 Pitch every word and visual at the customer from "Who is it for", not at the person asking for the video.
 
@@ -69,9 +69,9 @@ Pitch every word and visual at the customer from "Who is it for", not at the per
 
 Write `brag-plan.md` in the output directory: the angle, tone, visual identity, and for each video a scene-by-scene storyboard with durations that sum to the target.
 
-If the user points at one part — a new version, a new feature, one angle — make this the focus of the video.
+If the user points at one part — a new version, a new feature, one angle — make this the focus of the videos.
 
-**Shape:** one video per feature, unless the user asks for one combined video. Each opens on the viewer's own question in big type (2–3s), then shows what sets the product apart in the product's own words, the real result as proof, 2–3 payoffs, and a call to action. Each payoff quotes a revealing detail from the result, such as a specific finding, rather than its overall verdict. The shape sets the scenes, and the tone sets their feel. A starting shape, not a template.
+**Shape:** one video per feature, unless the user asks for one combined video. Each opens on the viewer's own question in big type (2–3s), then shows what sets the product apart in the product's own words, the generated result as proof, 2–3 payoffs, and a call to action. Each payoff quotes a revealing detail from the generated result, such as a specific finding, rather than only a date or an overall verdict. The shape sets the scenes, and the tone sets their feel.
 
 Then show the user `brag-plan.md` and the format, and wait for their approval. Update the plan with any edits before building. Plan approval is the video's design checkpoint, so build without separate design mocks. Before rendering a kind of visual the approved plan did not describe, show the user a still and wait for approval. If the user asked to skip plan approval, build without waiting at either point.
 
@@ -83,7 +83,7 @@ Then show the user `brag-plan.md` and the format, and wait for their approval. U
 - **Show the thing.** Reuse the real thing from the source — its UI, components, copy, images, videos and animations — rather than re-creating it. Rebuild only what you can't reuse. Prefer the working app doing its job over a landing page describing it. Small illustrative UI text is fine when showing the product in use (a filename, an "Exported" toast); invented claims, numbers, or testimonials are not. Never abstract filler. New graphics use the product's own icons.
 - **Footage behind type.** Put footage behind type, under a brand-tinted scrim, instead of a plain background. For the general public, footage of people and objects beats charts and diagrams. Product icons stay in front of it. When the source has no fitting footage, use stock clips licensed for commercial use, with no recognizable logos and nobody who appears to endorse the product.
 - **Specific.** It must feel made for this exact project. Use its own copy and claims; no generic SaaS language ("streamline your workflow" is banned).
-- **Readable.** Pace comes from motion and cuts, not from pulling text away early. Each scene says one thing in a few words. Any line the viewer is meant to read stays fully visible and settled long enough to read it (roughly 0.3s per word), counted from when the whole line is on screen. Text that's only texture doesn't need to be read, but stays legible enough to show what it is: a spotlight on one line of real output dims the rest without hiding it.
+- **Readable.** Pace comes from motion and cuts, not from pulling text away early. Each scene says one thing in a few words. Any line the viewer is meant to read stays fully visible and settled long enough to read it (roughly 0.3s per word), counted from when the whole line is on screen and the scene's earlier lines are read. Step 3's checker tests this. Text that's only texture doesn't need to be read, but stays legible enough to show what it is: a spotlight on one line of real output dims the rest without hiding it.
 - **Make it alive.** Things that appear one by one, simulated clicks, swipes, and typing beat static slides.
 - **Funny earns its place.** Humor comes from the project's own absurdity, not from trying.
 - **Every frame postable.** Any frozen frame should be worth sharing.
@@ -92,15 +92,15 @@ Then show the user `brag-plan.md` and the format, and wait for their approval. U
 
 Presets are defaults; freeform direction ("fake Series A launch from 2016") refines or overrides them.
 
-| Tone | Feel | Pacing / transitions |
+| Tone | Feel | Pacing and look |
 |---|---|---|
-| `default` | Punchy, playful, clean | 4–5 scenes; soft transitions |
-| `polished` | Serious, elegant, restrained | 3–4 scenes, long holds; soft fades |
-| `yc-parody` | Deadpan startup launch, played straight | 4–5 scenes, one claim each; hard cuts |
-| `chaotic` | FAST, LOUD, ALL CAPS | 6–8 scenes, some under 2s; flash/zoom cuts |
-| `deadpan` | Calm, dry, nothing is a joke | 3–4 scenes, big empty space; slow fades |
-| `cinematic` | Trailer-scale, epic claims | 4–5 scenes, big type; dramatic wipes |
-| `app-store` | Clean feature cards | 4–6 scenes; smooth slides |
+| `default` | Punchy, playful, clean | Soft transitions |
+| `polished` | Serious, elegant, restrained | Long holds; soft fades |
+| `yc-parody` | Deadpan startup launch, played straight | One claim per scene; hard cuts |
+| `chaotic` | FAST, LOUD, ALL CAPS | Flash/zoom cuts, some under 2s |
+| `deadpan` | Calm, dry, nothing is a joke | Big empty space; slow fades |
+| `cinematic` | Trailer-scale, epic claims | Big type; dramatic wipes |
+| `app-store` | Clean feature cards | Smooth slides |
 
 ## Sound
 
@@ -112,11 +112,11 @@ Build it with whatever works on this machine. If you draw the video in a browser
 
 Write a pacing timeline, one beat per scene, from the same data that drives the render. Before each full render, run `python3 <this skill's directory>/scripts/check_pacing.py <timeline.json>`, and lengthen scenes or cut words until it exits 0. Its `--help` describes the format.
 
-Before the full render, look at stills from every scene *and* from mid-transition, and fix overflow, collisions, and low contrast. Stills cannot show shake, so for each camera move, track one element's position across consecutive frames, and fix any move where the element jumps or reverses. A plain crossfade between two busy layouts makes a muddy double exposure; stagger it (old content out, then new content in) or dip through the background. Then render each video as `brag-<feature>.mp4`.
+Before the full render, look at stills from every scene *and* from mid-transition, and fix overflow, collisions, and low contrast. Stills cannot show shake, so for each camera move, track one element's position across consecutive frames, and fix any move where the element jumps or reverses. A plain crossfade between two busy layouts makes a muddy double exposure; stagger it (old content out, then new content in) or dip through the background. Then render each video as `brag-<feature>.mp4`, or `brag.mp4` for one combined video.
 
 ## 4. Deliver
 
-- **Poster:** pull each video's strongest *settled* frame (text fully in, not mid-transition) to `brag-<feature>.jpg`, and bake it in as frame 0 of that video so every platform's thumbnail shows it. Replace frame 0 rather than adding a frame, so the duration and audio sync stay the same.
+- **Poster:** pull each video's strongest *settled* frame (text fully in, not mid-transition) to a `.jpg` with the video's name, and bake it in as frame 0 of that video so every platform's thumbnail shows it. Replace frame 0 rather than adding a frame, so the duration and audio sync stay the same.
 - **`share-copy.txt`:** for each video, 1–3 sentences, postable as-is, specific, matching the tone. No "excited to share."
 - **`credits.txt`:** the source and license of every stock clip, when a video uses any.
-- **Tell the user** where the video and copy are, give one sentence on the creative angle, and offer to re-roll a scene or try another tone.
+- **Tell the user** where the videos and copy are, give one sentence on the creative angle, and offer to re-roll a scene or try another tone.
