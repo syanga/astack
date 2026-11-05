@@ -12,7 +12,7 @@ Follow [hillclimb](../hillclimb/SKILL.md) with a council vote as its metric. The
 
 This replaces the workload, repro, and metric in hillclimb step 1, and the measurement harness in step 2.
 
-1. Write the judge brief from the request: what the judges assess, for example the design quality of these screens.
+1. Write the judge brief from the request: what the judges assess, for example the design quality of these screens. List any fixed constraints the work cannot change, such as brand colors, and tell the judges not to count them as flaws.
 2. Choose the input. For visual work, write a capture script that takes the same screenshots every round, for example through [t3-preview](../t3-preview/SKILL.md). For text, the judges read the files. Add any reference examples the user supplies, such as competitor screenshots.
 3. Ask the user, with the question tool, to approve the brief and, for visual work, the screen list. When the user delegated this pick, record both with the task's other decisions instead. Then freeze the brief, capture script, and references.
 
