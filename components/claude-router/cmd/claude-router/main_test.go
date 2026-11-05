@@ -30,28 +30,53 @@ func TestLoginRefusesAnAccountIDOutsideTheAuthDirectory(t *testing.T) {
 
 const pastedCallback = "http://localhost:54545/callback?code=c0de&state=5tate"
 
+func within(t *testing.T, f func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f()
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sign-in still waits after 5 s")
+	}
+}
+
+func answerOnce(answer *string) func(func(string) (string, error)) error {
+	return func(prompt func(string) (string, error)) error {
+		var err error
+		*answer, err = prompt("Paste the Claude callback URL (or press Enter to keep waiting): ")
+		return err
+	}
+}
+
 func TestABlankEnterLeavesTheCallbackPromptWaitingForThePastedURL(t *testing.T) {
 	stdin, typing := io.Pipe()
 	defer typing.Close()
-	prompt := newCallbackPrompt(readLines(stdin), io.Discard)
 	go func() {
 		fmt.Fprintln(typing)
 		fmt.Fprintln(typing, "  "+pastedCallback+"  ")
 	}()
+	var answer string
+	var err error
 
-	answer, err := prompt.ask("Paste the Claude callback URL (or press Enter to keep waiting): ")
+	within(t, func() { err = awaitCallback(readLines(stdin), io.Discard, answerOnce(&answer)) })
 
 	if answer != pastedCallback || err != nil {
-		t.Fatalf("after Enter, then the pasted callback URL, the prompt answered %q, %v; want the URL", answer, err)
+		t.Fatalf("after Enter, then the pasted callback URL, the SDK got %q, %v; want the URL", answer, err)
 	}
 }
 
-type promptScreen chan struct{}
+type promptSignal chan struct{}
 
-func (s promptScreen) Write(p []byte) (int, error) {
-	select {
-	case s <- struct{}{}:
-	default:
+func (s promptSignal) Write(p []byte) (int, error) {
+	if !bytes.HasSuffix(p, []byte("\n")) {
+		select {
+		case s <- struct{}{}:
+		default:
+		}
 	}
 	return len(p), nil
 }
@@ -60,30 +85,37 @@ func TestAnAutomaticCallbackEndsTheWaitingPromptAndLeavesTheNextLineForTheNextSi
 	stdin, typing := io.Pipe()
 	defer typing.Close()
 	lines := readLines(stdin)
-	shown := make(promptScreen, 1)
-	first := newCallbackPrompt(lines, shown)
-	firstAnswer := make(chan string, 1)
-	go func() {
-		answer, _ := first.ask("")
-		firstAnswer <- answer
-	}()
-	<-shown
+	prompted := make(promptSignal, 1)
+	var first, second error
+	var answer string
 
-	first.end()
-
-	select {
-	case answer := <-firstAnswer:
-		if answer != "" {
-			t.Fatalf("the prompt of the sign-in that ended answered %q, want no answer", answer)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the prompt still waits for input after its sign-in ended")
-	}
-	second := newCallbackPrompt(lines, io.Discard)
+	within(t, func() {
+		first = awaitCallback(lines, prompted, func(prompt func(string) (string, error)) error {
+			go prompt("")
+			<-prompted
+			return nil
+		})
+	})
 	go fmt.Fprintln(typing, pastedCallback)
-	answer, err := second.ask("")
-	if answer != pastedCallback || err != nil {
-		t.Fatalf("the next sign-in's prompt answered %q, %v; want the URL pasted after the first sign-in ended", answer, err)
+	within(t, func() { second = awaitCallback(lines, io.Discard, answerOnce(&answer)) })
+
+	if first != nil || second != nil || answer != pastedCallback {
+		t.Fatalf("sign-ins returned %v and %v, and the second SDK got %q; want the URL pasted after the first sign-in ended", first, second, answer)
+	}
+}
+
+func TestASignInThatTimesOutSaysTheAttemptEndedAndHowToRetry(t *testing.T) {
+	sdkTimeout := errors.New("callback_timeout: Timeout waiting for OAuth callback (caused by: timeout waiting for OAuth callback)")
+	var out bytes.Buffer
+
+	reportError(&out, "account", awaitCallback(readLines(strings.NewReader("")), io.Discard,
+		func(func(string) (string, error)) error { return sdkTimeout }))
+
+	want := "claude-router: account: sign-in timed out; this attempt ended\n" +
+		"          its sign-in URL and callback address no longer work\n" +
+		"next      run the same command again and open the new sign-in URL\n"
+	if out.String() != want {
+		t.Fatalf("timeout report\n%s\nwant\n%s", out.String(), want)
 	}
 }
 

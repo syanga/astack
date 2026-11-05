@@ -261,19 +261,13 @@ func enroll(state, account string, noBrowser bool) (kept int, published bool, er
 	mgr := sdkauth.NewManager(store, sdkauth.NewClaudeAuthenticator())
 	cfg := &config.Config{}
 	cfg.AuthDir = staging
-	prompt := newCallbackPrompt(stdinLines(), os.Stderr)
-	opts := &sdkauth.LoginOptions{NoBrowser: noBrowser, Prompt: prompt.ask}
-	err = showingOnlySignInURLs(func() error {
-		_, _, err := mgr.Login(context.Background(), "claude", cfg, opts)
-		return err
+	err = awaitCallback(stdinLines(), os.Stderr, func(prompt func(string) (string, error)) error {
+		opts := &sdkauth.LoginOptions{NoBrowser: noBrowser, Prompt: prompt}
+		return showingOnlySignInURLs(func() error {
+			_, _, err := mgr.Login(context.Background(), "claude", cfg, opts)
+			return err
+		})
 	})
-	prompt.end()
-	// The SDK's timeout error type is internal to the SDK, so match its name.
-	if err != nil && strings.Contains(err.Error(), "callback_timeout") {
-		return 0, false, nextError{err: errors.New("sign-in timed out; this attempt ended"),
-			detail: "its sign-in URL and callback address no longer work",
-			next:   "run the same command again and open the new sign-in URL"}
-	}
 	if err != nil {
 		return 0, false, err
 	}
@@ -319,29 +313,39 @@ func readLines(r io.Reader) <-chan string {
 	return lines
 }
 
+func awaitCallback(lines <-chan string, out io.Writer, login func(prompt func(string) (string, error)) error) error {
+	fmt.Fprint(out, "After sign-in, the browser opens an http://localhost address. If that page\n"+
+		"does not load, copy the full address and paste it at the prompt below.\n")
+	prompt := &callbackPrompt{lines: lines, out: out, ended: make(chan struct{})}
+	err := login(prompt.ask)
+	prompt.end()
+	// The SDK's timeout error type is internal to the SDK, so match its name.
+	if err != nil && strings.Contains(err.Error(), "callback_timeout") {
+		return nextError{err: errors.New("sign-in timed out; this attempt ended"),
+			detail: "its sign-in URL and callback address no longer work",
+			next:   "run the same command again and open the new sign-in URL"}
+	}
+	return err
+}
+
+const pasteHere = "Paste the address here, then press Enter: "
+
 var errSignInEnded = errors.New("sign-in ended")
 
-// callbackPrompt is the SDK's manual-callback prompt. The SDK calls it once,
-// 15 s after it prints the sign-in URL, and ends the sign-in on its first
-// answer, so ask answers only with a non-blank line.
+// callbackPrompt answers the SDK's LoginOptions.Prompt. The SDK calls Prompt
+// once, 15 s after it prints the sign-in URL, and never asks again, so ask
+// answers only with a non-blank line.
 type callbackPrompt struct {
 	lines <-chan string
 	out   io.Writer
 	ended chan struct{}
 
 	mu      sync.Mutex
-	done    bool
 	waiting bool
 }
 
-func newCallbackPrompt(lines <-chan string, out io.Writer) *callbackPrompt {
-	return &callbackPrompt{lines: lines, out: out, ended: make(chan struct{})}
-}
-
 func (p *callbackPrompt) ask(string) (string, error) {
-	if !p.show("After you sign in, the browser opens an address that starts with http://localhost.\n" +
-		"That page can fail to load. Copy the full address from the address bar anyway.\n" +
-		"Paste the address here, then press Enter: ") {
+	if !p.showWhileOpen(pasteHere) {
 		return "", errSignInEnded
 	}
 	lines := p.lines
@@ -352,26 +356,25 @@ func (p *callbackPrompt) ask(string) (string, error) {
 		case l, ok := <-lines:
 			if !ok {
 				lines = nil
-				continue
-			}
-			if l = strings.TrimSpace(l); l != "" {
+			} else if l = strings.TrimSpace(l); l != "" {
 				p.mu.Lock()
 				p.waiting = false
 				p.mu.Unlock()
 				return l, nil
-			}
-			if !p.show("Nothing pasted. Paste the address here, then press Enter: ") {
+			} else if !p.showWhileOpen("Nothing pasted. " + pasteHere) {
 				return "", errSignInEnded
 			}
 		}
 	}
 }
 
-func (p *callbackPrompt) show(text string) bool {
+func (p *callbackPrompt) showWhileOpen(text string) (open bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.done {
+	select {
+	case <-p.ended:
 		return false
+	default:
 	}
 	fmt.Fprint(p.out, text)
 	p.waiting = true
@@ -384,7 +387,6 @@ func (p *callbackPrompt) end() {
 	if p.waiting {
 		fmt.Fprintln(p.out)
 	}
-	p.done = true
 	close(p.ended)
 }
 
