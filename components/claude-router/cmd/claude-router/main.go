@@ -346,7 +346,7 @@ type callbackPrompt struct {
 }
 
 func (p *callbackPrompt) ask(string) (string, error) {
-	if !p.whileOpen(func() { p.asking.Add(1); fmt.Fprint(p.out, pasteHere) }) {
+	if !p.ifOpen(func() { p.asking.Add(1); fmt.Fprint(p.out, pasteHere) }) {
 		return "", errSignInEnded
 	}
 	defer p.asking.Done()
@@ -360,14 +360,14 @@ func (p *callbackPrompt) ask(string) (string, error) {
 				lines = nil
 			} else if l = strings.TrimSpace(l); l != "" {
 				return l, nil
-			} else if !p.whileOpen(func() { fmt.Fprint(p.out, "Nothing pasted. "+pasteHere) }) {
+			} else if !p.ifOpen(func() { fmt.Fprint(p.out, "Nothing pasted. "+pasteHere) }) {
 				return "", errSignInEnded
 			}
 		}
 	}
 }
 
-func (p *callbackPrompt) whileOpen(f func()) (open bool) {
+func (p *callbackPrompt) ifOpen(f func()) (open bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	select {
@@ -380,7 +380,7 @@ func (p *callbackPrompt) whileOpen(f func()) (open bool) {
 }
 
 func (p *callbackPrompt) end() {
-	p.whileOpen(func() { close(p.ended) })
+	p.ifOpen(func() { close(p.ended) })
 	p.asking.Wait()
 }
 
