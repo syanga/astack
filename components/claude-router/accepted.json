@@ -1,7 +1,7 @@
 {
- "head": "94d348486afc3ab25287852b1ea6cc98b939e537",
- "code_sha256": "eb77ad7e9dc1dd0375f3e0669d8b1fcbb31e32c8fbcce55b66dba1cedc1f24e5",
- "binary_sha256": "7e097a28ef8c03ee63ebfd389836a64a32f99caede83c5ba605798e733505a39",
+ "head": "e16ff141c5ff2fca7e059811763986766532f817",
+ "code_sha256": "c05a83e0fccbc0635d4062ad123727fe571d2fb170a5c9ef5f0379a9e3f64434",
+ "binary_sha256": "9f2825598af32a4bed8bed9184559c5b03ac0495b9c26c685744bb6f749660a8",
  "helpers_sha256": "4bc4da547f346e0cf0ad12832eccfdcb972257e91876189234cab1e424400243",
  "sdk": "v8.0.11",
  "go": "go1.27.3",
@@ -10,29 +10,61 @@
   "claude_code": "2.1.318"
  },
  "result": "pass",
- "scope": "PR119 status display for plans without a 5-hour limit, real-account new/resume/restart checks; unchanged historical scenarios are references and were not rerun",
- "evidence_root": "/Users/alan/.local/state/astack/claude-router-lanes/pr119/evidence",
+ "scope": "PR127 sign-in callback prompt: paste guide, blank Enter then paste, an automatic callback while the prompt waits, and the 5-minute timeout, through the lane binary's login -no-browser against the real SDK with a callback whose state does not match, so no token exchange ran; real-account new/resume/restart checks; a real-account sign-in was not run; unchanged historical scenarios are references and were not rerun",
+ "evidence_root": "/Users/alan/.local/state/astack/claude-router-lanes/pr127/evidence",
  "matrix": [
   {
    "scenario": "work token is outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 479
+    "expires_in_min": 401
    }
   },
   {
    "scenario": "personal token is outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 425
+    "expires_in_min": 347
    }
   },
   {
-   "scenario": "Lane code and executable match the build at 94d3484",
+   "scenario": "The paste guide prints before the sign-in URL and every router line fits 80 columns",
    "status": "pass",
    "detail": {
-    "code_sha256": "eb77ad7e9dc1dd0375f3e0669d8b1fcbb31e32c8fbcce55b66dba1cedc1f24e5",
-    "binary_sha256": "7e097a28ef8c03ee63ebfd389836a64a32f99caede83c5ba605798e733505a39",
+    "guide_line": 1,
+    "url_line": 3,
+    "widest": 77
+   }
+  },
+  {
+   "scenario": "The SDK prompts for the callback 15 s after it prints the URL",
+   "status": "pass",
+   "detail": {
+    "after_s": 15.4
+   }
+  },
+  {
+   "scenario": "After a blank Enter, the pasted callback reaches the SDK's state check",
+   "status": "pass",
+   "detail": {
+    "exit": 1,
+    "after_s": 15.7
+   }
+  },
+  {
+   "scenario": "A callback to the SDK's own server while the prompt waits ends the sign-in, with the error on its own line",
+   "status": "pass",
+   "detail": {
+    "exit": 1,
+    "after_s": 15.7
+   }
+  },
+  {
+   "scenario": "Lane code and executable match the build at e16ff14",
+   "status": "pass",
+   "detail": {
+    "code_sha256": "c05a83e0fccbc0635d4062ad123727fe571d2fb170a5c9ef5f0379a9e3f64434",
+    "binary_sha256": "9f2825598af32a4bed8bed9184559c5b03ac0495b9c26c685744bb6f749660a8",
     "sdk": "v8.0.11"
    }
   },
@@ -51,28 +83,6 @@
     "state": "disabled",
     "source": "settings"
    }
-  },
-  {
-   "scenario": "work's usage reading reports no five_hour window",
-   "status": "pass",
-   "detail": {
-    "windows": [
-     "weekly",
-     "weekly"
-    ]
-   }
-  },
-  {
-   "scenario": "Status shows 5h none for work, the plan without a 5-hour limit",
-   "status": "pass",
-   "detail": {
-    "line": "work      ready        5h none         wk 44% (Fri)  cap 1  0/0 active  cache --"
-   }
-  },
-  {
-   "scenario": "Status -v says no limit on this plan",
-   "status": "pass",
-   "detail": null
   },
   {
    "scenario": "new receives a routed 200",
@@ -117,8 +127,8 @@
    "scenario": "Identity is the same at the start and the end",
    "status": "pass",
    "detail": {
-    "code_sha256": "eb77ad7e9dc1dd0375f3e0669d8b1fcbb31e32c8fbcce55b66dba1cedc1f24e5",
-    "binary_sha256": "7e097a28ef8c03ee63ebfd389836a64a32f99caede83c5ba605798e733505a39",
+    "code_sha256": "c05a83e0fccbc0635d4062ad123727fe571d2fb170a5c9ef5f0379a9e3f64434",
+    "binary_sha256": "9f2825598af32a4bed8bed9184559c5b03ac0495b9c26c685744bb6f749660a8",
     "sdk": "v8.0.11"
    }
   },
@@ -137,28 +147,37 @@
    "status": "pass",
    "detail": {
     "attempts": 4,
-    "input": 86010,
-    "output": 289
+    "input": 86031,
+    "output": 162
+   }
+  },
+  {
+   "scenario": "With no answer, the sign-in times out after 5 minutes and says to retry with a new sign-in URL",
+   "status": "pass",
+   "detail": {
+    "prompted": true,
+    "exit": 1,
+    "after_s": 300.6
    }
   },
   {
    "scenario": "Evidence contains no copied access token",
    "status": "pass",
    "detail": {
-    "files_scanned": 10,
+    "files_scanned": 11,
     "hits": []
    }
   }
  ],
  "open": [],
  "prior_acceptance": {
-  "record": "components/claude-router/accepted.json at 839fb98",
+  "record": "components/claude-router/accepted.json at 8977cdb",
   "status": "historical reference, not rerun at this code"
  },
  "offline_verification": {
-  "head": "94d348486afc3ab25287852b1ea6cc98b939e537",
+  "head": "e16ff141c5ff2fca7e059811763986766532f817",
   "go_test_race": "pass",
-  "evidence": "/Users/alan/.local/state/astack/claude-router-lanes/pr119/evidence/go-test.txt"
+  "evidence": "/Users/alan/.local/state/astack/claude-router-lanes/pr127/evidence/go-test.txt"
  },
- "written": "2026-11-04T08:14:47.623134+00:00"
+ "written": "2026-11-05T01:38:22.214339+00:00"
 }
