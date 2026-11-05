@@ -204,7 +204,7 @@ func TestAccountAddOnSystemdStopsAndStartsItsOwnUnit(t *testing.T) {
 	if string(log) != "start\nstop\nstart\n" || !strings.Contains(l.shown(out), "start     router running on 127.0.0.1:18787 (systemd)\n") {
 		t.Fatalf("systemctl log %q, output\n%s", log, l.shown(out))
 	}
-	if !strings.Contains(out, "login     school: open the URL below and sign in\n") {
+	if !strings.Contains(out, "login     school: open the URL below in your browser and sign in\n") {
 		t.Fatalf("output\n%s\nwant the -no-browser sign-in line", out)
 	}
 	if _, err := os.Stat(filepath.Join(l.jobs, l.in.Name+".enabled")); err != nil {

@@ -136,7 +136,7 @@ func signInNew(in installation, name string, noBrowser bool) error {
 
 func signInLines(out io.Writer, name string, noBrowser bool) {
 	if noBrowser {
-		line(out, "login", name+": open the URL below and sign in")
+		line(out, "login", name+": open the URL below in your browser and sign in")
 	} else {
 		line(out, "login", name+": sign in in the browser window that opened")
 	}

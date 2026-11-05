@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,6 +25,65 @@ func TestLoginRefusesAnAccountIDOutsideTheAuthDirectory(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(state, "assignments")); !os.IsNotExist(statErr) {
 		t.Fatal("login touched the state directory before refusing the account ID")
+	}
+}
+
+const pastedCallback = "http://localhost:54545/callback?code=c0de&state=5tate"
+
+func TestABlankEnterLeavesTheCallbackPromptWaitingForThePastedURL(t *testing.T) {
+	stdin, typing := io.Pipe()
+	defer typing.Close()
+	prompt := newCallbackPrompt(readLines(stdin), io.Discard)
+	go func() {
+		fmt.Fprintln(typing)
+		fmt.Fprintln(typing, "  "+pastedCallback+"  ")
+	}()
+
+	answer, err := prompt.ask("Paste the Claude callback URL (or press Enter to keep waiting): ")
+
+	if answer != pastedCallback || err != nil {
+		t.Fatalf("after Enter, then the pasted callback URL, the prompt answered %q, %v; want the URL", answer, err)
+	}
+}
+
+type promptScreen chan struct{}
+
+func (s promptScreen) Write(p []byte) (int, error) {
+	select {
+	case s <- struct{}{}:
+	default:
+	}
+	return len(p), nil
+}
+
+func TestAnAutomaticCallbackEndsTheWaitingPromptAndLeavesTheNextLineForTheNextSignIn(t *testing.T) {
+	stdin, typing := io.Pipe()
+	defer typing.Close()
+	lines := readLines(stdin)
+	shown := make(promptScreen, 1)
+	first := newCallbackPrompt(lines, shown)
+	firstAnswer := make(chan string, 1)
+	go func() {
+		answer, _ := first.ask("")
+		firstAnswer <- answer
+	}()
+	<-shown
+
+	first.end()
+
+	select {
+	case answer := <-firstAnswer:
+		if answer != "" {
+			t.Fatalf("the prompt of the sign-in that ended answered %q, want no answer", answer)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the prompt still waits for input after its sign-in ended")
+	}
+	second := newCallbackPrompt(lines, io.Discard)
+	go fmt.Fprintln(typing, pastedCallback)
+	answer, err := second.ask("")
+	if answer != pastedCallback || err != nil {
+		t.Fatalf("the next sign-in's prompt answered %q, %v; want the URL pasted after the first sign-in ended", answer, err)
 	}
 }
 
