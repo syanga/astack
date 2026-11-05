@@ -338,16 +338,18 @@ var errSignInEnded = errors.New("sign-in ended")
 // once, 15 s after it opens the browser or prints the sign-in URL, and never
 // asks again, so ask answers only with a non-blank line.
 type callbackPrompt struct {
-	lines <-chan string
-	out   io.Writer
-	mu    sync.Mutex
-	ended chan struct{}
+	lines  <-chan string
+	out    io.Writer
+	mu     sync.Mutex
+	ended  chan struct{}
+	asking sync.WaitGroup
 }
 
 func (p *callbackPrompt) ask(string) (string, error) {
-	if !p.showWhileOpen(pasteHere) {
+	if !p.whileOpen(func() { p.asking.Add(1); fmt.Fprint(p.out, pasteHere) }) {
 		return "", errSignInEnded
 	}
+	defer p.asking.Done()
 	lines := p.lines
 	for {
 		select {
@@ -358,29 +360,28 @@ func (p *callbackPrompt) ask(string) (string, error) {
 				lines = nil
 			} else if l = strings.TrimSpace(l); l != "" {
 				return l, nil
-			} else if !p.showWhileOpen("Nothing pasted. " + pasteHere) {
+			} else if !p.whileOpen(func() { fmt.Fprint(p.out, "Nothing pasted. "+pasteHere) }) {
 				return "", errSignInEnded
 			}
 		}
 	}
 }
 
-func (p *callbackPrompt) showWhileOpen(text string) (open bool) {
+func (p *callbackPrompt) whileOpen(f func()) (open bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	select {
 	case <-p.ended:
 		return false
 	default:
+		f()
+		return true
 	}
-	fmt.Fprint(p.out, text)
-	return true
 }
 
 func (p *callbackPrompt) end() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	close(p.ended)
+	p.whileOpen(func() { close(p.ended) })
+	p.asking.Wait()
 }
 
 // The SDK prints its progress and SSH tunnel instructions for remote servers
