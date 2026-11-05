@@ -313,7 +313,9 @@ func readLines(r io.Reader) <-chan string {
 	return lines
 }
 
-func awaitCallback(lines <-chan string, out io.Writer, login func(prompt func(string) (string, error)) error) error {
+type sdkLogin func(prompt func(string) (string, error)) error
+
+func awaitCallback(lines <-chan string, out io.Writer, login sdkLogin) error {
 	fmt.Fprint(out, "After sign-in, the browser opens an http://localhost address. If that page\n"+
 		"does not load, copy the full address and paste it at the prompt below.\n")
 	prompt := &callbackPrompt{lines: lines, out: out, ended: make(chan struct{})}
@@ -328,20 +330,18 @@ func awaitCallback(lines <-chan string, out io.Writer, login func(prompt func(st
 	return err
 }
 
-const pasteHere = "Paste the address here, then press Enter: "
+const pasteHere = "Paste the address here, then press Enter:\n"
 
 var errSignInEnded = errors.New("sign-in ended")
 
 // callbackPrompt answers the SDK's LoginOptions.Prompt. The SDK calls Prompt
-// once, 15 s after it prints the sign-in URL, and never asks again, so ask
-// answers only with a non-blank line.
+// once, 15 s after it opens the browser or prints the sign-in URL, and never
+// asks again, so ask answers only with a non-blank line.
 type callbackPrompt struct {
 	lines <-chan string
 	out   io.Writer
+	mu    sync.Mutex
 	ended chan struct{}
-
-	mu      sync.Mutex
-	waiting bool
 }
 
 func (p *callbackPrompt) ask(string) (string, error) {
@@ -357,9 +357,6 @@ func (p *callbackPrompt) ask(string) (string, error) {
 			if !ok {
 				lines = nil
 			} else if l = strings.TrimSpace(l); l != "" {
-				p.mu.Lock()
-				p.waiting = false
-				p.mu.Unlock()
 				return l, nil
 			} else if !p.showWhileOpen("Nothing pasted. " + pasteHere) {
 				return "", errSignInEnded
@@ -377,16 +374,12 @@ func (p *callbackPrompt) showWhileOpen(text string) (open bool) {
 	default:
 	}
 	fmt.Fprint(p.out, text)
-	p.waiting = true
 	return true
 }
 
 func (p *callbackPrompt) end() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.waiting {
-		fmt.Fprintln(p.out)
-	}
 	close(p.ended)
 }
 

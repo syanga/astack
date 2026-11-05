@@ -30,7 +30,7 @@ func TestLoginRefusesAnAccountIDOutsideTheAuthDirectory(t *testing.T) {
 
 const pastedCallback = "http://localhost:54545/callback?code=c0de&state=5tate"
 
-func within(t *testing.T, f func()) {
+func withinFiveSeconds(t *testing.T, f func()) {
 	t.Helper()
 	done := make(chan struct{})
 	go func() {
@@ -44,7 +44,7 @@ func within(t *testing.T, f func()) {
 	}
 }
 
-func answerOnce(answer *string) func(func(string) (string, error)) error {
+func answerOnce(answer *string) sdkLogin {
 	return func(prompt func(string) (string, error)) error {
 		var err error
 		*answer, err = prompt("Paste the Claude callback URL (or press Enter to keep waiting): ")
@@ -62,21 +62,19 @@ func TestABlankEnterLeavesTheCallbackPromptWaitingForThePastedURL(t *testing.T) 
 	var answer string
 	var err error
 
-	within(t, func() { err = awaitCallback(readLines(stdin), io.Discard, answerOnce(&answer)) })
+	withinFiveSeconds(t, func() { err = awaitCallback(readLines(stdin), io.Discard, answerOnce(&answer)) })
 
 	if answer != pastedCallback || err != nil {
 		t.Fatalf("after Enter, then the pasted callback URL, the SDK got %q, %v; want the URL", answer, err)
 	}
 }
 
-type promptSignal chan struct{}
+type writeSignal chan struct{}
 
-func (s promptSignal) Write(p []byte) (int, error) {
-	if !bytes.HasSuffix(p, []byte("\n")) {
-		select {
-		case s <- struct{}{}:
-		default:
-		}
+func (s writeSignal) Write(p []byte) (int, error) {
+	select {
+	case s <- struct{}{}:
+	default:
 	}
 	return len(p), nil
 }
@@ -85,19 +83,23 @@ func TestAnAutomaticCallbackEndsTheWaitingPromptAndLeavesTheNextLineForTheNextSi
 	stdin, typing := io.Pipe()
 	defer typing.Close()
 	lines := readLines(stdin)
-	prompted := make(promptSignal, 1)
+	wrote := make(writeSignal, 1)
 	var first, second error
 	var answer string
 
-	within(t, func() {
-		first = awaitCallback(lines, prompted, func(prompt func(string) (string, error)) error {
+	withinFiveSeconds(t, func() {
+		first = awaitCallback(lines, wrote, func(prompt func(string) (string, error)) error {
+			select {
+			case <-wrote:
+			default:
+			}
 			go prompt("")
-			<-prompted
+			<-wrote
 			return nil
 		})
 	})
 	go fmt.Fprintln(typing, pastedCallback)
-	within(t, func() { second = awaitCallback(lines, io.Discard, answerOnce(&answer)) })
+	withinFiveSeconds(t, func() { second = awaitCallback(lines, io.Discard, answerOnce(&answer)) })
 
 	if first != nil || second != nil || answer != pastedCallback {
 		t.Fatalf("sign-ins returned %v and %v, and the second SDK got %q; want the URL pasted after the first sign-in ended", first, second, answer)
