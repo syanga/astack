@@ -39,6 +39,6 @@ Keep logs, SHA lists, exhaustive file inventories, and bulky evidence in linked 
 
 Create or update the PR using a file for the body. Confirm that it targets the intended base and is open for review, not a draft. In T3 Code, link it with `link_pull_request` when available.
 
-Finish the requested phase or stack first. Then, unless the user declines review or a brief assigns it to another owner, run [review-pr](../review-pr/SKILL.md) in fix-and-review mode on each PR you opened or pushed to, so its record posts on the PR. When `gh repo view <base repository> --json viewerPermission` reports anything other than `WRITE`, `MAINTAIN`, or `ADMIN`, keep the record in the conversation. When the user explicitly requests hardening, run [harden-pr](../harden-pr/SKILL.md) instead.
+Finish the requested phase or stack first. Then run [review-pr](../review-pr/SKILL.md) on each PR you opened or pushed to, unless the user declines review. When the branch still contains the commit of the PR's last review-pr record, review only the commits after it. When the user explicitly requests hardening, run [harden-pr](../harden-pr/SKILL.md) instead, unless a brief assigns hardening to another owner.
 
 Return the URL, a brief verification summary, the review outcome, and any unresolved findings or limitations.

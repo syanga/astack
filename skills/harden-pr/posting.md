@@ -1,6 +1,6 @@
 # Post the review
 
-Invoking review-pr or harden-pr authorizes publication on an existing PR unless the user or the calling workflow restricts it, such as "conversation only" or "do not post". Otherwise, report in the conversation.
+Invoking review-pr or harden-pr authorizes publication on an existing PR unless the user restricts it, such as "conversation only" or "do not post". Otherwise, report in the conversation.
 
 At the end of each invocation, post one informational GitHub review with event `COMMENT`, even when no findings remain. Combine internal repair passes in that record. A later invocation adds a new record.
 
