@@ -9,7 +9,7 @@ Check whether the branch already has an open PR and update it when it does. Revi
 
 Before opening a new PR, rebase onto the latest default branch, or its parent's current tip for a stack child. When an orchestrate brief forbids rebasing, skip the rebase and state in your report how far the branch trails its target. Independent work and stack roots target the default branch. Each child targets its parent branch. Start substantial work on a new stack from the latest default branch.
 
-Apply [no-comments](../no-comments/SKILL.md) to the code diff before review. Follow [test results](test-results.md) to reuse verification, run the required checks, and publish the results on the PR.
+Apply [no-comments](../no-comments/SKILL.md) to the code diff before review. Follow [test results](test-results.md) to reuse verification, run the suites that cover the change, and publish the results on the PR.
 
 Before pushing, install the Gitleaks hook from the repository root:
 
@@ -25,7 +25,7 @@ Follow the repository's title convention, using recent merged PRs and Git histor
 
 The description is a briefing for a reviewer who has the diff but has not seen this conversation. Explain why the change exists, what is out of scope when that matters, and how you verified it. Keep it readable in under a minute and within about 40 lines, since it may become the squash commit body.
 
-Use these sections in this order by default. Omit sections that have nothing useful to say. A small PR can use a brief description without headings.
+Use these sections in this order by default. Include `## Verification` in every PR. Omit other sections that have nothing useful to say. A small PR can put the rest in brief prose without headings.
 
 - `## Why`. State the problem or goal and the approach in one or two short paragraphs. For a bug fix, explain what went wrong and what happens now.
 - `## Scope`. Name the symbols and paths that define the boundary, including both sides of a rename or retarget. State what is in and out when that distinction matters.
@@ -37,6 +37,8 @@ When screenshots or recordings demonstrate the change, upload them as GitHub att
 
 Keep logs, SHA lists, exhaustive file inventories, and bulky evidence in linked artifacts. End with the model and harness attribution. Use commit bodies to explain what the subject leaves unsaid.
 
-Create or update the PR using a file for the body. Confirm that it targets the intended base and is open for review, not a draft. In T3 Code, link it with `link_pull_request` when available. Return the URL, a brief verification summary, and any unresolved findings or limitations.
+Create or update the PR using a file for the body. Confirm that it targets the intended base and is open for review, not a draft. In T3 Code, link it with `link_pull_request` when available.
 
-Finish the requested phase or stack first. If the user requested a review, use [review-pr](../review-pr/SKILL.md). Use [harden-pr](../harden-pr/SKILL.md) only when the user explicitly requests hardening.
+Finish the requested phase or stack first. Then, unless the user declines review or a brief assigns it to another owner, run [review-pr](../review-pr/SKILL.md) in fix-and-review mode on each PR you opened or pushed to, so its record posts on the PR. When `gh repo view <base repository> --json viewerPermission` reports anything other than `WRITE`, `MAINTAIN`, or `ADMIN`, keep the record in the conversation. When the user explicitly requests hardening, run [harden-pr](../harden-pr/SKILL.md) instead.
+
+Return the URL, a brief verification summary, the review outcome, and any unresolved findings or limitations.
