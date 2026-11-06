@@ -39,6 +39,6 @@ Keep logs, SHA lists, exhaustive file inventories, and bulky evidence in linked 
 
 Create or update the PR using a file for the body. Confirm that it targets the intended base and is open for review, not a draft. In T3 Code, link it with `link_pull_request` when available.
 
-Finish the requested phase or stack first. Then run [review-pr](../review-pr/SKILL.md) on each PR you opened or pushed to, unless the user declines review. Use fix-and-review mode when an implementation workflow called open-pr or the user requested repairs, and report-only mode otherwise. When the PR's last complete review-pr record reviewed a commit the branch still contains, pass that commit to review-pr as the fixed point. When the user explicitly requests hardening, run [harden-pr](../harden-pr/SKILL.md) instead, unless a brief assigns hardening to another owner.
+Finish the requested phase or stack first. Then run [review-pr](../review-pr/SKILL.md) on each PR you opened or pushed to, unless the user declines review. Use fix-and-review mode when an implementation workflow invoked open-pr or when the user requested repairs. Otherwise, use report-only mode. When the PR's last complete review-pr record reviewed a commit the branch still contains, pass that commit to review-pr as the fixed point. When the user explicitly requests hardening, run [harden-pr](../harden-pr/SKILL.md) instead, unless a brief assigns hardening to another owner.
 
 Return the URL, a brief verification summary, the review outcome, and any unresolved findings or limitations.

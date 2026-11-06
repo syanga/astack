@@ -2,7 +2,7 @@
 
 Before running tests, check the PR for results that still cover the current code and required checks.
 
-Run the covering suites, which are the suites that cover the change, on the commit you push. Run each through its own command or the test runner's filter. Map each suite to the code it covers using the repository's instructions, CI configuration, and build files. In a repository with one suite, run it whole. In a repository of independent components with their own suites, run the suite of each changed component. Also run the suite of each component that depends on it, directly or transitively.
+Run the covering suites, which are the suites that cover the change, on the code you push. Run each through its own command or the test runner's filter. Map each suite to the code it covers using the repository's instructions, CI configuration, and build files. In a repository with one suite, run it whole. In a repository of independent components with their own suites, run the suite of each changed component. Also run the suite of each component that depends on a changed component, directly or transitively.
 
 Run the full suite when no command or filter selects the covering suites. Also run it when the change touches any of these:
 
