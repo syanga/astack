@@ -31,4 +31,4 @@ Answer questions without editing files, even when the implied change is trivial.
 ## Live systems
 
 * Never touch production, live databases, or daily-driver build/preview channels unless explicitly told to. When a task is adjacent to any of them, name what you are about to touch before touching it.
-* The user pre-approves read-only queries on every database, production included, and the tunnel each one needs. Run each query in a read-only transaction, such as a Postgres session with `default_transaction_read_only=on`.
+* Read-only database queries are an exception. Treat them as explicitly approved on every database, production included, along with the tunnel each query needs. Name the database, then run the query without asking. Query only tables and plain functions, in the database's read-only mode where it has one, such as a Postgres session with `default_transaction_read_only=on` and a `statement_timeout`.
