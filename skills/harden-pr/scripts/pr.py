@@ -7,8 +7,8 @@ locations; review then folds findings into the body and reports that fallback.
 
 A test result is a PR comment whose last line is a hidden JSON record, plus an
 astack/tests commit status that links to it. A record counts only when its
-author also set that status, which needs push access. The status on a commit
-reflects the newest result for each suite on that commit.
+author also set that status. Creating a status needs push access. The status
+on a commit reflects the newest result for each suite on that commit.
 
 Every posted body starts with:
 
@@ -244,7 +244,7 @@ def summarize(pr, threads, reviews, recent, since, now, stuck_minutes=60, pushed
                     "resolved": sum(1 for thread in threads if thread.get("isResolved"))},
         "our_reviews": {"total": len(ours), "on_head": len(on_head),
                         "last_sha": last_sha,
-                        "last_sha_in_pr": last_sha is not None and last_sha in {commit.get("oid") for commit in pr["commits"]},
+                        "last_sha_in_pr": last_sha is not None and pr_has_commit(pr, last_sha),
                         "folded_on_head": any(FOLD_MARK in review.get("body", "") or FOLDED_FINDING.search(review.get("body", ""))
                                               for review in on_head),
                         "folded_act_on": folded_act_on},
@@ -560,7 +560,7 @@ def command_post_tests(args):
         fail("commit {} is not in the PR; post results for a PR commit".format(args.commit))
     if not (gh(["api", "--method", "GET", "repos/{}/{}".format(owner, name)]).get("permissions") or {}).get("push"):
         fail("post-tests needs push access to {}/{} to set the {} status".format(owner, name, TEST_CONTEXT))
-    record = dict(result, commit=args.commit, version=1)
+    record = dict(result, commit=args.commit)
     endpoint = comments_endpoint(owner, name, pr["number"])
     earlier, _ = read_test_records(owner, name, fetch_pages(endpoint))
     state, description = commit_status([entry for entry in earlier if entry["commit"] == args.commit]
