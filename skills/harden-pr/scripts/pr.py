@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""GitHub state, review history, and posting for harden-pr and review-pr.
+"""GitHub state, review history, test results, and posting for harden-pr, review-pr, and open-pr.
 
 Bodies come from files and reach gh as JSON on stdin. Reviews are attributed
 and posted against the commit actually reviewed. GitHub can reject inline
 locations; review then folds findings into the body and reports that fallback.
+
+A test result is a PR comment with a hidden JSON record and an astack/tests
+commit status. Only records from accounts with write access count. The status
+on a commit reflects the newest result for each suite on that commit.
 
 Every posted body starts with:
 
@@ -73,6 +77,13 @@ mutation($thread: ID!) {
   resolveReviewThread(input: {threadId: $thread}) { thread { isResolved } }
 }
 """
+
+TEST_CONTEXT = "astack/tests"
+TEST_RECORD = re.compile(r"^<!-- astack-test-result (\{.*\}) -->\r?$", re.M)
+TRUSTED_AUTHORS = {"OWNER", "MEMBER", "COLLABORATOR"}
+TEST_STATES = {"fail": "failure", "incomplete": "error", "pass": "success"}
+FULL_SHA = re.compile(r"[0-9a-f]{40}")
+STATUS_LIMIT = 140
 
 PASSED = {"SUCCESS", "NEUTRAL"}
 PENDING = {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED", None}
@@ -416,6 +427,139 @@ def command_resolve(args):
     print("resolved")
 
 
+def test_result_problem(result):
+    if not isinstance(result, dict):
+        return "it must be an object"
+    for key in ("tested", "base"):
+        if not isinstance(result.get(key), str) or not FULL_SHA.fullmatch(result[key]):
+            return "{} must be a full 40-character commit SHA".format(key)
+    for key in ("command", "summary", "scope"):
+        if not isinstance(result.get(key), str) or not result[key].strip():
+            return "{} must be a nonempty string".format(key)
+    if not isinstance(result.get("limits", ""), str):
+        return "limits must be a string"
+    suites = result.get("suites")
+    if not isinstance(suites, dict) or not suites or not all(
+            name.strip() and outcome in TEST_STATES for name, outcome in suites.items()):
+        return "suites must map each suite name to pass, fail, or incomplete"
+    heads = result.get("heads", [])
+    if not isinstance(heads, list) or not all(isinstance(head, str) and FULL_SHA.fullmatch(head) for head in heads):
+        return "heads must be a list of full commit SHAs"
+    return None
+
+
+def fetch_comments(owner, name, number):
+    comments, page = [], 1
+    while True:
+        batch = gh(["api", "--method", "GET", "repos/{}/{}/issues/{}/comments".format(owner, name, number),
+                    "-F", "per_page=100", "-F", "page={}".format(page)])
+        comments += batch
+        if len(batch) < 100:
+            return comments
+        page += 1
+
+
+def test_records(comments):
+    records, ignored = [], 0
+    for comment in comments:
+        for found in TEST_RECORD.findall(comment.get("body") or ""):
+            if comment.get("author_association") not in TRUSTED_AUTHORS:
+                ignored += 1
+                continue
+            try:
+                record = json.loads(found)
+            except ValueError:
+                record = None
+            if test_result_problem(record) or not FULL_SHA.fullmatch(str(record.get("commit"))):
+                ignored += 1
+                continue
+            records.append(dict(record, url=comment.get("html_url"),
+                                author=(comment.get("user") or {}).get("login"), at=comment.get("created_at")))
+    records.sort(key=lambda record: record["at"] or "")
+    return records, ignored
+
+
+def latest_by_suite(records):
+    latest = {}
+    for record in records:
+        for suite, outcome in record["suites"].items():
+            latest[suite] = dict(record, outcome=outcome)
+    return latest
+
+
+def worst_outcome(outcomes):
+    return next(outcome for outcome in TEST_STATES if outcome in outcomes)
+
+
+def commit_status(records):
+    outcomes = [entry["outcome"] for entry in latest_by_suite(records).values()]
+    worst = worst_outcome(outcomes)
+    counts = ", ".join("{} {}".format(outcomes.count(outcome), outcome) for outcome in TEST_STATES if outcome in outcomes)
+    noun = "suite" if len(outcomes) == 1 else "suites"
+    description = "{} {}: {}. {}".format(len(outcomes), noun, counts, records[-1]["summary"])
+    if len(description) > STATUS_LIMIT:
+        description = description[:STATUS_LIMIT - 3] + "..."
+    return TEST_STATES[worst], description
+
+
+def render_test_result(record):
+    hidden = json.dumps(record, sort_keys=True).replace("<", "\\u003c").replace(">", "\\u003e")
+    lines = ["**Tests: {}** for `{}`. Ran on `{}` with base `{}`.".format(
+        worst_outcome(record["suites"].values()), record["commit"][:12], record["tested"][:12], record["base"][:12]), "",
+        "| Suite | Outcome |", "| --- | --- |"]
+    lines += ["| {} | {} |".format(suite.replace("|", "\\|"), outcome) for suite, outcome in sorted(record["suites"].items())]
+    lines += ["", "Result: " + record["summary"], "", "Scope: " + record["scope"]]
+    if record.get("limits"):
+        lines += ["", "Limits: " + record["limits"]]
+    if record.get("heads"):
+        lines += ["", "Batch heads: " + ", ".join("`{}`".format(head[:12]) for head in record["heads"])]
+    fence = "`" * max(3, max((len(run) for run in re.findall(r"`+", record["command"])), default=0) + 1)
+    lines += ["", fence + "sh", record["command"], fence, "", "<!-- astack-test-result {} -->".format(hidden)]
+    return "\n".join(lines)
+
+
+def command_tests(args):
+    pr = fetch_pr(args)
+    owner, name = pr["url"].split("/")[3:5]
+    records, ignored = test_records(fetch_comments(owner, name, pr["number"]))
+    json.dump({"head": pr["headRefOid"], "records": records, "latest_by_suite": latest_by_suite(records),
+               "ignored": ignored}, sys.stdout, indent=2)
+    print()
+
+
+def command_post_tests(args):
+    identity = git_user_name()
+    with open(args.result_file, encoding="utf-8") as handle:
+        result = json.load(handle)
+    problem = test_result_problem(result)
+    if problem:
+        fail("result file: " + problem)
+    pr = fetch_pr(args)
+    owner, name = pr["url"].split("/")[3:5]
+    if args.commit not in {commit.get("oid") for commit in pr["commits"]}:
+        fail("commit {} is not in the PR; post results for a PR commit".format(args.commit))
+    record = dict(result, commit=args.commit, version=1)
+    earlier, _ = test_records(fetch_comments(owner, name, pr["number"]))
+    state, description = commit_status([entry for entry in earlier if entry.get("commit") == args.commit]
+                                       + [dict(record, at=None)])
+    body = format_body(args.model, render_test_result(record), identity)
+    comment = gh(["api", "--method", "POST", "repos/{}/{}/issues/{}/comments".format(owner, name, pr["number"]),
+                  "--input", "-"], stdin=json.dumps({"body": body}))
+    status = subprocess.run(
+        ["gh", "api", "--method", "POST", "repos/{}/{}/statuses/{}".format(owner, name, args.commit), "--input", "-"],
+        input=json.dumps({"state": state, "context": TEST_CONTEXT, "description": description,
+                          "target_url": comment["html_url"]}), capture_output=True, text=True)
+    report = {"url": comment["html_url"], "commit": args.commit, "on_head": args.commit == pr["headRefOid"],
+              "trusted": comment.get("author_association") in TRUSTED_AUTHORS,
+              "state": state if status.returncode == 0 else None, "description": description}
+    if status.returncode != 0:
+        report["status_error"] = status.stderr.strip()
+    json.dump(report, sys.stdout)
+    print()
+    if status.returncode != 0:
+        sys.exit(2)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
@@ -452,6 +596,15 @@ def main(argv=None):
     review.add_argument("--model", required=True, help="model id for the on-behalf-of header")
     review.add_argument("--commit", required=True, help="the SHA the reviewers read; the review is posted on it")
     review.set_defaults(run=command_review)
+
+    tests = scoped("tests", help="print the PR's published test results as JSON")
+    tests.set_defaults(run=command_tests)
+
+    post_tests = scoped("post-tests", help="publish a test result as a PR comment and an astack/tests status")
+    post_tests.add_argument("--commit", required=True, help="the PR commit the result applies to, usually the head")
+    post_tests.add_argument("--result-file", required=True, help="JSON with tested, base, command, suites, summary, and scope")
+    post_tests.add_argument("--model", required=True, help="model id for the on-behalf-of header")
+    post_tests.set_defaults(run=command_post_tests)
 
     resolve = commands.add_parser("resolve", help="resolve a review thread")
     resolve.add_argument("--thread", required=True, help="thread id from the status snapshot")

@@ -1,10 +1,10 @@
 # Run and share PR tests
 
-The base branch is the PR's target, which is the parent branch for a stack child. Fetch it before any check below. The change is the file list from `git diff --name-only --no-renames origin/<base branch>...HEAD`. The covering suites are the test suites that cover the change, chosen under [Pick the suites](#pick-the-suites). A file affects a covering suite when it is in that suite's component or in a component the suite depends on, directly or transitively. A file affects every covering suite when it is repository-wide build or test configuration, or code whose dependents you cannot trace. A result's base commit is `git merge-base <tested commit> origin/<base branch>`.
+The base branch is the PR's target, which is the parent branch for a stack child. Fetch it before any check below. The change is the file list from `git diff --name-only --no-renames origin/<base branch>...HEAD`. The covering suites are the test suites that cover the change, chosen under [Pick the suites](#pick-the-suites). A file affects a covering suite when it is in that suite's component or in a component the suite depends on, directly or transitively. A file affects every covering suite when it is repository-wide build or test configuration, or code whose dependents you cannot trace. A result's base commit is the base it records, or `git merge-base <tested commit> origin/<base branch>` when it records none.
 
 ## Reuse a published result
 
-Before running tests, check the PR for results that still cover the current code and required checks. List the files changed since a result ran:
+Before running tests, list the PR's published results with `python3 "<harden-pr directory>/scripts/pr.py" tests --pr <n>`. Its `latest_by_suite` gives each suite's newest result with its tested and base commits. A result only in the PR description also counts when it names its tested commit. Check whether the results still cover the current code and required checks. List the files changed since a result ran:
 
 - On the branch: `git diff --name-only --no-renames <tested commit> HEAD`
 - On the base, when HEAD does not contain `origin/<base branch>`: `git diff --name-only --no-renames <result's base commit> origin/<base branch>`
@@ -29,4 +29,32 @@ Run the other checks that repository instructions require, such as lint or typec
 
 ## Publish the result
 
-When you or a delegated reviewer runs tests, publish the command, tested commit, base commit, outcome, and relevant coverage limits in the PR description. After a partial rerun, publish each group of suites as its own result. State how you scoped the run and why, such as `packages/api` and its dependents because no shared configuration changed. When no test ran, say so and give the reason. A covering suite that could not run is a coverage limit, not a pass. Include failures and skipped tests. Distinguish results from uncommitted changes. Confirm the results are visible on the PR before finishing.
+When you or a delegated reviewer runs tests on a pushed PR commit, publish each result with the PR helper. It posts a PR comment and sets the `astack/tests` commit status on that commit:
+
+```bash
+python3 "<harden-pr directory>/scripts/pr.py" post-tests --pr <n> --commit <PR head SHA> --result-file <file> --model <your model id>
+```
+
+Write the result file as JSON:
+
+```json
+{
+  "tested": "<full SHA the suites ran on>",
+  "base": "<full SHA of the result's base commit>",
+  "command": "<the command you ran>",
+  "suites": {"packages/api": "pass", "packages/web": "fail"},
+  "summary": "<counts, including failures and skipped tests>",
+  "scope": "<how you scoped the run and why>",
+  "limits": "<coverage limits, when any>"
+}
+```
+
+- Name each suite by the path or package its command runs, so later runs match it.
+- State the scope and why, such as `packages/api` and its dependents because no shared configuration changed.
+- Mark a covering suite that could not run as `incomplete`. It is a coverage limit, not a pass.
+- After a partial rerun, post the rerun suites as one result. Post the suites that keep their result as another, with their original tested commit and the new PR head.
+- For a batch, add `"heads"` with every head SHA.
+
+The status on a commit follows the newest result for each suite on that commit. Results from accounts without write access do not count, and the helper reports `"trusted": false` for them.
+
+Then summarize the results under `## Verification` in the PR description and link each result comment. When no test ran, say so there and give the reason. Describe runs on uncommitted changes there too, marked as uncommitted. If the helper fails, put the full result in the description and report the failure. Confirm the results are visible on the PR before finishing.
