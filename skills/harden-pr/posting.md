@@ -15,7 +15,7 @@ When a review-pr run stops at its pass limit, start the review body with this al
 > Not converged after <n> review-pr passes. Do not merge. Investigate why the passes kept leaving problems.
 ```
 
-Put the same alert at the top of the PR description. Add `> Review: <url>` as the alert's last line, with the `url` that `pr.py review` returns. If posting fails, omit that line. When a later run stops at its pass limit, replace the alert. When the user confirms a merge despite the alert, append `> Merge approved by the user for <sha>.` to it.
+Put the same alert at the top of the PR description. Add `> Review: <url>` after the alert's text, with the `url` that `pr.py review` returns. If posting fails, omit that line. When a later run stops at its pass limit, replace the alert. The approval line that [pr-work's merge step](pr-work.md#finish-or-merge) appends is `> Merge approved by the user for <sha>.`
 
 Remove the alert only when a later review-pr or harden-pr run converges and its diff includes everything the pass-limited run reviewed. A converged review against the PR's target branch qualifies.
 
@@ -27,7 +27,7 @@ Write a JSON file with this shape:
 
 ```json
 {
-  "body": "Reviewed <sha>. Outcome, repairs, remaining findings, verification, and coverage.",
+  "body": "Reviewed <sha> against <fixed point>. Outcome, repairs, remaining findings, verification, and coverage.",
   "comments": [
     {
       "path": "src/example.py",

@@ -29,8 +29,8 @@ For a requested pause or transfer to another session, read [handoff](../handoff/
 6. Rebase into small, ordered commits. Stack follow-ups.
    Use the [sequence-verifiable-units](../principles/sequence-verifiable-units.md) principle skill, building, verifying, and committing each small unit before the next.
 7. Commit the work and use [open-pr](../open-pr/SKILL.md) for PR delivery within the task's authorized scope. When that scope stops short of a PR, such as a request to stop at local edits, do this instead of open-pr:
-   - Run the covering suites picked under [test results](../open-pr/test-results.md#pick-the-suites).
-   - Then run [review-pr](../review-pr/SKILL.md) in fix-and-review mode.
+   1. Run the covering suites picked under [test results](../open-pr/test-results.md#pick-the-suites).
+   2. Run [review-pr](../review-pr/SKILL.md) in fix-and-review mode.
 
    For explicitly requested adversarial hardening, run [harden-pr](../harden-pr/SKILL.md) instead of review-pr. Merging and deployment are separate actions.
 
