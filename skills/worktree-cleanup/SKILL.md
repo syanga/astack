@@ -26,7 +26,7 @@ Remove only merged or explicitly abandoned worktrees. Check ignored and untracke
 
 Recheck before `git worktree remove`. Force removal requires explicit disposal authorization for the affected files. Verify teardown before deleting recovery records.
 
-Report removed, queued, and held targets, including owners, reasons, retired links, and failures.
+Report removed, queued, and held targets separately, including owners, reasons, retired links, and failures.
 
 After the lane's work and resource checks pass, durably queue any eligible current checkout for [post-exit retirement](RETIREMENTS.md). Then settle this T3 thread with `t3_thread_organize` without asking. Leave it active after an early stop, failure, or unresolved hold. Settlement closes execution. Queued resources remain until a later pass verifies removal.
 

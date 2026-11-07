@@ -5,8 +5,9 @@ Apply this policy when cleanup includes an orchestrate or multi-phase-plan progr
 ## Account for worker checkouts
 
 The coordinator owns the inventory of worker, review, and baseline checkouts,
-including those outside the primary worktree. Reconcile each checkout through
-[lane teardown](SKILL.md), including any [queued retirement](RETIREMENTS.md). Record the
+including those outside the primary worktree. Within the caller's finished scope,
+reconcile each checkout through [lane teardown](SKILL.md), including any
+[queued retirement](RETIREMENTS.md). Record the
 [cleanup results](SKILL.md) in the program handoff before archiving it.
 
 For cleanup limited to a worker lane, preserve the shared store and evidence still needed by the program. Return to [lane teardown](SKILL.md) for that worker's disposable resources. The remaining steps require whole-program cleanup scope.
