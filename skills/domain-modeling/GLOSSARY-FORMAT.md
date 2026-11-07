@@ -1,4 +1,4 @@
-# CONTEXT.md format
+# GLOSSARY.md format
 
 Use the domain glossary identified by the caller or project instructions. When none is identified, use the default locations below.
 
@@ -33,12 +33,12 @@ _Avoid_: Client, buyer, account
 
 ## Single vs multi-context repos
 
-**Single context (most repos):** One `CONTEXT.md` at the repo root.
+**Single context (most repos):** One `GLOSSARY.md` at the repo root.
 
-**Multiple contexts:** A `CONTEXT-MAP.md` at the repo root lists the contexts, where they live, and how they relate to each other:
+**Multiple contexts:** A `GLOSSARY-MAP.md` at the repo root lists the contexts, where they live, and how they relate to each other:
 
 ```md
-# Context Map
+# Glossary map
 
 ## Contexts
 
@@ -46,9 +46,9 @@ _Avoid_: Client, buyer, account
 - [Billing][billing-context]: generates invoices and processes payments
 - [Fulfillment][fulfillment-context]: manages warehouse picking and shipping
 
-[ordering-context]: ./src/ordering/CONTEXT.md
-[billing-context]: ./src/billing/CONTEXT.md
-[fulfillment-context]: ./src/fulfillment/CONTEXT.md
+[ordering-context]: ./src/ordering/GLOSSARY.md
+[billing-context]: ./src/billing/GLOSSARY.md
+[fulfillment-context]: ./src/fulfillment/GLOSSARY.md
 
 ## Relationships
 
@@ -57,10 +57,12 @@ _Avoid_: Client, buyer, account
 - **Ordering ↔ Billing**: Shared types for `CustomerId` and `Money`
 ```
 
+`CONTEXT.md` and `CONTEXT-MAP.md` are this convention's earlier names. An existing `CONTEXT.md` stands in for `GLOSSARY.md`, and an existing `CONTEXT-MAP.md` for `GLOSSARY-MAP.md`. Read and update the existing file in place, and never create a second glossary beside it. New files use the new names. If both names exist, read both and ask which one to write to before writing.
+
 For the default layout:
 
-- If `CONTEXT-MAP.md` exists, read it to find contexts
-- If only a root `CONTEXT.md` exists, single context
-- If neither exists, use the root `CONTEXT.md` location for the first glossary
+- If `GLOSSARY-MAP.md` exists, read it to find contexts
+- If only a root `GLOSSARY.md` exists, single context
+- If neither exists, use the root `GLOSSARY.md` location for the first glossary
 
 When multiple contexts exist, infer which one the current topic relates to. If unclear, ask.
