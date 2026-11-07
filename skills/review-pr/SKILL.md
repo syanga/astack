@@ -103,6 +103,8 @@ Run Correctness once, on the first candidate where the applicable Standards and 
 
 Converge when the final changes have no unresolved verified problems, required checks pass, and applicable reviews are complete. A native fallback completes the Correctness review for convergence. Optional suggestions do not block completion. If progress stalls or a decision is needed, report the remaining blockers.
 
+Fix-and-review runs at most three passes unless the user sets another limit. A pass is one review of the current candidate: the applicable Standards and Spec reviews, or the focused verification of a repair. The Correctness run does not count as a pass. When the last pass still finds unresolved verified problems, stop without more repairs. If Correctness has not run, report it as not run because no candidate converged. Report the run as not converged, and follow [posting.md](../harden-pr/posting.md) for its warning.
+
 In fix-and-review mode with existing PRs, [finalize the PRs](../harden-pr/pr-work.md#finalize-reviewed-prs), including committing and pushing verified repairs. Without a PR, return the reviewed changes to the caller's delivery workflow.
 
 Verify Correctness findings against the evidence requirements before presenting or posting them. Present each report under its axis heading (`## Standards`, `## Spec`, `## Correctness`), verbatim or lightly cleaned. Under `## Correctness`, name the reviewer (outside provider, `native fallback`, or not run with the reason), each finding's disposition, and any repair-verification result. Do **not** merge or rerank findings, because the axes are deliberately separate (see _Why three axes_).

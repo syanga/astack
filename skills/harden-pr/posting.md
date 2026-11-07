@@ -8,6 +8,15 @@ Include the reviewed commit, outcome, repairs, remaining findings, verification,
 
 If a run stops early after substantive review, mark its record incomplete. If no substantive review occurred, report the reason only in the conversation. Missing coverage is not a clean result.
 
+When fix-and-review stops at its pass limit, start the review body with this alert:
+
+```markdown
+> [!CAUTION]
+> Not converged after <n> review-pr passes. Do not merge. Investigate why repairs did not resolve the findings below.
+```
+
+Post each remaining finding as an `act on` comment. Put the same alert at the top of the PR description, with a link to the review record. A later review-pr run that converges removes the alert from the description.
+
 Use harden-pr's `scripts/pr.py review` to post against the commit actually reviewed. The helper signs the review and exposes actionable findings to harden-pr.
 
 The helper prefixes reviews, inline comments, and thread replies with `[<model slug>] on behalf of <first name from git config user.name>`. Run it from the reviewed repository so repository-specific Git identity applies. An unset or invalid name stops posting; earlier signed reviews remain recognizable after a name change.
