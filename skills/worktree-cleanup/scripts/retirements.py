@@ -51,9 +51,13 @@ def record_path(state, worktree):
 def read_record(path):
     if path.is_symlink():
         raise ValueError('Retirement record is a symlink: ' + str(path))
-    row = json.loads(path.read_text(encoding='utf-8'))
+    try:
+        row = json.loads(path.read_text(encoding='utf-8'))
+    except RecursionError as error:
+        raise ValueError('Retirement record is too deeply nested: ' + str(path)) from error
     required = ['worktree', 'common', 'head', 'owner', 'authorization', 'queued_at']
-    if not isinstance(row, dict) or row.get('version') != 1 or any(not isinstance(row.get(k), str) or not row[k] for k in required):
+    if (not isinstance(row, dict) or set(row) != {'version', 'branch', *required} or
+            row.get('version') != 1 or any(not isinstance(row.get(k), str) or not row[k] for k in required)):
         raise ValueError('Invalid retirement record: ' + str(path))
     if 'branch' not in row or (row['branch'] is not None and not isinstance(row['branch'], str)):
         raise ValueError('Invalid branch in retirement record')

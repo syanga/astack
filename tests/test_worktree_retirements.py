@@ -53,12 +53,16 @@ class WorktreeRetirementTests(unittest.TestCase):
         self.assertEqual(queued.returncode, 0, queued.stderr)
         incomplete = json.loads(queued.stdout)
         del incomplete['branch']
+        nested = '[' * 10000 + ']' * 10000
         bad_records = {
             '00-broken.json': b'{',
             '01-array.json': b'[]',
             '02-utf8.json': b'\xff',
             '03-future.json': b'{"version": 2}',
             '04-missing-branch.json': json.dumps(incomplete).encode(),
+            '05-nested.json': nested.encode(),
+            '06-unexpected-field.json': (json.dumps(json.loads(queued.stdout))[:-1] +
+                                         ', "unexpected": ' + nested + '}').encode(),
         }
         for name, contents in bad_records.items():
             (self.state / name).write_bytes(contents)
