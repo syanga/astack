@@ -74,10 +74,13 @@ def snapshot(path):
     if 'locked' in own:
         raise ValueError('Keep locked worktrees')
     ref = branch(path)
-    default = subprocess.run(['git', '-C', str(path), 'symbolic-ref', '--quiet',
-                              'refs/remotes/origin/HEAD'], capture_output=True, text=True, timeout=30)
-    default_ref = default.stdout.strip().replace('refs/remotes/origin/', 'refs/heads/', 1)
-    if ref in {'refs/heads/main', 'refs/heads/master', default_ref}:
+    default_refs = {'refs/heads/main', 'refs/heads/master'}
+    for line in git(path, 'for-each-ref', '--format=%(refname) %(symref)', 'refs/remotes').splitlines():
+        name, _, target = line.partition(' ')
+        prefix = name.removesuffix('HEAD')
+        if name.endswith('/HEAD') and target.startswith(prefix):
+            default_refs.add('refs/heads/' + target[len(prefix):])
+    if ref in default_refs:
         raise ValueError('Keep default-branch worktrees')
     if git(path, 'status', '--porcelain=v1', '--untracked-files=normal'):
         raise ValueError('Resolve tracked and untracked changes before queuing retirement')

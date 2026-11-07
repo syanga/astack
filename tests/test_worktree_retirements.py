@@ -125,6 +125,16 @@ class WorktreeRetirementTests(unittest.TestCase):
         self.assertEqual((self.worktree / 'source.txt').read_text(), 'retained source\n')
         self.assertEqual(self.git('rev-parse', 'trunk'), self.git('rev-parse', 'main'))
 
+    def test_upstream_default_branch_worktree_is_preserved(self):
+        subprocess.run(['git', '-C', str(self.worktree), 'branch', '-m', 'trunk'], check=True, capture_output=True)
+        self.git('update-ref', 'refs/remotes/upstream/trunk', 'main')
+        self.git('symbolic-ref', 'refs/remotes/upstream/HEAD', 'refs/remotes/upstream/trunk')
+        self.assertNotEqual(self.queue().returncode, 0)
+        self.assertEqual((self.worktree / 'source.txt').read_text(), 'retained source\n')
+        self.git('symbolic-ref', '--delete', 'refs/remotes/upstream/HEAD')
+        self.assertEqual(self.queue().returncode, 0)
+        self.assertEqual(json.loads(self.run_cli('list').stdout)[0]['status'], 'pending')
+
     def test_completion_keeps_record_until_commit_is_retained(self):
         (self.worktree / 'source.txt').write_text('unique commit\n')
         subprocess.run(['git', '-C', str(self.worktree), 'commit', '-am', 'Unique work'], check=True, capture_output=True)
