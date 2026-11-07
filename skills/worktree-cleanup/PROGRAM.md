@@ -2,13 +2,20 @@
 
 Apply this policy when cleanup includes an orchestrate or multi-phase-plan program. Use the plan and [execution store](../orchestrate/STATE.md) to find its artifacts, including paths outside worker worktrees. Planning alone does not create a store; handle an existing plan without initializing one.
 
+## Account for worker checkouts
+
+The coordinator owns the inventory of worker, review, and baseline checkouts,
+including those outside the primary worktree. Reconcile each checkout through
+[lane teardown](SKILL.md), including any [queued retirement](RETIREMENTS.md). Record the
+[cleanup results](SKILL.md) in the program handoff before archiving it.
+
 For cleanup limited to a worker lane, preserve the shared store and evidence still needed by the program. Return to [lane teardown](SKILL.md) for that worker's disposable resources. The remaining steps require whole-program cleanup scope.
 
 ## Establish what can close
 
 Confirm that cleanup covers the whole program. Reconcile its units, workers, pending completions, PRs, gates, and follow-ups against current evidence. Require completion of the program's done predicate or explicit abandonment with remaining requirements accounted for. A merged worker PR does not establish program completion. Preserve state for active, paused, blocked, or merge-ready programs.
 
-Reconcile every worker, review, and baseline checkout through [deferred retirement](RETIREMENTS.md). Record removed, queued, and held targets in the final handoff before archiving it. The coordinator's current checkout follows the same post-exit procedure.
+The coordinator's current checkout follows [worktree retirement](RETIREMENTS.md) too.
 
 Identify every path's owner and consumers from the plan, store, handoffs, and launch records. Keep resources shared outside the cleanup scope, retained deliverables, and artifacts of unknown ownership. Stop owned disposable processes through [worktree-cleanup](SKILL.md) before removing their files. Confirm that no worker or coordinator can still write to a store being archived.
 

@@ -133,12 +133,14 @@ partial result. Session termination alone never marks work done.
 4. Recompute ready work from dependencies and current state. Record acceptance
    and the next action in the overview handoff, then run `orch status`.
 
-After accepting a completed worker, reconcile its worktrees through
-[worktree retirement](../worktree-cleanup/RETIREMENTS.md#account-for-worker-checkouts).
-This cleanup covers that worker's finished scope; preserve the shared store.
+After accepting a completed worker, reconcile
+[worker checkouts](../worktree-cleanup/PROGRAM.md#account-for-worker-checkouts)
+within that worker's finished scope.
 
 After interruption, run `orch init`, inspect `orch --json inbox history`, and
-reconcile any unrecorded receipts before dispatching more work. History includes
+reconcile any unrecorded receipts. Reconcile
+[worker checkouts](../worktree-cleanup/PROGRAM.md#account-for-worker-checkouts)
+before dispatching more work. History includes
 interrupted and archived batches. A drained pointer is not proof of acceptance.
 Arrivals after queue rotation remain in `inbox/` for the next drain.
 
