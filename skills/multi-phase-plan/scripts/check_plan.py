@@ -81,7 +81,7 @@ def check(text):
             elif probe_id:
                 probe_body.append(source_lines[number - 1])
             continue
-        if marker:
+        if marker and not (marker[1][0] == "`" and "`" in marker[2]):
             fence = marker[1]
             info = marker[2].strip()
             probe = re.fullmatch(rf"\w+ probe=({PROBE_ID})", info)
@@ -91,7 +91,7 @@ def check(text):
                 fail(number, "probe fence needs a language and UNIT.unit, UNIT.live.N, or UNIT.perf ID")
             continue
         lines.append(Line(number, value))
-        prose = re.sub(r"`[^`]*`|!?\[[^\]]*\]\([^)]*\)", "", value)
+        prose = re.sub(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)|!?\[[^\]]*\]\([^)]*\)", "", value)
         if re.search(r"[\u2013\u2014]", prose):
             fail(number, "long dash")
         if re.search(r"[\u2018\u2019\u201c\u201d]", prose):
