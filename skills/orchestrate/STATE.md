@@ -68,17 +68,25 @@ for worker claims; name the verifier for independent receipts. Use
 `orch --json ledger check <pr> <sha>` to read the effective verdict. The CLI
 retains every row and selects the latest verifier receipt for that PR and SHA,
 or the latest worker receipt when no verifier exists. A new SHA needs a new receipt.
+When the change from a verified SHA touches nothing a check exercises, the new
+receipt may carry that check forward. It saves the diff from the verified SHA to
+the new one as its evidence and links the earlier receipt. A failed check that a
+saved run at a named trunk SHA shows the same way, in behavior outside what the
+PR changes or claims to fix, is recorded against trunk in the receipt and does
+not fail the verdict. Record a carry-forward under whoever checked the diff, and
+as a verifier receipt only when the earlier receipt was one.
 
 Verdicts are `live-ui-verified`, `unit-test-verified`, `type-check-only`,
-`verifier-blocked`, and `verifier-failed`. Inspect the evidence and compare its SHA
-with the current PR head before accepting the result. Treat a receipt as
+`verifier-blocked`, and `verifier-failed`. Inspect the evidence and compare its SHA,
+or a carry-forward receipt's saved diff, with the current PR head before
+accepting the result. Treat a receipt as
 evidence only when it links saved files that hold the raw output and exit
 status of every verification command it reports, and the saved artifact, such
 as a screenshot, of every other check. A CI result needs only a link to its
 run. CI success contributes evidence but does not establish a verdict.
 Behavioral work needs more than `type-check-only`. A blocked check resumes when
-its environment is available; a failed check needs a fix before new
-verification. Neither satisfies acceptance.
+its environment is available; a failed check not recorded against trunk needs a
+fix before new verification. Neither satisfies acceptance.
 
 The CLI records claims. It rejects evidence that is neither an http(s) URL nor
 an existing path, but it does not run verification, read evidence contents, or
@@ -168,8 +176,9 @@ Check the recorded worktrees, uncommitted changes, branch heads, PR states, and
 verification receipts. Preserve partial work. Probe surviving workers through
 read-only harness status and durable artifacts before reassigning their scope.
 Reconcile stale rows and plan checkboxes with these facts; a changed SHA requires
-fresh verification. Evaluate receipts under [Accept verification](#accept-verification).
-Reuse them only when they identify the current artifact and remain applicable to
+a new receipt. Evaluate receipts under [Accept verification](#accept-verification).
+Reuse them only when they identify the current artifact, directly or through a
+carry-forward diff, and remain applicable to
 its environment and acceptance criteria. When those inputs changed or supporting
 evidence is missing, run the necessary checks if the hold permits them. Otherwise
 report them as pending. Reconcile these results before selecting work. An
