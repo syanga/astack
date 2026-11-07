@@ -4,7 +4,7 @@ The base branch is the PR's target, which is the parent branch for a stack child
 
 ## Reuse a published result
 
-Before running tests, list the PR's published results with `python3 "<harden-pr directory>/scripts/pr.py" tests --pr <n>`. It drops results from accounts without write access and counts them as `ignored`. Its `latest_by_suite` gives each suite's newest result with its tested and base commits. Check whether the results still cover the current code and required checks. List the files changed since a result ran:
+Before running tests, list the PR's published results with `python3 "<harden-pr directory>/scripts/pr.py" tests --pr <n>`. It drops results from accounts without write access and counts them as `ignored`. Its `latest_by_suite` gives each suite's newest result with its tested and base commits. Check whether the results still cover the current code. List the files changed since a result ran:
 
 - On the branch: `git diff --name-only --no-renames <tested commit> HEAD`
 - On the base, when HEAD does not contain `origin/<base branch>`: `git diff --name-only --no-renames <result's base commit> origin/<base branch>`
