@@ -55,7 +55,7 @@ Write the result file as JSON:
 - Mark a covering suite that could not run as `incomplete`. It is a coverage limit, not a pass.
 - Omit `limits` when there are none.
 - When the PR head moved and some suites kept their result, post only those suites for the new head, with their original `tested`, `base`, and `command`. Post rerun suites as a separate result.
-- When the tested commit is a scratch merge, as for a batch, add `"heads"` with every head SHA merged onto the base.
+- When the tested commit is a scratch merge, such as a batch or a merge-time check, add `"heads"` with every head SHA merged onto the base.
 
 On an existing PR, publish a failing result before you fix its cause, then publish the new result. If you cannot fix it, report the failure.
 

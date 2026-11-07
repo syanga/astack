@@ -532,7 +532,7 @@ def render_test_result(record):
     if record.get("limits"):
         lines += ["", "Limits: " + record["limits"]]
     if record.get("heads"):
-        lines += ["", "Batch heads: " + ", ".join("`{}`".format(head[:12]) for head in record["heads"])]
+        lines += ["", "Heads merged onto the base: " + ", ".join("`{}`".format(head[:12]) for head in record["heads"])]
     fence = "`" * max(3, max((len(run) for run in re.findall(r"`+", record["command"])), default=0) + 1)
     lines += ["", fence + "sh", record["command"], fence, "", "<!-- astack-test-result {} -->".format(hidden)]
     return "\n".join(lines)
