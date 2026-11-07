@@ -8,6 +8,8 @@ For cleanup limited to a worker lane, preserve the shared store and evidence sti
 
 Confirm that cleanup covers the whole program. Reconcile its units, workers, pending completions, PRs, gates, and follow-ups against current evidence. Require completion of the program's done predicate or explicit abandonment with remaining requirements accounted for. A merged worker PR does not establish program completion. Preserve state for active, paused, blocked, or merge-ready programs.
 
+Reconcile every worker, review, and baseline checkout through [deferred retirement](RETIREMENTS.md). Record removed, queued, and held targets in the final handoff before archiving it. The coordinator's current checkout follows the same post-exit procedure.
+
 Identify every path's owner and consumers from the plan, store, handoffs, and launch records. Keep resources shared outside the cleanup scope, retained deliverables, and artifacts of unknown ownership. Stop owned disposable processes through [worktree-cleanup](SKILL.md) before removing their files. Confirm that no worker or coordinator can still write to a store being archived.
 
 ## Preserve one final archive

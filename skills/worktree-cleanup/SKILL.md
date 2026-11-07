@@ -9,6 +9,8 @@ First, check the lane's conversation, notes, and linked PRs for unfinished work 
 
 "Close this lane" means the current T3 thread unless specified otherwise. Resource questions are read-only.
 
+For authorized cleanup, process previously authorized [queued retirements](RETIREMENTS.md) before the current lane's resources. Revalidate each recorded owner's state and disposal authority. Coordinators account for worker, review, and baseline checkouts through the same procedure.
+
 Inventory worktrees and associated resources, including leftovers outside deleted worktrees. Establish ownership from thread and launch records. Retain unknown targets and resources shared outside the cleanup scope. Retain active, pinned, or data-bearing targets whose disposal is undecided. Current-thread tools cannot establish other threads' inactivity.
 
 For artifacts from orchestrate or multi-phase-plan, follow [program closeout](PROGRAM.md) before removing their stores or workspaces. A worker lane's cleanup does not authorize disposal of its shared program store.
@@ -20,10 +22,10 @@ Stop disposable resources before removing their worktrees:
 - Docker: verify the daemon and container ownership. Compose names can span worktrees. Inspect volume consumers, including stopped containers. Avoid global pruning.
 - Test databases: derive the exact target from test setup. Stop clients before scoped teardown. Preserve shared servers and data.
 
-Remove only merged or explicitly abandoned worktrees. Check ignored and untracked files and post-squash commits. Retain detached commits through a branch. Keep main, current, locked, active, and open-PR worktrees. Preserve branch refs unless deletion was requested.
+Remove only merged or explicitly abandoned worktrees. Check ignored and untracked files and post-squash commits. Retain detached commits through a branch. Keep main, locked, active, and open-PR worktrees. Queue an otherwise eligible current checkout for [post-exit retirement](RETIREMENTS.md). Preserve branch refs unless deletion was requested.
 
 Recheck before `git worktree remove`. Force removal requires explicit disposal authorization for the affected files. Verify teardown before deleting recovery records. Report removals, retired links, holds, and failures.
 
-When cleanup of the current T3 thread's own lane completes, including any program closeout, settle this thread with `t3_thread_organize` without asking. Leave it active after an early stop, a failure, or a hold awaiting the user's decision.
+Report removed, queued, and held targets separately. When the lane's work and resource checks are complete and its eligible current checkout is durably queued, settle this T3 thread with `t3_thread_organize` without asking. A lane with no disposable current checkout can settle after those checks pass. Settlement closes execution; queued resources remain until a later pass verifies removal. Leave the thread active after an early stop, a failure, or an unresolved hold.
 
 Expand to simulators or caches only when requested. Editor backups may contain otherwise unrecorded work.
