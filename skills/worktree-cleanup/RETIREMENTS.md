@@ -15,7 +15,7 @@ Resolve tracked and untracked changes, account for ignored files, preserve
 required program records, and retain detached commits through a branch first.
 The helper rejects primary, known default-branch, and locked checkouts, and
 checks Git-reported tracked and untracked changes. It holds checkouts with
-`assume-unchanged` or `skip-worktree` entries; review their contents before
+`assume-unchanged` or `skip-worktree` entries. Review their contents before
 resolving those flags. Git's clean status does not account for ignored data.
 
 Records live under `$XDG_STATE_HOME/astack/worktree-cleanup`, or
@@ -36,7 +36,7 @@ records intent; it grants no disposal authority and proves no thread inactivity.
    an open PR, missing evidence, changed checkout, or undecided data disposal.
    A changed record requires fresh verification and authorization before queuing
    a replacement. Use `withdraw` below when the old retirement no longer applies.
-   `pending` means only that Git state matches; a reused path still requires a
+   `pending` means only that Git state matches. A reused path still requires a
    fresh ownership check.
 3. For an eligible target whose owner has exited, stop its disposable resources
    and run `git worktree remove` from outside that checkout. Preserve branch refs.
