@@ -25,7 +25,7 @@
     "path": "pstack/skills/poteto-mode/playbooks/opening-a-pr.md",
     "commit": "c1c0a32802223f4be824112dd83d33ad29a8b26c",
     "license": "MIT, kept in skills/open-pr/LICENSE",
-    "note": "Adapted under the global Pull Requests policy. Keeps narrow PRs, stack relationships, coherent commits, no-comments, technical-writing, unslop, title guidance, and default description sections. Cursor forge and deslop removed; Gitleaks hook install and T3 Code PR linking added. Links shared astack guidance for reusing and publishing PR test results, including delegated runs and the tested commit."
+    "note": "Adapted under the global Pull Requests policy. Keeps narrow PRs, stack relationships, coherent commits, no-comments, technical-writing, unslop, title guidance, and default description sections. Cursor forge and deslop removed; Gitleaks hook install and T3 Code PR linking added. Links shared astack guidance for reusing, scoping, and publishing PR test results, including delegated runs and the tested commit. Runs review-pr after the PR exists, so its review record posts on GitHub."
   },
   "review-pr": {
     "repository": "https://github.com/mattpocock/skills.git",
