@@ -1,6 +1,6 @@
 # Run and share PR tests
 
-The base branch is the PR's target, which is the parent branch for a stack child. Fetch it before any check below. The change is the file list from `git diff --name-only --no-renames origin/<base branch>...HEAD`. The covering suites are the test suites that cover the change, chosen under [Pick the suites](#pick-the-suites). A file affects a covering suite when it is in that suite's component or in a component the suite depends on, directly or transitively. A file that matches a full-suite trigger in Pick the suites affects every covering suite. A result's base commit is `git merge-base <tested commit> origin/<base branch>`.
+The base branch is the PR's target, which is the parent branch for a stack child. Fetch it before any check below. The change is the file list from `git diff --name-only --no-renames origin/<base branch>...HEAD`. The covering suites are the test suites that cover the change, chosen under [Pick the suites](#pick-the-suites). A file affects a covering suite when it is in that suite's component or in a component the suite depends on, directly or transitively. A file affects every covering suite when it is repository-wide build or test configuration, or code whose dependents you cannot trace. A result's base commit is `git merge-base <tested commit> origin/<base branch>`.
 
 ## Reuse a published result
 
@@ -9,7 +9,7 @@ Before running tests, check the PR for results that still cover the current code
 - On the branch: `git diff --name-only --no-renames <tested commit> HEAD`
 - On the base, when HEAD does not contain `origin/<base branch>`: `git diff --name-only --no-renames <result's base commit> origin/<base branch>`
 
-A covering suite keeps its result when that result includes it and no listed file affects it. Run the other covering suites after the rebase check below. When the tested commit cannot be fetched, run every covering suite.
+A covering suite keeps its result when that result includes it and no listed file affects it. Run the other covering suites after [Rebase before the published run](#rebase-before-the-published-run). When the tested commit cannot be fetched, run every covering suite.
 
 ## Rebase before the published run
 
