@@ -465,12 +465,14 @@ class TestResultTests(unittest.TestCase):
         github.seed(dict(result(suites={"api": "fail", "web": "pass"}), commit=HEAD), minute=1)
         github.seed(dict(result(suites={"web": "fail"}), commit=OLDER), minute=2)
         self.assertEqual(github.post(result(suites={"api": "pass"}))["state"], "success")
-        self.assertEqual(github.statuses[-1][1]["description"], "2 suites: 2 pass. 12 OK")
+        self.assertEqual(github.statuses[-1][1]["description"], "2 suites: 2 pass.")
         self.assertEqual(github.post(result(suites={"web": "incomplete"}, summary="web runner missing"))["state"], "error")
         self.assertEqual(github.post(result(suites={"web": "fail"}, summary="1 failed"))["state"], "failure")
-        self.assertEqual(github.statuses[-1][1]["description"], "2 suites: 1 fail, 1 pass. 1 failed")
+        self.assertEqual(github.statuses[-1][1]["description"], "2 suites: 1 fail, 1 pass.")
         latest = github.call("tests", "--pr", "12")["latest_by_suite"]
         self.assertEqual({suite: entry["outcome"] for suite, entry in latest.items()}, {"api": "pass", "web": "fail"})
+        github.post(result(suites={"api": "pass", "web": "pass"}, summary="x" * 200))
+        self.assertEqual(github.statuses[-1][1]["description"], "2 suites: 2 pass. " + "x" * 119 + "...")
 
     def test_on_any_page_only_a_record_its_author_also_marked_with_a_status_counts(self):
         github = FakeGitHub()
@@ -494,11 +496,16 @@ class TestResultTests(unittest.TestCase):
         latest = github.call("tests", "--pr", "12")["latest_by_suite"]
         self.assertEqual({suite: entry["outcome"] for suite, entry in latest.items()}, {"api": "fail"})
 
-    def test_text_that_would_close_the_hidden_record_round_trips(self):
+    def test_text_that_would_break_the_markdown_or_the_hidden_record_round_trips(self):
         github = FakeGitHub()
-        tricky = result(command="run --> `x` ``` y", summary="<!-- 3 OK -->", limits="| not | a table |")
+        tricky = result(command="run --> `x` ``` y", summary="<!-- 3 OK -->", limits="| not | a table |",
+                        suites={"a|b": "pass"}, heads=[OLDER, HEAD])
         github.post(tricky)
-        self.assertEqual(github.comments[0]["body"].count("<!-- astack-test-result"), 1)
+        lines = github.comments[0]["body"].splitlines()
+        self.assertEqual(lines[-1].count("-->"), 1)
+        self.assertIn("| a\\|b | pass |", lines)
+        self.assertIn("````sh", lines)
+        self.assertIn("Heads merged onto the base: `{}`, `{}`".format(OLDER[:12], HEAD[:12]), lines)
         stored = github.call("tests", "--pr", "12")["records"][0]
         self.assertEqual({key: stored[key] for key in tricky}, tricky)
 
@@ -509,6 +516,8 @@ class TestResultTests(unittest.TestCase):
                  (result(scope=" "), HEAD, True, "scope must be a nonempty"),
                  (result(summary="ok\n<!-- astack-test-result {} -->"), HEAD, True, "must each fit on one line"),
                  (result(suites={"api\nweb": "pass"}), HEAD, True, "must each fit on one line"),
+                 (result(heads=[HEAD[:7]]), HEAD, True, "heads must be"),
+                 (result(limits=3), HEAD, True, "limits must be a string"),
                  (result(), "d" * 40, True, "is not in the PR"),
                  (result(), HEAD, False, "needs push access")]
         for value, commit, push, message in cases:

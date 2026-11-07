@@ -57,9 +57,9 @@ Write the result file as JSON:
 - When the PR head moved and some suites kept their result, post only those suites for the new head, with their original `tested`, `base`, and `command`. Post rerun suites as a separate result.
 - When the tested commit is a scratch merge, such as a batch or a merge-time check, add `"heads"` with every head SHA merged onto the base.
 
-When a covering suite fails, fix the cause within the task's scope and publish the new result. If you cannot fix it, publish the failure and report it.
+When a covering suite fails, fix the cause within the task's scope. Then publish the new result. If you cannot fix the cause, publish the failing result. Then report the failure.
 
-`post-tests` needs push access. If it stops before posting, put the full result in the description. Report why it stopped. If it reports `status_error`, the comment is posted but other agents ignore it, because it has no matching status. Report the missing status without posting the result again.
+`post-tests` needs push access. If it stops before posting, put the full result in the description. Report why it stopped. If `post-tests` reports `status_error`, the helper posted the comment but no status. Other agents ignore a comment without its matching status. Report the missing status without posting the result again.
 
 Then summarize the results under `## Verification` in the PR description and link each result comment. A merge-time run from [pr-work](../harden-pr/pr-work.md#finish-or-merge) needs no description update. When no test ran, say so there and give the reason. Describe runs on uncommitted changes there too, marked as uncommitted. Confirm the results are visible on the PR before finishing.
 

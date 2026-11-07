@@ -17,7 +17,8 @@ Every posted body starts with:
 Status reports observations, including review coverage and stalled checks.
 Wait polls pending checks and mergeability for a bounded interval. It returns
 on changed state that needs attention; callers assess the resulting snapshot.
-Exit code 2 means the API failed or the supplied review or result file was invalid.
+Exit code 2 means the API failed, the supplied review or result file was invalid,
+or a precondition failed, such as a commit outside the PR or missing push access.
 """
 
 import argparse
@@ -80,7 +81,8 @@ mutation($thread: ID!) {
 """
 
 TEST_CONTEXT = "astack/tests"
-TEST_RECORD = re.compile(r"<!-- astack-test-result (\{.*\}) -->")
+RECORD_PREFIX = "<!-- astack-test-result "
+TEST_RECORD = re.compile(re.escape(RECORD_PREFIX) + r"(\{.*\}) -->")
 OUTCOMES_WORST_FIRST = ("fail", "incomplete", "pass")
 STATUS_BY_OUTCOME = {"fail": "failure", "incomplete": "error", "pass": "success"}
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
@@ -512,11 +514,13 @@ def worst_outcome(outcomes):
 
 
 def commit_status(records):
-    outcomes = [entry["outcome"] for entry in latest_by_suite(records).values()]
+    latest = latest_by_suite(records)
+    outcomes = [entry["outcome"] for entry in latest.values()]
     counts = ", ".join("{} {}".format(outcomes.count(outcome), outcome)
                        for outcome in OUTCOMES_WORST_FIRST if outcome in outcomes)
-    noun = "suite" if len(outcomes) == 1 else "suites"
-    description = "{} {}: {}. {}".format(len(outcomes), noun, counts, records[-1]["summary"])
+    description = "{} {}: {}.".format(len(outcomes), "suite" if len(outcomes) == 1 else "suites", counts)
+    if set(records[-1]["suites"]) == set(latest):
+        description += " " + records[-1]["summary"]
     if len(description) > STATUS_DESCRIPTION_LIMIT:
         description = description[:STATUS_DESCRIPTION_LIMIT - 3] + "..."
     return STATUS_BY_OUTCOME[worst_outcome(outcomes)], description
@@ -534,7 +538,7 @@ def render_test_result(record):
     if record.get("heads"):
         lines += ["", "Heads merged onto the base: " + ", ".join("`{}`".format(head[:12]) for head in record["heads"])]
     fence = "`" * max(3, max((len(run) for run in re.findall(r"`+", record["command"])), default=0) + 1)
-    lines += ["", fence + "sh", record["command"], fence, "", "<!-- astack-test-result {} -->".format(hidden)]
+    lines += ["", fence + "sh", record["command"], fence, "", RECORD_PREFIX + hidden + " -->"]
     return "\n".join(lines)
 
 
