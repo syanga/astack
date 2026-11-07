@@ -5,9 +5,10 @@ Bodies come from files and reach gh as JSON on stdin. Reviews are attributed
 and posted against the commit actually reviewed. GitHub can reject inline
 locations; review then folds findings into the body and reports that fallback.
 
-A test result is a PR comment with a hidden JSON record and an astack/tests
-commit status. Only records from accounts with write access count. The status
-on a commit reflects the newest result for each suite on that commit.
+A test result is a PR comment whose last line is a hidden JSON record, plus an
+astack/tests commit status that links to it. A record counts only when its
+author also set that status, which needs push access. The status on a commit
+reflects the newest result for each suite on that commit.
 
 Every posted body starts with:
 
@@ -16,7 +17,7 @@ Every posted body starts with:
 Status reports observations, including review coverage and stalled checks.
 Wait polls pending checks and mergeability for a bounded interval. It returns
 on changed state that needs attention; callers assess the resulting snapshot.
-Exit code 2 means the API failed or the supplied review was invalid.
+Exit code 2 means the API failed or the supplied review or result file was invalid.
 """
 
 import argparse
@@ -79,11 +80,11 @@ mutation($thread: ID!) {
 """
 
 TEST_CONTEXT = "astack/tests"
-TEST_RECORD = re.compile(r"^<!-- astack-test-result (\{.*\}) -->\r?$", re.M)
-TRUSTED_AUTHORS = {"OWNER", "MEMBER", "COLLABORATOR"}
-TEST_STATES = {"fail": "failure", "incomplete": "error", "pass": "success"}
+TEST_RECORD = re.compile(r"<!-- astack-test-result (\{.*\}) -->")
+OUTCOMES_WORST_FIRST = ("fail", "incomplete", "pass")
+STATUS_BY_OUTCOME = {"fail": "failure", "incomplete": "error", "pass": "success"}
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
-STATUS_LIMIT = 140
+STATUS_DESCRIPTION_LIMIT = 140
 
 PASSED = {"SUCCESS", "NEUTRAL"}
 PENDING = {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED", None}
@@ -111,6 +112,10 @@ def graphql(query, **variables):
 def fetch_pr(args):
     scope = ["--repo", args.repo] if args.repo else []
     return gh(["pr", "view", *([args.pr] if args.pr else []), *scope, "--json", PR_FIELDS])
+
+
+def pr_has_commit(pr, sha):
+    return sha in {commit.get("oid") for commit in pr["commits"]}
 
 
 def fetch_threads(owner, name, number):
@@ -400,7 +405,7 @@ def command_review(args):
         return
     endpoint = "repos/{}/{}/pulls/{}/reviews".format(owner, name, pr["number"])
     wanted = len(review.get("comments", []))
-    if args.commit not in {commit.get("oid") for commit in pr["commits"]}:
+    if not pr_has_commit(pr, args.commit):
         fail("commit {} is not in the PR; review the current commits again".format(args.commit))
     for attempt in (review, fold_comments(review)):
         payload = build_review(args.model, attempt, args.commit, identity)
@@ -440,41 +445,56 @@ def test_result_problem(result):
         return "limits must be a string"
     suites = result.get("suites")
     if not isinstance(suites, dict) or not suites or not all(
-            name.strip() and outcome in TEST_STATES for name, outcome in suites.items()):
+            name.strip() and outcome in STATUS_BY_OUTCOME for name, outcome in suites.items()):
         return "suites must map each suite name to pass, fail, or incomplete"
     heads = result.get("heads", [])
     if not isinstance(heads, list) or not all(isinstance(head, str) and FULL_SHA.fullmatch(head) for head in heads):
         return "heads must be a list of full commit SHAs"
+    texts = [result[key] for key in ("command", "summary", "scope", "limits") if key in result] + list(suites)
+    if any("\n" in text or "\r" in text for text in texts):
+        return "command, summary, scope, limits, and suite names must each fit on one line"
     return None
 
 
-def fetch_comments(owner, name, number):
-    comments, page = [], 1
+def fetch_pages(endpoint):
+    items, page = [], 1
     while True:
-        batch = gh(["api", "--method", "GET", "repos/{}/{}/issues/{}/comments".format(owner, name, number),
-                    "-F", "per_page=100", "-F", "page={}".format(page)])
-        comments += batch
+        batch = gh(["api", "--method", "GET", endpoint, "-F", "per_page=100", "-F", "page={}".format(page)])
+        items += batch
         if len(batch) < 100:
-            return comments
+            return items
         page += 1
 
 
-def test_records(comments):
-    records, ignored = [], 0
+def comments_endpoint(owner, name, number):
+    return "repos/{}/{}/issues/{}/comments".format(owner, name, number)
+
+
+def read_test_records(owner, name, comments):
+    found, ignored = [], 0
     for comment in comments:
-        for found in TEST_RECORD.findall(comment.get("body") or ""):
-            if comment.get("author_association") not in TRUSTED_AUTHORS:
-                ignored += 1
-                continue
-            try:
-                record = json.loads(found)
-            except ValueError:
-                record = None
-            if test_result_problem(record) or not FULL_SHA.fullmatch(str(record.get("commit"))):
-                ignored += 1
-                continue
-            records.append(dict(record, url=comment.get("html_url"),
-                                author=(comment.get("user") or {}).get("login"), at=comment.get("created_at")))
+        lines = (comment.get("body") or "").rstrip().splitlines()
+        match = TEST_RECORD.fullmatch(lines[-1]) if lines else None
+        if not match:
+            continue
+        try:
+            record = json.loads(match.group(1))
+        except ValueError:
+            record = None
+        if test_result_problem(record) or not FULL_SHA.fullmatch(str(record.get("commit"))):
+            ignored += 1
+            continue
+        found.append((comment, record))
+    statuses = {sha: fetch_pages("repos/{}/{}/commits/{}/statuses".format(owner, name, sha))
+                for sha in {record["commit"] for _, record in found}}
+    records = []
+    for comment, record in found:
+        author = (comment.get("user") or {}).get("login")
+        if not any(status.get("context") == TEST_CONTEXT and status.get("target_url") == comment.get("html_url")
+                   and (status.get("creator") or {}).get("login") == author for status in statuses[record["commit"]]):
+            ignored += 1
+            continue
+        records.append(dict(record, url=comment.get("html_url"), author=author, at=comment.get("created_at")))
     records.sort(key=lambda record: record["at"] or "")
     return records, ignored
 
@@ -488,18 +508,18 @@ def latest_by_suite(records):
 
 
 def worst_outcome(outcomes):
-    return next(outcome for outcome in TEST_STATES if outcome in outcomes)
+    return next(outcome for outcome in OUTCOMES_WORST_FIRST if outcome in outcomes)
 
 
 def commit_status(records):
     outcomes = [entry["outcome"] for entry in latest_by_suite(records).values()]
-    worst = worst_outcome(outcomes)
-    counts = ", ".join("{} {}".format(outcomes.count(outcome), outcome) for outcome in TEST_STATES if outcome in outcomes)
+    counts = ", ".join("{} {}".format(outcomes.count(outcome), outcome)
+                       for outcome in OUTCOMES_WORST_FIRST if outcome in outcomes)
     noun = "suite" if len(outcomes) == 1 else "suites"
     description = "{} {}: {}. {}".format(len(outcomes), noun, counts, records[-1]["summary"])
-    if len(description) > STATUS_LIMIT:
-        description = description[:STATUS_LIMIT - 3] + "..."
-    return TEST_STATES[worst], description
+    if len(description) > STATUS_DESCRIPTION_LIMIT:
+        description = description[:STATUS_DESCRIPTION_LIMIT - 3] + "..."
+    return STATUS_BY_OUTCOME[worst_outcome(outcomes)], description
 
 
 def render_test_result(record):
@@ -521,7 +541,7 @@ def render_test_result(record):
 def command_tests(args):
     pr = fetch_pr(args)
     owner, name = pr["url"].split("/")[3:5]
-    records, ignored = test_records(fetch_comments(owner, name, pr["number"]))
+    records, ignored = read_test_records(owner, name, fetch_pages(comments_endpoint(owner, name, pr["number"])))
     json.dump({"head": pr["headRefOid"], "records": records, "latest_by_suite": latest_by_suite(records),
                "ignored": ignored}, sys.stdout, indent=2)
     print()
@@ -536,21 +556,22 @@ def command_post_tests(args):
         fail("result file: " + problem)
     pr = fetch_pr(args)
     owner, name = pr["url"].split("/")[3:5]
-    if args.commit not in {commit.get("oid") for commit in pr["commits"]}:
+    if not pr_has_commit(pr, args.commit):
         fail("commit {} is not in the PR; post results for a PR commit".format(args.commit))
+    if not (gh(["api", "--method", "GET", "repos/{}/{}".format(owner, name)]).get("permissions") or {}).get("push"):
+        fail("post-tests needs push access to {}/{} to set the {} status".format(owner, name, TEST_CONTEXT))
     record = dict(result, commit=args.commit, version=1)
-    earlier, _ = test_records(fetch_comments(owner, name, pr["number"]))
-    state, description = commit_status([entry for entry in earlier if entry.get("commit") == args.commit]
+    endpoint = comments_endpoint(owner, name, pr["number"])
+    earlier, _ = read_test_records(owner, name, fetch_pages(endpoint))
+    state, description = commit_status([entry for entry in earlier if entry["commit"] == args.commit]
                                        + [dict(record, at=None)])
     body = format_body(args.model, render_test_result(record), identity)
-    comment = gh(["api", "--method", "POST", "repos/{}/{}/issues/{}/comments".format(owner, name, pr["number"]),
-                  "--input", "-"], stdin=json.dumps({"body": body}))
+    comment = gh(["api", "--method", "POST", endpoint, "--input", "-"], stdin=json.dumps({"body": body}))
     status = subprocess.run(
         ["gh", "api", "--method", "POST", "repos/{}/{}/statuses/{}".format(owner, name, args.commit), "--input", "-"],
         input=json.dumps({"state": state, "context": TEST_CONTEXT, "description": description,
                           "target_url": comment["html_url"]}), capture_output=True, text=True)
     report = {"url": comment["html_url"], "commit": args.commit, "on_head": args.commit == pr["headRefOid"],
-              "trusted": comment.get("author_association") in TRUSTED_AUTHORS,
               "state": state if status.returncode == 0 else None, "description": description}
     if status.returncode != 0:
         report["status_error"] = status.stderr.strip()

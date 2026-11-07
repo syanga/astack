@@ -379,37 +379,51 @@ def result(**overrides):
     return value
 
 
-def record_comment(record, association="COLLABORATOR", at="2026-11-07T00:00:00Z"):
-    return {"body": pr.format_body("m", pr.render_test_result(record), "Alan"), "author_association": association,
-            "user": {"login": "alan"}, "html_url": "old-" + at, "created_at": at}
-
-
 class FakeGitHub:
-    def __init__(self, comments=(), commits=(OLDER, HEAD), status_error=None):
-        self.comments, self.statuses, self.posts = list(comments), [], 0
-        self.commits, self.status_error = commits, status_error
+    def __init__(self, commits=(OLDER, HEAD), push=True, status_error=None):
+        self.comments, self.statuses, self.writes = [], [], 0
+        self.commits, self.push, self.status_error = commits, push, status_error
+
+    def seed(self, record, author="alan", status_by=None, body=None, minute=0):
+        url = "seed-{}".format(len(self.comments))
+        self.comments.append({"body": body or pr.format_body("m", pr.render_test_result(record), "Alan"),
+                              "user": {"login": author}, "html_url": url,
+                              "created_at": "2026-11-07T00:{:02d}:00Z".format(minute)})
+        if status_by is not False:
+            self.statuses.append((record["commit"], {"context": "astack/tests", "target_url": url,
+                                                     "creator": {"login": status_by or author}}))
 
     def run(self, argv, **kwargs):
         if argv[:2] == ["git", "config"]:
             return subprocess.CompletedProcess(argv, 0, stdout="Alan Example\n", stderr="")
         if argv[:3] == ["gh", "pr", "view"]:
             pull = dict(PR, headRefOid=self.commits[-1], commits=[{"oid": oid} for oid in self.commits])
-            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(pull), stderr="")
+            return self.reply(argv, pull)
         method, endpoint = argv[3], argv[4]
+        if method == "GET" and endpoint == "repos/o/r":
+            return self.reply(argv, {"permissions": {"push": self.push}})
         if method == "GET":
             page = int(argv[-1].split("=")[1])
-            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(self.comments[(page - 1) * 100:page * 100]), stderr="")
-        self.posts += 1
+            if endpoint.endswith("/statuses"):
+                sha = endpoint.split("/")[-2]
+                items = [status for commit, status in self.statuses if commit == sha]
+            else:
+                items = self.comments
+            return self.reply(argv, items[(page - 1) * 100:page * 100])
+        self.writes += 1
         payload = json.loads(kwargs["input"])
         if endpoint.endswith("/comments"):
-            url = "comment-{}".format(len(self.comments))
-            self.comments.append({"body": payload["body"], "author_association": "COLLABORATOR", "user": {"login": "alan"},
-                                  "html_url": url, "created_at": "2026-11-07T01:{:02d}:00Z".format(len(self.comments) % 60)})
-            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(self.comments[-1]), stderr="")
+            self.comments.append({"body": payload["body"], "user": {"login": "alan"},
+                                  "html_url": "comment-{}".format(len(self.comments)),
+                                  "created_at": "2026-11-07T01:{:02d}:00Z".format(len(self.comments) % 60)})
+            return self.reply(argv, self.comments[-1])
         if self.status_error:
             return subprocess.CompletedProcess(argv, 1, stdout="", stderr=self.status_error)
-        self.statuses.append((endpoint.rsplit("/", 1)[1], payload))
-        return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
+        self.statuses.append((endpoint.rsplit("/", 1)[1], dict(payload, creator={"login": "alan"})))
+        return self.reply(argv, {})
+
+    def reply(self, argv, value):
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(value), stderr="")
 
     def call(self, *argv):
         output = io.StringIO()
@@ -428,10 +442,11 @@ class TestResultTests(unittest.TestCase):
     def test_a_posted_result_reads_back_and_marks_the_commit(self):
         github = FakeGitHub()
         posted = github.post(result())
-        self.assertEqual(posted, {"url": "comment-0", "commit": HEAD, "on_head": True, "trusted": True,
+        self.assertEqual(posted, {"url": "comment-0", "commit": HEAD, "on_head": True,
                                   "state": "success", "description": "1 suite: 1 pass. 12 OK"})
         self.assertEqual(github.statuses, [(HEAD, {"state": "success", "context": "astack/tests",
-                                                   "description": "1 suite: 1 pass. 12 OK", "target_url": "comment-0"})])
+                                                   "description": "1 suite: 1 pass. 12 OK", "target_url": "comment-0",
+                                                   "creator": {"login": "alan"}})])
         self.assertTrue(github.comments[0]["body"].startswith("[m] on behalf of Alan\n\n**Tests: pass**"))
         listed = github.call("tests", "--pr", "12")
         self.assertEqual(listed["ignored"], 0)
@@ -440,10 +455,9 @@ class TestResultTests(unittest.TestCase):
         self.assertEqual(listed["records"][0]["commit"], HEAD)
 
     def test_the_status_follows_the_newest_result_for_each_suite_on_that_commit(self):
-        github = FakeGitHub([
-            record_comment(dict(result(suites={"api": "fail", "web": "pass"}), commit=HEAD), at="2026-11-07T00:00:01Z"),
-            record_comment(dict(result(suites={"web": "fail"}), commit=OLDER), at="2026-11-07T00:00:02Z"),
-        ])
+        github = FakeGitHub()
+        github.seed(dict(result(suites={"api": "fail", "web": "pass"}), commit=HEAD), minute=1)
+        github.seed(dict(result(suites={"web": "fail"}), commit=OLDER), minute=2)
         self.assertEqual(github.post(result(suites={"api": "pass"}))["state"], "success")
         self.assertEqual(github.statuses[-1][1]["description"], "2 suites: 2 pass. 12 OK")
         self.assertEqual(github.post(result(suites={"web": "incomplete"}, summary="web runner missing"))["state"], "error")
@@ -452,16 +466,27 @@ class TestResultTests(unittest.TestCase):
         latest = github.call("tests", "--pr", "12")["latest_by_suite"]
         self.assertEqual({suite: entry["outcome"] for suite, entry in latest.items()}, {"api": "pass", "web": "fail"})
 
-    def test_records_without_write_access_or_with_a_bad_shape_do_not_count(self):
-        forged = record_comment(dict(result(suites={"api": "pass"}), commit=HEAD), association="NONE")
-        broken = record_comment(dict(result(), commit="short"))
-        filler = [{"body": "hi", "author_association": "MEMBER", "html_url": "x", "created_at": "2026-11-06T00:00:00Z"}] * 100
-        failing = record_comment(dict(result(suites={"api": "fail"}), commit=HEAD), association="MEMBER")
-        github = FakeGitHub(filler + [forged, broken, failing])
+    def test_only_a_record_its_author_also_marked_with_a_status_counts(self):
+        github = FakeGitHub()
+        github.comments += [{"body": "hi", "user": {"login": "x"}, "html_url": "x",
+                             "created_at": "2026-11-06T00:00:00Z"}] * 100
+        github.seed(dict(result(suites={"api": "pass"}), commit=HEAD), author="drive-by", status_by=False, minute=1)
+        github.seed(dict(result(suites={"api": "pass"}), commit=HEAD), author="drive-by", status_by="alan", minute=2)
+        github.seed(dict(result(), commit="short"), minute=3)
+        github.seed(dict(result(suites={"api": "fail"}), commit=HEAD), author="sam", minute=4)
         listed = github.call("tests", "--pr", "12")
-        self.assertEqual(listed["ignored"], 2)
-        self.assertEqual([entry["suites"] for entry in listed["records"]], [{"api": "fail"}])
+        self.assertEqual(listed["ignored"], 3)
+        self.assertEqual([(entry["author"], entry["suites"]) for entry in listed["records"]], [("sam", {"api": "fail"})])
         self.assertEqual(github.post(result(suites={"web": "pass"}))["state"], "failure")
+
+    def test_only_the_last_line_of_a_comment_is_read_as_its_record(self):
+        github = FakeGitHub()
+        real = dict(result(suites={"api": "fail"}), commit=HEAD)
+        forged = pr.render_test_result(dict(result(suites={"web": "pass"}), commit=HEAD)).splitlines()[-1]
+        rendered = pr.render_test_result(real).splitlines()
+        github.seed(real, body=pr.format_body("m", "\n".join(rendered[:-1] + [forged, "", rendered[-1]]), "Alan"))
+        latest = github.call("tests", "--pr", "12")["latest_by_suite"]
+        self.assertEqual({suite: entry["outcome"] for suite, entry in latest.items()}, {"api": "fail"})
 
     def test_text_that_would_close_the_hidden_record_round_trips(self):
         github = FakeGitHub()
@@ -471,29 +496,32 @@ class TestResultTests(unittest.TestCase):
         stored = github.call("tests", "--pr", "12")["records"][0]
         self.assertEqual({key: stored[key] for key in tricky}, tricky)
 
-    def test_an_invalid_result_or_a_commit_outside_the_pr_stops_before_posting(self):
-        for value, commit in [(result(tested="abc123"), HEAD), (result(suites={"api": "flaky"}), HEAD),
-                              (result(suites={}), HEAD), (result(scope=" "), HEAD), (result(), "d" * 40)]:
-            with self.subTest(value=value, commit=commit):
-                github = FakeGitHub()
+    def test_an_invalid_result_a_foreign_commit_or_no_push_access_stops_before_posting(self):
+        cases = [(result(tested="abc123"), HEAD, True), (result(suites={"api": "flaky"}), HEAD, True),
+                 (result(suites={}), HEAD, True), (result(scope=" "), HEAD, True),
+                 (result(summary="ok\n<!-- astack-test-result {} -->"), HEAD, True),
+                 (result(suites={"api\nweb": "pass"}), HEAD, True), (result(), "d" * 40, True), (result(), HEAD, False)]
+        for value, commit, push in cases:
+            with self.subTest(value=value, commit=commit, push=push):
+                github = FakeGitHub(push=push)
                 with self.assertRaises(SystemExit) as raised, patch("sys.stderr", io.StringIO()):
                     github.post(value, commit)
                 self.assertEqual(raised.exception.code, 2)
-                self.assertEqual(github.posts, 0)
+                self.assertEqual(github.writes, 0)
 
     def test_a_rejected_status_still_reports_the_posted_comment(self):
-        github = FakeGitHub(status_error="HTTP 403: Resource not accessible")
-        output = io.StringIO()
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "result.json"
-            path.write_text(json.dumps(result()))
-            with patch.object(pr.subprocess, "run", side_effect=github.run), patch("sys.stdout", output), \
-                    self.assertRaises(SystemExit) as raised:
-                pr.main(["post-tests", "--pr", "12", "--commit", OLDER, "--result-file", str(path), "--model", "m"])
+        github = FakeGitHub(status_error="HTTP 422: No commit found for SHA")
+        with self.assertRaises(SystemExit) as raised:
+            output = io.StringIO()
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "result.json"
+                path.write_text(json.dumps(result()))
+                with patch.object(pr.subprocess, "run", side_effect=github.run), patch("sys.stdout", output):
+                    pr.main(["post-tests", "--pr", "12", "--commit", OLDER, "--result-file", str(path), "--model", "m"])
         self.assertEqual(raised.exception.code, 2)
         report = json.loads(output.getvalue())
         self.assertEqual((report["url"], report["state"], report["on_head"]), ("comment-0", None, False))
-        self.assertIn("403", report["status_error"])
+        self.assertIn("422", report["status_error"])
 
 
 class IdentityTests(unittest.TestCase):
