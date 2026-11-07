@@ -42,7 +42,7 @@ Each of these conditions is a gate:
 - a change you cannot verify on the matching surface
 - a human change request
 - a missing approval that the [admin merge](#5-merge) does not clear
-- a [review-pr](../review-pr/SKILL.md) run that stops at its pass limit
+- in-scope review defects after three fix-and-review passes
 - a review bot silent through both timers in [Merge](#5-merge) step 2
 
 On the orchestrate route, park it through [orchestrate's escalation](../orchestrate/SKILL.md#escalation). Otherwise write its [decision request](../orchestrate/SKILL.md#messages-to-the-user) to the store's `open-decisions.md`, and record the answer there when it arrives. Continue unblocked work. When nothing can move, ask with the question tool if one exists, otherwise end the turn with the request. Send a push notification if the harness has one.

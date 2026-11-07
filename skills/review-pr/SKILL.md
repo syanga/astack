@@ -27,7 +27,7 @@ Review the requested changes against the fixed point. Give every reviewer the sa
 
 Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, before dispatching reviewers.
 
-Save the reviewed source and diff in a temporary review directory, with the base SHA, the candidate identity (commit SHA, or HEAD plus the working-tree diff), and the capture command, for the Correctness reviewer. Refresh the snapshot before each Correctness pass.
+Save the reviewed source and diff in a temporary review directory, with the base SHA, the candidate identity (commit SHA, or HEAD plus the working-tree diff), and the capture command, for the Correctness reviewer. Refresh the snapshot before each Correctness review.
 
 ### 2. Identify the spec source
 
@@ -103,13 +103,13 @@ Run Correctness once, on the first candidate where the applicable Standards and 
 
 Converge when the final changes have no unresolved verified problems, required checks pass, and applicable reviews are complete. A native fallback completes the Correctness review for convergence. Optional suggestions do not block completion. If progress stalls or a decision is needed, report the remaining blockers.
 
-Fix-and-review runs at most three passes unless the user sets another limit. All reviews of one candidate, from every axis, make one pass. When the last pass does not converge, stop at the pass limit without more repairs. If Correctness has not run, report it as not run and name the gate that no candidate cleared.
+Fix-and-review runs at most three passes unless the user sets another limit. All reviews of one candidate, from every axis, make one pass. When the pass that reaches the limit does not converge, stop without more repairs. A required check that fails on the head pushed after that pass also leaves it unconverged. If Correctness has not run, give as its reason the condition no candidate met: Standards, Spec, or required checks.
 
 In fix-and-review mode with existing PRs, [finalize the PRs](../harden-pr/pr-work.md#finalize-reviewed-prs), including committing and pushing verified repairs. Without a PR, return the reviewed changes to the caller's delivery workflow.
 
 Verify Correctness findings against the evidence requirements before presenting or posting them. Present each report under its axis heading (`## Standards`, `## Spec`, `## Correctness`), verbatim or lightly cleaned. Under `## Correctness`, name the reviewer (outside provider, `native fallback`, or not run with the reason), each finding's disposition, and any repair-verification result. Do **not** merge or rerank findings, because the axes are deliberately separate (see _Why three axes_).
 
-End with a one-line summary: remaining findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent. When the run stopped at its pass limit, begin that line with `Not converged after <n> passes; do not merge.`
+End with a one-line summary: remaining findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent. When the run stopped at its pass limit, begin that line with `Not converged after <n> review-pr passes. Do not merge.`
 
 At the end of the invocation, follow [posting.md](../harden-pr/posting.md) for clean, incomplete, or pass-limited review records, actionable findings, and publication limits.
 

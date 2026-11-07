@@ -37,7 +37,7 @@ When screenshots or recordings demonstrate the change, upload them as GitHub att
 
 Keep logs, SHA lists, exhaustive file inventories, and bulky evidence in linked artifacts. End with the model and harness attribution. Use commit bodies to explain what the subject leaves unsaid.
 
-Create or update the PR using a file for the body. When updating, keep a pass-limit alert from [posting.md](../harden-pr/posting.md). Confirm that it targets the intended base and is open for review, not a draft. In T3 Code, link it with `link_pull_request` when available.
+Create or update the PR using a file for the body. When updating, keep any pass-limit alert from [posting.md](../harden-pr/posting.md). Confirm that it targets the intended base and is open for review, not a draft. In T3 Code, link it with `link_pull_request` when available.
 
 Finish the requested phase or stack first. Then run [review-pr](../review-pr/SKILL.md) on each PR you opened or pushed to, unless the user declines review. Use fix-and-review mode unless the user asks for report-only review. When a review-pr record on the PR completed with no remaining findings and the branch still contains its reviewed commit, pass the latest such commit to review-pr as the fixed point. When the user explicitly requests hardening, run [harden-pr](../harden-pr/SKILL.md) instead, unless a brief assigns hardening to another owner.
 
