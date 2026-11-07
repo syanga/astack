@@ -134,8 +134,7 @@ partial result. Session termination alone never marks work done.
    and the next action in the overview handoff, then run `orch status`.
 
 After accepting a completed worker, reconcile
-[worker checkouts](../worktree-cleanup/PROGRAM.md#account-for-worker-checkouts)
-within that worker's finished scope.
+[worker checkouts](../worktree-cleanup/PROGRAM.md#account-for-worker-checkouts).
 
 After interruption, run `orch init`, inspect `orch --json inbox history`, and
 reconcile any unrecorded receipts. Reconcile
