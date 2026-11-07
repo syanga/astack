@@ -11,7 +11,7 @@ Three-axis review of the requested changes against a fixed point:
 
 The axes run as **separate reviewers** so they don't pollute each other's context, then this skill aggregates their findings.
 
-Use **report-only** for standalone review requests. Use **fix-and-review** when the user requests repairs, an implementation workflow hands off its authorized work, or open-pr runs the review. Explicit read-only requests take precedence.
+Use **report-only** for standalone review requests. Use **fix-and-review** when the user or a calling workflow requests repairs, or an implementation workflow hands off its authorized work. Explicit read-only requests take precedence.
 
 ## Process
 
@@ -103,13 +103,13 @@ Run Correctness once, on the first candidate where the applicable Standards and 
 
 Converge when the final changes have no unresolved verified problems, required checks pass, and applicable reviews are complete. A native fallback completes the Correctness review for convergence. Optional suggestions do not block completion. If progress stalls or a decision is needed, report the remaining blockers.
 
-Fix-and-review runs at most three passes unless the user sets another limit. A pass is every review run on one candidate. When the last pass ends with unresolved verified problems from any axis, stop at the pass limit without more repairs. If Correctness has not run, report it as not run because no candidate cleared Standards and Spec.
+Fix-and-review runs at most three passes unless the user sets another limit. All reviews of one candidate, from every axis, make one pass. When the last pass does not converge, stop at the pass limit without more repairs. If Correctness has not run, report it as not run and name the gate that no candidate cleared.
 
 In fix-and-review mode with existing PRs, [finalize the PRs](../harden-pr/pr-work.md#finalize-reviewed-prs), including committing and pushing verified repairs. Without a PR, return the reviewed changes to the caller's delivery workflow.
 
 Verify Correctness findings against the evidence requirements before presenting or posting them. Present each report under its axis heading (`## Standards`, `## Spec`, `## Correctness`), verbatim or lightly cleaned. Under `## Correctness`, name the reviewer (outside provider, `native fallback`, or not run with the reason), each finding's disposition, and any repair-verification result. Do **not** merge or rerank findings, because the axes are deliberately separate (see _Why three axes_).
 
-End with a one-line summary: remaining findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent.
+End with a one-line summary: remaining findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent. When the run stopped at its pass limit, begin that line with `Not converged after <n> passes; do not merge.`
 
 At the end of the invocation, follow [posting.md](../harden-pr/posting.md) for clean, incomplete, or pass-limited review records, actionable findings, and publication limits.
 
