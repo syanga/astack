@@ -4,9 +4,20 @@ Invoking review-pr or harden-pr authorizes publication on an existing PR unless 
 
 At the end of each invocation, post one informational GitHub review with event `COMMENT`, even when no findings remain. Combine internal repair passes in that record. A later invocation adds a new record.
 
-Include the reviewed commit, outcome, repairs, remaining findings, verification, and completed and missing coverage in the body. Preserve review-pr's separate axes. Keep full transcripts in local review records. Also publish [test results](../open-pr/test-results.md) in the PR description.
+Include the reviewed commit, its fixed point, the outcome, repairs, remaining findings, verification, and completed and missing coverage in the body. Preserve review-pr's separate axes. Keep full transcripts in local review records. Also publish [test results](../open-pr/test-results.md) in the PR description.
 
 If a run stops early after substantive review, mark its record incomplete. If no substantive review occurred, report the reason only in the conversation. Missing coverage is not a clean result.
+
+When a review-pr run stops at its pass limit, start the review body with this alert, followed by a blank line:
+
+```markdown
+> [!CAUTION]
+> Not converged after <n> review-pr passes. Do not merge. Investigate why the passes kept leaving problems.
+```
+
+Put the same alert at the top of the PR description. Add `> Review: <url>` after the alert's text, with the `url` that `pr.py review` returns. If posting fails, omit that line. When a later run stops at its pass limit, replace the alert. The approval line that [pr-work's merge step](pr-work.md#finish-or-merge) appends is `> Merge approved by the user for <sha>.`
+
+Remove the alert only when a later review-pr or harden-pr run converges and its diff includes everything the pass-limited run reviewed. A converged review against the PR's target branch qualifies.
 
 Use harden-pr's `scripts/pr.py review` to post against the commit actually reviewed. The helper signs the review and exposes actionable findings to harden-pr.
 
@@ -16,7 +27,7 @@ Write a JSON file with this shape:
 
 ```json
 {
-  "body": "Reviewed <sha>. Outcome, repairs, remaining findings, verification, and coverage.",
+  "body": "Reviewed <sha> against <fixed point>. Outcome, repairs, remaining findings, verification, and coverage.",
   "comments": [
     {
       "path": "src/example.py",

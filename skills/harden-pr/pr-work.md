@@ -24,7 +24,7 @@ For conflicts, read the intent on both sides and preserve it through the resolut
 
 ## Push and wait
 
-Apply [open-pr's diff cleanup and pre-push protection](../open-pr/SKILL.md) to fixes. Update any PR description made inaccurate by the changes. Prefer new commits for review fixes; use a rebase when the base or conflicts require it. Before pushing, fetch the remote head and compare it with the snapshot. If another actor advanced the branch, inspect their work before proceeding. Use an explicit lease for a necessary rewritten push.
+Apply [open-pr's diff cleanup and pre-push protection](../open-pr/SKILL.md) to fixes. Update any PR description made inaccurate by the changes, but keep any pass-limit alert from [posting.md](posting.md). Prefer new commits for review fixes; use a rebase when the base or conflicts require it. Before pushing, fetch the remote head and compare it with the snapshot. If another actor advanced the branch, inspect their work before proceeding. Use an explicit lease for a necessary rewritten push.
 
 Take a fresh snapshot after each push. Use `pr.py wait --pr <n> --max-minutes 0.5` to wait in short intervals while checks or mergeability settle. It returns when they settle, the head changes, the PR closes, checks fail or stall, or the interval expires. Inspect the returned snapshot; returning does not imply success. An API failure is missing state, never a clean result. Retry a transient failure, then report it if it persists. Stay quiet during routine waiting.
 
@@ -32,11 +32,13 @@ Take a fresh snapshot after each push. Use `pr.py wait --pr <n> --max-minutes 0.
 
 Hardening and fix-and-review finish when every in-scope PR has its repairs committed and pushed, current descriptions and review threads, and passing required checks. Required reviews must be complete and apply to each remote head, with no unresolved in-scope defects. Use the procedures above, routing stack changes through the designated owner.
 
-Honor explicit report-only, read-only, or local-only limits. If publication, verification, or a needed decision is blocked, report the unfinished PRs and the blocker.
+Honor explicit report-only, read-only, or local-only limits. If publication, verification, or a needed decision is blocked, report the unfinished PRs and the blocker. When a review-pr run stops at its pass limit, push its repairs and stop. Leave the remaining findings open.
 
 ## Finish or merge
 
 When hardening was requested, confirm its assessment covers the final head, refreshing affected coverage through [harden-pr](SKILL.md) as needed. For a narrower follow-through request, finish when its findings and checks are addressed. Report each PR's URL and final head SHA, what changed, remaining findings, CI, required approvals, and unavailable coverage.
+
+A pass-limit alert from [posting.md](posting.md) in the PR description blocks the merge until you show the user the PR's remaining findings and the user confirms merging the head SHA. Right before the merge command, append the approval line from posting.md to the alert.
 
 Before an authorized merge, fetch the base, merge the head onto it in a scratch branch, and record that base SHA. Apply [Reuse a published result](../open-pr/test-results.md#reuse-a-published-result) with the scratch branch as HEAD and the recorded SHA in place of `origin/<base branch>`, without fetching again. Run the covering suites that do not keep their result on the scratch branch. The PR head stays unchanged, and a squash merge lands the scratch branch's tree while the base stays at that SHA. When the scratch merge conflicts or a suite fails, stop and follow [Address findings and CI](#address-findings-and-ci). For a batch result, follow [Test a batch](#test-a-batch) instead. Then take a fresh snapshot and confirm that findings and user decisions are addressed and required checks and approvals pass on the intended head. Fetch the base again. If it no longer points at the recorded SHA, build a new scratch branch on the new base and repeat this paragraph. Otherwise, merge with `gh pr merge <n> --squash --match-head-commit <sha>`. Respect the user's merge disposition. If it is absent, stop with the finalized PRs open. For stacked PRs, retarget children to the parent's base before deleting the parent branch.
 

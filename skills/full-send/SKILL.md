@@ -42,7 +42,8 @@ Each of these conditions is a gate:
 - a change you cannot verify on the matching surface
 - a human change request
 - a missing approval that the [admin merge](#5-merge) does not clear
-- in-scope review defects after three fix-and-review passes
+- a [review-pr](../review-pr/SKILL.md) run that stopped at its pass limit
+- in-scope harden-pr defects after three fix-and-review rounds
 - a review bot silent through both timers in [Merge](#5-merge) step 2
 
 On the orchestrate route, park it through [orchestrate's escalation](../orchestrate/SKILL.md#escalation). Otherwise write its [decision request](../orchestrate/SKILL.md#messages-to-the-user) to the store's `open-decisions.md`, and record the answer there when it arrives. Continue unblocked work. When nothing can move, ask with the question tool if one exists, otherwise end the turn with the request. Send a push notification if the harness has one.
@@ -51,11 +52,11 @@ On the orchestrate route, park it through [orchestrate's escalation](../orchestr
 
 Before merging, or before reporting merge-ready under "no merge":
 
-1. Get a clean [review-pr](../review-pr/SKILL.md) fix-and-review pass on the final head. A commit after the last pass needs a new pass. Treat a consequential PR as a hardening request for [harden-pr](../harden-pr/SKILL.md).
+1. Get a converged [review-pr](../review-pr/SKILL.md) fix-and-review run on the final head, or the user's confirmation at the pass-limit gate to merge that head. A commit after either needs a new run. Treat a consequential PR as a hardening request for [harden-pr](../harden-pr/SKILL.md).
 2. Wait for a review of the final head from each review bot seen on this PR or recent merged PRs. In T3 Code, call `watch_pull_request` once per PR and end the turn while checks are pending. When checks pass and a bot has not yet reviewed the final head, start a 30-minute timer as a background job ([run-job](../run-job/SKILL.md) or [codex-background-jobs](../codex-background-jobs/SKILL.md)). Check [`pr.py status`](../harden-pr/pr-work.md) when the timer fires or a review arrives. When the timer fires first, request a re-review where the bot supports one and start a second timer.
 3. File each actionable follow-up, including `followups.md` entries, as a GitHub issue linked from the PR. List other notes under `Deferred follow-ups` in the PR body.
 
-**Admin merge.** When the base branch's protection and rulesets show repository-required approvals as the only unmet requirement, and every check on the head is green, follow [Finish or merge](../harden-pr/pr-work.md#finish-or-merge) without its approval check and add `--admin` to its merge command. A required check that has not run is unmet. A merge queue or a human change request rules out the admin merge. Leave human reviews for humans to dismiss.
+**Admin merge.** When the base branch's protection and rulesets show repository-required approvals as the only unmet requirement, and every check on the head is green, follow [Finish or merge](../harden-pr/pr-work.md#finish-or-merge) without its repository-required approval check and add `--admin` to its merge command. A required check that has not run is unmet. A merge queue or a human change request rules out the admin merge. Leave human reviews for humans to dismiss.
 
 ## 6. Close
 
