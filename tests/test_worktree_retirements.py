@@ -48,6 +48,39 @@ class WorktreeRetirementTests(unittest.TestCase):
         self.assertEqual(record['status'], 'pending')
         self.assertEqual((self.worktree / 'source.txt').read_text(), 'retained source\n')
 
+    def test_bad_records_do_not_hide_other_retirements(self):
+        queued = self.queue()
+        self.assertEqual(queued.returncode, 0, queued.stderr)
+        incomplete = json.loads(queued.stdout)
+        del incomplete['branch']
+        bad_records = {
+            '00-broken.json': b'{',
+            '01-array.json': b'[]',
+            '02-utf8.json': b'\xff',
+            '03-future.json': b'{"version": 2}',
+            '04-missing-branch.json': json.dumps(incomplete).encode(),
+        }
+        for name, contents in bad_records.items():
+            (self.state / name).write_bytes(contents)
+        listed = self.run_cli('list')
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        records = json.loads(listed.stdout)
+        pending = next(row for row in records if row.get('worktree') == str(self.worktree))
+        self.assertEqual(pending['status'], 'pending')
+        self.assertEqual(pending['owner'], 'thread:finished')
+        for name in bad_records:
+            held = next(row for row in records if row.get('record') == str(self.state / name))
+            self.assertEqual(held['status'], 'held')
+            self.assertIn('error', held)
+        self.git('worktree', 'remove', str(self.worktree))
+        completed = self.run_cli('complete', '--worktree', str(self.worktree), '--owner', 'thread:finished',
+                                 '--head', self.git('rev-parse', 'finished'))
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(json.loads(completed.stdout)['status'], 'completed')
+        self.assertEqual(self.git('show', 'finished:source.txt'), 'retained source')
+        for name, contents in bad_records.items():
+            self.assertEqual((self.state / name).read_bytes(), contents)
+
     def test_queue_must_survive_deletion_of_its_target(self):
         self.state = self.worktree / '.retirements'
         refused = self.queue()
@@ -107,6 +140,23 @@ class WorktreeRetirementTests(unittest.TestCase):
         self.assertNotEqual(self.queue().returncode, 0)
         self.assertEqual((self.worktree / 'notes.txt').read_text(), 'untracked notes\n')
         self.assertEqual(json.loads(self.run_cli('list').stdout), [])
+
+    def test_index_flags_cannot_hide_new_work_from_retirement_checks(self):
+        for flag in ['assume-unchanged', 'skip-worktree']:
+            with self.subTest(flag=flag):
+                self.assertEqual(self.queue().returncode, 0)
+                subprocess.run(['git', '-C', str(self.worktree), 'update-index', '--' + flag, 'source.txt'],
+                               check=True, capture_output=True)
+                (self.worktree / 'source.txt').write_text('hidden local work\n')
+                refused = self.queue()
+                self.assertNotEqual(refused.returncode, 0)
+                self.assertEqual(json.loads(self.run_cli('list').stdout)[0]['status'], 'held')
+                self.assertEqual((self.worktree / 'source.txt').read_text(), 'hidden local work\n')
+                subprocess.run(['git', '-C', str(self.worktree), 'update-index', '--no-' + flag, 'source.txt'],
+                               check=True, capture_output=True)
+                (self.worktree / 'source.txt').write_text('retained source\n')
+                self.assertEqual(self.queue().returncode, 0)
+                self.assertEqual(json.loads(self.run_cli('list').stdout)[0]['status'], 'pending')
 
     def test_locked_and_primary_checkouts_are_preserved(self):
         self.git('worktree', 'lock', str(self.worktree))

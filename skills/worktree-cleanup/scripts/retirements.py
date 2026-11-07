@@ -53,9 +53,9 @@ def read_record(path):
         raise ValueError('Retirement record is a symlink: ' + str(path))
     row = json.loads(path.read_text(encoding='utf-8'))
     required = ['worktree', 'common', 'head', 'owner', 'authorization', 'queued_at']
-    if row.get('version') != 1 or any(not isinstance(row.get(k), str) or not row[k] for k in required):
+    if not isinstance(row, dict) or row.get('version') != 1 or any(not isinstance(row.get(k), str) or not row[k] for k in required):
         raise ValueError('Invalid retirement record: ' + str(path))
-    if row.get('branch') is not None and not isinstance(row['branch'], str):
+    if 'branch' not in row or (row['branch'] is not None and not isinstance(row['branch'], str)):
         raise ValueError('Invalid branch in retirement record')
     if not Path(row['worktree']).is_absolute() or not Path(row['common']).is_absolute():
         raise ValueError('Retirement paths must be absolute')
@@ -82,6 +82,9 @@ def snapshot(path):
             default_refs.add('refs/heads/' + target[len(prefix):])
     if ref in default_refs:
         raise ValueError('Keep default-branch worktrees')
+    entries = git(path, 'ls-files', '-v', '-z').split('\0')
+    if any(entry and (entry[0].islower() or entry[0] == 'S') for entry in entries):
+        raise ValueError('Review assume-unchanged and skip-worktree entries before queuing retirement')
     if git(path, 'status', '--porcelain=v1', '--untracked-files=normal'):
         raise ValueError('Resolve tracked and untracked changes before queuing retirement')
     head = git(path, 'rev-parse', 'HEAD')
@@ -174,8 +177,11 @@ def main():
         elif args.command == 'list':
             result = []
             for file in sorted(state.glob('*.json')):
-                row = read_record(file)
-                result.append(dict(row, status=inspect(row)))
+                try:
+                    row = read_record(file)
+                    result.append(dict(row, status=inspect(row)))
+                except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+                    result.append({'record': str(file), 'status': 'held', 'error': str(error)})
         else:
             result = finish(state, args)
     except (ValueError, OSError, subprocess.TimeoutExpired) as error:
