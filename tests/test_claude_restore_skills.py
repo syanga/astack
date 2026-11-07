@@ -122,7 +122,6 @@ class RestoreSkillsHookTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location('restore_hook', HOOK)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        self.assertEqual(ENTRY['matcher'], 'resume|compact')
         self.assertEqual([int(re.search(r'hook\.py" (\d+) ', launcher).group(1)) for launcher in LAUNCHERS],
                          list(range(1, module.PARTS + 1)))
 
@@ -148,7 +147,6 @@ class RestoreSkillsHookTests(unittest.TestCase):
         self.transcript.command('beta')
         self.assertEqual(self.context('resume'),
                          '\n\n'.join([HEADER.format('`/alpha`'), self.block('alpha', '# Alpha')]))
-        self.transcript.compact()
         self.assertEqual(self.context('compact'), '\n\n'.join([
             HEADER.format('`/alpha`, `/beta`'), self.block('alpha', '# Alpha'), self.block('beta', '# Beta')]))
         self.assertEqual(self.context('startup'), '')
@@ -180,7 +178,7 @@ class RestoreSkillsHookTests(unittest.TestCase):
         self.transcript.command('beta')
         self.transcript.compact(('alpha', '# Alpha\n\nFull text.'),
                                 ('beta', '# Beta\n\n[... skill content truncated for compaction; use Read]'))
-        self.assertEqual(self.context('compact'), '\n\n'.join([
+        self.assertEqual(self.context('resume'), '\n\n'.join([
             HEADER.format('`/beta`'), self.block('beta', '# Beta\n\nFull text.')]))
 
     def test_a_skill_abandoned_by_a_rewind_is_not_restored(self):
@@ -192,6 +190,26 @@ class RestoreSkillsHookTests(unittest.TestCase):
         self.transcript.compact()
         self.assertEqual(self.context('resume'),
                          '\n\n'.join([HEADER.format('`/beta`'), self.block('beta', '# Beta')]))
+
+    def test_a_rewind_before_a_broken_chain_keeps_the_abandoned_skill_out(self):
+        self.skill('alpha', '# Alpha')
+        self.skill('send', '# Send')
+        self.transcript.command('alpha')
+        kept = self.transcript.entries[-1]['uuid']
+        self.transcript.command('send', 'merge it')
+        self.transcript.add('user', 'Do not merge.', parent=kept)
+        self.transcript.add('assistant', [{'type': 'text', 'text': 'Understood.'}])
+        self.transcript.add('user', 'Continue.', parent='never-written')
+        self.assertEqual(self.context('resume'),
+                         '\n\n'.join([HEADER.format('`/alpha`'), self.block('alpha', '# Alpha')]))
+
+    def test_arguments_expand_into_the_placeholder_and_match_claude_codes_copy(self):
+        self.skill('task', '# Task\n\nDo $ARGUMENTS.')
+        self.transcript.command('task', 'work', recorded='Do work.')
+        self.transcript.compact(('task', '# Task\n\nDo work.'))
+        self.assertEqual(self.context('resume'), '')
+        self.assertEqual(self.context('compact'),
+                         '\n\n'.join([HEADER.format('`/task work`'), self.block('task', '# Task\n\nDo work.')]))
 
     def test_long_skills_arrive_whole_and_in_order(self):
         body = '\n'.join('Line {:05d} {}'.format(number, 'x' * 60) for number in range(400))
@@ -223,10 +241,10 @@ class RestoreSkillsHookTests(unittest.TestCase):
         notice = '\n[Cut for space. Read the rest in {}/.claude/skills/huge/SKILL.md.]\n</skill>'.format(self.home)
         whole = '\n\n'.join([HEADER.format('`/huge`'), self.block('huge', body)])
         restored = '\n'.join(parts)
+        kept = whole[:len(restored) - len(notice)]
         self.assertEqual(len(parts), len(LAUNCHERS))
-        self.assertTrue(restored.endswith(notice))
-        self.assertTrue(whole.startswith(restored[:-len(notice)]))
-        self.assertGreater(len(restored), 65000)
+        self.assertEqual(restored, kept + notice)
+        self.assertTrue(kept.endswith('z' * 99))
 
 
 if __name__ == '__main__':

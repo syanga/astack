@@ -19,8 +19,10 @@ PARTS = 8
 PART_BYTES = 9000
 ARGS_LIMIT = 8000
 LISTED_ARGS_LIMIT = 1000
-WAIT_SECONDS = 5
+WAIT_SECONDS = 8
 FRESH_SECONDS = 15
+STALE_SECONDS = 60
+HEADER_ARGS_LIMIT = 200
 BASE = 'Base directory for this skill: '
 # Claude Code marks the skills it re-attached after compaction but cut short.
 CUT = 'skill content truncated for compaction'
@@ -32,16 +34,18 @@ FRONTMATTER = re.compile(r'\A---\n.*?\n---\n', re.S)
 class History(NamedTuple):
     context: list[dict]
     lineage: set[str]
-    oldest: int
 
 
 class Invocation(NamedTuple):
     uuid: str
-    position: int
     name: str
     args: str
     base: str
     text: str
+
+    @property
+    def skill_file(self) -> Path:
+        return Path(self.base) / 'SKILL.md'
 
 
 def read_entries(path: str) -> list[dict]:
@@ -81,28 +85,40 @@ def text_of(entry: dict) -> str:
 def history(entries: list[dict], source: str) -> History:
     """Claude Code rebuilds context from the newest entry's parent chain, back to
     the last compaction or to a parent missing from the transcript. A compaction
-    boundary links to the history before it through logicalParentUuid."""
+    boundary links to the history before it through logicalParentUuid. Compact
+    hooks run before Claude Code writes the new boundary, so on compact nothing
+    in the transcript is still in context."""
     position = {entry['uuid']: index for index, entry in enumerate(entries)}
     boundaries = [index for index, entry in enumerate(entries) if entry['subtype'] == 'compact_boundary']
-    boundary = boundaries[-1] if boundaries else (len(entries) if source == 'compact' else -1)
-    index = next((index for index in range(len(entries) - 1, -1, -1) if not entries[index]['isSidechain']), None)
-    context, lineage, oldest = [], set(), len(entries)
-    in_context = True
+    boundary = boundaries[-1] if boundaries else -1
+    index = newest_before(entries, len(entries), set())
+    context, lineage = [], set()
+    in_context = source != 'compact'
     while index is not None and entries[index]['uuid'] not in lineage:
         entry = entries[index]
         lineage.add(entry['uuid'])
-        oldest = index
         in_context = in_context and index > boundary
         if in_context:
             context.append(entry)
-        index = position.get(entry['parentUuid'] or entry['logicalParentUuid'])
-    return History(context, lineage, oldest)
+        parent = entry['parentUuid'] or entry['logicalParentUuid']
+        if parent is not None and parent not in position:
+            # The parent was never written; the newest earlier entry stands in for it.
+            in_context = False
+            index = newest_before(entries, index, lineage)
+        else:
+            index = position.get(parent)
+    return History(context, lineage)
+
+
+def newest_before(entries: list[dict], end: int, visited: set[str]) -> int | None:
+    return next((index for index in range(end - 1, -1, -1)
+                 if not entries[index]['isSidechain'] and entries[index]['uuid'] not in visited), None)
 
 
 def invocations(entries: list[dict]) -> list[Invocation]:
     by_id = {entry['uuid']: entry for entry in entries}
     found = []
-    for position, entry in enumerate(entries):
+    for entry in entries:
         if entry['type'] != 'user' or not entry['isMeta'] or entry['sourceToolUseID'] or entry['isSidechain']:
             continue
         blocks = (entry['message'] or {}).get('content')
@@ -115,17 +131,34 @@ def invocations(entries: list[dict]) -> list[Invocation]:
         base = text[len(BASE):].split('\n', 1)[0].strip()
         name = COMMAND.search(command)
         args = ARGS.search(command)
-        found.append(Invocation(entry['uuid'], position, name.group(1) if name else Path(base).name,
+        found.append(Invocation(entry['uuid'], name.group(1) if name else Path(base).name,
                                 args.group(1).strip() if args else '', base, text))
     return found
 
 
-def current_body(invocation: Invocation) -> str | None:
+def limited_args(invocation: Invocation) -> str:
+    if len(invocation.args) <= ARGS_LIMIT:
+        return invocation.args
+    return invocation.args[:ARGS_LIMIT] + '\n[Arguments cut at {} characters.]'.format(ARGS_LIMIT)
+
+
+def skill_source(invocation: Invocation) -> str | None:
     try:
-        text = (Path(invocation.base) / 'SKILL.md').read_text(encoding='utf-8')
+        text = invocation.skill_file.read_text(encoding='utf-8')
     except (OSError, UnicodeDecodeError):
         return None
     return FRONTMATTER.sub('', text, count=1).strip()
+
+
+def expand(source: str, invocation: Invocation) -> str:
+    """Expand the skill as Claude Code does: substitute $ARGUMENTS, or append the arguments."""
+    if '$ARGUMENTS' in source:
+        return source.replace('$ARGUMENTS', limited_args(invocation))
+    return source + '\n\n\nARGUMENTS: ' + limited_args(invocation) if invocation.args else source
+
+
+def recorded_body(invocation: Invocation) -> str:
+    return invocation.text[len(BASE) + len(invocation.base):].strip().rsplit('\n\n\nARGUMENTS: ', 1)[0]
 
 
 def missing(entries: list[dict], source: str) -> list[Invocation]:
@@ -139,42 +172,38 @@ def missing(entries: list[dict], source: str) -> list[Invocation]:
                 for skill in attachment.get('skills') or [] if isinstance(skill, dict)}
     latest = {}
     for invocation in invocations(entries):
-        if invocation.uuid in known.lineage or invocation.position < known.oldest:
+        if invocation.uuid in known.lineage:
             latest.pop(invocation.name, None)
             latest[invocation.name] = invocation
     result = []
     for invocation in latest.values():
         copy = attached.get(BASE + invocation.base)
-        body = current_body(invocation)
         if invocation.uuid in ids or '<skill name="{}">'.format(invocation.name) in restored:
             continue
-        if copy is not None and CUT not in copy and (body is None or body in copy):
+        source = skill_source(invocation)
+        current = expand(source, invocation).rsplit('\n\n\nARGUMENTS: ', 1)[0] if source is not None else None
+        if copy is not None and CUT not in copy and any(
+                body in copy for body in (current, recorded_body(invocation)) if body):
             continue
         result.append(invocation)
     return result
 
 
 def skill_text(invocation: Invocation) -> str:
-    body = current_body(invocation)
-    if body is None:
+    source = skill_source(invocation)
+    if source is None:
         return BASE + invocation.base + '\n\n' + invocation.text[len(BASE) + len(invocation.base):].strip()
-    text = BASE + invocation.base + '\n\n' + body
-    if not invocation.args:
-        return text
-    args = invocation.args[:ARGS_LIMIT]
-    if len(invocation.args) > ARGS_LIMIT:
-        args += '\n[Arguments cut at {} characters.]'.format(ARGS_LIMIT)
-    return text + '\n\n\nARGUMENTS: ' + args
+    return BASE + invocation.base + '\n\n' + expand(source, invocation)
 
 
 def message(restored: list[Invocation], left_out: list[Invocation]) -> str:
-    named = ', '.join('`/{}`'.format(' '.join(filter(None, (item.name, ' '.join(item.args.split())[:200]))))
+    named = ', '.join('`/{}`'.format(' '.join(filter(None, (item.name, ' '.join(item.args.split())[:HEADER_ARGS_LIMIT]))))
                       for item in left_out + restored)
     lines = ['Earlier history of this session is no longer in context. Before it dropped out, the user invoked '
              'these skills, in this order: {}. The text of each {}follows. Continue each unfinished task from '
              'where its work stands, and skip steps already done.'.format(named, 'that fit ' if left_out else '')]
     for item in left_out:
-        lines.append('`/{}` did not fit. Read {} if its task is unfinished.'.format(item.name, Path(item.base) / 'SKILL.md')
+        lines.append('`/{}` did not fit. Read {} if its task is unfinished.'.format(item.name, item.skill_file)
                      + ('\nARGUMENTS: ' + item.args[:LISTED_ARGS_LIMIT] if item.args else ''))
     for item in restored:
         lines.append('<skill name="{}">\n{}\n</skill>'.format(item.name, skill_text(item)))
@@ -209,12 +238,12 @@ def restoration(entries: list[dict], source: str) -> list[str]:
     parts = split(message(restored, left_out))
     if len(parts) <= PARTS:
         return parts
-    notice = '[Cut for space. Read the rest in {}.]\n</skill>'.format(Path(restored[0].base) / 'SKILL.md')
+    notice = '[Cut for space. Read the rest in {}.]\n</skill>'.format(restored[0].skill_file)
     last = parts[PARTS - 1].encode()[:PART_BYTES - len(notice.encode()) - 1].decode(errors='ignore')
     return parts[:PARTS - 1] + [last.rsplit('\n', 1)[0] + '\n' + notice]
 
 
-class Turn:
+class PartOrder:
     """Claude Code runs the parts in parallel and joins their output in the order
     the processes exit. All parts of one run receive the same event."""
 
@@ -229,7 +258,7 @@ class Turn:
             if self.usable and part == 1:
                 for stale in self.folder.iterdir():
                     try:
-                        if time.time() - stale.stat().st_mtime > 60:
+                        if time.time() - stale.stat().st_mtime > STALE_SECONDS:
                             stale.unlink()
                     except OSError:
                         pass
@@ -285,19 +314,19 @@ def main():
     event = json.loads(raw)
     if event.get('source') not in ('resume', 'compact'):
         return
-    turn = Turn(raw, part)
+    order = PartOrder(raw, part)
     try:
         parts = restoration(read_entries(event['transcript_path']), event['source'])
     except BaseException:
-        turn.finish(last=True)
+        order.finish(last=True)
         raise
     if part > len(parts):
-        turn.finish(last=True)
+        order.finish(last=True)
         return
-    turn.wait()
+    order.wait()
     json.dump({'hookSpecificOutput': {'hookEventName': 'SessionStart', 'additionalContext': parts[part - 1]}}, sys.stdout)
     sys.stdout.flush()
-    turn.finish(last=part == len(parts))
+    order.finish(last=part == len(parts))
 
 
 if __name__ == '__main__':
