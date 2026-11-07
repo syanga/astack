@@ -32,9 +32,10 @@ class SettingsTests(InstallerFixture):
         codex = self.config("codex", "not even valid TOML; leave untouched\n")
         before = codex.read_bytes(), codex.stat().st_mtime_ns
         self.run_installer()
-        hook = json.loads((self.repo / "settings/claude.json").read_text())["hooks"]["PreToolUse"]["$entries"]
+        hooks = json.loads((self.repo / "settings/claude.json").read_text())["hooks"]
         self.assertEqual(json.loads((self.home / ".claude/settings.json").read_text()),
-                         {"autoMemoryEnabled": False, "hooks": {"PreToolUse": hook}})
+                         {"autoMemoryEnabled": False,
+                          "hooks": {event: entries["$entries"] for event, entries in hooks.items()}})
         self.assertEqual(before, (codex.read_bytes(), codex.stat().st_mtime_ns))
         self.assertEqual(self.manifest()["version"], 3)
         self.assertNotIn("codex", self.manifest()["settings"])
