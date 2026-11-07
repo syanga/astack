@@ -12,10 +12,12 @@ When a review-pr run stops at its pass limit, start the review body with this al
 
 ```markdown
 > [!CAUTION]
-> Not converged after <n> review-pr passes. Do not merge. Investigate why repair passes kept leaving problems.
+> Not converged after <n> review-pr passes. Do not merge. Investigate why the passes kept leaving problems.
 ```
 
-Put the same alert at the top of the PR description, adding `> Review: <url>` as its last line, with the `url` that `pr.py review` returns. If posting fails, omit that line. Remove the alert only when a later review-pr or harden-pr run converges on a diff that includes everything the pass-limited run reviewed, such as a review against the PR's target branch. When a later run stops at its pass limit, replace the alert.
+Put the same alert at the top of the PR description. Add `> Review: <url>` as the alert's last line, with the `url` that `pr.py review` returns. If posting fails, omit that line. When a later run stops at its pass limit, replace the alert. When the user confirms a merge despite the alert, append `> Merge approved by the user for <sha>.` to it.
+
+Remove the alert only when a later review-pr or harden-pr run converges and its diff includes everything the pass-limited run reviewed. A converged review against the PR's target branch qualifies.
 
 Use harden-pr's `scripts/pr.py review` to post against the commit actually reviewed. The helper signs the review and exposes actionable findings to harden-pr.
 
