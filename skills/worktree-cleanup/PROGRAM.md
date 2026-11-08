@@ -2,11 +2,27 @@
 
 Apply this policy when cleanup includes an orchestrate or multi-phase-plan program. Use the plan and [execution store](../orchestrate/STATE.md) to find its artifacts, including paths outside worker worktrees. Planning alone does not create a store; handle an existing plan without initializing one.
 
+## Account for worker checkouts
+
+The coordinator owns the inventory of worker, review, and baseline checkouts,
+including those outside the primary worktree. After accepting a completed worker,
+reconcile that worker's checkouts and queued retirements. On resume after failure or
+cancellation, reconcile the entire inventory before dispatch.
+
+Restrict teardown to finished work within the caller's cleanup scope. Apply
+[cleanup checks](SKILL.md) to the target lane before teardown. For queued targets,
+follow [worktree retirement](RETIREMENTS.md). Record the [cleanup results](SKILL.md)
+in the program handoff before archiving it.
+
 For cleanup limited to a worker lane, preserve the shared store and evidence still needed by the program. Return to [lane teardown](SKILL.md) for that worker's disposable resources. The remaining steps require whole-program cleanup scope.
 
 ## Establish what can close
 
 Confirm that cleanup covers the whole program. Reconcile its units, workers, pending completions, PRs, gates, and follow-ups against current evidence. Require completion of the program's done predicate or explicit abandonment with remaining requirements accounted for. A merged worker PR does not establish program completion. Preserve state for active, paused, blocked, or merge-ready programs.
+
+Before archiving, reconcile the entire inventory through
+[checkout accounting](#account-for-worker-checkouts). The coordinator's current
+checkout uses [post-exit retirement](RETIREMENTS.md).
 
 Identify every path's owner and consumers from the plan, store, handoffs, and launch records. Keep resources shared outside the cleanup scope, retained deliverables, and artifacts of unknown ownership. Stop owned disposable processes through [worktree-cleanup](SKILL.md) before removing their files. Confirm that no worker or coordinator can still write to a store being archived.
 
