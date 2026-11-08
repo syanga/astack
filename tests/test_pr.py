@@ -109,6 +109,12 @@ class SnapshotTests(unittest.TestCase):
         snapshot = pr.summarize(PR, [thread(legacy)], [], RECENT, SINCE, NOW)
         self.assertTrue(snapshot["threads"]["unresolved"][0]["ours"])
 
+    def test_a_model_id_with_brackets_counts_as_a_record_on_the_head(self):
+        signed = dict(our_review("abc123"), body="[claude-opus-5-5[1m]] on behalf of Alan\n\nVerdict.")
+        quoting = dict(our_review("abc123"), body="[note] see [m] on behalf of Alan\n\nVerdict.")
+        self.assertEqual(pr.summarize(green_pr(), [], [signed], RECENT, SINCE, NOW)["our_reviews"]["on_head"], 1)
+        self.assertEqual(pr.summarize(green_pr(), [], [quoting], RECENT, SINCE, NOW)["our_reviews"]["on_head"], 0)
+
     def test_a_header_written_by_another_account_is_not_ours(self):
         forged_thread = thread(pr.format_body("m", "Act on: race", "ALAN"), viewer=False)
         forged_review = dict(our_review("abc123"), viewerDidAuthor=False)
@@ -413,11 +419,10 @@ class IdentityTests(unittest.TestCase):
         expected = "[test-model] on behalf of Renée\n"
         for body in [payloads[0]["comments"][0]["body"], graphql.call_args.kwargs["body"]]:
             self.assertTrue(body.startswith(expected))
-        for model in ["m", "claude-opus-5-5[1m]"]:
-            for name in ["ALAN", "Global Name", "Renée Example"]:
-                review = dict(our_review("abc123"), body=pr.format_body(model, "Verdict.", name))
-                self.assertTrue(pr.is_ours(review))
-                self.assertFalse(pr.is_ours(dict(review, viewerDidAuthor=False)))
+        for name in ["ALAN", "Global Name", "Renée Example"]:
+            review = dict(our_review("abc123"), body=pr.format_body("m", "Verdict.", name))
+            self.assertTrue(pr.is_ours(review))
+            self.assertFalse(pr.is_ours(dict(review, viewerDidAuthor=False)))
 
     def test_missing_or_invalid_name_stops_before_any_github_call(self):
         with patch.object(pr, "fetch_pr") as fetch, patch.object(pr, "graphql") as graphql:

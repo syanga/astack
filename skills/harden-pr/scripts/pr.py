@@ -26,7 +26,7 @@ import time
 HEADER_MARK = "on behalf of "
 LEGACY_HEADER_MARK = "RESPONDING ON BEHALF OF "
 ATTRIBUTION_HEADER = re.compile(
-    r"\[[^\r\n]+?\] (?:" + HEADER_MARK + r"\S+|" + LEGACY_HEADER_MARK + r"\S[^\r\n]*)"
+    r"(?:\[\S+\] " + HEADER_MARK + r"\S+|\[[^\]\r\n]+\] " + LEGACY_HEADER_MARK + r"\S[^\r\n]*)"
 )
 FOLD_MARK = "Findings on lines outside the diff:"
 CHECK_GRACE_MINUTES = 10

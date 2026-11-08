@@ -8,7 +8,7 @@ Include the reviewed commit, outcome, repairs, remaining findings, verification,
 
 If a run stops early after substantive review, mark its record incomplete. If no substantive review occurred, report the reason only in the conversation. Missing coverage is not a clean result.
 
-Use harden-pr's `scripts/pr.py review` to post against the commit actually reviewed. After you push verified repairs, post against the last pushed commit that the review covered. Post against a later commit, such as a CI fix pushed after the review ended, only after a review covers it. When a conflict-free rebase or replay of the reviewed commit produced a commit with an unchanged patch, post against that rebased commit. In that review's body, name the reviewed SHA and the rebased SHA. The helper signs the review and exposes actionable findings to harden-pr.
+Use harden-pr's `scripts/pr.py review` to post against the commit the review covers. After you push verified repairs, post against the last pushed commit that the review covered. Post against a later commit, such as a CI fix pushed after the review ended, only after a review covers it. When a conflict-free rebase or replay of the reviewed commit produced a commit with an unchanged patch, post against that rebased commit. In that review's body, name the reviewed SHA and the rebased SHA. The helper signs the review and exposes actionable findings to harden-pr.
 
 The helper prefixes reviews, inline comments, and thread replies with `[<model slug>] on behalf of <first name from git config user.name>`. Run it from the reviewed repository so repository-specific Git identity applies. An unset or invalid name stops posting; earlier signed reviews remain recognizable after a name change.
 
