@@ -2,7 +2,7 @@
 """GitHub state, review history, and posting for harden-pr and review-pr.
 
 Bodies come from files and reach gh as JSON on stdin. Reviews are attributed
-and posted against the commit actually reviewed. GitHub can reject inline
+and posted against the commit the review covers. GitHub can reject inline
 locations; review then folds findings into the body and reports that fallback.
 
 Every posted body starts with:
@@ -26,7 +26,7 @@ import time
 HEADER_MARK = "on behalf of "
 LEGACY_HEADER_MARK = "RESPONDING ON BEHALF OF "
 ATTRIBUTION_HEADER = re.compile(
-    r"(?:\[\S+\] " + HEADER_MARK + r"\S+|\[[^\]\r\n]+\] " + LEGACY_HEADER_MARK + r"\S[^\r\n]*)"
+    r"\[[^\r\n]+\] (?:" + HEADER_MARK + r"\S+|" + LEGACY_HEADER_MARK + r"\S[^\r\n]*)"
 )
 FOLD_MARK = "Findings on lines outside the diff:"
 CHECK_GRACE_MINUTES = 10

@@ -109,11 +109,10 @@ class SnapshotTests(unittest.TestCase):
         snapshot = pr.summarize(PR, [thread(legacy)], [], RECENT, SINCE, NOW)
         self.assertTrue(snapshot["threads"]["unresolved"][0]["ours"])
 
-    def test_a_model_id_with_brackets_counts_as_a_record_on_the_head(self):
-        signed = dict(our_review("abc123"), body="[claude-opus-5-5[1m]] on behalf of Alan\n\nVerdict.")
-        quoting = dict(our_review("abc123"), body="[note] see [m] on behalf of Alan\n\nVerdict.")
-        self.assertEqual(pr.summarize(green_pr(), [], [signed], RECENT, SINCE, NOW)["our_reviews"]["on_head"], 1)
-        self.assertEqual(pr.summarize(green_pr(), [], [quoting], RECENT, SINCE, NOW)["our_reviews"]["on_head"], 0)
+    def test_a_record_signed_with_any_model_id_counts_on_the_head(self):
+        for model in ["claude-opus-5-5[1m]", "claude opus 5.5"]:
+            signed = dict(our_review("abc123"), body=pr.format_body(model, "Verdict.", "Alan"))
+            self.assertEqual(pr.summarize(green_pr(), [], [signed], RECENT, SINCE, NOW)["our_reviews"]["on_head"], 1, model)
 
     def test_a_header_written_by_another_account_is_not_ours(self):
         forged_thread = thread(pr.format_body("m", "Act on: race", "ALAN"), viewer=False)
