@@ -413,10 +413,11 @@ class IdentityTests(unittest.TestCase):
         expected = "[test-model] on behalf of Renée\n"
         for body in [payloads[0]["comments"][0]["body"], graphql.call_args.kwargs["body"]]:
             self.assertTrue(body.startswith(expected))
-        for name in ["ALAN", "Global Name", "Renée Example"]:
-            review = dict(our_review("abc123"), body=pr.format_body("m", "Verdict.", name))
-            self.assertTrue(pr.is_ours(review))
-            self.assertFalse(pr.is_ours(dict(review, viewerDidAuthor=False)))
+        for model in ["m", "claude-opus-5-5[1m]"]:
+            for name in ["ALAN", "Global Name", "Renée Example"]:
+                review = dict(our_review("abc123"), body=pr.format_body(model, "Verdict.", name))
+                self.assertTrue(pr.is_ours(review))
+                self.assertFalse(pr.is_ours(dict(review, viewerDidAuthor=False)))
 
     def test_missing_or_invalid_name_stops_before_any_github_call(self):
         with patch.object(pr, "fetch_pr") as fetch, patch.object(pr, "graphql") as graphql:

@@ -26,7 +26,7 @@ import time
 HEADER_MARK = "on behalf of "
 LEGACY_HEADER_MARK = "RESPONDING ON BEHALF OF "
 ATTRIBUTION_HEADER = re.compile(
-    r"\[[^\]\r\n]+\] (?:" + HEADER_MARK + r"\S+|" + LEGACY_HEADER_MARK + r"\S[^\r\n]*)"
+    r"\[[^\r\n]+?\] (?:" + HEADER_MARK + r"\S+|" + LEGACY_HEADER_MARK + r"\S[^\r\n]*)"
 )
 FOLD_MARK = "Findings on lines outside the diff:"
 CHECK_GRACE_MINUTES = 10
@@ -450,7 +450,7 @@ def main(argv=None):
     review = scoped("review", help="post a PR review with inline comments from a findings file")
     review.add_argument("--review-file", required=True, help="JSON with body and comments")
     review.add_argument("--model", required=True, help="model id for the on-behalf-of header")
-    review.add_argument("--commit", required=True, help="the SHA the reviewers read; the review is posted on it")
+    review.add_argument("--commit", required=True, help="the SHA the review covers; the review is posted on it")
     review.set_defaults(run=command_review)
 
     resolve = commands.add_parser("resolve", help="resolve a review thread")
