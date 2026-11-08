@@ -8,24 +8,19 @@ disable-model-invocation: true
 
 `scripts/hook.py` is a Claude Code `SessionStart` hook for the `resume` and
 `compact` sources. It reads the session transcript and finds each skill the user
-invoked with a slash command. For each one whose invocation is no longer in
-context, it adds the skill's current `SKILL.md` text and the invocation's
-arguments. When the file is gone, it uses the text recorded at invocation. It
-skips invocations on branches abandoned by a rewind, and skills the model
-invoked through the Skill tool, because the model can invoke those again.
+invoked with a slash command. For each one whose text is no longer in context,
+it adds the skill's current `SKILL.md` text and the invocation's arguments. When
+the file is gone, it uses the text recorded at invocation. It skips invocations
+on branches abandoned by a rewind, and skills the model invoked through the
+Skill tool, because the model can invoke those again.
 
-A compaction drops every earlier invocation. Claude Code sometimes attaches its
-own copy, cut at 20,000 characters, after the compact hooks run, so a skill it
-copies arrives twice after that compaction. A resume rebuilds context from the
-newest entry's parent chain, back to the last compaction or to a parent missing
-from the transcript, and the hook skips a skill whose copy in that context is
-complete.
+The hook splits its output into parts. The comment on `PARTS` in
+`scripts/hook.py` says why. When the skills do not fit in all parts together,
+the hook leaves out the oldest skills until the rest fit and lists their files
+and arguments. If the newest skill alone does not fit, the hook cuts it and
+points to its file.
 
-Claude Code saves hook context over 10,000 characters to a file and shows the
-model a 2 KB preview, and agents do not reliably read the file.
-`settings/claude.json` registers the hook once per part (`PARTS` in the script),
-and each run prints one part under that limit. Claude Code joins hook output in
-the order the processes exit, so each part waits until the previous part's
-process has exited. When the skills need more than all parts together, the hook
-leaves out the oldest skills and lists their files and arguments. The hook cuts
-a single skill too large for all parts together and points to its file.
+After a compaction, Claude Code sometimes attaches its own copy of a skill, cut
+at 20,000 characters. It attaches that copy after the hook runs, so the skill
+arrives twice. On a later resume, the hook skips a skill whose copy in context
+is complete.

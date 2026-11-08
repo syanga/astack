@@ -47,7 +47,7 @@ Each of these conditions is a gate:
 
 On the orchestrate route, park it through [orchestrate's escalation](../orchestrate/SKILL.md#escalation). Otherwise write its [decision request](../orchestrate/SKILL.md#messages-to-the-user) to the store's `open-decisions.md`, and record the answer there when it arrives. Continue unblocked work. When nothing can move, ask with the question tool if one exists, otherwise end the turn with the request. Send a push notification if the harness has one.
 
-Before ending a turn, check that a running worker, watcher, or timer will wake you, or that each unfinished unit waits on a gate. If neither holds, dispatch ready work first, including the review-pr passes that [Merge](#5-merge) step 1 requires.
+Before ending a turn, check that a running worker, watcher, or timer will wake you, or that each unfinished unit waits on a gate. If neither holds, dispatch ready work first, including the review that [Merge](#5-merge) step 1 requires.
 
 ## 5. Merge
 

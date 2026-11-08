@@ -14,7 +14,9 @@ from typing import NamedTuple
 
 
 # Claude Code saves hook context over 10,000 characters to a file and shows the
-# model a 2 KB preview, so settings/claude.json runs this hook once per part.
+# model a 2 KB preview, and agents do not reliably read the file. So
+# settings/claude.json registers this hook once per part, and each part fits in
+# PART_BYTES.
 PARTS = 8
 PART_BYTES = 9000
 ARGS_LIMIT = 8000
