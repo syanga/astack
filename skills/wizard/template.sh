@@ -172,14 +172,23 @@ ask_secret() {
 # line). Idempotent. Creates ENV_FILE at mode 0600; writes through a symlink and
 # keeps an existing file's mode.
 write_env() {
-  local key="$1" value="$2" tmp encoded
+  local key="$1" value="$2" target="$ENV_FILE" link hops=0 tmp encoded
   encoded=$(_quote_env "$value") || exit $?
-  [[ -e "$ENV_FILE" ]] || (umask 077 && : > "$ENV_FILE")
-  tmp=$(mktemp)
-  grep -vE "^${key}=" "$ENV_FILE" > "$tmp" || true
-  printf '%s=%s\n' "$key" "$encoded" >> "$tmp"
-  cat "$tmp" > "$ENV_FILE"
-  rm -f "$tmp"
+  while [[ -L "$target" ]]; do
+    (( ++hops <= 40 )) || { printf '%s: too many levels of symbolic links\n' "$ENV_FILE" >&2; exit 1; }
+    link=$(readlink "$target")
+    [[ "$link" == /* ]] || link="$(dirname "$target")/$link"
+    target="$link"
+  done
+  [[ -e "$target" ]] || (umask 077 && : > "$target")
+  # Replace by rename in the target's directory, so an interrupted write never truncates it.
+  tmp=$(mktemp "$target.XXXXXX")
+  if ! { cp -p "$target" "$tmp" &&
+         { grep -vE "^${key}=" "$target" || true; printf '%s=%s\n' "$key" "$encoded"; } > "$tmp" &&
+         mv "$tmp" "$target"; }; then
+    rm -f "$tmp"
+    exit 1
+  fi
   WRITTEN_ENV+=("$key")
   printf '  %s✓ wrote%s %s → %s\n' "$GREEN" "$RESET" "$key" "$ENV_FILE"
 }

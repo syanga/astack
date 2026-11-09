@@ -119,7 +119,37 @@ sys.exit(1)
         self.assertEqual(target.read_text(), "OTHER=keep\nTOKEN=abc123\n")
         self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o644)
 
+    def test_failed_write_leaves_the_environment_file_intact(self):
+        (self.root / ".env").write_text("OTHER=keep\n")
+        for tool in ("cat", "mv"):
+            stub = self.root / "bin" / tool
+            stub.write_text("#!/bin/sh\nexit 1\n")
+            stub.chmod(0o755)
+        result = self.run_wizard('write_env TOKEN new\n')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.root / ".env").read_text(), "OTHER=keep\n")
+        self.assertEqual(sorted(p.name for p in self.root.iterdir() if p.name.startswith(".env")),
+                         [".env"])
+
+    def test_rewrites_a_relative_symlink_chain_without_leaving_temporary_files(self):
+        (self.root / "config").mkdir()
+        target = self.root / "config" / "real.env"
+        target.write_text("TOKEN=old\n")
+        target.chmod(0o640)
+        (self.root / "config" / "middle.env").symlink_to("real.env")
+        (self.root / ".env").symlink_to("config/middle.env")
+        result = self.run_wizard('write_env TOKEN new\n')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(target.read_text(), "TOKEN=new\n")
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o640)
+        self.assertEqual(sorted(p.name for p in (self.root / "config").iterdir()),
+                         ["middle.env", "real.env"])
+
     def test_editing_the_script_mid_run_does_not_change_the_run(self):
+        for opener in ("wslview", "explorer.exe", "xdg-open", "open"):
+            stub = self.root / "bin" / opener
+            stub.write_text("#!/bin/sh\n")
+            stub.chmod(0o755)
         script = self.root / "wizard.sh"
         script.write_text(TEMPLATE.read_text())
         process = subprocess.Popen(["/bin/bash", str(script)], stdin=subprocess.PIPE,
