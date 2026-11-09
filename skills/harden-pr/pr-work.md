@@ -1,6 +1,6 @@
 # Follow the PR
 
-Use `python3 "<harden-pr directory>/scripts/pr.py" status --pr <n>` for a GitHub snapshot and `history --pr <n>` for earlier reviews and thread replies. Add `--repo owner/name` when needed. `reply` and `resolve` take no `--pr` or `--repo`, because thread IDs are global. A status-only request ends with a report. Read the current head, checks, approvals, unresolved threads, and review evidence before changing anything. The helper reports state, not a verdict about correctness or merge readiness.
+Use `python3 "<harden-pr directory>/scripts/pr.py" status --pr <n>` for a GitHub snapshot and `history --pr <n>` for earlier reviews and thread replies. Add `--repo owner/name` when needed. `reply` and `resolve` take no `--pr` or `--repo`, because thread IDs are global. A status-only request ends with a report. Read the current head, checks, approvals, unresolved threads, and review evidence before changing anything. `status` omits the PR description, so read it with `gh pr view <n> --json body`. The helper reports state, not a verdict about correctness or merge readiness.
 
 Reuse applicable reviews. Follow [test results](../open-pr/test-results.md) to reuse verification and publish any new test results on the PR. Use targeted review for missing evidence or changes that invalidate earlier reviews. Run the full [review-pr](../review-pr/SKILL.md) or [harden-pr](SKILL.md) workflow only when the user requests it or the record check in [Finish or merge](#finish-or-merge) calls for review-pr.
 
@@ -24,7 +24,7 @@ For conflicts, read the intent on both sides and preserve it through the resolut
 
 ## Push and wait
 
-Apply [open-pr's diff cleanup and pre-push protection](../open-pr/SKILL.md) to fixes. Update any PR description made inaccurate by the changes. Prefer new commits for review fixes; use a rebase when the base or conflicts require it. Before pushing, fetch the remote head and compare it with the snapshot. If another actor advanced the branch, inspect their work before proceeding. Use an explicit lease for a necessary rewritten push.
+Apply [open-pr's diff cleanup and pre-push protection](../open-pr/SKILL.md) to fixes. Update any PR description made inaccurate by the changes, but keep any pass-limit alert from [posting.md](posting.md). Prefer new commits for review fixes; use a rebase when the base or conflicts require it. Before pushing, fetch the remote head and compare it with the snapshot. If another actor advanced the branch, inspect their work before proceeding. Use an explicit lease for a necessary rewritten push.
 
 Take a fresh snapshot after each push. Use `pr.py wait --pr <n> --max-minutes 0.5` to wait in short intervals while checks or mergeability settle. It returns when they settle, the head changes, the PR closes, checks fail or stall, or the interval expires. Inspect the returned snapshot; returning does not imply success. An API failure is missing state, never a clean result. Retry a transient failure, then report it if it persists. Stay quiet during routine waiting.
 
@@ -32,20 +32,27 @@ Take a fresh snapshot after each push. Use `pr.py wait --pr <n> --max-minutes 0.
 
 Finalizing ends when every in-scope PR has its repairs committed and pushed, current descriptions and review threads, and passing required checks. Required reviews must be complete and apply to each remote head, with no unresolved in-scope defects. Use the procedures above, routing stack changes through the designated owner.
 
-Honor explicit report-only, read-only, or local-only limits. If publication, verification, or a needed decision is blocked, report the unfinished PRs and the blocker.
+Honor explicit report-only, read-only, or local-only limits. If publication, verification, or a needed decision is blocked, report the unfinished PRs and the blocker. When a review-pr run stops at its pass limit, push its repairs and stop. Leave the remaining findings open.
 
 ## Finish or merge
 
 When hardening was requested, confirm its assessment covers the final head, refreshing affected coverage through [harden-pr](SKILL.md) as needed. For a narrower follow-through request, finish when its findings and checks are addressed. Report each PR's URL and final head SHA, what changed, remaining findings, CI, required approvals, and unavailable coverage.
 
+A pass-limit alert from [posting.md](posting.md) in the PR description blocks the merge until the user confirms merging the head SHA. A confirmation for an earlier SHA does not count. Before you ask for that confirmation, show the user the remaining findings in the pass-limited review record and on the PR. For that head, the user's confirmation counts as addressing those findings. Leave them unrepaired.
+
 Before an authorized merge, run the record check, which passes when the head has a signed review record. When the user explicitly declined review or limited publication, skip the record check. Otherwise, run `pr.py status` before the scratch merge. When `our_reviews.on_head` is 0, take the first case that applies:
 
 1. If a review-pr or harden-pr run in this session reviewed the head, post its record through [posting.md](posting.md).
 2. If the current head is a conflict-free rebase or replay, with an unchanged patch, of an earlier head that has a signed review record, repost that record through posting.md. Drop the helper's prefix line from the old body, and use an empty `comments` list.
-3. Otherwise, run [review-pr](../review-pr/SKILL.md) on the head. When the PR's latest complete signed record reviewed a commit the branch still contains, pass that commit as the fixed point. When the task authorizes repairs, use fix-and-review mode. Otherwise, use report-only mode.
+3. Otherwise, run [review-pr](../review-pr/SKILL.md) on the head, with the fixed point that [open-pr](../open-pr/SKILL.md) picks. When the task authorizes repairs, use fix-and-review mode. Otherwise, use report-only mode.
 
 After the case you took, run `pr.py status` again. If the head changed, repeat this record check on the new head. If the head is unchanged and `our_reviews.on_head` is still 0, leave the PR open. Report that the head has no signed review record.
 
-After the record check passes or you skip it, fetch the base, merge the head onto it in a scratch branch, and record that base SHA. Apply [Reuse a published result](../open-pr/test-results.md#reuse-a-published-result) with the scratch branch as HEAD and the recorded SHA in place of `origin/<base branch>`, without fetching again. Run the covering suites that do not keep their result on the scratch branch. The PR head stays unchanged, and a squash merge lands the scratch branch's tree while the base stays at that SHA. When the scratch merge conflicts or a suite fails, stop and follow [Address findings and CI](#address-findings-and-ci). For a batch result, follow [Test a batch](#test-a-batch) instead. Then take a fresh snapshot. If the head changed, run the record check on the new head, then repeat this paragraph. Confirm that findings and user decisions are addressed, and required checks and approvals pass. Fetch the base again. If it no longer points at the recorded SHA, build a new scratch branch on the new base and repeat this paragraph. Otherwise, merge with `gh pr merge <n> --squash --match-head-commit <sha>`. Respect the user's merge disposition. If it is absent, stop with the finalized PRs open. For stacked PRs, retarget children to the parent's base before deleting the parent branch.
+After the record check passes or you skip it, fetch the base, merge the head onto it in a scratch branch, and record that base SHA. Apply [Reuse a published result](../open-pr/test-results.md#reuse-a-published-result) with the scratch branch as HEAD and the recorded SHA in place of `origin/<base branch>`, without fetching again. Run the covering suites that do not keep their result on the scratch branch. The PR head stays unchanged, and a squash merge lands the scratch branch's tree while the base stays at that SHA. When the scratch merge conflicts or a suite fails, stop and follow [Address findings and CI](#address-findings-and-ci). For a batch result, follow [Test a batch](#test-a-batch) instead. Then take a fresh snapshot. If the head changed, run the record check on the new head, then repeat this paragraph. Confirm that findings and user decisions are addressed, and required checks and approvals pass. Fetch the base again. If it no longer points at the recorded SHA, build a new scratch branch on the new base and repeat this paragraph. Respect the user's merge disposition. If it is absent or does not allow a merge, stop with the finalized PRs open. Otherwise, take these steps:
+
+1. If the PR description has a pass-limit alert, continue only when the user confirmed merging this head SHA under the gate above. Append `> Merge confirmed by the user for <sha>.` to the alert. Resolve each thread that an agent or review bot opened for a finding that the confirmation addressed. In each resolution, cite the confirmation.
+2. Merge with `gh pr merge <n> --squash --match-head-commit <sha>`.
+
+For stacked PRs, retarget children to the parent's base before deleting the parent branch.
 
 For merge-when-ready, wait, run the record check, and merge the verified head explicitly. Use auto-merge only when requested and repository controls prevent unverified head changes while pending. Matching the head at scheduling time alone is insufficient. Confirm the merged state before reporting the PR as landed.
