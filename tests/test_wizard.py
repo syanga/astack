@@ -137,7 +137,7 @@ sys.exit(1)
         stub.write_text("#!/bin/sh\nkill -TERM $PPID\nexit 1\n")
         stub.chmod(0o755)
         result = self.run_wizard('write_env TOKEN secret-value\n')
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 143)
         self.assertEqual((self.root / ".env").read_text(), "OTHER=keep\n")
         self.assertEqual(sorted(p.name for p in self.root.iterdir() if p.name.startswith(".env")),
                          [".env"])

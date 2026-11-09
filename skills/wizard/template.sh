@@ -181,9 +181,7 @@ write_env() {
     target="$link"
   done
   [[ -e "$target" ]] || (umask 077 && : > "$target")
-  # Replace by rename in the target's directory, so an interrupted write never truncates it.
   tmp=$(mktemp "$target.XXXXXX")
-  # The temporary file holds every value and may escape the project's .env ignore rule.
   trap 'rm -f "$tmp"; exit 130' INT
   trap 'rm -f "$tmp"; exit 143' TERM
   trap 'rm -f "$tmp"; exit 129' HUP
