@@ -15,7 +15,7 @@ model invoked through the Skill tool, because the model can invoke those again.
 
 The hook also skips invocations on branches abandoned by a rewind. When the
 first entry after a rewind has a parent missing from the transcript, the hook
-cannot tell the abandoned branch from lost entries, and it can restore that
+cannot tell the abandoned branch from lost entries. It can then restore that
 branch's skills.
 
 The hook splits its output into parts. The comment on `PARTS` in

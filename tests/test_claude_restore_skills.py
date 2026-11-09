@@ -205,11 +205,11 @@ class RestoreSkillsHookTests(unittest.TestCase):
 
     def test_arguments_expand_into_the_placeholder_and_match_claude_codes_copy(self):
         self.skill('task', '# Task\n\nDo $ARGUMENTS.')
-        self.transcript.command('task', 'work', recorded='Do work.')
-        self.transcript.compact(('task', '# Task\n\nDo work.'))
+        self.transcript.command('task', 'C:\\work', recorded='Do C:\\work.')
+        self.transcript.compact(('task', '# Task\n\nDo C:\\work.'))
         self.assertEqual(self.context('resume'), '')
-        self.assertEqual(self.context('compact'),
-                         '\n\n'.join([HEADER.format('`/task work`'), self.block('task', '# Task\n\nDo work.')]))
+        self.assertEqual(self.context('compact'), '\n\n'.join([
+            HEADER.format('`/task C:\\work`'), self.block('task', '# Task\n\nDo C:\\work.')]))
 
     def test_an_indexed_placeholder_stays_as_written_and_the_arguments_follow(self):
         self.skill('task', '# Task\n\nUse $ARGUMENTS[0].')

@@ -161,7 +161,8 @@ def skill_source(invocation: Invocation) -> str | None:
 
 def expand(source: str, invocation: Invocation) -> str:
     """Fill $ARGUMENTS as Claude Code does, or append the arguments when it is absent. Unlike
-    Claude Code, leave $ARGUMENTS[N], $N, and named placeholders as written."""
+    Claude Code, leave $ARGUMENTS[N], $N, and named placeholders as written, append the
+    arguments when only those appear, and fill a backslash-escaped $ARGUMENTS."""
     if PLACEHOLDER.search(source):
         return PLACEHOLDER.sub(lambda _: limited_args(invocation), source)
     return source + ARGUMENTS_LINE + limited_args(invocation) if invocation.args else source
