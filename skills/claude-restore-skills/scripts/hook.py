@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -25,7 +26,8 @@ WAIT_SECONDS = 8
 FRESH_SECONDS = 15
 STALE_SECONDS = 60
 HEADER_ARGS_LIMIT = 200
-BASE = 'Base directory for this skill: '
+BRIDGE_MS = 5000
+BASE ='Base directory for this skill: '
 # Claude Code marks the skills it re-attached after compaction but cut short.
 CUT = 'skill content truncated for compaction'
 COMMAND = re.compile(r'<command-name>/?([^<\s]+)</command-name>')
@@ -73,7 +75,8 @@ def read_entries(path: str) -> list[dict]:
             if not isinstance(entry, dict) or not isinstance(entry.get('uuid'), str):
                 continue
             slim = {key: entry.get(key) for key in (
-                'uuid', 'parentUuid', 'logicalParentUuid', 'type', 'subtype', 'isSidechain', 'isMeta', 'sourceToolUseID')}
+                'uuid', 'parentUuid', 'logicalParentUuid', 'type', 'subtype', 'isSidechain', 'isMeta', 'sourceToolUseID',
+                'timestamp')}
             slim['message'] = entry.get('message') if entry.get('type') == 'user' else None
             attachment = entry.get('attachment')
             keep = isinstance(attachment, dict) and attachment.get('type') in ('hook_additional_context', 'invoked_skills')
@@ -93,10 +96,12 @@ def text_of(entry: dict) -> str:
 
 def history(entries: list[dict], source: str) -> History:
     """Claude Code rebuilds context from the newest entry's parent chain, back to
-    the last compaction or to a parent missing from the transcript. A compaction
-    boundary links to the history before it through logicalParentUuid. Compact
-    hooks run before Claude Code writes the new boundary, so on compact nothing
-    in the transcript is still in context."""
+    the last compaction or to a parent missing from the transcript. At a missing
+    parent, Claude Code continues through the entry that bridge() picks, and the
+    chain ends only when there is none. A compaction boundary links to the
+    history before it through logicalParentUuid. Compact hooks run before Claude
+    Code writes the new boundary, so on compact nothing in the transcript is
+    still in context."""
     position = {entry['uuid']: index for index, entry in enumerate(entries)}
     boundaries = [index for index, entry in enumerate(entries) if entry['subtype'] == 'compact_boundary']
     boundary = boundaries[-1] if boundaries else -1
@@ -111,12 +116,40 @@ def history(entries: list[dict], source: str) -> History:
             context.append(entry)
         parent = entry['parentUuid'] or entry['logicalParentUuid']
         lost = parent is not None and parent not in position
-        if lost:
+        bridged = bridge(entries, entry, lineage) if lost and entry['parentUuid'] else None
+        if bridged is not None:
+            index = bridged
+        elif lost:
             in_context = False
             index = newest_before(entries, index, lineage)
         else:
             index = position.get(parent)
     return History(context, lineage)
+
+
+def bridge(entries: list[dict], orphan: dict, visited: set[str]) -> int | None:
+    """The entry Claude Code links to an entry whose parent is missing: the newest
+    unvisited entry on the same side, not newer than the orphan and at most
+    BRIDGE_MS older. Among entries with the same timestamp, the first one wins."""
+    time = milliseconds(orphan['timestamp'])
+    if time is None:
+        return None
+    best = None
+    for index, entry in enumerate(entries):
+        moment = milliseconds(entry['timestamp'])
+        if (moment is None or moment > time or entry['uuid'] in visited or entry['isSidechain'] != orphan['isSidechain']
+                or entry['type'] == 'progress' or (entry['type'] == 'system' and entry['subtype'] == 'file_snapshot')):
+            continue
+        if best is None or moment > best[0]:
+            best = (moment, index)
+    return best[1] if best is not None and time - best[0] <= BRIDGE_MS else None
+
+
+def milliseconds(stamp) -> float | None:
+    try:
+        return datetime.fromisoformat(stamp.replace('Z', '+00:00')).timestamp() * 1000
+    except (AttributeError, TypeError, ValueError):
+        return None
 
 
 def newest_before(entries: list[dict], end: int, visited: set[str]) -> int | None:

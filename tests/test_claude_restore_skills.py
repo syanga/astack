@@ -139,6 +139,18 @@ class RestoreSkillsHookTests(unittest.TestCase):
             self.block('beta', '# Beta\n\nRecorded beta text.'),
         ]))
 
+    def test_a_missing_parent_that_claude_code_bridges_restores_nothing(self):
+        self.skill('alpha', '# Alpha')
+        self.transcript.command('alpha')
+        self.transcript.add('user', 'Next task.', parent='never-written')
+        for number, entry in enumerate(self.transcript.entries[:-1]):
+            entry['timestamp'] = '2026-11-09T05:00:00.00{}Z'.format(number)
+        restored = '\n\n'.join([HEADER.format('`/alpha`'), self.block('alpha', '# Alpha')])
+        for stamp, expected in (('2026-11-09T05:00:05.002Z', ''), ('2026-11-09T05:00:05.003Z', restored)):
+            with self.subTest(stamp=stamp):
+                self.transcript.entries[-1]['timestamp'] = stamp
+                self.assertEqual(self.context(), expected)
+
     def test_restores_only_what_the_last_compaction_dropped(self):
         self.skill('alpha', '# Alpha')
         self.skill('beta', '# Beta')
