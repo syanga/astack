@@ -49,6 +49,8 @@ Write the result file as JSON:
 }
 ```
 
+Fill in the fields as follows:
+
 - Set `base` to `git merge-base <tested commit> origin/<base branch>`.
 - Name each suite by the path or package its command runs, so later runs match it.
 - State the scope and why, such as `packages/api` and its dependents because no shared configuration changed.

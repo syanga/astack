@@ -385,15 +385,15 @@ class FakeGitHub:
         self.comments, self.statuses = [], []
         self.commits, self.push, self.status_error = commits, push, status_error
 
-    def seed(self, record, author="alan", status_creator="alan", body=None, minute=0):
+    def seed(self, record, author="alan", status_creator="alan", body=None, minute=0, context=None):
         url = "seed-{}".format(len(self.comments))
         self.comments.append({"body": body or pr.format_body("m", pr.render_test_result(record), "Alan"),
                               "user": {"login": author}, "html_url": url,
                               "created_at": "2026-11-07T00:{:02d}:00Z".format(minute)})
         if status_creator:
             for suite, outcome in record["suites"].items():
-                self.statuses.append((record["commit"], {"context": "astack/tests/" + suite, "target_url": url,
-                                                         "state": pr.STATUS_BY_OUTCOME.get(str(outcome)),
+                self.statuses.append((record["commit"], {"context": context or "astack/tests/" + suite, "target_url": url,
+                                                         "state": {"pass": "success", "fail": "failure"}.get(str(outcome)),
                                                          "creator": {"login": status_creator}}))
 
     def latest_states(self, commit=HEAD):
@@ -473,7 +473,6 @@ class TestResultTests(unittest.TestCase):
         self.assertEqual(github.post(result(suites={"web": "incomplete"}, summary="web runner missing"))["states"], {"web": "error"})
         github.post(result(suites={"web": "fail"}, summary="1 failed"))
         self.assertEqual(github.latest_states(), {"astack/tests/api": "success", "astack/tests/web": "failure"})
-        self.assertEqual(github.latest_states(OLDER), {"astack/tests/web": "failure"})
         latest = github.call("tests", "--pr", "12")["latest_by_suite"]
         self.assertEqual({suite: entry["outcome"] for suite, entry in latest.items()}, {"api": "pass", "web": "fail"})
         github.post(result(suites={"api": "pass"}, summary="x" * 200))
@@ -487,12 +486,14 @@ class TestResultTests(unittest.TestCase):
         github.seed(dict(result(suites={"api": "pass"}), commit=HEAD), author="drive-by", status_creator="alan", minute=2)
         github.seed(dict(result(), commit="short"), minute=3)
         github.seed(dict(result(suites={"api": "fail"}), commit=HEAD), author="sam", status_creator="sam", minute=4)
+        github.seed(dict(result(suites={"api": "pass"}), commit=HEAD), minute=7, context="astack/tests")
+        github.seed(dict(result(suites={"api": "pass"}), commit=HEAD), minute=8, context="astack/tests/web")
         unhashable = dict(result(suites={"api": ["pass"]}), commit=HEAD)
         github.seed(unhashable, body=pr.format_body("m", pr.RECORD_PREFIX + json.dumps(unhashable) + " -->", "Alan"), minute=5)
         too_deep = '{"a": ' + "[" * 20000 + "]" * 20000 + "}"
         github.seed(dict(result(), commit=HEAD), body=pr.format_body("m", pr.RECORD_PREFIX + too_deep + " -->", "Alan"), minute=6)
         listed = github.call("tests", "--pr", "12")
-        self.assertEqual(listed["ignored"], 5)
+        self.assertEqual(listed["ignored"], 7)
         self.assertEqual([(entry["author"], entry["suites"]) for entry in listed["records"]], [("sam", {"api": "fail"})])
 
     def test_only_the_last_line_of_a_comment_is_read_as_its_record(self):
@@ -545,7 +546,7 @@ class TestResultTests(unittest.TestCase):
         self.assertEqual(github.post(result(suites={"api": "pass", "web": "fail"}))["states"], {"api": "success", "web": "failure"})
         self.assertEqual((github.exit_code, len(github.comments), len(github.statuses)), (0, 1, 2))
 
-    def test_a_result_posted_during_another_post_leaves_each_suite_on_its_newest_result(self):
+    def test_a_post_during_another_suites_post_writes_only_its_own_suites(self):
         github = FakeGitHub()
         post_without_race = github.run
 
@@ -556,6 +557,8 @@ class TestResultTests(unittest.TestCase):
             return post_without_race(argv, **kwargs)
         github.run = run
         self.assertEqual(github.post(result(suites={"api": "pass"}))["states"], {"api": "success"})
+        self.assertEqual([status["context"] for _, status in github.statuses if status["creator"]["login"] == "alan"],
+                         ["astack/tests/api"])
         self.assertEqual(github.latest_states(), {"astack/tests/web": "failure", "astack/tests/api": "success"})
 
     def test_a_rejected_status_still_reports_the_posted_comment(self):

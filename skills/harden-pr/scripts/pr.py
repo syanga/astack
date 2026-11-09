@@ -8,7 +8,8 @@ locations; review then folds findings into the body and reports that fallback.
 A test result is a PR comment whose last line is a hidden JSON record, plus one
 astack/tests/<suite> commit status per suite that links to it. A record counts
 only when its author also set one of those statuses. Creating a status needs
-push access. Each suite's status shows the newest result posted for that suite.
+push access. Each suite's status on a commit shows the result whose status for
+that suite was written last.
 
 Every posted body starts with:
 
@@ -577,8 +578,10 @@ def command_post_tests(args):
     states, errors = {}, []
     for suite, outcome in sorted(record["suites"].items()):
         status = set_suite_status(owner, name, args.commit, suite, outcome, record["summary"], comment["html_url"])
-        states[suite] = STATUS_BY_OUTCOME[outcome] if status.returncode == 0 else None
-        if status.returncode != 0:
+        if status.returncode == 0:
+            states[suite] = STATUS_BY_OUTCOME[outcome]
+        else:
+            states[suite] = None
             errors.append("{}: {}".format(suite, status.stderr.strip() or "gh exited with code {}".format(status.returncode)))
     report = {"url": comment["html_url"], "commit": args.commit, "on_head": args.commit == pr["headRefOid"],
               "states": states}
