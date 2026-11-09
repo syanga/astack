@@ -30,7 +30,7 @@ BASE = 'Base directory for this skill: '
 CUT = 'skill content truncated for compaction'
 COMMAND = re.compile(r'<command-name>/?([^<\s]+)</command-name>')
 ARGS = re.compile(r'<command-args>(.*?)</command-args>', re.S)
-PLACEHOLDER = re.compile(r'\$ARGUMENTS(?![\[\w])')
+PLACEHOLDER = re.compile(r'\$ARGUMENTS(?!\[\d+\])')
 ARGUMENTS_LINE = '\n\n\nARGUMENTS: '
 SKILL_OPEN = '<skill name="{}">'
 FRONTMATTER = re.compile(r'\A---\n.*?\n---\n', re.S)
@@ -160,7 +160,8 @@ def skill_source(invocation: Invocation) -> str | None:
 
 
 def expand(source: str, invocation: Invocation) -> str:
-    """Expand the skill as Claude Code does: substitute $ARGUMENTS, or append the arguments."""
+    """Fill $ARGUMENTS as Claude Code does, or append the arguments when it is absent. Unlike
+    Claude Code, leave $ARGUMENTS[N], $N, and named placeholders as written."""
     if PLACEHOLDER.search(source):
         return PLACEHOLDER.sub(lambda _: limited_args(invocation), source)
     return source + ARGUMENTS_LINE + limited_args(invocation) if invocation.args else source

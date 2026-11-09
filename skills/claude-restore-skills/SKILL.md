@@ -13,10 +13,10 @@ it adds the skill's current `SKILL.md` text and the invocation's arguments. When
 the file is gone, it uses the text recorded at invocation. It skips skills the
 model invoked through the Skill tool, because the model can invoke those again.
 
-The hook also skips invocations on branches abandoned by a rewind. When a
-parent missing from the transcript follows a rewind at once, the hook cannot
-tell the abandoned branch from lost entries, and it can restore that branch's
-skills.
+The hook also skips invocations on branches abandoned by a rewind. When the
+first entry after a rewind has a parent missing from the transcript, the hook
+cannot tell the abandoned branch from lost entries, and it can restore that
+branch's skills.
 
 The hook splits its output into parts. The comment on `PARTS` in
 `scripts/hook.py` says why. When the skills do not fit in all parts together,
