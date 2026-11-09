@@ -23,9 +23,9 @@ The directly imported orchestration runtime retains Bun/TypeScript, and
 `skills/show-me-your-work/scripts/log.sh` retains Bash. These upstream imports
 are exceptions to the Python script convention. The scripts in
 `skills/run-job/`, `skills/claude-background-jobs/`,
-`skills/codex-background-jobs/`, and `skills/claude-restore-skills/` also run on
-Python 3.9. Agents and Claude Code hooks run them with the system `python3`,
-which is 3.9 on stock macOS. Follow the
+`skills/codex-background-jobs/`, `skills/claude-restore-skills/`, and
+`skills/claude-full-send-guard/` also run on Python 3.9. Agents and Claude Code
+hooks run them with the system `python3`, which is 3.9 on stock macOS. Follow the
 verification steps in [CLI.md](skills/orchestrate/CLI.md) to run the
 orchestration tests offline in a temporary copy. The Python suite also tests the
 imported decision-log helper.
