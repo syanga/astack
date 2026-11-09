@@ -52,7 +52,6 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
       }
       reviews(last: 100) { nodes {
         author { login __typename } viewerDidAuthor state submittedAt body commit { oid }
-        comments(first: 1) { nodes { viewerDidAuthor body replyTo { id } } }
       } }
       commits(last: 20) { nodes { commit { oid statusCheckRollup { state } } } }
     }
@@ -161,9 +160,7 @@ def is_bot(node):
 
 def is_ours(node):
     first = (node.get("body") or "").split("\n", 1)[0].strip()
-    return bool(node.get("viewerDidAuthor")) and (
-        ATTRIBUTION_HEADER.fullmatch(first) is not None
-        or any(not comment.get("replyTo") and is_ours(comment) for comment in (node.get("comments") or {}).get("nodes", [])))
+    return bool(node.get("viewerDidAuthor")) and ATTRIBUTION_HEADER.fullmatch(first) is not None
 
 
 def minutes_between(start, now):
@@ -241,7 +238,7 @@ def summarize(pr, threads, reviews, recent, since, now, stuck_minutes=60, pushed
             {"author": login(review), "bot": is_bot(review), "ours": is_ours(review),
              "at": review["submittedAt"], "state": review["state"], "body": review.get("body", "")}
             for review in reviews if review.get("submittedAt") and review["submittedAt"] > since
-            and (review.get("body") or is_ours(review) or not review.get("viewerDidAuthor"))
+            and (review.get("body") or not review.get("viewerDidAuthor"))
         ],
     }
     return snapshot
@@ -262,19 +259,19 @@ def format_body(model, body, name):
 
 
 def build_review(model, review, commit, name):
-    payload = {
+    return {
         "event": "COMMENT", "commit_id": commit,
+        "body": format_body(model, review["body"], name),
         "comments": [{"path": c["path"], "line": c["line"], "side": "RIGHT", "body": format_body(model, c["body"], name)}
                      for c in review.get("comments", [])],
     }
-    if review["body"].strip():
-        payload["body"] = format_body(model, review["body"], name)
-    return payload
 
 
 def check_review(review):
     if not isinstance(review, dict) or not isinstance(review.get("body"), str):
         fail("review file: it must be an object whose body is a string")
+    if not review["body"].strip():
+        fail("review file: the body is empty; summarize the review in it, as posting.md describes")
     if not isinstance(review.get("comments", []), list):
         fail("review file: comments must be a list")
     for index, c in enumerate(review.get("comments", [])):
@@ -383,10 +380,6 @@ def command_review(args):
     with open(args.review_file, encoding="utf-8") as handle:
         review = json.load(handle)
     check_review(review)
-    if not review["body"].strip() and not review.get("comments"):
-        json.dump({"url": None, "inline": 0, "folded": False}, sys.stdout)
-        print()
-        return
     endpoint = "repos/{}/{}/pulls/{}/reviews".format(owner, name, pr["number"])
     wanted = len(review.get("comments", []))
     if args.commit not in {commit.get("oid") for commit in pr["commits"]}:
