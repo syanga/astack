@@ -32,7 +32,7 @@
     "path": "skills/engineering/code-review",
     "commit": "74ca5fe077456a0b3b2f5310cf9430999fd0b5fd",
     "license": "MIT, kept in skills/review-pr/LICENSE-mattpocock",
-    "note": "Preserves the independent Standards and Spec axes and Fowler smell baseline. Parent-owned repairs address implementation handoffs that previously stopped after reporting findings. An outside-provider Correctness axis gives delegated implementations cross-model bug review without full hardening. Posting the review record is its own step because agents often skipped a closing pointer to posting.md.",
+    "note": "Preserves the independent Standards and Spec axes and Fowler smell baseline. Parent-owned repairs address implementation handoffs that previously stopped after reporting findings. An outside-provider Correctness axis gives delegated implementations cross-model bug review without full hardening. Posting the review record is its own step because agents often skipped a closing pointer to posting.md. The pass limit exists because a fix-and-review run that keeps finding problems may need a different direction. The user decides the direction, so the run stops instead of making more passes.",
     "files": {
       "SKILL.md": "skills/review-pr/SKILL.md"
     }

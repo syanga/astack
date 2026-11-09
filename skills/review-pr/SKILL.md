@@ -11,7 +11,7 @@ Three-axis review of the requested changes against a fixed point:
 
 The axes run as **separate reviewers** so they don't pollute each other's context, then this skill aggregates their findings.
 
-Use **report-only** for standalone review requests. Use **fix-and-review** when the user requests repairs or an implementation workflow hands off its authorized work. Explicit read-only requests take precedence.
+Use **report-only** for standalone review requests. Use **fix-and-review** when the user or a calling workflow requests repairs, or an implementation workflow hands off its authorized work. Explicit read-only requests take precedence.
 
 ## Process
 
@@ -27,7 +27,7 @@ Review the requested changes against the fixed point. Give every reviewer the sa
 
 Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, before dispatching reviewers.
 
-Save the reviewed source and diff in a temporary review directory, with the base SHA, the candidate identity (commit SHA, or HEAD plus the working-tree diff), and the capture command, for the Correctness reviewer. Refresh the snapshot before each Correctness pass.
+Save the reviewed source and diff in a temporary review directory, with the base SHA, the candidate identity (commit SHA, or HEAD plus the working-tree diff), and the capture command, for the Correctness reviewer. Refresh the snapshot before each Correctness review.
 
 ### 2. Identify the spec source
 
@@ -103,11 +103,21 @@ Run Correctness once, on the first candidate where the applicable Standards and 
 
 Converge when the final changes have no unresolved verified problems, required checks pass, and applicable reviews are complete. A native fallback completes the Correctness review for convergence. Optional suggestions do not block completion. If progress stalls or a decision is needed, report the remaining blockers.
 
+All reviews of one candidate, from every axis, make one pass. A fix-and-review run's pass limit is three passes, or the number of passes the user names. When the last allowed pass does not converge, the run stops at its pass limit without more repairs. A required check that fails on the head pushed after that pass also leaves that pass unconverged. A request to loop or review until clean asks for fix-and-review and starts one run with this pass limit.
+
+After a run stops at its pass limit, reassess the change's direction. Check whether:
+
+- the remaining findings, from any axis, share a cause
+- repairs reopened earlier findings
+- the direction fits the requirements
+
+Report the assessment under `## Direction`, after the axis reports. Recommend either keeping the direction and the repairs it still needs, or a new direction that you name. End the section with the direction question, which asks the user how to proceed. Start a new run or change direction only as the user directs. A new run has its own pass limit.
+
 In fix-and-review mode with existing PRs, [finalize the PRs](../harden-pr/pr-work.md#finalize-reviewed-prs), including committing and pushing verified repairs. A fix made while finalizing, such as a CI fix, is a later repair. Handle it as step 5 handles every later repair, before step 6. Without a PR, return the reviewed changes to the caller's delivery workflow.
 
-Verify Correctness findings against the evidence requirements before presenting or posting them. Present each report under its axis heading (`## Standards`, `## Spec`, `## Correctness`), verbatim or lightly cleaned. Under `## Correctness`, name the reviewer (outside provider, `native fallback`, or not run with the reason), each finding's disposition, and any repair-verification result. Do **not** merge or rerank findings, because the axes are deliberately separate (see _Why three axes_).
+Verify Correctness findings against the evidence requirements before presenting or posting them. Present each report under its axis heading (`## Standards`, `## Spec`, `## Correctness`), verbatim or lightly cleaned. Under `## Correctness`, name the reviewer (outside provider, `native fallback`, or not run with the reason), each finding's disposition, and any repair-verification result. When Correctness never ran before the pass limit, the reason is the condition no candidate met: Standards, Spec, or required checks. Do **not** merge or rerank findings, because the axes are deliberately separate (see _Why three axes_).
 
-End the axis reports with a one-line summary: remaining findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent.
+End the axis reports with a one-line summary: remaining findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent. When the run stopped at its pass limit, begin that line with `Not converged after <n> review-pr passes. Do not merge.`
 
 ### 6. Post the signed review record
 

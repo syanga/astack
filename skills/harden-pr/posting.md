@@ -4,11 +4,24 @@ Invoking review-pr or harden-pr authorizes publication on an existing PR unless 
 
 At the end of each invocation, post one informational GitHub review with event `COMMENT`, even when no findings remain. Combine internal repair passes in that record. A later invocation adds a new record.
 
-Include the reviewed commit, outcome, repairs, remaining findings, verification, and completed and missing coverage in the body. Preserve review-pr's separate axes. Keep full transcripts in local review records. Also publish [test results](../open-pr/test-results.md) in the PR description.
+Include the reviewed commit, its fixed point, the outcome, repairs, remaining findings, verification, and completed and missing coverage in the body. Preserve review-pr's separate axes. Keep full transcripts in local review records. Also publish [test results](../open-pr/test-results.md) in the PR description.
 
 If a run stops early after substantive review, mark its record incomplete. If no substantive review occurred, report the reason only in the conversation. Missing coverage is not a clean result.
 
 Use harden-pr's `scripts/pr.py review` to post against the commit the review covers. After you push verified repairs, post against the last pushed commit that the review covered. Post against a later commit, such as a CI fix pushed after the review ended, only after a review covers it. When a conflict-free rebase or replay of the reviewed commit produced a commit with an unchanged patch, post against that rebased commit. In that review's body, name the reviewed SHA and the rebased SHA. The helper signs the review and exposes actionable findings to harden-pr.
+
+When a review-pr run stops at its pass limit, start the review body with this pass-limit alert, followed by a blank line:
+
+```markdown
+> [!CAUTION]
+> Not converged after <n> review-pr passes. Do not merge. Read the review's Direction section before running more passes.
+```
+
+Include review-pr's `## Direction` section in that review body. That review is the pass-limited review record.
+
+Put the same alert at the top of the PR description. Add `> Review: <url>` after the alert's text, with the `url` that `pr.py review` returns. If posting fails, omit that line. When a later run stops at its pass limit, replace the alert. The approval line that [pr-work's merge step](pr-work.md#finish-or-merge) appends is `> Merge approved by the user for <sha>.`
+
+Keep the alert until a later review-pr or harden-pr run converges and its diff includes everything the pass-limited run reviewed. A converged review against the PR's target branch qualifies. Then remove the alert from the PR description.
 
 The helper prefixes reviews, inline comments, and thread replies with `[<model slug>] on behalf of <first name from git config user.name>`. Run it from the reviewed repository so repository-specific Git identity applies. An unset or invalid name stops posting; earlier signed reviews remain recognizable after a name change.
 
@@ -16,7 +29,7 @@ Write a JSON file with this shape:
 
 ```json
 {
-  "body": "Reviewed <sha>. Outcome, repairs, remaining findings, verification, and coverage.",
+  "body": "Reviewed <sha> against <fixed point>. Outcome, repairs, remaining findings, verification, and coverage.",
   "comments": [
     {
       "path": "src/example.py",
