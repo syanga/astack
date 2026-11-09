@@ -9,11 +9,11 @@ When the PR exists, list its published results before running tests, with `pytho
 - On the branch: `git diff --name-only --no-renames <tested commit> HEAD`
 - On the base, when HEAD does not contain `origin/<base branch>`: `git diff --name-only --no-renames <result's base commit> origin/<base branch>`
 
-A covering suite keeps a `pass` or `fail` result when that result includes it and no listed file affects it. Rerun a suite whose newest result is `incomplete`. Run the other covering suites after [Rebase before the published run](#rebase-before-the-published-run). When the tested commit cannot be fetched, rebuild the tested commit by merging the result's `heads` onto the result's base. When the result lists no `heads`, run every covering suite.
+A covering suite keeps a `pass` or `fail` result when that result includes it and no listed file affects it. Rerun a suite whose newest result is `incomplete`. Run the other covering suites after [Rebase before the published run](#rebase-before-the-published-run). When the tested commit cannot be fetched, rebuild the tested commit by merging the result's `heads` onto the result's base. When the tested commit cannot be fetched and the result lists no `heads`, run every covering suite.
 
 ## Rebase before the published run
 
-Before a run you publish, list the files the base changed with `git diff --name-only --no-renames HEAD...origin/<base branch>`. Rebase onto `origin/<base branch>` when any of them affects a covering suite, following [pr-work's push rules](../harden-pr/pr-work.md#push-and-wait). When an orchestrate brief forbids rebasing, run on the current branch and say so in the published result.
+Before a run you publish, list the files the base changed with `git diff --name-only --no-renames HEAD...origin/<base branch>`. Rebase onto `origin/<base branch>` when any of them affects a covering suite, following [pr-work's push rules](../harden-pr/pr-work.md#push-and-wait). When an orchestrate brief forbids rebasing, run on the current branch and say so in the result's `limits`.
 
 ## Pick the suites
 

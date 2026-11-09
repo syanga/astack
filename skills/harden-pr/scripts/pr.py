@@ -285,6 +285,14 @@ def build_review(model, review, commit, name):
     }
 
 
+def load_json_file(path, label):
+    with open(path, encoding="utf-8") as handle:
+        try:
+            return json.load(handle)
+        except ValueError as error:
+            fail("{}: it is not valid JSON: {}".format(label, error))
+
+
 def check_review(review):
     if not isinstance(review, dict) or not isinstance(review.get("body"), str):
         fail("review file: it must be an object whose body is a string")
@@ -395,8 +403,7 @@ def command_review(args):
     identity = git_user_name()
     pr = fetch_pr(args)
     owner, name = pr["url"].split("/")[3:5]
-    with open(args.review_file, encoding="utf-8") as handle:
-        review = json.load(handle)
+    review = load_json_file(args.review_file, "review file")
     check_review(review)
     endpoint = "repos/{}/{}/pulls/{}/reviews".format(owner, name, pr["number"])
     wanted = len(review.get("comments", []))
@@ -474,7 +481,7 @@ def read_test_records(owner, name, comments):
             continue
         try:
             record = json.loads(match.group(1))
-        except ValueError:
+        except (ValueError, RecursionError):
             record = None
         if test_result_problem(record) or not FULL_SHA.fullmatch(str(record.get("commit"))):
             ignored += 1
@@ -546,8 +553,7 @@ def command_tests(args):
 
 def command_post_tests(args):
     identity = git_user_name()
-    with open(args.result_file, encoding="utf-8") as handle:
-        result = json.load(handle)
+    result = load_json_file(args.result_file, "result file")
     problem = test_result_problem(result)
     if problem:
         fail("result file: " + problem)

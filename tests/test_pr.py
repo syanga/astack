@@ -485,8 +485,10 @@ class TestResultTests(unittest.TestCase):
         github.seed(dict(result(suites={"api": "fail"}), commit=HEAD), author="sam", status_creator="sam", minute=4)
         unhashable = dict(result(suites={"api": ["pass"]}), commit=HEAD)
         github.seed(unhashable, body=pr.format_body("m", pr.RECORD_PREFIX + json.dumps(unhashable) + " -->", "Alan"), minute=5)
+        too_deep = '{"a": ' + "[" * 20000 + "]" * 20000 + "}"
+        github.seed(dict(result(), commit=HEAD), body=pr.format_body("m", pr.RECORD_PREFIX + too_deep + " -->", "Alan"), minute=6)
         listed = github.call("tests", "--pr", "12")
-        self.assertEqual(listed["ignored"], 4)
+        self.assertEqual(listed["ignored"], 5)
         self.assertEqual([(entry["author"], entry["suites"]) for entry in listed["records"]], [("sam", {"api": "fail"})])
         self.assertEqual(github.post(result(suites={"web": "pass"}))["state"], "failure")
 
@@ -527,8 +529,15 @@ class TestResultTests(unittest.TestCase):
             with self.subTest(message=message, value=value):
                 github = FakeGitHub(push=push)
                 self.assertIsNone(github.post(value, commit))
-                self.assertEqual((github.exit_code, github.writes), (2, 0))
+                self.assertEqual((github.exit_code, github.comments, github.statuses), (2, [], []))
                 self.assertIn(message, github.errors)
+        github = FakeGitHub()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "result.json"
+            path.write_text("not json")
+            self.assertIsNone(github.call("post-tests", "--pr", "12", "--commit", HEAD, "--result-file", str(path), "--model", "m"))
+        self.assertEqual((github.exit_code, github.comments, github.statuses), (2, [], []))
+        self.assertIn("result file: it is not valid JSON", github.errors)
         github = FakeGitHub()
         self.assertEqual(github.post(result())["state"], "success")
         self.assertEqual((github.exit_code, github.writes), (0, 2))
