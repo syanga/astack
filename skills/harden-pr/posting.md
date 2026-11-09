@@ -4,7 +4,7 @@ Invoking review-pr or harden-pr authorizes publication on an existing PR unless 
 
 At the end of each invocation, post one informational GitHub review with event `COMMENT`, even when no findings remain. Combine internal repair passes in that record. A later invocation adds a new record.
 
-Include the reviewed commit, its fixed point, the outcome, repairs, remaining findings, verification, and completed and missing coverage in the body. Preserve review-pr's separate axes. Keep full transcripts in local review records. Also publish [test results](../open-pr/test-results.md) in the PR description.
+Include the reviewed commit, the review's fixed point, the outcome, repairs, remaining findings, verification, and completed and missing coverage in the body. Preserve review-pr's separate axes. Keep full transcripts in local review records. Also publish [test results](../open-pr/test-results.md) in the PR description.
 
 If a run stops early after substantive review, mark its record incomplete. If no substantive review occurred, report the reason only in the conversation. Missing coverage is not a clean result.
 
@@ -21,7 +21,7 @@ Include review-pr's `## Direction` section in that review body. That review is t
 
 Put the same alert at the top of the PR description. Add `> Review: <url>` after the alert's text, with the `url` that `pr.py review` returns. If posting fails, omit that line. When a later run stops at its pass limit, replace the alert.
 
-A later run covers the pass-limited run when its diff includes everything the pass-limited run reviewed. A review against the PR's target branch covers it. Keep the alert until a later review-pr or harden-pr run converges and covers the pass-limited run. Before you post any converged record, read the PR description with `gh pr view <n> --json body`. If it has a pass-limit alert and this run covers the pass-limited run, remove the alert.
+A later run covers the pass-limited run when its diff includes everything the pass-limited run reviewed. A run against the PR's target branch covers it. Keep the alert until a later review-pr or harden-pr run converges and covers the pass-limited run. Before that run posts its record, it reads the PR description with `gh pr view <n> --json body` and removes the alert.
 
 The helper prefixes reviews, inline comments, and thread replies with `[<model slug>] on behalf of <first name from git config user.name>`. Run it from the reviewed repository so repository-specific Git identity applies. An unset or invalid name stops posting; earlier signed reviews remain recognizable after a name change.
 
