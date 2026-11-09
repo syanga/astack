@@ -10,7 +10,7 @@ disable-model-invocation: true
 
 ## 1. Start
 
-1. For a simple task, or one already settled, for example by [grilling](../grilling/SKILL.md), skip the questions. Otherwise ask one round of questions, each with a recommended answer. Cover open questions that block the work. Also cover production deploys, live systems, destructive actions, and secrets, when the task touches one and the request leaves it open. After this step, reach the user only through gates.
+1. For a simple task, or one already settled, for example by [grilling](../grilling/SKILL.md), skip the questions. Otherwise ask one round of questions, each with a recommended answer. Cover open questions that block the work. Also cover production deploys, live systems, destructive actions, and secrets, when the task touches one and the request leaves it open. When a plan's live checks need an environment that a later unit builds, ask whether the plan's PRs may merge before those checks run. After this step, reach the user only through gates.
 2. Create `assumed-decisions.md` in the task's store, `.scratch/<task>/` per [Locate the store](../orchestrate/STATE.md#locate-the-store). Start it with the request and whether merging is authorized. Post its absolute path in the thread.
 
 ## 2. Route
@@ -39,13 +39,15 @@ Each of these conditions is a gate:
 
 - a deploy, live-system, destructive, or secrets action the start round left open
 - missing access
-- a change you cannot verify on the matching surface
+- a change you cannot verify on the matching surface, unless the start round let it merge before that check
 - a human change request
 - a missing approval that the [admin merge](#5-merge) does not clear
 - in-scope review defects after three fix-and-review passes
 - a review bot silent through both timers in [Merge](#5-merge) step 2
 
 On the orchestrate route, park it through [orchestrate's escalation](../orchestrate/SKILL.md#escalation). Otherwise write its [decision request](../orchestrate/SKILL.md#messages-to-the-user) to the store's `open-decisions.md`, and record the answer there when it arrives. Continue unblocked work. When nothing can move, ask with the question tool if one exists, otherwise end the turn with the request. Send a push notification if the harness has one.
+
+Before ending a turn, check that a running worker, watcher, or timer will wake you, or that each unfinished unit waits on a gate. If neither holds, dispatch ready work first, including the review that [Merge](#5-merge) step 1 requires.
 
 ## 5. Merge
 
