@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,6 +25,99 @@ func TestLoginRefusesAnAccountIDOutsideTheAuthDirectory(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(state, "assignments")); !os.IsNotExist(statErr) {
 		t.Fatal("login touched the state directory before refusing the account ID")
+	}
+}
+
+const pastedCallback = "http://localhost:54545/callback?code=c0de&state=5tate"
+
+func withinFiveSeconds(t *testing.T, f func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f()
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sign-in still waits after 5 s")
+	}
+}
+
+func answerOnce(answer *string) sdkLogin {
+	return func(prompt func(string) (string, error)) error {
+		var err error
+		*answer, err = prompt("Paste the Claude callback URL (or press Enter to keep waiting): ")
+		return err
+	}
+}
+
+func TestABlankEnterLeavesTheCallbackPromptWaitingForThePastedURL(t *testing.T) {
+	stdin, typing := io.Pipe()
+	defer typing.Close()
+	go func() {
+		fmt.Fprintln(typing)
+		fmt.Fprintln(typing, "  "+pastedCallback+"  ")
+	}()
+	var answer string
+	var err error
+
+	withinFiveSeconds(t, func() { err = awaitCallback(readLines(stdin), io.Discard, answerOnce(&answer)) })
+
+	if answer != pastedCallback || err != nil {
+		t.Fatalf("after Enter, then the pasted callback URL, the SDK got %q, %v; want the URL", answer, err)
+	}
+}
+
+type writeSignal chan struct{}
+
+func (s writeSignal) Write(p []byte) (int, error) {
+	select {
+	case s <- struct{}{}:
+	default:
+	}
+	return len(p), nil
+}
+
+func TestAnAutomaticCallbackEndsTheWaitingPromptAndLeavesTheNextLineForTheNextSignIn(t *testing.T) {
+	stdin, typing := io.Pipe()
+	defer typing.Close()
+	lines := readLines(stdin)
+	wrote := make(writeSignal, 1)
+	var first, second error
+	var answer string
+
+	withinFiveSeconds(t, func() {
+		first = awaitCallback(lines, wrote, func(prompt func(string) (string, error)) error {
+			select {
+			case <-wrote:
+			default:
+			}
+			go prompt("")
+			<-wrote
+			return nil
+		})
+	})
+	go fmt.Fprintln(typing, pastedCallback)
+	withinFiveSeconds(t, func() { second = awaitCallback(lines, io.Discard, answerOnce(&answer)) })
+
+	if first != nil || second != nil || answer != pastedCallback {
+		t.Fatalf("sign-ins returned %v and %v, and the second SDK got %q; want the URL pasted after the first sign-in ended", first, second, answer)
+	}
+}
+
+func TestASignInThatTimesOutSaysTheAttemptEndedAndHowToRetry(t *testing.T) {
+	sdkTimeout := errors.New("callback_timeout: Timeout waiting for OAuth callback (caused by: timeout waiting for OAuth callback)")
+	var out bytes.Buffer
+
+	reportError(&out, "account", awaitCallback(readLines(strings.NewReader("")), io.Discard,
+		func(func(string) (string, error)) error { return sdkTimeout }))
+
+	want := "claude-router: account: sign-in timed out; this attempt ended\n" +
+		"          its sign-in URL and callback address no longer work\n" +
+		"next      run the same command again and open the new sign-in URL\n"
+	if out.String() != want {
+		t.Fatalf("timeout report\n%s\nwant\n%s", out.String(), want)
 	}
 }
 

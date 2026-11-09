@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -202,7 +203,7 @@ func login(args []string) error {
 		return fmt.Errorf("%q is not a valid account ID (letters, digits, '-', '_', '.')", *account)
 	}
 	if *noBrowser {
-		fmt.Printf("login   open the URL below; sign in as %s (Ctrl-C cancels)\n", *account)
+		fmt.Printf("login   open the URL below in your browser; sign in as %s (Ctrl-C cancels)\n", *account)
 	} else {
 		fmt.Printf("login   browser opened; sign in as %s (Ctrl-C cancels)\n", *account)
 	}
@@ -260,19 +261,14 @@ func enroll(state, account string, noBrowser bool) (kept int, published bool, er
 	mgr := sdkauth.NewManager(store, sdkauth.NewClaudeAuthenticator())
 	cfg := &config.Config{}
 	cfg.AuthDir = staging
-	reader := bufio.NewReader(os.Stdin)
-	opts := &sdkauth.LoginOptions{
-		NoBrowser: noBrowser,
-		Prompt: func(p string) (string, error) {
-			fmt.Fprint(os.Stderr, p)
-			line, err := reader.ReadString('\n')
-			return strings.TrimSpace(line), err
-		},
-	}
-	if err := showingOnlySignInURLs(func() error {
-		_, _, err := mgr.Login(context.Background(), "claude", cfg, opts)
-		return err
-	}); err != nil {
+	err = awaitCallback(stdinLines(), os.Stderr, func(prompt func(string) (string, error)) error {
+		opts := &sdkauth.LoginOptions{NoBrowser: noBrowser, Prompt: prompt}
+		return showingOnlySignInURLs(func() error {
+			_, _, err := mgr.Login(context.Background(), "claude", cfg, opts)
+			return err
+		})
+	})
+	if err != nil {
 		return 0, false, err
 	}
 	entries, err := filepath.Glob(filepath.Join(staging, "*.json"))
@@ -300,6 +296,92 @@ func enroll(state, account string, noBrowser bool) (kept int, published bool, er
 		}
 	}
 	return kept, true, nil
+}
+
+var stdinLines = sync.OnceValue(func() <-chan string { return readLines(os.Stdin) })
+
+func readLines(r io.Reader) <-chan string {
+	lines := make(chan string)
+	go func() {
+		defer close(lines)
+		sc := bufio.NewScanner(r)
+		sc.Buffer(nil, 1<<20)
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+	}()
+	return lines
+}
+
+type sdkLogin func(prompt func(string) (string, error)) error
+
+func awaitCallback(lines <-chan string, out io.Writer, login sdkLogin) error {
+	fmt.Fprint(out, "After sign-in, the browser opens an http://localhost address. If that page\n"+
+		"does not load, copy the full address and paste it at the prompt below.\n")
+	prompt := &callbackPrompt{lines: lines, out: out, ended: make(chan struct{})}
+	err := login(prompt.ask)
+	prompt.end()
+	// The SDK's timeout error type is internal to the SDK, so match its name.
+	if err != nil && strings.Contains(err.Error(), "callback_timeout") {
+		return nextError{err: errors.New("sign-in timed out; this attempt ended"),
+			detail: "its sign-in URL and callback address no longer work",
+			next:   "run the same command again and open the new sign-in URL"}
+	}
+	return err
+}
+
+const pasteHere = "Paste the address here, then press Enter:\n"
+
+var errSignInEnded = errors.New("sign-in ended")
+
+// callbackPrompt answers the SDK's LoginOptions.Prompt. The SDK calls Prompt
+// once, 15 s after it opens the browser or prints the sign-in URL, and never
+// asks again, so ask answers only with a non-blank line.
+type callbackPrompt struct {
+	lines  <-chan string
+	out    io.Writer
+	mu     sync.Mutex
+	ended  chan struct{}
+	asking sync.WaitGroup
+}
+
+func (p *callbackPrompt) ask(string) (string, error) {
+	if !p.ifOpen(func() { p.asking.Add(1); fmt.Fprint(p.out, pasteHere) }) {
+		return "", errSignInEnded
+	}
+	defer p.asking.Done()
+	lines := p.lines
+	for {
+		select {
+		case <-p.ended:
+			return "", errSignInEnded
+		case l, ok := <-lines:
+			if !ok {
+				lines = nil
+			} else if l = strings.TrimSpace(l); l != "" {
+				return l, nil
+			} else if !p.ifOpen(func() { fmt.Fprint(p.out, "Nothing pasted. "+pasteHere) }) {
+				return "", errSignInEnded
+			}
+		}
+	}
+}
+
+func (p *callbackPrompt) ifOpen(f func()) (open bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	select {
+	case <-p.ended:
+		return false
+	default:
+		f()
+		return true
+	}
+}
+
+func (p *callbackPrompt) end() {
+	p.ifOpen(func() { close(p.ended) })
+	p.asking.Wait()
 }
 
 // The SDK prints its progress and SSH tunnel instructions for remote servers
