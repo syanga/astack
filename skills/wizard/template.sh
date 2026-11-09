@@ -183,12 +183,17 @@ write_env() {
   [[ -e "$target" ]] || (umask 077 && : > "$target")
   # Replace by rename in the target's directory, so an interrupted write never truncates it.
   tmp=$(mktemp "$target.XXXXXX")
+  # The temporary file holds every value and may escape the project's .env ignore rule.
+  trap 'rm -f "$tmp"; exit 130' INT
+  trap 'rm -f "$tmp"; exit 143' TERM
+  trap 'rm -f "$tmp"; exit 129' HUP
   if ! { cp -p "$target" "$tmp" &&
          { grep -vE "^${key}=" "$target" || true; printf '%s=%s\n' "$key" "$encoded"; } > "$tmp" &&
          mv "$tmp" "$target"; }; then
     rm -f "$tmp"
     exit 1
   fi
+  trap - INT TERM HUP
   WRITTEN_ENV+=("$key")
   printf '  %s✓ wrote%s %s → %s\n' "$GREEN" "$RESET" "$key" "$ENV_FILE"
 }

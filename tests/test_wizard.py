@@ -131,6 +131,17 @@ sys.exit(1)
         self.assertEqual(sorted(p.name for p in self.root.iterdir() if p.name.startswith(".env")),
                          [".env"])
 
+    def test_interrupted_write_removes_its_temporary_file(self):
+        (self.root / ".env").write_text("OTHER=keep\n")
+        stub = self.root / "bin" / "mv"
+        stub.write_text("#!/bin/sh\nkill -TERM $PPID\nexit 1\n")
+        stub.chmod(0o755)
+        result = self.run_wizard('write_env TOKEN secret-value\n')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.root / ".env").read_text(), "OTHER=keep\n")
+        self.assertEqual(sorted(p.name for p in self.root.iterdir() if p.name.startswith(".env")),
+                         [".env"])
+
     def test_rewrites_a_relative_symlink_chain_without_leaving_temporary_files(self):
         (self.root / "config").mkdir()
         target = self.root / "config" / "real.env"
