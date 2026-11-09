@@ -30,6 +30,9 @@ BASE = 'Base directory for this skill: '
 CUT = 'skill content truncated for compaction'
 COMMAND = re.compile(r'<command-name>/?([^<\s]+)</command-name>')
 ARGS = re.compile(r'<command-args>(.*?)</command-args>', re.S)
+PLACEHOLDER = re.compile(r'\$ARGUMENTS(?![\[\w])')
+ARGUMENTS_LINE = '\n\n\nARGUMENTS: '
+SKILL_OPEN = '<skill name="{}">'
 FRONTMATTER = re.compile(r'\A---\n.*?\n---\n', re.S)
 
 
@@ -48,6 +51,10 @@ class Invocation(NamedTuple):
     @property
     def skill_file(self) -> Path:
         return Path(self.base) / 'SKILL.md'
+
+    @property
+    def recorded(self) -> str:
+        return self.text[len(BASE) + len(self.base):].strip()
 
 
 def read_entries(path: str) -> list[dict]:
@@ -103,8 +110,8 @@ def history(entries: list[dict], source: str) -> History:
         if in_context:
             context.append(entry)
         parent = entry['parentUuid'] or entry['logicalParentUuid']
-        if parent is not None and parent not in position:
-            # The parent was never written; the newest earlier entry stands in for it.
+        lost = parent is not None and parent not in position
+        if lost:
             in_context = False
             index = newest_before(entries, index, lineage)
         else:
@@ -154,21 +161,22 @@ def skill_source(invocation: Invocation) -> str | None:
 
 def expand(source: str, invocation: Invocation) -> str:
     """Expand the skill as Claude Code does: substitute $ARGUMENTS, or append the arguments."""
-    if '$ARGUMENTS' in source:
-        return source.replace('$ARGUMENTS', limited_args(invocation))
-    return source + '\n\n\nARGUMENTS: ' + limited_args(invocation) if invocation.args else source
+    if PLACEHOLDER.search(source):
+        return PLACEHOLDER.sub(lambda _: limited_args(invocation), source)
+    return source + ARGUMENTS_LINE + limited_args(invocation) if invocation.args else source
 
 
 def recorded_body(invocation: Invocation) -> str:
-    return invocation.text[len(BASE) + len(invocation.base):].strip().rsplit('\n\n\nARGUMENTS: ', 1)[0]
+    return invocation.recorded.rsplit(ARGUMENTS_LINE, 1)[0]
 
 
 def missing(entries: list[dict], source: str) -> list[Invocation]:
     known = history(entries, source)
     ids = {entry['uuid'] for entry in known.context}
     attachments = [entry['attachment'] for entry in known.context if isinstance(entry['attachment'], dict)]
-    restored = '\n'.join(str(part) for attachment in attachments if attachment.get('type') == 'hook_additional_context'
-                         for part in attachment.get('content') or [])
+    earlier_output = '\n'.join(str(part) for attachment in attachments
+                               if attachment.get('type') == 'hook_additional_context'
+                               for part in attachment.get('content') or [])
     attached = {str(skill.get('content', '')).split('\n', 1)[0]: str(skill.get('content', ''))
                 for attachment in attachments if attachment.get('type') == 'invoked_skills'
                 for skill in attachment.get('skills') or [] if isinstance(skill, dict)}
@@ -180,10 +188,10 @@ def missing(entries: list[dict], source: str) -> list[Invocation]:
     result = []
     for invocation in latest.values():
         copy = attached.get(BASE + invocation.base)
-        if invocation.uuid in ids or '<skill name="{}">'.format(invocation.name) in restored:
+        if invocation.uuid in ids or SKILL_OPEN.format(invocation.name) in earlier_output:
             continue
         source = skill_source(invocation)
-        current = expand(source, invocation).rsplit('\n\n\nARGUMENTS: ', 1)[0] if source is not None else None
+        current = expand(source, invocation).rsplit(ARGUMENTS_LINE, 1)[0] if source is not None else None
         if copy is not None and CUT not in copy and any(
                 body in copy for body in (current, recorded_body(invocation)) if body):
             continue
@@ -194,7 +202,7 @@ def missing(entries: list[dict], source: str) -> list[Invocation]:
 def skill_text(invocation: Invocation) -> str:
     source = skill_source(invocation)
     if source is None:
-        return BASE + invocation.base + '\n\n' + invocation.text[len(BASE) + len(invocation.base):].strip()
+        return BASE + invocation.base + '\n\n' + invocation.recorded
     return BASE + invocation.base + '\n\n' + expand(source, invocation)
 
 
@@ -208,7 +216,7 @@ def message(restored: list[Invocation], left_out: list[Invocation]) -> str:
         lines.append('`/{}` did not fit. Read {} if its task is unfinished.'.format(item.name, item.skill_file)
                      + ('\nARGUMENTS: ' + item.args[:LISTED_ARGS_LIMIT] if item.args else ''))
     for item in restored:
-        lines.append('<skill name="{}">\n{}\n</skill>'.format(item.name, skill_text(item)))
+        lines.append(SKILL_OPEN.format(item.name) + '\n{}\n</skill>'.format(skill_text(item)))
     return '\n\n'.join(lines)
 
 

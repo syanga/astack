@@ -211,6 +211,14 @@ class RestoreSkillsHookTests(unittest.TestCase):
         self.assertEqual(self.context('compact'),
                          '\n\n'.join([HEADER.format('`/task work`'), self.block('task', '# Task\n\nDo work.')]))
 
+    def test_an_indexed_placeholder_stays_as_written_and_the_arguments_follow(self):
+        self.skill('task', '# Task\n\nUse $ARGUMENTS[0].')
+        self.transcript.command('task', 'alpha beta', recorded='Use alpha.')
+        self.transcript.compact()
+        self.assertEqual(self.context('resume'), '\n\n'.join([
+            HEADER.format('`/task alpha beta`'),
+            self.block('task', '# Task\n\nUse $ARGUMENTS[0].\n\n\nARGUMENTS: alpha beta')]))
+
     def test_long_skills_arrive_whole_and_in_order(self):
         body = '\n'.join('Line {:05d} {}'.format(number, 'x' * 60) for number in range(400))
         self.skill('long', body)
