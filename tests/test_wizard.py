@@ -125,9 +125,14 @@ sys.exit(1)
         process = subprocess.Popen(["/bin/bash", str(script)], stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    cwd=self.root, env=self.env)
+        self.addCleanup(process.kill)
         seen = b""
+        deadline = time.monotonic() + 10
         while b"Ready to start?" not in seen:
-            chunk = process.stdout.read1(4096)
+            self.assertLess(time.monotonic(), deadline, "wizard never showed its first prompt")
+            if not select.select([process.stdout], [], [], 0.1)[0]:
+                continue
+            chunk = process.stdout.read1()
             self.assertTrue(chunk, "wizard exited before its first prompt")
             seen += chunk
         script.write_text("# edited while the wizard runs\n" * 3 + TEMPLATE.read_text())

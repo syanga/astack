@@ -4,9 +4,9 @@ set -euo pipefail
 
 if [[ -t 1 ]] && command -v tput >/dev/null 2>&1 && [[ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]]; then
   BOLD=$(tput bold); DIM=$(tput dim); RESET=$(tput sgr0)
-  BLUE=$(tput setaf 4); GREEN=$(tput setaf 2); YELLOW=$(tput setaf 3); RED=$(tput setaf 1)
+  BLUE=$(tput setaf 4); GREEN=$(tput setaf 2); YELLOW=$(tput setaf 3)
 else
-  BOLD=""; DIM=""; RESET=""; BLUE=""; GREEN=""; YELLOW=""; RED=""
+  BOLD=""; DIM=""; RESET=""; BLUE=""; GREEN=""; YELLOW=""
 fi
 
 TOTAL_STAGES=0
@@ -126,21 +126,21 @@ _existing() {
 }
 
 # ask KEY "Prompt" reads a value into $KEY. Offers the existing .env value as
-# a default on re-runs (Enter keeps it). Visible input (non-secret), edited with Readline.
+# a default on re-runs (Enter keeps it). Visible input (non-secret), edited with Readline at a terminal.
 ask() {
-  local key="$1" prompt="$2" current input p s=$'\001' e=$'\002' rc user
+  local key="$1" prompt="$2" current input p s=$'\001' e=$'\002' inputrc user_inputrc
   current=$(_existing "$key") || exit $?
   if [[ -t 0 ]]; then
     # Readline needs the colour codes wrapped in \001..\002 to place the cursor.
     p="  $s$BOLD$e$prompt$s$RESET$e "
     [[ -n "$current" ]] && p+="$s$DIM$e[Enter keeps current]$s$RESET$e "
     # Tab completion would splice file names into the value; bash 3.2 ignores bind here.
-    rc=$(mktemp) user=${INPUTRC:-${HOME:-}/.inputrc}
-    [[ -n "${INPUTRC:-}" || -r "$user" ]] || user=/etc/inputrc
-    printf '$include %s\nset disable-completion on\n' "$user" > "$rc"
-    local INPUTRC="$rc"
-    IFS= read -e -r -p "$p" input || { rm -f "$rc"; _input_ended; }
-    rm -f "$rc"
+    inputrc=$(mktemp) user_inputrc=${INPUTRC:-${HOME:-}/.inputrc}
+    [[ -n "${INPUTRC:-}" || -r "$user_inputrc" ]] || user_inputrc=/etc/inputrc
+    printf '$include %s\nset disable-completion on\n' "$user_inputrc" > "$inputrc"
+    local INPUTRC="$inputrc"
+    IFS= read -e -r -p "$p" input || { rm -f "$inputrc"; _input_ended; }
+    rm -f "$inputrc"
   else
     if [[ -n "$current" ]]; then
       printf '  %s%s%s %s[Enter keeps current]%s ' "$BOLD" "$prompt" "$RESET" "$DIM" "$RESET"
