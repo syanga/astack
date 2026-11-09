@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import bisect
 from datetime import datetime
 import hashlib
 import json
@@ -11,7 +12,7 @@ import stat
 import sys
 import tempfile
 import time
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 
 # Claude Code saves hook context over 10,000 characters to a file and shows the
@@ -36,6 +37,7 @@ PLACEHOLDER = re.compile(r'\$ARGUMENTS(?!\[\d+\])')
 ARGUMENTS_LINE = '\n\n\nARGUMENTS: '
 SKILL_OPEN = '<skill name="{}">'
 FRONTMATTER = re.compile(r'\A---\n.*?\n---\n', re.S)
+Source = Literal['resume', 'compact']
 
 
 class History(NamedTuple):
@@ -105,30 +107,29 @@ def text_of(entry: dict) -> str:
     return ''
 
 
-def history(entries: list[dict], source: str) -> History:
-    """Claude Code rebuilds context from the newest entry's parent chain, back to
-    the last compaction or to a parent missing from the transcript. At a parent
-    that is missing or already walked, Claude Code continues through the entry
-    that bridge() picks, and the chain ends only when there is none. A compaction
-    boundary links to the history before it through logicalParentUuid. Compact
-    hooks run before Claude Code writes the new boundary, so on compact nothing
-    in the transcript is still in context."""
+def history(entries: list[dict], source: Source) -> History:
+    """Claude Code rebuilds context from the newest entry's parent chain and stops
+    at an entry without a parent, such as a compaction boundary, which links to
+    the history before it through logicalParentUuid. At a parent that is missing
+    or already walked, Claude Code continues through the entry Bridge picks, and
+    the chain ends only when there is none. Compact hooks run before Claude Code
+    writes the new boundary, so on compact nothing in the transcript is still in
+    context."""
     position = {entry['uuid']: index for index, entry in enumerate(entries)}
-    boundaries = [index for index, entry in enumerate(entries) if entry['subtype'] == 'compact_boundary']
-    boundary = boundaries[-1] if boundaries else -1
+    bridge = Bridge(entries, position)
     index = newest_before(entries, len(entries), set())
     context, lineage = [], set()
     in_context = source != 'compact'
     while index is not None and entries[index]['uuid'] not in lineage:
         entry = entries[index]
         lineage.add(entry['uuid'])
-        in_context = in_context and index > boundary
         if in_context:
             context.append(entry)
+        in_context = in_context and entry['parentUuid'] is not None
         parent = entry['parentUuid'] or entry['logicalParentUuid']
         broken = entry['parentUuid'] is not None and (entry['parentUuid'] not in position
                                                       or entry['parentUuid'] in lineage)
-        bridged = bridge(entries, position, entry, lineage) if broken else None
+        bridged = bridge.link(entry, lineage) if broken else None
         if bridged is not None:
             index = bridged
         elif broken or (parent is not None and parent not in position):
@@ -139,29 +140,60 @@ def history(entries: list[dict], source: str) -> History:
     return History(context, lineage)
 
 
-def bridge(entries: list[dict], position: dict[str, int], orphan: dict, visited: set[str]) -> int | None:
+class Bridge:
     """The entry Claude Code links to an entry whose parent is missing or already
     walked: the newest unvisited entry on the same side, not newer than the orphan
     and at most BRIDGE_MS older. Claude Code keeps one entry per uuid, with the
     last copy's fields in the first copy's place, and among equal timestamps the
-    first place wins."""
-    time = milliseconds(orphan['timestamp'])
-    if time is None:
+    first place wins. Like Claude Code, sort each side's candidates once, and skip
+    visited candidates through links that later lookups reuse."""
+
+    def __init__(self, entries: list[dict], position: dict[str, int]):
+        self.entries, self.position = entries, position
+        self.sides: dict[object, tuple[list[float], list[int], list[int]]] = {}
+
+    def side(self, sidechain, visited: set[str]) -> tuple[list[float], list[int], list[int]]:
+        if sidechain not in self.sides:
+            timed, seen = [], set()
+            for first in self.entries:
+                if first['uuid'] in seen:
+                    continue
+                seen.add(first['uuid'])
+                index = self.position[first['uuid']]
+                entry = self.entries[index]
+                moment = milliseconds(entry['timestamp'])
+                if (moment is not None and entry['isSidechain'] == sidechain and entry['uuid'] not in visited
+                        and not (entry['type'] == 'system' and entry['subtype'] == 'file_snapshot')):
+                    timed.append((moment, index))
+            timed.reverse()
+            timed.sort(key=lambda candidate: candidate[0])
+            self.sides[sidechain] = ([moment for moment, _ in timed], [index for _, index in timed],
+                                     list(range(len(timed))))
+        return self.sides[sidechain]
+
+    def link(self, orphan: dict, visited: set[str]) -> int | None:
+        orphan_time = milliseconds(orphan['timestamp'])
+        if orphan_time is None:
+            return None
+        moments, indexes, previous = self.side(orphan['isSidechain'], visited)
+        end = bisect.bisect_right(moments, orphan_time)
+        found = end - 1
+        while found >= 0:
+            if previous[found] != found:
+                found = previous[found]
+            elif self.entries[indexes[found]]['uuid'] in visited:
+                previous[found] = found - 1
+                found -= 1
+            else:
+                break
+        walked = end - 1
+        while walked > found:
+            following = previous[walked]
+            previous[walked] = found
+            walked = following
+        if found >= 0 and orphan_time - moments[found] <= BRIDGE_MS:
+            return indexes[found]
         return None
-    best, seen = None, set()
-    for first in entries:
-        if first['uuid'] in seen:
-            continue
-        seen.add(first['uuid'])
-        index = position[first['uuid']]
-        entry = entries[index]
-        moment = milliseconds(entry['timestamp'])
-        if (moment is None or moment > time or entry['uuid'] in visited or entry['isSidechain'] != orphan['isSidechain']
-                or (entry['type'] == 'system' and entry['subtype'] == 'file_snapshot')):
-            continue
-        if best is None or moment > best[0]:
-            best = (moment, index)
-    return best[1] if best is not None and time - best[0] <= BRIDGE_MS else None
 
 
 def milliseconds(stamp) -> float | None:
@@ -212,9 +244,7 @@ def skill_source(invocation: Invocation) -> str | None:
 
 
 def expand(source: str, invocation: Invocation) -> str:
-    """Fill $ARGUMENTS as Claude Code does, or append the arguments when it is absent. Unlike
-    Claude Code, leave $ARGUMENTS[N], $N, and named placeholders as written, append the
-    arguments when only those appear, and fill a backslash-escaped $ARGUMENTS."""
+    """Fill $ARGUMENTS as Claude Code does, or append the arguments when it is absent."""
     if PLACEHOLDER.search(source):
         return PLACEHOLDER.sub(lambda _: limited_args(invocation), source)
     return source + ARGUMENTS_LINE + limited_args(invocation) if invocation.args else source
@@ -224,7 +254,7 @@ def recorded_body(invocation: Invocation) -> str:
     return invocation.recorded.rsplit(ARGUMENTS_LINE, 1)[0]
 
 
-def missing(entries: list[dict], source: str) -> list[Invocation]:
+def missing(entries: list[dict], source: Source) -> list[Invocation]:
     known = history(entries, source)
     ids = {entry['uuid'] for entry in known.context}
     attachments = [entry['attachment'] for entry in known.context if isinstance(entry['attachment'], dict)]
@@ -242,7 +272,7 @@ def missing(entries: list[dict], source: str) -> list[Invocation]:
     result = []
     for invocation in latest.values():
         copy = attached.get(BASE + invocation.base)
-        if invocation.uuid in ids or SKILL_OPEN.format(invocation.name) in earlier_output:
+        if invocation.uuid in ids or skill_block(invocation) in earlier_output:
             continue
         source = skill_source(invocation)
         current = expand(source, invocation).rsplit(ARGUMENTS_LINE, 1)[0] if source is not None else None
@@ -260,6 +290,10 @@ def skill_text(invocation: Invocation) -> str:
     return BASE + invocation.base + '\n\n' + expand(source, invocation)
 
 
+def skill_block(invocation: Invocation) -> str:
+    return SKILL_OPEN.format(invocation.name) + '\n{}\n</skill>'.format(skill_text(invocation))
+
+
 def message(restored: list[Invocation], left_out: list[Invocation]) -> str:
     named = ', '.join('`/{}`'.format(' '.join(filter(None, (item.name, ' '.join(item.args.split())[:HEADER_ARGS_LIMIT]))))
                       for item in left_out + restored)
@@ -269,8 +303,7 @@ def message(restored: list[Invocation], left_out: list[Invocation]) -> str:
     for item in left_out:
         lines.append('`/{}` did not fit. Read {} if its task is unfinished.'.format(item.name, item.skill_file)
                      + ('\nARGUMENTS: ' + item.args[:LISTED_ARGS_LIMIT] if item.args else ''))
-    for item in restored:
-        lines.append(SKILL_OPEN.format(item.name) + '\n{}\n</skill>'.format(skill_text(item)))
+    lines += [skill_block(item) for item in restored]
     return '\n\n'.join(lines)
 
 
@@ -293,7 +326,7 @@ def split(text: str) -> list[str]:
     return parts
 
 
-def restoration(entries: list[dict], source: str) -> list[str]:
+def restoration(entries: list[dict], source: Source) -> list[str]:
     restored, left_out = missing(entries, source), []
     while len(restored) > 1 and len(split(message(restored, left_out))) > PARTS:
         left_out.append(restored.pop(0))

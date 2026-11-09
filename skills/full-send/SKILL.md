@@ -10,7 +10,7 @@ disable-model-invocation: true
 
 ## 1. Start
 
-1. For a simple task, or one already settled, for example by [grilling](../grilling/SKILL.md), skip the questions. Otherwise ask one round of questions, each with a recommended answer. Cover open questions that block the work. Also cover production deploys, live systems, destructive actions, and secrets, when the task touches one and the request leaves it open. When a plan's live checks need an environment that a later unit builds, ask whether its PRs may merge before those checks run. After this step, reach the user only through gates.
+1. For a simple task, or one already settled, for example by [grilling](../grilling/SKILL.md), skip the questions. Otherwise ask one round of questions, each with a recommended answer. Cover open questions that block the work. Also cover production deploys, live systems, destructive actions, and secrets, when the task touches one and the request leaves it open. When a plan's live checks need an environment that a later unit builds, ask whether the plan's PRs may merge before those checks run. After this step, reach the user only through gates.
 2. Create `assumed-decisions.md` in the task's store, `.scratch/<task>/` per [Locate the store](../orchestrate/STATE.md#locate-the-store). Start it with the request and whether merging is authorized. Post its absolute path in the thread.
 
 ## 2. Route

@@ -88,7 +88,6 @@ class RestoreSkillsHookTests(unittest.TestCase):
         (folder / 'SKILL.md').write_text('---\nname: {}\ndescription: test\n---\n\n{}\n'.format(name, body))
 
     def parts(self, source='resume'):
-        """Run every part as Claude Code does, in parallel, and collect their output in exit order."""
         path = self.root / 'session.jsonl'
         self.transcript.write(path)
         event = json.dumps({'session_id': 's', 'transcript_path': str(path), 'hook_event_name': 'SessionStart',
@@ -124,6 +123,21 @@ class RestoreSkillsHookTests(unittest.TestCase):
         spec.loader.exec_module(module)
         self.assertEqual([int(re.search(r'hook\.py" (\d+) ', launcher).group(1)) for launcher in LAUNCHERS],
                          list(range(1, module.PARTS + 1)))
+
+    def test_repeated_bridges_skip_entries_already_walked(self):
+        spec = importlib.util.spec_from_file_location('restore_hook', HOOK)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        entries = [{'uuid': uuid, 'isSidechain': False, 'type': 'user', 'subtype': None,
+                    'timestamp': '2026-11-09T05:00:0{}Z'.format(stamp)}
+                   for uuid, stamp in (('a', '1.000'), ('b', '5.000'), ('c', '6.000'), ('d', '5.001'))]
+        bridge = module.Bridge(entries, {entry['uuid']: index for index, entry in enumerate(entries)})
+        visited, picks = set(), []
+        for orphan in (3, 0, 2):
+            visited.add(entries[orphan]['uuid'])
+            found = bridge.link(entries[orphan], visited)
+            picks.append(None if found is None else entries[found]['uuid'])
+        self.assertEqual(picks, ['b', None, 'b'])
 
     def test_resume_after_a_broken_chain_restores_user_invoked_skills(self):
         self.skill('alpha', '# Alpha\n\nCurrent alpha text.')
@@ -182,15 +196,30 @@ class RestoreSkillsHookTests(unittest.TestCase):
         self.assertEqual(self.context('compact'),
                          '\n\n'.join([HEADER.format('`/alpha`'), self.block('alpha', '# Alpha')]))
 
-    def test_a_restoration_already_in_context_is_not_repeated(self):
+    def test_only_a_complete_earlier_restoration_counts_as_in_context(self):
         self.skill('alpha', '# Alpha')
         self.transcript.command('alpha')
         self.transcript.compact()
-        self.transcript.add('attachment', None, attachment={
-            'type': 'hook_additional_context', 'content': [HEADER.format('`/alpha`') + '\n\n<skill name="alpha">']})
+        restored = '\n\n'.join([HEADER.format('`/alpha`'), self.block('alpha', '# Alpha')])
+        attachment = {'type': 'hook_additional_context', 'content': [restored]}
+        self.transcript.add('attachment', None, attachment=attachment)
         self.transcript.add('user', 'Continue.')
         self.assertEqual(self.context('resume'), '')
+        attachment['content'] = [restored.split('\n# Alpha')[0]]
+        self.assertEqual(self.context('resume'), restored)
+        attachment['content'] = [restored]
         self.transcript.compact()
+        self.assertEqual(self.context('resume'), restored)
+
+    def test_context_ends_at_the_compaction_on_the_active_chain(self):
+        self.skill('alpha', '# Alpha')
+        self.skill('beta', '# Beta')
+        self.transcript.command('alpha')
+        self.transcript.compact()
+        self.transcript.command('beta')
+        kept = self.transcript.entries[-1]['uuid']
+        self.transcript.compact()
+        self.transcript.add('user', 'Go back to before the second compaction.', parent=kept)
         self.assertEqual(self.context('resume'),
                          '\n\n'.join([HEADER.format('`/alpha`'), self.block('alpha', '# Alpha')]))
 
