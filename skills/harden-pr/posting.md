@@ -21,7 +21,7 @@ Include review-pr's `## Direction` section in that review body. That review is t
 
 Put the same alert at the top of the PR description. Add `> Review: <url>` after the alert's text, with the `url` that `pr.py review` returns. If posting fails, omit that line. When a later run stops at its pass limit, replace the alert.
 
-A later run covers the pass-limited run when its diff includes everything the pass-limited run reviewed. A run against the PR's target branch covers it. Keep the alert until a later review-pr or harden-pr run converges and covers the pass-limited run. Before that run posts its record, it reads the PR description with `gh pr view <n> --json body` and removes the alert.
+A later run covers the pass-limited run when its diff includes everything the pass-limited run reviewed. A run against the PR's target branch covers it. Keep the alert until a later review-pr or harden-pr run converges and covers the pass-limited run. Before you post that run's record, read the PR description with `gh pr view <n> --json body` and remove the alert.
 
 The helper prefixes reviews, inline comments, and thread replies with `[<model slug>] on behalf of <first name from git config user.name>`. Run it from the reviewed repository so repository-specific Git identity applies. An unset or invalid name stops posting; earlier signed reviews remain recognizable after a name change.
 
