@@ -483,8 +483,10 @@ class TestResultTests(unittest.TestCase):
         github.seed(dict(result(suites={"api": "pass"}), commit=HEAD), author="drive-by", status_creator="alan", minute=2)
         github.seed(dict(result(), commit="short"), minute=3)
         github.seed(dict(result(suites={"api": "fail"}), commit=HEAD), author="sam", status_creator="sam", minute=4)
+        unhashable = dict(result(suites={"api": ["pass"]}), commit=HEAD)
+        github.seed(unhashable, body=pr.format_body("m", pr.RECORD_PREFIX + json.dumps(unhashable) + " -->", "Alan"), minute=5)
         listed = github.call("tests", "--pr", "12")
-        self.assertEqual(listed["ignored"], 3)
+        self.assertEqual(listed["ignored"], 4)
         self.assertEqual([(entry["author"], entry["suites"]) for entry in listed["records"]], [("sam", {"api": "fail"})])
         self.assertEqual(github.post(result(suites={"web": "pass"}))["state"], "failure")
 

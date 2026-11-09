@@ -440,7 +440,7 @@ def test_result_problem(result):
         return "limits must be a string"
     suites = result.get("suites")
     if not isinstance(suites, dict) or not suites or not all(
-            name.strip() and outcome in STATUS_BY_OUTCOME for name, outcome in suites.items()):
+            name.strip() and isinstance(outcome, str) and outcome in STATUS_BY_OUTCOME for name, outcome in suites.items()):
         return "suites must map each suite name to pass, fail, or incomplete"
     heads = result.get("heads", [])
     if not isinstance(heads, list) or not all(isinstance(head, str) and FULL_SHA.fullmatch(head) for head in heads):

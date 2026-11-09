@@ -29,7 +29,7 @@ Run the other checks that repository instructions require, such as lint or typec
 
 ## Publish the result
 
-When you or a delegated reviewer runs tests for a PR, publish each result with the PR helper. It posts a PR comment and sets the `astack/tests` commit status on the PR commit you name:
+When the user limited publication, such as to the conversation only, report results there instead of publishing them. Otherwise, when you or a delegated reviewer runs tests for a PR, publish each result with the PR helper. It posts a PR comment and sets the `astack/tests` commit status on the PR commit you name:
 
 ```bash
 python3 "<harden-pr directory>/scripts/pr.py" post-tests --pr <n> --commit <PR head SHA> --result-file <file> --model <your model id>
@@ -54,7 +54,7 @@ Write the result file as JSON:
 - State the scope and why, such as `packages/api` and its dependents because no shared configuration changed.
 - Mark a covering suite that could not run as `incomplete`. It is a coverage limit, not a pass.
 - Omit `limits` when there are none.
-- When the PR head moved and some suites kept their result, post only those suites for the new head, with their original `tested`, `base`, and `command`. Post rerun suites as a separate result.
+- When the PR head moved and some suites kept their result, post only those suites for the new head, with their original `tested`, `base`, `command`, and any `heads`. Post rerun suites as a separate result.
 - When the tested commit is a scratch merge, such as a batch or a merge-time check, add `"heads"` with every head SHA merged onto the base.
 
 When a covering suite fails, fix the cause within the task's scope. Then publish the new result. If you cannot fix the cause, publish the failing result. Then report the failure.
@@ -62,5 +62,3 @@ When a covering suite fails, fix the cause within the task's scope. Then publish
 `post-tests` needs push access. If it stops before posting, put the full result in the description. Report why it stopped. If `post-tests` reports `status_error`, the helper posted the comment but no status. Other agents ignore a comment without its matching status. Report the missing status without posting the result again.
 
 Then summarize the results under `## Verification` in the PR description and link each result comment. A merge-time run from [pr-work](../harden-pr/pr-work.md#finish-or-merge) needs no description update. When no test ran, say so there and give the reason. Describe runs on uncommitted changes there too, marked as uncommitted. Confirm the results are visible on the PR before finishing.
-
-When the user limited publication, such as to the conversation only, report results there instead.
