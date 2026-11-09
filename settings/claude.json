@@ -14,6 +14,68 @@
           ]
         }
       ]
+    },
+    "SessionStart": {
+      "$entries": [
+        {
+          "matcher": "resume|compact",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/claude-restore-skills/scripts/hook.py\" 1 || exit 1",
+              "timeout": 10
+            },
+            {
+              "type": "command",
+              "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/claude-restore-skills/scripts/hook.py\" 2 || exit 1",
+              "timeout": 10
+            },
+            {
+              "type": "command",
+              "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/claude-restore-skills/scripts/hook.py\" 3 || exit 1",
+              "timeout": 10
+            },
+            {
+              "type": "command",
+              "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/claude-restore-skills/scripts/hook.py\" 4 || exit 1",
+              "timeout": 10
+            },
+            {
+              "type": "command",
+              "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/claude-restore-skills/scripts/hook.py\" 5 || exit 1",
+              "timeout": 10
+            },
+            {
+              "type": "command",
+              "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/claude-restore-skills/scripts/hook.py\" 6 || exit 1",
+              "timeout": 10
+            },
+            {
+              "type": "command",
+              "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/claude-restore-skills/scripts/hook.py\" 7 || exit 1",
+              "timeout": 10
+            },
+            {
+              "type": "command",
+              "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/claude-restore-skills/scripts/hook.py\" 8 || exit 1",
+              "timeout": 10
+            }
+          ]
+        }
+      ]
+    },
+    "Stop": {
+      "$entries": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/claude-full-send-guard/scripts/hook.py\" || exit 1",
+              "timeout": 10
+            }
+          ]
+        }
+      ]
     }
   }
 }

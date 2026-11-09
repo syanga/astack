@@ -103,13 +103,15 @@ Run Correctness once, on the first candidate where the applicable Standards and 
 
 Converge when the final changes have no unresolved verified problems, required checks pass, and applicable reviews are complete. A native fallback completes the Correctness review for convergence. Optional suggestions do not block completion. If progress stalls or a decision is needed, report the remaining blockers.
 
-In fix-and-review mode with existing PRs, [finalize the PRs](../harden-pr/pr-work.md#finalize-reviewed-prs), including committing and pushing verified repairs. Without a PR, return the reviewed changes to the caller's delivery workflow.
+In fix-and-review mode with existing PRs, [finalize the PRs](../harden-pr/pr-work.md#finalize-reviewed-prs), including committing and pushing verified repairs. A fix made while finalizing, such as a CI fix, is a later repair. Handle it as step 5 handles every later repair, before step 6. Without a PR, return the reviewed changes to the caller's delivery workflow.
 
 Verify Correctness findings against the evidence requirements before presenting or posting them. Present each report under its axis heading (`## Standards`, `## Spec`, `## Correctness`), verbatim or lightly cleaned. Under `## Correctness`, name the reviewer (outside provider, `native fallback`, or not run with the reason), each finding's disposition, and any repair-verification result. Do **not** merge or rerank findings, because the axes are deliberately separate (see _Why three axes_).
 
-End with a one-line summary: remaining findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent.
+End the axis reports with a one-line summary: remaining findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent.
 
-At the end of the invocation, follow [posting.md](../harden-pr/posting.md) for clean or incomplete review records, actionable findings, and publication limits.
+### 6. Post the signed review record
+
+Run this step at the end of every invocation that reached substantive review, including an early stop. If the reviewed changes are not on an existing PR, or the user limited publication, skip posting. Say in the conversation that no record was posted, and why. Otherwise, read [posting.md](../harden-pr/posting.md) and post a record on each reviewed PR with `pr.py review`. Report each `url` that `pr.py review` returns, with any limitation posting.md names. If posting.md's failure handling ends without a `url` for a PR, report why for that PR. The step is done when every reviewed PR has a reported `url` or reason.
 
 ## Why three axes
 
