@@ -11,7 +11,8 @@ import unittest
 
 REPO = Path(__file__).resolve().parents[1]
 SKILLS = REPO / 'skills'
-LAUNCHER = json.loads((REPO / 'settings/claude.json').read_text())['hooks']['PreToolUse']['$entries'][0]['hooks'][0]['command']
+LAUNCHER = next(hook['command'] for entry in json.loads((REPO / 'settings/claude.json').read_text())['hooks']['PreToolUse']['$entries']
+                for hook in entry['hooks'] if 'claude-background-jobs' in hook['command'])
 CORE = 'skills/run-job/scripts/run_job.py'
 
 
@@ -181,7 +182,8 @@ class HookTests(unittest.TestCase):
                        check=True, capture_output=True, text=True, timeout=60,
                        env=dict(os.environ, PATH=os.pathsep.join([str(bin_dir), '/usr/bin', '/bin'])))
         settings = json.loads((self.home / '.claude/settings.json').read_text())
-        command, = [hook['command'] for group in settings['hooks']['PreToolUse'] for hook in group['hooks']]
+        command, = [hook['command'] for group in settings['hooks']['PreToolUse'] for hook in group['hooks']
+                    if 'claude-background-jobs' in hook['command']]
         core = self.home / '.claude' / CORE
         for tool_command, expected in (('make test', 'deny'),
                                        ('python3 {} --timeout 60 -- make test'.format(core), 'allow')):
