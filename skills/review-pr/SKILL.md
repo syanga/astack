@@ -115,9 +115,9 @@ After a run stops at its pass limit, reassess the change's direction. Check each
 
 - the remaining findings, from any axis, share a cause
 - repairs reopened earlier findings
-- the direction fits the requirements
+- the direction misses a requirement
 
-Report the assessment under `## Direction`, after the axis reports. Recommend either keeping the direction and the repairs it still needs, or a new direction that you name. End the section by asking the user how to proceed. In the session where the run stopped, start a new run or change direction only as the user directs. A new run has its own pass limit.
+Report the assessment under `## Direction`, after the axis reports. Recommend either keeping the direction and listing the repairs it still needs, or a new direction that you name. End the section by asking the user how to proceed. In the session where the run stopped, start a new run or change direction only as the user directs. A new run has its own pass limit.
 
 ### 6. Post the signed review record
 
