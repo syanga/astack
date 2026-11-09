@@ -31,6 +31,7 @@ BRIDGE_MS = 5000
 BASE = 'Base directory for this skill: '
 # Claude Code marks the skills it re-attached after compaction but cut short.
 CUT = 'skill content truncated for compaction'
+CUT_FOR_SPACE = '[Cut for space. Read the rest in {}.]'
 COMMAND = re.compile(r'<command-name>/?([^<\s]+)</command-name>')
 ARGS = re.compile(r'<command-args>(.*?)</command-args>', re.S)
 PLACEHOLDER = re.compile(r'\$ARGUMENTS(?!\[\d+\])')
@@ -258,9 +259,9 @@ def missing(entries: list[dict], source: Source) -> list[Invocation]:
     known = history(entries, source)
     ids = {entry['uuid'] for entry in known.context}
     attachments = [entry['attachment'] for entry in known.context if isinstance(entry['attachment'], dict)]
-    earlier_output = '\n'.join(str(part) for attachment in attachments
-                               if attachment.get('type') == 'hook_additional_context'
-                               for part in attachment.get('content') or [])
+    earlier_output = without_line_breaks(''.join(str(part) for attachment in attachments
+                                                 if attachment.get('type') == 'hook_additional_context'
+                                                 for part in attachment.get('content') or []))
     attached = {str(skill.get('content', '')).split('\n', 1)[0]: str(skill.get('content', ''))
                 for attachment in attachments if attachment.get('type') == 'invoked_skills'
                 for skill in attachment.get('skills') or [] if isinstance(skill, dict)}
@@ -272,7 +273,7 @@ def missing(entries: list[dict], source: Source) -> list[Invocation]:
     result = []
     for invocation in latest.values():
         copy = attached.get(BASE + invocation.base)
-        if invocation.uuid in ids or skill_block(invocation) in earlier_output:
+        if invocation.uuid in ids or delivered(invocation, earlier_output):
             continue
         source = skill_source(invocation)
         current = expand(source, invocation).rsplit(ARGUMENTS_LINE, 1)[0] if source is not None else None
@@ -288,6 +289,17 @@ def skill_text(invocation: Invocation) -> str:
     if source is None:
         return BASE + invocation.base + '\n\n' + invocation.recorded
     return BASE + invocation.base + '\n\n' + expand(source, invocation)
+
+
+def without_line_breaks(text: str) -> str:
+    return text.replace('\n', '')
+
+
+def delivered(invocation: Invocation, earlier_output: str) -> bool:
+    if without_line_breaks(skill_block(invocation)) in earlier_output:
+        return True
+    opening = without_line_breaks(SKILL_OPEN.format(invocation.name) + '\n' + BASE + invocation.base)
+    return opening in earlier_output and CUT_FOR_SPACE.format(invocation.skill_file) in earlier_output
 
 
 def skill_block(invocation: Invocation) -> str:
@@ -335,7 +347,7 @@ def restoration(entries: list[dict], source: Source) -> list[str]:
     parts = split(message(restored, left_out))
     if len(parts) <= PARTS:
         return parts
-    notice = '[Cut for space. Read the rest in {}.]\n</skill>'.format(restored[0].skill_file)
+    notice = CUT_FOR_SPACE.format(restored[0].skill_file) + '\n</skill>'
     last = parts[PARTS - 1].encode()[:PART_BYTES - len(notice.encode()) - 1].decode(errors='ignore')
     return parts[:PARTS - 1] + [last.rsplit('\n', 1)[0] + '\n' + notice]
 

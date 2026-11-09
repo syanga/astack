@@ -211,6 +211,20 @@ class RestoreSkillsHookTests(unittest.TestCase):
         self.transcript.compact()
         self.assertEqual(self.context('resume'), restored)
 
+    def test_a_restoration_the_hook_split_or_cut_is_not_repeated(self):
+        self.skill('wide', '# Wide\n\n' + 'w' * 9500)
+        self.skill('huge', '\n'.join('z' * 99 for _ in range(900)))
+        for name in ('wide', 'huge'):
+            with self.subTest(name=name):
+                self.transcript = Transcript(self.home)
+                self.transcript.command(name)
+                self.transcript.compact()
+                first = self.parts('resume')
+                self.assertGreater(len(first), 1)
+                self.transcript.add('attachment', None, attachment={'type': 'hook_additional_context', 'content': first})
+                self.transcript.add('user', 'Continue.')
+                self.assertEqual(self.context('resume'), '')
+
     def test_context_ends_at_the_compaction_on_the_active_chain(self):
         self.skill('alpha', '# Alpha')
         self.skill('beta', '# Beta')
