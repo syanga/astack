@@ -17,7 +17,7 @@ This replaces the workload, repro, and metric in hillclimb step 1, and the measu
    - Write a capture script that takes the same screenshots every round, for example through [t3-preview](../t3-preview/SKILL.md). Freeze animations and the page clock, and seed test data from a script, so an untouched screen captures identically every round.
    - Add a scripted layout check, such as no horizontal overflow, to the correctness checks. Run it over every page at each supported width, including pages the screenshots omit.
 3. Ask the user, with the question tool, to approve the brief and, for visual work, the screen list. When the user delegated this pick, record both with the task's other decisions instead. Then freeze the brief and references.
-4. Run a baseline vote, per the vote steps, on the starting version and the references alone. Its scores are the baseline, and its flaws fill the first flaw queue. From each judge's time per subdirectory, estimate its time on a round's ballot, which adds up to two subdirectories. If a judge times out or its estimate passes 15 minutes, half its limit, skip its retries. Shrink how the input is encoded, such as image size or format, and rerun the baseline, at most twice. Only the last baseline vote counts toward the stop rules. If the content itself would have to change, or the second rerun is still too slow, ask the user. Then freeze the input format, the judge commands, and any capture script.
+4. Run a baseline vote, per the vote steps, on the starting version and the references alone. Its scores are the baseline, and its flaws fill the first flaw queue. From each judge's time per subdirectory, estimate its time on a round's ballot, which holds up to two more subdirectories than the baseline's. If a judge fails, times out, or its estimate passes half the first-attempt limit in vote step 3, skip its retries, fix its command or shrink how the input is encoded, such as image size or format, and rerun the baseline, at most twice. Only the last baseline vote counts toward the stop rules. If the content itself would have to change, or the second rerun still fails, ask the user. Then freeze the input format, the judge commands, and any capture script.
 
 The target defaults to 9 out of 10 and the budget to 10 rounds.
 
@@ -39,9 +39,9 @@ This replaces hillclimb step 7. After any requested minimum rounds, stop at the 
 
 - Every member scores the current best at or above the target and above every reference. Check this before the keep rule, and stop with the current best.
 - The budget runs out.
-- Two votes in a row end without a score from the same member, even before any requested minimum rounds.
+- Two votes in a row, counting confirm votes, end without a score from the same member, even before any requested minimum rounds.
 
-At any stop, the last conclusive vote replaces the frozen measurement in hillclimb step 8's recheck, so rerun only the correctness checks there, then finish that step. If the recheck has no conclusive vote, report it as unavailable. After a budget stop, ask the user whether to extend the budget. If the user extends it, continue the loop on the same branch and repeat step 8 at the next stop.
+At any stop, the last conclusive vote replaces the frozen measurement in hillclimb step 8's recheck, so rerun only the correctness checks there, then finish that step. If no vote is conclusive, report the recheck as unavailable. After a budget stop, ask the user whether to extend the budget. If the user extends it, continue the loop on the same branch and repeat step 8 at the next stop.
 
 If step 8 finds a moved base, the recheck instead runs vote steps 1 to 5 with the rebased current best as the new version and the new base as the current best, plus the original starting version and the references. If that recheck is inconclusive, ask the user before opening the PR. Later rounds use the new base as the starting version.
 
