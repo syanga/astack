@@ -151,6 +151,17 @@ class RestoreSkillsHookTests(unittest.TestCase):
                 self.transcript.entries[-1]['timestamp'] = stamp
                 self.assertEqual(self.context(), expected)
 
+    def test_a_bridge_back_to_an_entry_already_walked_ends_the_history(self):
+        self.skill('alpha', '# Alpha')
+        self.transcript.command('alpha')
+        orphan = self.transcript.add('user', 'Next task.', parent='never-written')
+        self.transcript.add('attachment', None, parent=orphan, attachment={'type': 'date'})
+        self.transcript.add('assistant', [{'type': 'text', 'text': 'Done.'}], parent=orphan)
+        stamps = ['00.000', '00.001', '00.002', '10.000', '10.000', '11.000']
+        for entry, stamp in zip(self.transcript.entries, stamps):
+            entry['timestamp'] = '2026-11-09T05:00:{}Z'.format(stamp)
+        self.assertEqual(self.context(), '\n\n'.join([HEADER.format('`/alpha`'), self.block('alpha', '# Alpha')]))
+
     def test_restores_only_what_the_last_compaction_dropped(self):
         self.skill('alpha', '# Alpha')
         self.skill('beta', '# Beta')

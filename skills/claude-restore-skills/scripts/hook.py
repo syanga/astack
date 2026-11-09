@@ -27,7 +27,7 @@ FRESH_SECONDS = 15
 STALE_SECONDS = 60
 HEADER_ARGS_LIMIT = 200
 BRIDGE_MS = 5000
-BASE ='Base directory for this skill: '
+BASE = 'Base directory for this skill: '
 # Claude Code marks the skills it re-attached after compaction but cut short.
 CUT = 'skill content truncated for compaction'
 COMMAND = re.compile(r'<command-name>/?([^<\s]+)</command-name>')
@@ -60,11 +60,13 @@ class Invocation(NamedTuple):
 
 
 def read_entries(path: str) -> list[dict]:
+    """Like Claude Code, skip progress entries and link each child of one to the
+    nearest ancestor that is not a progress entry."""
     with open(path, 'rb') as handle:
         if BASE.encode() not in handle.read():
             return []
         handle.seek(0)
-        entries = []
+        entries, skipped = [], {}
         for line in handle:
             if b'"uuid"' not in line:
                 continue
@@ -74,9 +76,18 @@ def read_entries(path: str) -> list[dict]:
                 continue
             if not isinstance(entry, dict) or not isinstance(entry.get('uuid'), str):
                 continue
+            parent = entry.get('parentUuid')
+            if entry.get('type') == 'progress':
+                skipped[entry['uuid']] = skipped[parent] if isinstance(parent, str) and parent in skipped else parent
+                continue
             slim = {key: entry.get(key) for key in (
                 'uuid', 'parentUuid', 'logicalParentUuid', 'type', 'subtype', 'isSidechain', 'isMeta', 'sourceToolUseID',
                 'timestamp')}
+            if isinstance(parent, str) and parent in skipped:
+                slim['parentUuid'] = skipped[parent]
+            for key in ('parentUuid', 'logicalParentUuid'):
+                if not isinstance(slim[key], str) or not slim[key]:
+                    slim[key] = None
             slim['message'] = entry.get('message') if entry.get('type') == 'user' else None
             attachment = entry.get('attachment')
             keep = isinstance(attachment, dict) and attachment.get('type') in ('hook_additional_context', 'invoked_skills')
@@ -96,12 +107,12 @@ def text_of(entry: dict) -> str:
 
 def history(entries: list[dict], source: str) -> History:
     """Claude Code rebuilds context from the newest entry's parent chain, back to
-    the last compaction or to a parent missing from the transcript. At a missing
-    parent, Claude Code continues through the entry that bridge() picks, and the
-    chain ends only when there is none. A compaction boundary links to the
-    history before it through logicalParentUuid. Compact hooks run before Claude
-    Code writes the new boundary, so on compact nothing in the transcript is
-    still in context."""
+    the last compaction or to a parent missing from the transcript. At a parent
+    that is missing or already walked, Claude Code continues through the entry
+    that bridge() picks, and the chain ends only when there is none. A compaction
+    boundary links to the history before it through logicalParentUuid. Compact
+    hooks run before Claude Code writes the new boundary, so on compact nothing
+    in the transcript is still in context."""
     position = {entry['uuid']: index for index, entry in enumerate(entries)}
     boundaries = [index for index, entry in enumerate(entries) if entry['subtype'] == 'compact_boundary']
     boundary = boundaries[-1] if boundaries else -1
@@ -115,11 +126,12 @@ def history(entries: list[dict], source: str) -> History:
         if in_context:
             context.append(entry)
         parent = entry['parentUuid'] or entry['logicalParentUuid']
-        lost = parent is not None and parent not in position
-        bridged = bridge(entries, entry, lineage) if lost and entry['parentUuid'] else None
+        broken = entry['parentUuid'] is not None and (entry['parentUuid'] not in position
+                                                      or entry['parentUuid'] in lineage)
+        bridged = bridge(entries, position, entry, lineage) if broken else None
         if bridged is not None:
             index = bridged
-        elif lost:
+        elif broken or (parent is not None and parent not in position):
             in_context = False
             index = newest_before(entries, index, lineage)
         else:
@@ -127,18 +139,25 @@ def history(entries: list[dict], source: str) -> History:
     return History(context, lineage)
 
 
-def bridge(entries: list[dict], orphan: dict, visited: set[str]) -> int | None:
-    """The entry Claude Code links to an entry whose parent is missing: the newest
-    unvisited entry on the same side, not newer than the orphan and at most
-    BRIDGE_MS older. Among entries with the same timestamp, the first one wins."""
+def bridge(entries: list[dict], position: dict[str, int], orphan: dict, visited: set[str]) -> int | None:
+    """The entry Claude Code links to an entry whose parent is missing or already
+    walked: the newest unvisited entry on the same side, not newer than the orphan
+    and at most BRIDGE_MS older. Claude Code keeps one entry per uuid, with the
+    last copy's fields in the first copy's place, and among equal timestamps the
+    first place wins."""
     time = milliseconds(orphan['timestamp'])
     if time is None:
         return None
-    best = None
-    for index, entry in enumerate(entries):
+    best, seen = None, set()
+    for first in entries:
+        if first['uuid'] in seen:
+            continue
+        seen.add(first['uuid'])
+        index = position[first['uuid']]
+        entry = entries[index]
         moment = milliseconds(entry['timestamp'])
         if (moment is None or moment > time or entry['uuid'] in visited or entry['isSidechain'] != orphan['isSidechain']
-                or entry['type'] == 'progress' or (entry['type'] == 'system' and entry['subtype'] == 'file_snapshot')):
+                or (entry['type'] == 'system' and entry['subtype'] == 'file_snapshot')):
             continue
         if best is None or moment > best[0]:
             best = (moment, index)
