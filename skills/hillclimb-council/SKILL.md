@@ -16,8 +16,8 @@ This replaces the workload, repro, and metric in hillclimb step 1, and the measu
 2. Choose the input, and add any reference examples the user supplies, such as competitor screenshots. For text, the judges read the files. For visual work:
    - Write a capture script that takes the same screenshots every round, for example through [t3-preview](../t3-preview/SKILL.md). Freeze animations and the page clock, and seed test data from a script, so an untouched screen captures identically every round.
    - Add a scripted layout check, such as no horizontal overflow, to the correctness checks. Run it over every page at each supported width, including pages the screenshots omit.
-3. Ask the user, with the question tool, to approve the brief and, for visual work, the screen list. When the user delegated this pick, record both with the task's other decisions instead. Then freeze the brief, capture script, and references.
-4. Run a baseline vote, per the vote steps, on the starting version and the references alone. Its scores are the baseline, and its flaws fill the first flaw queue.
+3. Ask the user, with the question tool, to approve the brief and, for visual work, the screen list. When the user delegated this pick, record both with the task's other decisions instead. Then freeze the brief and references.
+4. Run a baseline vote, per the vote steps, on the starting version and the references alone. Its scores are the baseline, and its flaws fill the first flaw queue. A round's ballot holds up to two more versions than the baseline ballot, so scale each member's baseline time to that size. If a judge attempt timed out or a scaled time exceeds 15 minutes, skip that member's retries, shrink each version's input, for example by compressing or combining screenshots, and run the baseline again. These reruns do not count toward the inconclusive-vote stop. If two reruns are still too slow, or shrinking would drop approved screens or files, ask the user. Then freeze the input format, the judge commands, and, for visual work, the capture script.
 
 The target defaults to 9 out of 10 and the budget to 10 rounds.
 
@@ -27,8 +27,8 @@ The target defaults to 9 out of 10 and the budget to 10 rounds.
 2. Make a new ballot directory with `mktemp -d` outside any Git checkout. Put each version in its own randomly named subdirectory: the new version, the current best, each reference, and, after the first keep, the starting version. Keep the label map, prompts, and judge outputs outside the ballot directory.
 3. Even in T3 Code, start judges through their CLIs instead of `delegate_task`. Start a fresh judge for each of [council's members](../council/SKILL.md#members) in the ballot directory, with that member's model and effort and the read-only invocation in [provider execution](../arena/PROVIDERS.md). Add `--skip-git-repo-check` for Codex. Allow each judge 30 minutes, and set any host command timeout longer than the judge's limit. These limits replace the nine-minute default in provider execution. If a judge fails, times out, or lacks a score for any subdirectory, retry that member up to twice, each time with a fresh judge in the same ballot directory and a 60-minute limit. Keep the other members' scores.
 4. Give each judge the brief with no repository paths. Tell it to read only the ballot directory and to judge only by the brief, ignoring any other style instructions it holds. Ask, for each subdirectory, for a score out of 10 to one decimal place and a ranked list of flaws, each naming where it appears, such as a screen or file, and the change that would fix it. The judges must not learn the target, earlier scores, the round number, or which subdirectory holds which version.
-5. Keep the new version only when the members' mean score rises at least 0.3 above the current best's, so a keep is more than noise, and no member scores it below the current best. This replaces the noise threshold in hillclimb step 5.
-6. After the keep decision, rebuild the flaw queue from the current best's flaws in this vote, and mark the flaws already attempted. Base the next round on one queued flaw, and prefer flaws that several judges name. Give the implementer the flaw and the brief's fixed constraints. For visual work, also give it the capture script, and have it capture its change and fix visible regressions before the vote.
+5. Keep the new version only when the members' mean score rises at least 0.3 above the current best's, and no member scores it below the current best. This replaces the noise threshold in hillclimb steps 5 and 8. When a vote meets this rule with a mean gain below 0.5, run vote steps 2 to 4 again as a confirm vote, and keep only when both votes meet the rule.
+6. After the keep decision, rebuild the flaw queue from the current best's flaws in the round's last vote, and mark the flaws already attempted. Base the next round on one queued flaw, and prefer flaws that several judges name. Give the implementer the flaw and the brief's fixed constraints. For visual work, also give it the capture script, and have it capture its change and fix visible regressions before the vote.
 7. After a round that keeps nothing, pivot per hillclimb step 6 and still target one flaw: pick another queued flaw, or make a larger change for the same one, such as restructuring the screen that holds it.
 
 If a member still has no score after its retries, record the vote as inconclusive and continue. In a round, keep nothing, leave the flaw unmarked, and skip the step 7 pivot. The round still counts against the budget. In the baseline vote, start round 1 from the other members' flaws.
@@ -37,19 +37,19 @@ If a member still has no score after its retries, record the vote as inconclusiv
 
 This replaces hillclimb step 7. After any requested minimum rounds, stop at the first of:
 
-- Every member scores the current best at or above the target and above every reference. Check this before the keep rule, and stop with the current best.
+- Every member scores the current best at or above the target and above every reference. Check this after each vote, before the keep rule, and stop with the current best.
 - The budget runs out.
 - Two votes in a row end without a score from the same member, even before any requested minimum rounds.
 
-At any stop, the last vote with a score from every member serves as the recheck in hillclimb step 8, so rerun only the correctness checks there, then finish that step. If no vote has a score from every member, report the recheck as unavailable. After a budget stop, ask the user whether to extend the budget. If the user extends it, continue the loop on the same branch and repeat step 8 at the next stop.
+At any stop, the last vote with a score from every member replaces the frozen measurement in hillclimb step 8's recheck, so rerun only the correctness checks there, then finish that step. If step 8 rebased the accepted changes, that vote is instead one run of vote steps 1 to 4 on the rebased current best, the new base, the original starting version, and the references. If this vote lacks a score from any member, report the recheck as unavailable. After a budget stop, ask the user whether to extend the budget. If the user extends it, continue the loop on the same branch, with the new base as the starting version after a rebase, and repeat step 8 at the next stop.
 
 ## Report
 
 Add these to the council review section that [council](../council/SKILL.md#review) puts in the PR:
 
 - The brief.
-- The score table. Write each cell as `<new> vs <best>`, followed after the first keep by the starting version's score and then any reference scores, such as `8.3 vs 7.9, start 6.4, ref 8.8`. Add a row that names the flaw each round targeted.
+- The score table. Write each cell as `<new> vs <best>`, followed after the first keep by the starting version's score and then any reference scores, such as `8.3 vs 7.9, start 6.4, ref 8.8`. Write a round's vote and its confirm vote in one cell, such as `8.3 vs 7.9 / 8.0 vs 7.9`. Add a row that names the flaw each round targeted.
 - Each judge failure: the member, the vote, the attempts, and the error.
 - For visual work, before and after screenshots attached per [open-pr](../open-pr/SKILL.md).
 
-In hillclimb's reply, replace "baseline to final with the percent delta" with the starting version's and the accepted version's scores from the last vote with a score from every member.
+In hillclimb's reply, replace "baseline to final with the percent delta" and "the delta from the new base" with the scores of the original starting version, any new base, and the accepted version from the recheck.
