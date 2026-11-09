@@ -8,7 +8,7 @@ Include the reviewed commit, outcome, repairs, remaining findings, verification,
 
 If a run stops early after substantive review, mark its record incomplete. If no substantive review occurred, report the reason only in the conversation. Missing coverage is not a clean result.
 
-Use harden-pr's `scripts/pr.py review` to post against the commit actually reviewed. The helper signs the review and exposes actionable findings to harden-pr.
+Use harden-pr's `scripts/pr.py review` to post against the commit the review covers. After you push verified repairs, post against the last pushed commit that the review covered. Post against a later commit, such as a CI fix pushed after the review ended, only after a review covers it. When a conflict-free rebase or replay of the reviewed commit produced a commit with an unchanged patch, post against that rebased commit. In that review's body, name the reviewed SHA and the rebased SHA. The helper signs the review and exposes actionable findings to harden-pr.
 
 The helper prefixes reviews, inline comments, and thread replies with `[<model slug>] on behalf of <first name from git config user.name>`. Run it from the reviewed repository so repository-specific Git identity applies. An unset or invalid name stops posting; earlier signed reviews remain recognizable after a name change.
 
@@ -37,9 +37,9 @@ For a review with separate axes, label each finding with its axis.
 GitHub inline comments need a line in the PR diff. For a finding in unchanged code, anchor it on the changed line that causes the problem and name the actual location in the comment. For a finding about the title or description, use a diff line and explicitly label it as a metadata finding. These findings still need entries so the helper can preserve them if inline posting fails.
 
 ```bash
-python3 "<harden-pr directory>/scripts/pr.py" review --pr <n> --commit <reviewed sha> --review-file <file> --model <your model id>
+python3 "<harden-pr directory>/scripts/pr.py" review --pr <n> --commit <sha to post against> --review-file <file> --model <your model id>
 ```
 
-The result reports `url`, `inline`, and `folded`. When `folded` is true, the findings went into the review body instead of threads. Report that limitation. Fix a malformed review file before retrying. If the reviewed commit is no longer in the PR, prepare a new snapshot and review it. For other posting failures, retry once, then return the verdict and explain that it could not be posted.
+The result reports `url`, `inline`, and `folded`. When `folded` is true, the findings went into the review body instead of threads. Report that limitation. Fix a malformed review file before retrying. If the helper reports that the commit is not in the PR, prepare a new snapshot and review it. For other posting failures, retry once, then return the verdict and explain that it could not be posted.
 
 Reply with the review URL, outcome, and any posting or verification limitations.
