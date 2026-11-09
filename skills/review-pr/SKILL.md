@@ -105,23 +105,23 @@ Converge when the final changes have no unresolved verified problems, required c
 
 All reviews of one candidate, from every axis, make one pass. A fix-and-review run's pass limit is three passes, or the number of passes the user names. When the last allowed pass does not converge, the run stops at its pass limit without more repairs. A required check that fails on the head pushed after that pass also leaves that pass unconverged. A request to loop or review until clean asks for fix-and-review and starts one run with this pass limit.
 
-After a run stops at its pass limit, reassess the change's direction. Check whether:
-
-- the remaining findings, from any axis, share a cause
-- repairs reopened earlier findings
-- the direction fits the requirements
-
-Report the assessment under `## Direction`, after the axis reports. Recommend either keeping the direction and the repairs it still needs, or a new direction that you name. End the section with the direction question, which asks the user how to proceed. Start a new run or change direction only as the user directs. A new run has its own pass limit.
-
 In fix-and-review mode with existing PRs, [finalize the PRs](../harden-pr/pr-work.md#finalize-reviewed-prs), including committing and pushing verified repairs. A fix made while finalizing, such as a CI fix, is a later repair. Handle it as step 5 handles every later repair, before step 6. Without a PR, return the reviewed changes to the caller's delivery workflow.
 
 Verify Correctness findings against the evidence requirements before presenting or posting them. Present each report under its axis heading (`## Standards`, `## Spec`, `## Correctness`), verbatim or lightly cleaned. Under `## Correctness`, name the reviewer (outside provider, `native fallback`, or not run with the reason), each finding's disposition, and any repair-verification result. When Correctness never ran before the pass limit, the reason is the condition no candidate met: Standards, Spec, or required checks. Do **not** merge or rerank findings, because the axes are deliberately separate (see _Why three axes_).
 
 End the axis reports with a one-line summary: remaining findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent. When the run stopped at its pass limit, begin that line with `Not converged after <n> review-pr passes. Do not merge.`
 
+After a run stops at its pass limit, reassess the change's direction. Check whether:
+
+- the remaining findings, from any axis, share a cause
+- repairs reopened earlier findings
+- the direction fits the requirements
+
+Report the assessment under `## Direction`, after the axis reports. Recommend either keeping the direction and the repairs it still needs, or a new direction that you name. End the section by asking the user how to proceed. In the session that stopped, start a new run or change direction only as the user directs. A new run has its own pass limit.
+
 ### 6. Post the signed review record
 
-Run this step at the end of every invocation that reached substantive review, including an early stop. If the reviewed changes are not on an existing PR, or the user limited publication, skip posting. Say in the conversation that no record was posted, and why. Otherwise, read [posting.md](../harden-pr/posting.md) and post a record on each reviewed PR with `pr.py review`. Report each `url` that `pr.py review` returns, with any limitation posting.md names. If posting.md's failure handling ends without a `url` for a PR, report why for that PR. The step is done when every reviewed PR has a reported `url` or reason.
+Run this step at the end of every invocation that reached substantive review, including an early stop. If the reviewed changes are not on an existing PR, or the user limited publication, skip posting. Say in the conversation that no record was posted, and why. Otherwise, read [posting.md](../harden-pr/posting.md) and post a record on each reviewed PR with `pr.py review`. Report each `url` that `pr.py review` returns, with any limitation posting.md names. If posting.md's failure handling ends without a `url` for a PR, report why for that PR. After a run that stopped at its pass limit, also put posting.md's pass-limit alert at the top of each reviewed PR's description. The step is done when every reviewed PR has a reported `url` or reason, and, after such a run, has the alert in its description.
 
 ## Why three axes
 

@@ -19,9 +19,9 @@ When a review-pr run stops at its pass limit, start the review body with this pa
 
 Include review-pr's `## Direction` section in that review body. That review is the pass-limited review record.
 
-Put the same alert at the top of the PR description. Add `> Review: <url>` after the alert's text, with the `url` that `pr.py review` returns. If posting fails, omit that line. When a later run stops at its pass limit, replace the alert. The approval line that [pr-work's merge step](pr-work.md#finish-or-merge) appends is `> Merge approved by the user for <sha>.`
+Put the same alert at the top of the PR description. Add `> Review: <url>` after the alert's text, with the `url` that `pr.py review` returns. If posting fails, omit that line. When a later run stops at its pass limit, replace the alert.
 
-Keep the alert until a later review-pr or harden-pr run converges and its diff includes everything the pass-limited run reviewed. A converged review against the PR's target branch qualifies. Then remove the alert from the PR description.
+Keep the alert until a later review-pr or harden-pr run converges and its diff includes everything the pass-limited run reviewed. A converged review against the PR's target branch qualifies. Before you post any converged record, read the PR description with `gh pr view <n> --json body`. If it has a pass-limit alert that this run covers, remove the alert.
 
 The helper prefixes reviews, inline comments, and thread replies with `[<model slug>] on behalf of <first name from git config user.name>`. Run it from the reviewed repository so repository-specific Git identity applies. An unset or invalid name stops posting; earlier signed reviews remain recognizable after a name change.
 
