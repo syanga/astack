@@ -5,10 +5,10 @@ Bodies come from files and reach gh as JSON on stdin. Reviews are attributed
 and posted against the commit the review covers. GitHub can reject inline
 locations; review then folds findings into the body and reports that fallback.
 
-A test result is a PR comment whose last line is a hidden JSON record, plus an
-astack/tests commit status that links to it. A record counts only when its
-author also set that status. Creating a status needs push access. The status
-on a commit reflects the newest result for each suite on that commit.
+A test result is a PR comment whose last line is a hidden JSON record, plus one
+astack/tests/<suite> commit status per suite that links to it. A record counts
+only when its author also set one of those statuses. Creating a status needs
+push access. Each suite's status shows the newest result posted for that suite.
 
 Every posted body starts with:
 
@@ -492,7 +492,8 @@ def read_test_records(owner, name, comments):
     records = []
     for comment, record in found:
         author = (comment.get("user") or {}).get("login")
-        if not any(status.get("context") == TEST_CONTEXT and status.get("target_url") == comment.get("html_url")
+        contexts = {suite_context(suite) for suite in record["suites"]}
+        if not any(status.get("context") in contexts and status.get("target_url") == comment.get("html_url")
                    and (status.get("creator") or {}).get("login") == author for status in statuses[record["commit"]]):
             ignored += 1
             continue
@@ -513,17 +514,15 @@ def worst_outcome(outcomes):
     return next(outcome for outcome in OUTCOMES_WORST_FIRST if outcome in outcomes)
 
 
-def commit_status(records):
-    latest = latest_by_suite(records)
-    outcomes = [entry["outcome"] for entry in latest.values()]
-    counts = ", ".join("{} {}".format(outcomes.count(outcome), outcome)
-                       for outcome in OUTCOMES_WORST_FIRST if outcome in outcomes)
-    description = "{} {}: {}.".format(len(outcomes), "suite" if len(outcomes) == 1 else "suites", counts)
-    if set(records[-1]["suites"]) == set(latest):
-        description += " " + records[-1]["summary"]
+def suite_context(suite):
+    return "{}/{}".format(TEST_CONTEXT, suite)
+
+
+def suite_description(outcome, summary):
+    description = "{}: {}".format(outcome, summary)
     if len(description) > STATUS_DESCRIPTION_LIMIT:
         description = description[:STATUS_DESCRIPTION_LIMIT - 3] + "..."
-    return STATUS_BY_OUTCOME[worst_outcome(outcomes)], description
+    return description
 
 
 def render_test_result(record):
@@ -551,11 +550,12 @@ def command_tests(args):
     print()
 
 
-def set_test_status(owner, name, commit, state, description, target_url):
+def set_suite_status(owner, name, commit, suite, outcome, summary, target_url):
     return subprocess.run(
         ["gh", "api", "--method", "POST", "repos/{}/{}/statuses/{}".format(owner, name, commit), "--input", "-"],
-        input=json.dumps({"state": state, "context": TEST_CONTEXT, "description": description,
-                          "target_url": target_url}), capture_output=True, text=True)
+        input=json.dumps({"state": STATUS_BY_OUTCOME[outcome], "context": suite_context(suite),
+                          "description": suite_description(outcome, summary), "target_url": target_url}),
+        capture_output=True, text=True)
 
 
 def command_post_tests(args):
@@ -569,33 +569,24 @@ def command_post_tests(args):
     if not pr_has_commit(pr, args.commit):
         fail("commit {} is not in the PR; post results for a PR commit".format(args.commit))
     if not (gh(["api", "--method", "GET", "repos/{}/{}".format(owner, name)]).get("permissions") or {}).get("push"):
-        fail("post-tests needs push access to {}/{} to set the {} status".format(owner, name, TEST_CONTEXT))
+        fail("post-tests needs push access to {}/{} to set the {} statuses".format(owner, name, TEST_CONTEXT))
     record = dict(result, commit=args.commit)
-    endpoint = comments_endpoint(owner, name, pr["number"])
-    earlier, _ = read_test_records(owner, name, fetch_pages(endpoint))
-    state, description = commit_status([entry for entry in earlier if entry["commit"] == args.commit]
-                                       + [dict(record, at=None)])
     body = format_body(args.model, render_test_result(record), identity)
-    comment = gh(["api", "--method", "POST", endpoint, "--input", "-"], stdin=json.dumps({"body": body}))
-    status = set_test_status(owner, name, args.commit, state, description, comment["html_url"])
-    written, error = (state, None) if status.returncode == 0 else (None, status.stderr.strip())
-    if written:
-        try:
-            settled = [entry for entry in read_test_records(owner, name, fetch_pages(endpoint))[0]
-                       if entry["commit"] == args.commit]
-        except SystemExit:
-            settled, error = [], "the status is set, but re-reading the results to check it failed"
-        if any(entry["url"] == comment["html_url"] for entry in settled) and commit_status(settled) != (state, description):
-            state, description = commit_status(settled)
-            status = set_test_status(owner, name, args.commit, state, description, comment["html_url"])
-            written, error = (state, None) if status.returncode == 0 else (written, status.stderr.strip())
+    comment = gh(["api", "--method", "POST", comments_endpoint(owner, name, pr["number"]), "--input", "-"],
+                 stdin=json.dumps({"body": body}))
+    states, errors = {}, []
+    for suite, outcome in sorted(record["suites"].items()):
+        status = set_suite_status(owner, name, args.commit, suite, outcome, record["summary"], comment["html_url"])
+        states[suite] = STATUS_BY_OUTCOME[outcome] if status.returncode == 0 else None
+        if status.returncode != 0:
+            errors.append("{}: {}".format(suite, status.stderr.strip() or "gh exited with code {}".format(status.returncode)))
     report = {"url": comment["html_url"], "commit": args.commit, "on_head": args.commit == pr["headRefOid"],
-              "state": written, "description": description}
-    if error:
-        report["status_error"] = error
+              "states": states}
+    if errors:
+        report["status_error"] = "; ".join(errors)
     json.dump(report, sys.stdout)
     print()
-    if error:
+    if errors:
         sys.exit(2)
 
 
@@ -639,7 +630,7 @@ def main(argv=None):
     tests = scoped("tests", help="print the PR's published test results as JSON")
     tests.set_defaults(run=command_tests)
 
-    post_tests = scoped("post-tests", help="publish a test result as a PR comment and an astack/tests status")
+    post_tests = scoped("post-tests", help="publish a test result as a PR comment and one astack/tests/<suite> status per suite")
     post_tests.add_argument("--commit", required=True, help="the PR commit the result applies to, usually the head")
     post_tests.add_argument("--result-file", required=True, help="JSON with tested, base, command, suites, summary, and scope")
     post_tests.add_argument("--model", required=True, help="model id for the on-behalf-of header")

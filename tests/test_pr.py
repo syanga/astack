@@ -391,8 +391,13 @@ class FakeGitHub:
                               "user": {"login": author}, "html_url": url,
                               "created_at": "2026-11-07T00:{:02d}:00Z".format(minute)})
         if status_creator:
-            self.statuses.append((record["commit"], {"context": "astack/tests", "target_url": url,
-                                                     "creator": {"login": status_creator}}))
+            for suite, outcome in record["suites"].items():
+                self.statuses.append((record["commit"], {"context": "astack/tests/" + suite, "target_url": url,
+                                                         "state": pr.STATUS_BY_OUTCOME.get(str(outcome)),
+                                                         "creator": {"login": status_creator}}))
+
+    def latest_states(self, commit=HEAD):
+        return {status["context"]: status["state"] for sha, status in self.statuses if sha == commit}
 
     def run(self, argv, **kwargs):
         if argv[:2] == ["git", "config"]:
@@ -448,10 +453,9 @@ class TestResultTests(unittest.TestCase):
     def test_a_posted_result_reads_back_and_marks_the_commit(self):
         github = FakeGitHub()
         posted = github.post(result())
-        self.assertEqual(posted, {"url": "comment-0", "commit": HEAD, "on_head": True,
-                                  "state": "success", "description": "1 suite: 1 pass. 12 OK"})
-        self.assertEqual(github.statuses, [(HEAD, {"state": "success", "context": "astack/tests",
-                                                   "description": "1 suite: 1 pass. 12 OK", "target_url": "comment-0",
+        self.assertEqual(posted, {"url": "comment-0", "commit": HEAD, "on_head": True, "states": {"api": "success"}})
+        self.assertEqual(github.statuses, [(HEAD, {"state": "success", "context": "astack/tests/api",
+                                                   "description": "pass: 12 OK", "target_url": "comment-0",
                                                    "creator": {"login": "alan"}})])
         self.assertTrue(github.comments[0]["body"].startswith("[m] on behalf of Alan\n\n**Tests: pass**"))
         listed = github.call("tests", "--pr", "12")
@@ -460,19 +464,20 @@ class TestResultTests(unittest.TestCase):
         self.assertEqual({key: listed["records"][0][key] for key in result()}, result())
         self.assertEqual(listed["records"][0]["commit"], HEAD)
 
-    def test_the_status_follows_the_newest_result_for_each_suite_on_that_commit(self):
+    def test_each_suite_has_its_own_status_showing_its_newest_result(self):
         github = FakeGitHub()
         github.seed(dict(result(suites={"api": "fail", "web": "pass"}), commit=HEAD), minute=1)
         github.seed(dict(result(suites={"web": "fail"}), commit=OLDER), minute=2)
-        self.assertEqual(github.post(result(suites={"api": "pass"}))["state"], "success")
-        self.assertEqual(github.statuses[-1][1]["description"], "2 suites: 2 pass.")
-        self.assertEqual(github.post(result(suites={"web": "incomplete"}, summary="web runner missing"))["state"], "error")
-        self.assertEqual(github.post(result(suites={"web": "fail"}, summary="1 failed"))["state"], "failure")
-        self.assertEqual(github.statuses[-1][1]["description"], "2 suites: 1 fail, 1 pass.")
+        self.assertEqual(github.post(result(suites={"api": "pass"}))["states"], {"api": "success"})
+        self.assertEqual(github.latest_states(), {"astack/tests/api": "success", "astack/tests/web": "success"})
+        self.assertEqual(github.post(result(suites={"web": "incomplete"}, summary="web runner missing"))["states"], {"web": "error"})
+        github.post(result(suites={"web": "fail"}, summary="1 failed"))
+        self.assertEqual(github.latest_states(), {"astack/tests/api": "success", "astack/tests/web": "failure"})
+        self.assertEqual(github.latest_states(OLDER), {"astack/tests/web": "failure"})
         latest = github.call("tests", "--pr", "12")["latest_by_suite"]
         self.assertEqual({suite: entry["outcome"] for suite, entry in latest.items()}, {"api": "pass", "web": "fail"})
-        github.post(result(suites={"api": "pass", "web": "pass"}, summary="x" * 200))
-        self.assertEqual(github.statuses[-1][1]["description"], "2 suites: 2 pass. " + "x" * 119 + "...")
+        github.post(result(suites={"api": "pass"}, summary="x" * 200))
+        self.assertEqual(github.statuses[-1][1]["description"], "pass: " + "x" * 131 + "...")
 
     def test_on_any_page_only_a_record_its_author_also_marked_with_a_status_counts(self):
         github = FakeGitHub()
@@ -489,7 +494,6 @@ class TestResultTests(unittest.TestCase):
         listed = github.call("tests", "--pr", "12")
         self.assertEqual(listed["ignored"], 5)
         self.assertEqual([(entry["author"], entry["suites"]) for entry in listed["records"]], [("sam", {"api": "fail"})])
-        self.assertEqual(github.post(result(suites={"web": "pass"}))["state"], "failure")
 
     def test_only_the_last_line_of_a_comment_is_read_as_its_record(self):
         github = FakeGitHub()
@@ -538,10 +542,10 @@ class TestResultTests(unittest.TestCase):
         self.assertEqual((github.exit_code, github.comments, github.statuses), (2, [], []))
         self.assertIn("result file: it is not valid JSON", github.errors)
         github = FakeGitHub()
-        self.assertEqual(github.post(result())["state"], "success")
-        self.assertEqual((github.exit_code, len(github.comments), len(github.statuses)), (0, 1, 1))
+        self.assertEqual(github.post(result(suites={"api": "pass", "web": "fail"}))["states"], {"api": "success", "web": "failure"})
+        self.assertEqual((github.exit_code, len(github.comments), len(github.statuses)), (0, 1, 2))
 
-    def test_a_result_posted_during_another_post_still_leaves_the_status_on_the_newest_results(self):
+    def test_a_result_posted_during_another_post_leaves_each_suite_on_its_newest_result(self):
         github = FakeGitHub()
         post_without_race = github.run
 
@@ -551,16 +555,18 @@ class TestResultTests(unittest.TestCase):
                             author="sam", status_creator="sam", minute=9)
             return post_without_race(argv, **kwargs)
         github.run = run
-        report = github.post(result(suites={"api": "pass"}))
-        self.assertEqual((github.exit_code, report["state"]), (0, "failure"))
-        self.assertEqual(github.statuses[-1][1]["state"], "failure")
+        self.assertEqual(github.post(result(suites={"api": "pass"}))["states"], {"api": "success"})
+        self.assertEqual(github.latest_states(), {"astack/tests/web": "failure", "astack/tests/api": "success"})
 
     def test_a_rejected_status_still_reports_the_posted_comment(self):
         github = FakeGitHub(status_error="HTTP 422: No commit found for SHA")
         report = github.post(result(), OLDER)
         self.assertEqual(github.exit_code, 2)
-        self.assertEqual((report["url"], report["state"], report["on_head"]), ("comment-0", None, False))
-        self.assertIn("422", report["status_error"])
+        self.assertEqual((report["url"], report["states"], report["on_head"]), ("comment-0", {"api": None}, False))
+        self.assertIn("api: HTTP 422", report["status_error"])
+        silent = FakeGitHub(status_error=" ")
+        self.assertIn("api: gh exited with code 1", silent.post(result())["status_error"])
+        self.assertEqual(silent.exit_code, 2)
 
 
 class IdentityTests(unittest.TestCase):
