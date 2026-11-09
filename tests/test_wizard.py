@@ -125,6 +125,9 @@ sys.exit(1)
         process = subprocess.Popen(["/bin/bash", str(script)], stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    cwd=self.root, env=self.env)
+        for pipe in (process.stdin, process.stdout, process.stderr):
+            self.addCleanup(pipe.close)
+        self.addCleanup(process.wait)
         self.addCleanup(process.kill)
         seen = b""
         deadline = time.monotonic() + 10
