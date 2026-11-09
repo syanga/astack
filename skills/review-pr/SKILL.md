@@ -103,7 +103,7 @@ Run Correctness once, on the first candidate where the applicable Standards and 
 
 Converge when the final changes have no unresolved verified problems, required checks pass, and applicable reviews are complete. A native fallback completes the Correctness review for convergence. Optional suggestions do not block completion. If progress stalls or a decision is needed, report the remaining blockers.
 
-All reviews of one candidate, from every axis, make one pass. A fix-and-review run's pass limit is three passes, or the number of passes the user names. When the last allowed pass does not converge, the run stops at its pass limit without more repairs. A required check that fails on the head pushed after that pass also leaves that pass unconverged. A request to loop or review until clean asks for fix-and-review and starts one run with this pass limit.
+Each review-pr invocation is one run. All reviews of one candidate, from every axis, make one pass. A fix-and-review run's pass limit is three passes, or the number of passes the user names. When the last allowed pass does not converge, the run stops at its pass limit without more repairs. A required check that fails on the head pushed after that pass also leaves that pass unconverged. A request to loop or review until clean asks for fix-and-review and starts one run with this pass limit.
 
 In fix-and-review mode with existing PRs, [finalize the PRs](../harden-pr/pr-work.md#finalize-reviewed-prs), including committing and pushing verified repairs. A fix made while finalizing, such as a CI fix, is a later repair. Handle it as step 5 handles every later repair, before step 6. Without a PR, return the reviewed changes to the caller's delivery workflow.
 
@@ -121,7 +121,7 @@ Report the assessment under `## Direction`, after the axis reports. Recommend ei
 
 ### 6. Post the signed review record
 
-Run this step at the end of every invocation that reached substantive review, including an early stop. If the reviewed changes are not on an existing PR, or the user limited publication, skip posting. Say in the conversation that no record was posted, and why. Otherwise, read [posting.md](../harden-pr/posting.md) and post a record on each reviewed PR with `pr.py review`. Report each `url` that `pr.py review` returns, with any limitation posting.md names. If posting.md's failure handling ends without a `url` for a PR, report why for that PR. The step is done when every reviewed PR has a reported `url` or reason. After a run that stopped at its pass limit, every PR you posted to also needs posting.md's pass-limit alert at the top of its description.
+Run this step at the end of every invocation that reached substantive review, including an early stop. If the reviewed changes are not on an existing PR, or the user limited publication, skip posting. Say in the conversation that no record was posted, and why. Otherwise, read [posting.md](../harden-pr/posting.md) and post a record on each reviewed PR with `pr.py review`. Report each `url` that `pr.py review` returns, with any limitation posting.md names. If posting.md's failure handling ends without a `url` for a PR, report why for that PR. The step is done when every reviewed PR has a reported `url` or reason. After a run that stopped at its pass limit, every PR that this step did not skip also needs posting.md's pass-limit alert at the top of its description.
 
 ## Why three axes
 
