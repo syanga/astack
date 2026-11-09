@@ -382,7 +382,7 @@ def result(**overrides):
 
 class FakeGitHub:
     def __init__(self, commits=(OLDER, HEAD), push=True, status_error=None):
-        self.comments, self.statuses, self.writes = [], [], 0
+        self.comments, self.statuses = [], []
         self.commits, self.push, self.status_error = commits, push, status_error
 
     def seed(self, record, author="alan", status_creator="alan", body=None, minute=0):
@@ -411,7 +411,6 @@ class FakeGitHub:
             else:
                 items = self.comments
             return self.reply(argv, items[(page - 1) * 100:page * 100])
-        self.writes += 1
         payload = json.loads(kwargs["input"])
         if endpoint.endswith("/comments"):
             self.comments.append({"body": payload["body"], "user": {"login": "alan"},
@@ -540,7 +539,21 @@ class TestResultTests(unittest.TestCase):
         self.assertIn("result file: it is not valid JSON", github.errors)
         github = FakeGitHub()
         self.assertEqual(github.post(result())["state"], "success")
-        self.assertEqual((github.exit_code, github.writes), (0, 2))
+        self.assertEqual((github.exit_code, len(github.comments), len(github.statuses)), (0, 1, 1))
+
+    def test_a_result_posted_during_another_post_still_leaves_the_status_on_the_newest_results(self):
+        github = FakeGitHub()
+        post_without_race = github.run
+
+        def run(argv, **kwargs):
+            if argv[3:5] == ["POST", "repos/o/r/statuses/" + HEAD] and not github.statuses:
+                github.seed(dict(result(suites={"web": "fail"}, summary="1 failed"), commit=HEAD),
+                            author="sam", status_creator="sam", minute=9)
+            return post_without_race(argv, **kwargs)
+        github.run = run
+        report = github.post(result(suites={"api": "pass"}))
+        self.assertEqual((github.exit_code, report["state"]), (0, "failure"))
+        self.assertEqual(github.statuses[-1][1]["state"], "failure")
 
     def test_a_rejected_status_still_reports_the_posted_comment(self):
         github = FakeGitHub(status_error="HTTP 422: No commit found for SHA")

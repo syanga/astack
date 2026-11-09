@@ -551,6 +551,13 @@ def command_tests(args):
     print()
 
 
+def set_test_status(owner, name, commit, state, description, target_url):
+    return subprocess.run(
+        ["gh", "api", "--method", "POST", "repos/{}/{}/statuses/{}".format(owner, name, commit), "--input", "-"],
+        input=json.dumps({"state": state, "context": TEST_CONTEXT, "description": description,
+                          "target_url": target_url}), capture_output=True, text=True)
+
+
 def command_post_tests(args):
     identity = git_user_name()
     result = load_json_file(args.result_file, "result file")
@@ -570,17 +577,25 @@ def command_post_tests(args):
                                        + [dict(record, at=None)])
     body = format_body(args.model, render_test_result(record), identity)
     comment = gh(["api", "--method", "POST", endpoint, "--input", "-"], stdin=json.dumps({"body": body}))
-    status = subprocess.run(
-        ["gh", "api", "--method", "POST", "repos/{}/{}/statuses/{}".format(owner, name, args.commit), "--input", "-"],
-        input=json.dumps({"state": state, "context": TEST_CONTEXT, "description": description,
-                          "target_url": comment["html_url"]}), capture_output=True, text=True)
+    status = set_test_status(owner, name, args.commit, state, description, comment["html_url"])
+    written, error = (state, None) if status.returncode == 0 else (None, status.stderr.strip())
+    if written:
+        try:
+            settled = [entry for entry in read_test_records(owner, name, fetch_pages(endpoint))[0]
+                       if entry["commit"] == args.commit]
+        except SystemExit:
+            settled, error = [], "the status is set, but re-reading the results to check it failed"
+        if any(entry["url"] == comment["html_url"] for entry in settled) and commit_status(settled) != (state, description):
+            state, description = commit_status(settled)
+            status = set_test_status(owner, name, args.commit, state, description, comment["html_url"])
+            written, error = (state, None) if status.returncode == 0 else (written, status.stderr.strip())
     report = {"url": comment["html_url"], "commit": args.commit, "on_head": args.commit == pr["headRefOid"],
-              "state": state if status.returncode == 0 else None, "description": description}
-    if status.returncode != 0:
-        report["status_error"] = status.stderr.strip()
+              "state": written, "description": description}
+    if error:
+        report["status_error"] = error
     json.dump(report, sys.stdout)
     print()
-    if status.returncode != 0:
+    if error:
         sys.exit(2)
 
 
