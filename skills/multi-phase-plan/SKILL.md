@@ -86,8 +86,8 @@ Select a probe with `python3 <installed skills directory>/multi-phase-plan/scrip
 ### Verdict and merge, for every PR
 
 - [ ] Run the unit, live, and applicable perf checks below in full at the code-ready head, the first head the owner reports complete. Use independent verification for costly or judgment-heavy checks.
-- [ ] Give every later head its own receipt. Rerun the checks that the change from the last verified head can affect, including the perf and regression lanes after a base update that touches what they measure. When the change touches nothing a check exercises, the receipt carries the check forward under STATE.md.
-- [ ] Clean only when every applicable check passes. Findings go back to the owner. A failure that a saved trunk run shows the same way, in behavior outside what the PR changes or claims to fix, is recorded against trunk under STATE.md and does not fail the verdict. Required repository checks still gate the merge.
+- [ ] Give every later head its own receipt under STATE.md's Accept verification. A rebase, conflict resolution, or small fix gets one independent verifier, and only new behavior, a redesign, or a large new diff gets the full checks again. The verifier reruns the checks that the change can affect, including the perf and regression lanes after a base update that touches what they measure, and carries the rest forward.
+- [ ] Clean only when every applicable check passes. Findings go back to the owner. A trunk-side failure in the Regression lane against trunk is recorded against trunk under STATE.md and does not fail the verdict. Required repository checks and the covering suites that ship-pr runs still gate the merge.
 - [ ] Follow ship-pr when merging is authorized. Otherwise stop at merge-ready with the exact verified head and remaining gates.
 
 ### Boot recipe, for every live lane

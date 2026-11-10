@@ -70,11 +70,14 @@ retains every row and selects the latest verifier receipt for that PR and SHA,
 or the latest worker receipt when no verifier exists. A new SHA needs a new receipt.
 When the change from a verified SHA touches nothing a check exercises, the new
 receipt may carry that check forward. It saves the diff from the verified SHA to
-the new one as its evidence and links the earlier receipt. A failed check that a
-saved run at a named trunk SHA shows the same way, in behavior outside what the
-PR changes or claims to fix, is recorded against trunk in the receipt and does
-not fail the verdict. Record a carry-forward under whoever checked the diff, and
-as a verifier receipt only when the earlier receipt was one.
+the new one as its evidence and links the earlier receipt. For published test
+suites, decide which results carry forward with open-pr's
+[Reuse a published result](../open-pr/test-results.md#reuse-a-published-result).
+Record a carry-forward as a verifier receipt only when a verifier checked the
+diff and the earlier receipt was a verifier receipt. Otherwise record it as a
+worker receipt. A trunk-side failure in a plan's Regression lane against trunk,
+reproduced by a saved run at a named trunk SHA, is recorded against trunk in the
+receipt and does not fail the verdict.
 
 Verdicts are `live-ui-verified`, `unit-test-verified`, `type-check-only`,
 `verifier-blocked`, and `verifier-failed`. Inspect the evidence and compare its SHA,

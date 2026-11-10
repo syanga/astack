@@ -13,7 +13,7 @@ Trace every problem to its root cause and fix it there.
 - If a workaround for code we control needs a paragraph-long comment to justify it, fix the code. For explanations of constraints imposed by external dependencies, follow [no-comments](../no-comments/SKILL.md).
 - Search for the same pattern with grep. Fix every instance inside the change's scope and note the rest
 - When stuck, instrument. Don't guess (add logging, read the actual error)
-- If the deciding fact took a deep dig to find, propose the cheap, always-on signal that would have shown it at first look
+- If the deciding fact was hard to find, propose a cheap, always-on signal that would have shown it immediately
 
 **Restart bugs: suspect state before code**
 

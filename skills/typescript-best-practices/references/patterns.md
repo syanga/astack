@@ -19,7 +19,7 @@ function parseAgentId(input: string): AgentId {
 declare function focusAgent(id: AgentId): void;
 ```
 
-A brand comes from a verifying type guard (`input is AgentId`), never from `as`. This example uses a string brand. Reuse an existing brand convention when the repository has one.
+A brand comes from a type guard (`input is AgentId`) whose body checks the value, never from `as`. The compiler does not check that body, so review it like any other validation. This example uses a string brand. Reuse an existing brand convention when the repository has one.
 
 ## Discriminated unions
 
