@@ -2,7 +2,7 @@
 
 How to reason about confidence when evidence is historical, fragmentary, and sometimes contradictory, and how to communicate it without flattening it into false certainty.
 
-Code doesn't carry its own motivation. You can read what code does. You can't read *why it exists*. That lives in commits, PRs, tickets, docs, and conversations, all incomplete, biased, and sometimes missing entirely. Pretending otherwise produces confident-sounding guesses that mislead the user.
+Code doesn't carry its own motivation. You can read what code does. You can't read *why it exists*. That lives in commits, PRs, tickets, docs, and conversations, all incomplete, biased, and sometimes missing entirely.
 
 ## Confidence tiers
 
@@ -84,14 +84,14 @@ If you're using these, you should have a citation immediately adjacent.
 - "may have been"
 - "the evidence points toward"
 
-These signal that you're interpreting, not reporting. Use them liberally in the "What We Can Reasonably Infer" section.
+Use them liberally in the "What We Can Reasonably Infer" section.
 
 ### Words to avoid
 
-- "obviously". If it were obvious, the user wouldn't be asking
-- "clearly". Almost always precedes a claim that isn't clear
-- "of course". Same
-- "just" (as in "it's just X for performance"). Dismissive and usually hides uncertainty
+- "obviously"
+- "clearly"
+- "of course"
+- "just" (as in "it's just X for performance")
 - "I think" / "I believe". You're synthesizing evidence, not giving a personal opinion. Use "the evidence suggests" instead.
 
 ### Avoid rationalization
@@ -106,8 +106,6 @@ Resist the urge to:
 ## The sycophancy trap
 
 Users often phrase `why` questions with an embedded hypothesis: "Why do we do it this way, I assume it's for performance?" Don't simply confirm it. Treat it as one candidate among others and check the evidence independently. If the evidence supports it, say so with citations. If not, say so and present what the evidence *does* support.
-
-The user's guess is a prompt for investigation, not a conclusion to validate.
 
 ## When evidence contradicts
 

@@ -14,7 +14,7 @@ When executing a multi-phase plan, read [the shared execution-state convention](
 
 For a requested pause or transfer to another session, read [handoff](../handoff/SKILL.md). Reuse the execution store when present; standalone implementation needs only a handoff note.
 
-**You own the design. Plan, review, verify.** Delegate implementation. Stay in the lead.
+**You own the design. Plan, review, verify.** Delegate implementation.
 
 1. [how](../how/SKILL.md) over the affected subsystem.
 2. [architect](../architect/SKILL.md) for parallel design exploration. Skipping stays as `architect skipped: <reason>`. Do not fold the design decision silently into implementation. If the user pushes back on a design's shape because of an unstated constraint, follow [architect's pushback rule](../architect/SKILL.md#phase-c-agree-opt-in).

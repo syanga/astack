@@ -16,7 +16,7 @@ Operate as a **careful, cautious, and precise investigator**. Be honest about wh
 
 ## Step 1. Understand the target and the question
 
-Parse what the user is asking. The **target** is usually a chunk of code, a pattern, a feature, or a named design decision. The **question** is usually a design rationale, a tradeoff, a motivating edge case, an external constraint, dead code, or a broad history sweep.
+The **target** is usually a chunk of code, a pattern, a feature, or a named design decision. The **question** is usually a design rationale, a tradeoff, a motivating edge case, an external constraint, dead code, or a broad history sweep.
 
 If the target is vague ("why do we do it this way?" with no clear referent), make your best guess from conversation context (open files, recent edits, cursor location, what was just discussed). State your interpretation briefly so the user can redirect if you're off, then proceed.
 
@@ -75,7 +75,7 @@ Use git and `gh` for source control when available, or the connected source-cont
 
 Aim for a complete **coverage map**, not a minimal one. Document the null, don't skip the search.
 
-Launch the matching investigators in parallel with the available subagent tool. If subagents are unavailable, perform the same investigations directly. Don't ask one agent to cover multiple MCPs.
+Launch the matching investigators in parallel with the available subagent tool. If subagents are unavailable, perform the same investigations directly.
 
 Give each investigator access to its assigned source. Investigators must not write files or modify external state.
 
@@ -114,7 +114,7 @@ Only skip with an **explicit, written justification** that goes in the final "So
 - **The user or caller explicitly limited the sources, or access is outside the authorized scope.** Record the limit without treating an unsearched source as an empty result.
 - **The source is provably irrelevant**, not just "probably irrelevant." A high bar. Example: "Error / exception tracking skipped. Target is a build-time script with no runtime code path."
 
-If your scope assessment suggests a single-commit trivial target where the PR description already contains the complete answer, you may answer inline **only after** confirming all seven available category searches would be redundant. Say so explicitly. This should be rare.
+If your scope assessment suggests a single-commit trivial target where the PR description already contains the complete answer, you may answer inline **only after** confirming all seven available category searches would be redundant. Say so explicitly.
 
 ## Step 4. Synthesize
 
@@ -140,11 +140,3 @@ After the Sources Consulted block, if the user's `why` question is a precursor t
 ## Common failure modes to avoid
 
 - **Recency bias**. Assuming the most recent commit is authoritative. The current shape is often the accretion of many earlier decisions. Trace back.
-
-## Reference files
-
-- [references/epistemics.md](references/epistemics.md). Confidence tiers and phrasing guide. The synthesizer must follow it.
-- [references/investigator-prompt.md](references/investigator-prompt.md). Base prompt template for investigator subagents.
-- [references/source-playbook.md](references/source-playbook.md). Index pointing at the category playbooks below.
-- `references/sources/*.md`. One self-contained example playbook per category, plus cross-cutting `incident-postmortem.md`. Give an investigator the single file that matches its category and adapt it to the available MCP.
-- [references/synthesizer-prompt.md](references/synthesizer-prompt.md). Prompt template for the synthesizer subagent, including the output format.

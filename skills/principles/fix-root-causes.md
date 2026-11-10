@@ -4,8 +4,6 @@ Apply when debugging.
 
 Trace every problem to its root cause and fix it there.
 
-**Why:** Symptom fixes accumulate. Each workaround makes the system harder to reason about, and the real bug remains. Root-cause fixes are slower upfront but reduce total debugging time.
-
 **Pattern:**
 - Reproduce first
 - Ask "why" until you hit the root cause

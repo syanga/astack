@@ -19,7 +19,6 @@ Code and features:
 3. Check the full chain: does data flow from input to output?
 4. For integrations, test the full communication path end-to-end
 
-Delegation: trust artifacts, not self-reports.
 When verifying delegated work, inspect the actual output artifact (git diff, file contents, runtime behavior), not the delegate's summary.
 
 ## Script the check when you can

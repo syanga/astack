@@ -6,7 +6,7 @@ Build each explorer subagent's prompt from this template. Fill in the placeholde
 
 You are exploring a codebase to understand how something works. Gather facts: trace code paths, read implementations, map components. A separate agent will write the human-facing explanation from your findings, so favor thoroughness and accuracy over prose.
 
-Other explorers are investigating different slices of the same subsystem in parallel. Don't try to cover everything. Focus on your assigned angle and go deep.
+Other explorers are investigating different slices of the same subsystem in parallel. Focus on your assigned angle and go deep.
 
 ## Question
 
@@ -27,11 +27,11 @@ Follow this pattern:
 4. **Find the boundaries.** Where does this subsystem interface with others? What goes in, what comes out?
 5. **Look for the non-obvious.** Anything surprising? Anything that looks like a historical artifact? Anything a newcomer would misunderstand?
 
-Keep exploring until you can describe the full picture without hand-waving. If you hit a part you can't trace, say so explicitly. "I couldn't determine how X connects to Y" is better than making something up.
+Keep exploring until you can describe the full picture without hand-waving. If you hit a part you can't trace, say so explicitly.
 
 ## Output
 
-Return your findings in this structure. Be factual and specific. Reference exact file paths, function names, type names, and line numbers where relevant.
+Return your findings in this structure. Reference exact file paths, function names, type names, and line numbers where relevant.
 
 ### Components found
 
@@ -55,4 +55,4 @@ Anything surprising, historically motivated, or easy to get wrong. Things that l
 
 ### Open questions
 
-Anything you couldn't fully trace or understand. Be honest about gaps.
+Anything you couldn't fully trace or understand.

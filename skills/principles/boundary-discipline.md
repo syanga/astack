@@ -4,11 +4,9 @@ Apply when wiring validation, error handling, or framework adapters.
 
 Place validation, type narrowing, and error handling at system boundaries. Inside the boundary, trust the types. Business logic lives in pure functions. The shell, the thin layer that does input and output, stays mechanical.
 
-**Why:** Scattered validation is noisy, redundant, and gives a false sense of safety. Keep logic out of framework wiring so it can be tested without the framework.
-
 **The pattern:**
 - **At boundaries** (CLI args, config files, external APIs, network protocols): validate, return errors, handle defensively.
-- **Inside the system:** typed data, error propagation, no re-validation. Trust the types.
+- **Inside the system:** typed data, error propagation, no re-validation.
 - **Across the boundary.** Expose domain concepts, not the boundary's private representation. Keep general-purpose mechanism inside and special-purpose policy at the edge.
 
 **Applications:**

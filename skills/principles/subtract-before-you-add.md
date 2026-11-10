@@ -4,8 +4,6 @@ Apply when sequencing an addition, refactor, or rewrite.
 
 When evolving a system, remove complexity first, then build.
 
-**Why:** Adding to a complex system compounds complexity. Removing first leaves less code, reveals the essential structure, and usually makes the next design obvious. Default to subtraction.
-
 Make simplification a continual investment. Leave the design slightly simpler and more capable behind the same or smaller surface than you found it.
 
 **The pattern:**

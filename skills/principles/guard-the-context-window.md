@@ -4,8 +4,6 @@ Apply when context is filling up with large outputs, long files, repeated reads,
 
 The context window is finite. Load the material needed for the current decision.
 
-**Why.** Context overflow degrades reasoning quality, creates compression artifacts, and halts progress.
-
 ## Pattern
 
 - **Isolate large payloads.** Route verbose outputs, screenshots, and large documents to subagents. The main context gets summaries, not raw data.
