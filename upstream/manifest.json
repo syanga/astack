@@ -437,7 +437,7 @@
     "files": {
       "pstack/skills/poteto-mode/playbooks/hillclimb.md": "skills/hillclimb/SKILL.md"
     },
-    "note": "Minimum attempts apply when requested. Repeated confirmation guards early wins otherwise. Existing logs and handoffs preserve progress without promising automatic wake. Remeasuring a moved base keeps base changes from counting as the run's gains. The accept step applies the checklist's questions 4 and 7 to the harness counts, which upstream states only in the checklist."
+    "note": "Minimum attempts apply when requested. Repeated confirmation guards early wins otherwise. Existing logs and handoffs preserve progress without promising automatic wake. Remeasuring a moved base keeps base changes from counting as the run's gains. The accept step applies the checklist's questions 4 and 7 to the harness counts, which upstream states only in the checklist, and skips them when the harness prints no counts, as under hillclimb-council's vote. A harness for a metric other than performance is vetted with Explain the Number, because the benchmark checklist assumes a timing benchmark."
   },
   "benchmark-checklist": {
     "repository": "https://github.com/cursor/plugins.git",
