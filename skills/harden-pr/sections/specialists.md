@@ -16,7 +16,7 @@ Inspect the changed files and their callers, repository conventions, and test fr
 | API contract changes | [API contract](../specialists/api-contract.md) |
 | Requested simplification | [Simplification](../specialists/simplification.md) |
 
-Honor explicit specialist requests, including `--all-specialists`. Report which reviewers were selected and which were skipped. Functional frontend checks belong to the core checklist; aesthetic review is outside this skill.
+Honor explicit specialist requests, including `--all-specialists`. Report which reviewers were selected and which were skipped. Functional frontend checks belong to the core checklist. For a visual change, as [implement](../../implement/SKILL.md) step 5 defines it, also dispatch a reviewer with the screenshot item of [review-pr](../../review-pr/SKILL.md)'s Standards prompt and the screenshots from review-pr step 1. Other aesthetic review is outside this skill.
 
 ## Dispatch
 

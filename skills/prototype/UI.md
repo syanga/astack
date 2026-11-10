@@ -51,7 +51,7 @@ This works whether the user is here to push back or not.
 
 ### 2. Generate radically different variants
 
-Before drafting, read the code that draws, animates, or measures layout around the target, such as canvas or WebGL scenes and scroll anchors. Keep each variant connected to that code so the page still runs it. When the user references an earlier design, find it in git history and port its markup and styles. Cite the commit.
+Before drafting, read the code that draws, animates, or measures layout around the target, such as canvas or WebGL scenes and scroll anchors. Keep each variant connected to that code so the page still runs it. When the user references an earlier design, find it in git history and port its markup and styles. Cite the commit. When the user points to an unmerged page as the design to follow, list where it departs from the shipped pages. Follow the shipped pages there, unless the user approves the departure or a recorded pick covers it.
 
 Draft each variant. Hold each one to:
 
@@ -61,7 +61,7 @@ Draft each variant. Hold each one to:
 
 Variants must be **structurally different**: different layout, different information hierarchy, different primary affordance, not just different colours. Three slightly-tweaked card grids isn't a UI prototype, it's wallpaper. If two drafts come out too similar, redo one with explicit "do not use a card grid" guidance.
 
-Match the project's colors, typography, spacing, and component conventions unless the user requests a redesign. New pages within an existing product follow the same conventions. For standalone work, follow the user's visual preferences. Avoid continuously repainting animations.
+Match the project's colors, typography, spacing, and component conventions as shipped on the default branch, unless the user requests a redesign. New pages within an existing product follow the same conventions. For standalone work, follow the user's visual preferences. Avoid continuously repainting animations.
 
 ### 3. Wire them together
 

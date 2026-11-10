@@ -18,9 +18,11 @@ disable-model-invocation: true
 - When [multi-phase-plan](../multi-phase-plan/SKILL.md) step 1 would skip the plan, follow [implement](../implement/SKILL.md), then [ship-pr](../ship-pr/SKILL.md).
 - Otherwise follow multi-phase-plan with the plan in this store, then [orchestrate](../orchestrate/SKILL.md). Record this skill's authorizations, with the full [admin merge](#5-merge) rule, and the start-round answers in the plan and standing orders. Mark each plan gate that an assumed decision settles as decided by the coordinator. Record a repository-required approval as an admin merge case, not a review gate.
 
+On either route, the agent that implements work that is already built starts [implement](../implement/SKILL.md) at step 5.
+
 ## 3. Assumed decisions
 
-An **assumed decision** is a delegated pick, such as an architect candidate, a scope call, a [prototype](../prototype/SKILL.md) UI variant, or a choice a reviewer or bot asks for. Take the recommended option and append it to `assumed-decisions.md`. On the orchestrate route, workers report their picks and the coordinator appends them.
+An **assumed decision** is a delegated pick, such as an architect candidate, a scope call, a [prototype](../prototype/SKILL.md) UI variant, or a choice a reviewer or bot asks for. Take the recommended option and append it to `assumed-decisions.md`. On the orchestrate route, workers report their picks and the coordinator appends them. A defect that a reviewer reports, including a visual one, is a review finding, not a pick.
 
 ```markdown
 ## D<n>. <question>
@@ -39,7 +41,7 @@ Each of these conditions is a gate:
 
 - a deploy, live-system, destructive, or secrets action the start round left open
 - missing access
-- a change you cannot verify on the matching surface, unless the start round let it merge before that check
+- a change you cannot verify on the matching surface of [implement](../implement/SKILL.md) step 5, unless the start round let it merge before that check
 - a human change request
 - a missing approval that the [admin merge](#5-merge) does not clear
 - a head whose record check in [Finish or merge](../harden-pr/pr-work.md#finish-or-merge) ended with `our_reviews.on_head` at 0

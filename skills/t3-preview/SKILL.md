@@ -21,6 +21,8 @@ For either route, report unverified visual, interaction, or backend checks and l
 
 ## Viewport and theme checks
 
+Take screenshots in light and dark at phone (375px) and desktop (1280px or wider) widths. Pass explicit widths to `preview_resize` or Playwright's `viewport`. Before each screenshot, check `window.innerWidth`, because a preset or the preview pane can give a different width. Capture the full page, or scroll the changed element into view. Look at every screenshot, because DOM measurements miss rendered details such as a date input's placeholder.
+
 Use `preview_resize` and `preview_set_appearance` on the browser route. Without that route, install Playwright outside the project lockfile and use its `viewport`, `isMobile`, and `colorScheme` options. Headless Chrome's `--window-size` does not narrow the layout below about 500px.
 
 Each preview screenshot also returns the page's accessibility tree and logs. Capture large screenshot sets with Playwright, and use the preview browser for interaction and spot checks.
