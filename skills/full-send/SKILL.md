@@ -18,6 +18,8 @@ disable-model-invocation: true
 - When the task ships as one PR and [multi-phase-plan](../multi-phase-plan/SKILL.md) step 1 would skip the plan, follow [implement](../implement/SKILL.md), then [ship-pr](../ship-pr/SKILL.md).
 - Otherwise follow multi-phase-plan from step 2, with the plan in this store, then [orchestrate](../orchestrate/SKILL.md). Record this skill's authorizations, with the full [admin merge](#5-merge) rule, and the start-round answers in the plan and standing orders. Mark each plan gate that an assumed decision settles as decided by the coordinator. Record a repository-required approval as an admin merge case, not a review gate.
 
+A run that orchestrate's Frame step hands to implement stays on the orchestrate route. When work on the implement route needs a second PR, plan the open and remaining PRs with multi-phase-plan from step 2. Then continue under orchestrate.
+
 On either route, the agent that implements work that is already built starts [implement](../implement/SKILL.md) at step 5.
 
 ## 3. Assumed decisions
@@ -49,7 +51,7 @@ Each of these conditions is a gate:
 - in-scope harden-pr defects after three fix-and-review rounds
 - a review bot silent through both timers in [Merge](#5-merge) step 2
 
-On the orchestrate route, including a run that orchestrate hands to implement, park it through [orchestrate's escalation](../orchestrate/SKILL.md#escalation). Otherwise write its [decision request](../orchestrate/SKILL.md#messages-to-the-user) to the store's `open-decisions.md`, and record the answer there when it arrives. Continue unblocked work. When nothing can move, ask with the question tool if one exists, otherwise end the turn with the request. Send a push notification if the harness has one.
+On the orchestrate route, park it through [orchestrate's escalation](../orchestrate/SKILL.md#escalation). Otherwise write its [decision request](../orchestrate/SKILL.md#messages-to-the-user) to the store's `open-decisions.md`, and record the answer there when it arrives. Continue unblocked work. When nothing can move, ask with the question tool if one exists, otherwise end the turn with the request. Send a push notification if the harness has one.
 
 Before ending a turn, check that a running worker, watcher, or timer, or a promised message from another thread, will wake you. Otherwise, check that each unfinished unit waits on a gate. If neither holds, dispatch ready work first, including the review that [Merge](#5-merge) step 1 requires.
 
