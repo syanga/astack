@@ -4,6 +4,8 @@ Apply after completing a task, before declaring done.
 
 Verify every task output by checking the real thing directly. Do not infer from proxies, self-reports, or "it compiles."
 
+**Why:** Unverified work has unknown correctness. Indirect verification (file mtimes, output freshness, agent self-reports, cached screenshots) feels cheaper than direct observation. Acting on a wrong inference costs far more than checking the source.
+
 **Pattern:** After completing any task, ask: "how do I prove this actually works?"
 
 Check the real thing, not a proxy:

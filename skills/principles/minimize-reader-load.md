@@ -10,7 +10,7 @@ Maintainability is the work a reader must do to understand code. Track two axes:
 
 **The pattern:**
 - **Collapse layers** that cost more than they save: wrappers with one caller, adapters with no second implementation, speculative indirection that was never needed. Inline them.
-- **Make adjacent layers change the abstraction.** A layer that repeats the same methods and arguments adds reader load without compression.
+- **Make adjacent layers change the abstraction.** A layer that repeats the same methods and arguments adds reader load without compression. Collapse pass-through layers.
 - **Demand interface compression.** A broad interface that hides little complexity makes readers learn both the surface and the implementation. Prefer boundaries that hide meaningful decisions. For module-design guidance, read [Deep Modules](deep-modules.md).
 - **Shrink state scope:** prefer pure functions (returns over mutations), locals over fields, fields over module state, and module state over globals. Derive instead of sync.
 - **Name the invariant at the boundary,** not in every consumer, so the reader learns it once.

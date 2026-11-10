@@ -14,20 +14,28 @@ Use the available subagent tool for the steps below. All exploration and explana
 
 If the scope is ambiguous, state your interpretation and explore. The user can redirect.
 
-- **Simple** (a single module, a small utility, a narrow question such as "how does function X work"): no explorers. Spawn one explainer that explores and explains in one pass, built from [references/explainer-prompt.md](references/explainer-prompt.md) without the explorer-findings section. Go to Step 4.
-- **Complex** (a subsystem spanning multiple files or services, a cross-cutting feature, a full architectural overview): spawn parallel explorers first, then hand off to the explainer. Go to Step 2.
+- **Simple** (a single module, a small utility, a narrow question such as "how does function X work"): no explorers. One explainer explores and explains in a single pass. Go to Step 2b.
+- **Complex** (a subsystem spanning multiple files or services, a cross-cutting feature, a full architectural overview): spawn parallel explorers first, then hand off to the explainer. Go to Step 2a.
 
 When in doubt, take the simple path.
 
-## Step 2. Explore (complex questions only)
+## Step 2a. Explore (complex questions only)
 
 Decompose the question into 2 to 4 exploration angles, each a distinct slice of the subsystem. Spawn the explorers in parallel.
 
-Each explorer gets the prompt in [references/explorer-prompt.md](references/explorer-prompt.md) with its angle filled in.
+Each explorer gets the prompt in [references/explorer-prompt.md](references/explorer-prompt.md) with its angle filled in. Then go to Step 3.
+
+## Step 2b. Direct explain (simple questions)
+
+Spawn one subagent that explores and explains in one pass.
+
+Build its prompt from [references/explainer-prompt.md](references/explainer-prompt.md) without the explorer-findings section. Go to Step 4.
 
 ## Step 3. Synthesize (complex questions only)
 
-Once all explorers have returned, spawn one explainer built from [references/explainer-prompt.md](references/explainer-prompt.md) with every explorer's findings filled in.
+Once all explorers have returned, spawn one subagent to synthesize their findings into one explanation.
+
+Build its prompt from [references/explainer-prompt.md](references/explainer-prompt.md) with every explorer's findings filled in.
 
 ## Step 4. Present
 

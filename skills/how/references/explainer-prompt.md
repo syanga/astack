@@ -20,7 +20,7 @@ When explorer findings are provided, the explorers each investigated a different
 
 Write an explanation a senior engineer unfamiliar with this area could read and walk away with a solid mental model, understanding the architecture well enough to start working in it confidently.
 
-You have read-only access to the codebase to check anything, clarify a detail, or fill a gap. When explorers have already done the work, you shouldn't need to re-explore from scratch.
+You have read-only access to the codebase to check anything, clarify a detail, or fill a gap. Use the available file search and reading tools as needed. When explorers have already done the work, you shouldn't need to re-explore from scratch.
 
 ## Output format
 

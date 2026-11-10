@@ -11,7 +11,7 @@
     "path": "pstack/skills/unslop",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/unslop/LICENSE",
-    "note": "Rules verbatim as of c1c0a32; rule numbers are stable ids other skills cite. Description shortened to a human-facing line. Step 1 adds a done condition. Keeps the text that upstream 00b14f1 and 70b2dc8 cut; astack trims its own copies without dropping rules."
+    "note": "Rules verbatim as of c1c0a32; rule numbers are stable ids other skills cite. Description shortened to a human-facing line. Step 1 adds a done condition. Keeps the text that upstream 00b14f1 and 70b2dc8 cut."
   },
   "principles": {
     "repository": "https://github.com/cursor/plugins.git",
@@ -390,7 +390,7 @@
     "path": "pstack/skills/poteto-mode/playbooks/bug-fix.md",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/bug-fix/LICENSE-pstack",
-    "note": "Reuses diagnosing-bugs and tdd rather than defining a second diagnosis loop. Failing-before evidence is required without mandating a separate failing commit. Delivery stays within the task authorization. Keeps the text that upstream b0b9c7a cut; astack trims its own copies without dropping rules.",
+    "note": "Reuses diagnosing-bugs and tdd rather than defining a second diagnosis loop. Failing-before evidence is required without mandating a separate failing commit. Delivery stays within the task authorization. Keeps the text that upstream b0b9c7a cut.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/bug-fix.md": "skills/bug-fix/SKILL.md"
     }
@@ -466,7 +466,7 @@
     "mapping": {
       "pstack/skills/poteto-mode/playbooks/refactoring.md": "skills/refactoring/SKILL.md"
     },
-    "note": "Keeps the text that upstream b0b9c7a cut; astack trims its own copies without dropping rules."
+    "note": "Keeps the text that upstream b0b9c7a cut."
   },
   "typescript-best-practices": {
     "repository": "https://github.com/cursor/plugins.git",

@@ -96,7 +96,7 @@ Use them liberally in the "What We Can Reasonably Infer" section.
 
 ### Avoid rationalization
 
-Don't retrofit a clean rationale onto messy history.
+Code that "makes sense" today may have been written for reasons that no longer apply, or that were wrong when they were written. Don't retrofit a clean rationale onto messy history.
 
 Resist the urge to:
 - Assume the author did the "right" thing and work backward to justify it
