@@ -4,8 +4,6 @@ Apply when deciding whether to ask for permission during an authorized task.
 
 The human supervises asynchronously. Within the authorized task, make reasonable decisions, proceed, and present the result for review.
 
-**Why.** Repeated permission requests interrupt the human. For reversible implementation choices within the task, a reviewable result is often more useful than a question.
-
 ## Pattern
 
 - **Proceed, then present.** Do the authorized work, show the result, and explain the choices you made.

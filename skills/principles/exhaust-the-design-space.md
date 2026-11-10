@@ -1,6 +1,6 @@
 # Exhaust the design space
 
-When a novel interaction or architectural decision has no established precedent, explore several concrete alternatives before implementation. Building the wrong thing costs more than exploring three options.
+When a novel interaction or architectural decision has no established precedent, explore several concrete alternatives before implementation.
 
 **The rule.** When the right answer is not obvious, build 2-3 competing prototypes or sketches. Compare them side by side. Only then commit. The alternatives must differ in their underlying design.
 

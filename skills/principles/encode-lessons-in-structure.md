@@ -4,8 +4,6 @@ Apply when you catch yourself writing the same instruction a second time, or not
 
 Encode a recurring fix as a mechanism instead of a textual instruction. Every error, human correction, and unexpected outcome is a learning signal.
 
-**Why:** Textual instructions are easy to miss. They require the reader to notice, remember, and comply. A mechanism enforces the rule without cooperation.
-
 **Pattern:**
 When you catch yourself writing the same instruction a second time:
 1. Ask whether a mechanism can enforce it. Pick the strongest the situation allows: an unrepresentable state that cannot compile, then a lint or banned API that fails CI, then a canonical helper, then a runtime check. Agents copy whatever the surrounding code already does, and a weaker guard becomes the next template.

@@ -13,5 +13,3 @@ When we decide a new API is the right design, migrate callers and remove the old
 - Inventory callers, migrate them, and delete the old API in the same wave
 - Treat temporary adapters as exceptional and time-boxed, not default architecture
 - Update tests to assert the new contract, and delete tests that only protect pre-refactor implementation details
-
-Keeping both old and new APIs leaves two paths to maintain, test, and read.

@@ -4,8 +4,6 @@ Apply when repeated fixes target an imbalance across actors.
 
 When two or more fixes that share one premise have failed the same gate, suspect the premise, not the fixes.
 
-**Why.** Each failure under a shared premise is evidence about the premise.
-
 ## Pattern
 
 - **Write the premise down.** The premise is the one sentence that every failed fix assumed.

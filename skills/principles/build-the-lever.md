@@ -2,10 +2,6 @@
 
 Apply to any non-trivial work, not just bulk work: edits, migrations, analyses, checks.
 
-When the work isn't trivial, build or reuse a tool that does it instead of doing it by hand.
-
-**Why:** Two payoffs. Throughput: a codemod, generator, or script does the work the same way every time and reruns for free. Confidence: the tool is one artifact a reviewer can read and rerun to check the work. Hand-done changes can only be re-verified by redoing them. A deterministic script turns "trust me" into "run this".
-
 **Pattern:** Default to using a tool. Reuse one that already does the job, or build it. Skip tooling only when the task is trivial, a couple of obvious edits you can see at a glance.
 
 - When building a tool, do the first unit by hand to learn the recipe, then build it. Prove it by rerunning it on that unit and diffing against your hand-done version. Make the lever safe to rerun.
