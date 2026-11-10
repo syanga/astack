@@ -24,7 +24,7 @@ This command is _informed_ by the project's domain model and built on a shared d
 
 Read the project's domain glossary and any ADRs in the area you're touching first, when available.
 
-Then spawn a sub-agent to walk the codebase, with the scope, domain vocabulary, and principle guidance below. Don't follow rigid heuristics; explore organically and note where you experience friction:
+Then spawn a sub-agent with a fresh context window to walk the codebase, with the scope, domain vocabulary, and principle guidance below. Don't follow rigid heuristics; explore organically and note where you experience friction:
 
 - Where does understanding one concept require bouncing between many small modules?
 - Where are modules **shallow**, with an interface nearly as complex as the implementation?

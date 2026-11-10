@@ -9,7 +9,7 @@ Three-axis review of the requested changes against a fixed point:
 - **Spec**: does the code faithfully implement the originating issue / spec?
 - **Correctness**: does the code hold up under edge cases, failure paths, and hostile input?
 
-The axes run as **separate reviewers** so they don't pollute each other's context, then this skill aggregates their findings.
+The axes run as **separate reviewers** so they don't pollute each other's context, then this skill aggregates their findings. Start every sub-agent with a fresh context window.
 
 Use **report-only** for standalone review requests. Use **fix-and-review** when the user or a calling workflow requests repairs, or an implementation workflow hands off its authorized work. Explicit read-only requests take precedence.
 
