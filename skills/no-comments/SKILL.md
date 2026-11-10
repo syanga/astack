@@ -21,7 +21,7 @@ Only these comments survive. Each of the first four survives only with proof tha
 - A doc comment that defines a public API contract.
 - An issue or RFC link that explains a constraint the code cannot express.
 - `// prettier-ignore`, and a lint or type suppression whose rule is faulty, pedantic, or style-only. Look up the rule for every `eslint-disable`, `@ts-ignore`, `@ts-expect-error`, and similar suppression in scope, including the ones you did not write. If the rule catches real bugs or protects correctness or safety and the next entry does not keep the suppression, delete it and flag the symbol.
-- A suppression that the repository's agent rule table, in `AGENTS.md` or else `CLAUDE.md`, records as an approved exception for that file, rule, and enclosing symbol, with an approver and an expiry date that has not passed.
+- A suppression that the repository's agent rule table, in `AGENTS.md` or else `CLAUDE.md`, records as an approved exception for that file and rule, with an approver and an expiry date that has not passed.
 
 When unsure whether a keep-list entry applies, delete the comment.
 
