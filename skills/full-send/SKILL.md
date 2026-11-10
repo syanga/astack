@@ -15,8 +15,10 @@ disable-model-invocation: true
 
 ## 2. Route
 
-- When [multi-phase-plan](../multi-phase-plan/SKILL.md) step 1 would skip the plan, follow [implement](../implement/SKILL.md), then [ship-pr](../ship-pr/SKILL.md).
-- Otherwise follow multi-phase-plan with the plan in this store, then [orchestrate](../orchestrate/SKILL.md). Record this skill's authorizations, with the full [admin merge](#5-merge) rule, and the start-round answers in the plan and standing orders. Mark each plan gate that an assumed decision settles as decided by the coordinator. Record a repository-required approval as an admin merge case, not a review gate.
+- When the task ships as one PR and [multi-phase-plan](../multi-phase-plan/SKILL.md) step 1 would skip the plan, follow [implement](../implement/SKILL.md), then [ship-pr](../ship-pr/SKILL.md).
+- Otherwise follow multi-phase-plan from step 2, with the plan in this store, then [orchestrate](../orchestrate/SKILL.md). Record this skill's authorizations, with the full [admin merge](#5-merge) rule, and the start-round answers in the plan and standing orders. Mark each plan gate that an assumed decision settles as decided by the coordinator. Record a repository-required approval as an admin merge case, not a review gate.
+
+A run that orchestrate's Frame step hands to implement stays on the orchestrate route.
 
 On either route, the agent that implements work that is already built starts [implement](../implement/SKILL.md) at step 5.
 
@@ -67,5 +69,5 @@ Before merging, or before reporting merge-ready under "no merge":
 
 ## 6. Close
 
-1. When the default branch runs CI after merges, wait for the run on each merge commit as a background job. If the PR broke it, ship a fix or a revert under this skill. On the orchestrate route, orchestrate's retro watcher does the waiting.
+1. When the default branch runs CI after merges, wait for the run on each merge commit as a background job. If the PR broke it, ship a fix or a revert under this skill. When orchestrate runs its retro watcher, the watcher does the waiting.
 2. Follow [worktree-cleanup](../worktree-cleanup/SKILL.md). If it stops with work remaining, or a gate is still open, send a push notification naming what remains.
