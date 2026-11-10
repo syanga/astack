@@ -1,5 +1,9 @@
 ## Codex preferences
 
+When a `<skill>` block in your context contains a skill's `SKILL.md`, that block
+counts as your complete read of the file. Start the skill's workflow from that
+text, and read the files it links as the skill directs.
+
 Run long noninteractive jobs, including watchers and long-lived processes such as
 dev servers, through the `codex-background-jobs` skill. Stop a job you replace or
 no longer need as the skill describes. Follow the skill's recovery steps when
