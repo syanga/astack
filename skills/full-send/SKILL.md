@@ -18,7 +18,7 @@ disable-model-invocation: true
 - When the task ships as one PR and [multi-phase-plan](../multi-phase-plan/SKILL.md) step 1 would skip the plan, follow [implement](../implement/SKILL.md), then [ship-pr](../ship-pr/SKILL.md).
 - Otherwise follow multi-phase-plan from step 2, with the plan in this store, then [orchestrate](../orchestrate/SKILL.md). Record this skill's authorizations, with the full [admin merge](#5-merge) rule, and the start-round answers in the plan and standing orders. Mark each plan gate that an assumed decision settles as decided by the coordinator. Record a repository-required approval as an admin merge case, not a review gate.
 
-A run that orchestrate's Frame step hands to implement stays on the orchestrate route. When work on the implement route needs a second PR, plan the open and remaining PRs with multi-phase-plan from step 2. Then continue under orchestrate.
+A run that orchestrate's Frame step hands to implement stays on the orchestrate route.
 
 On either route, the agent that implements work that is already built starts [implement](../implement/SKILL.md) at step 5.
 

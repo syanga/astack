@@ -12,7 +12,8 @@ dropped from context. After that command, [full-send](../full-send/SKILL.md) pos
 the absolute path of the store's `assumed-decisions.md`. The hook reads the
 program's store from the first such path in the coordinator's own text, and
 ignores paths in tool output. It does nothing for a store without a `units.tsv`,
-such as the store of a single-PR task on full-send's implement route.
+such as the store of a task on full-send's implement route, including one that
+grows a second PR.
 
 The hook blocks the end of the turn when all of these hold:
 
