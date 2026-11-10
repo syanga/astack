@@ -18,7 +18,7 @@
     "path": "pstack/skills/principle-*",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/principles/LICENSE",
-    "note": "The 23 principle skills present at c1c0a32 as plain files under one user-invoked index. This entry does not cover Explain the Number, which upstream added later. Frontmatter removed, applicability retained in the bodies, links adapted to local files, and unavailable skill references removed. Headings use sentence case and duplicate applicability statements are removed. Adaptations put migration preconditions before the rule, bound root-cause fixes to the task's scope, preserve external-constraint explanations, clarify boundary guarantees, and consolidate the mechanism hierarchy. Autonomy follows the user's authorization and approval preferences; context guidance follows writing-for-agents. Other edits group failing-test and fix commits into one verified unit, allow reuse of a concrete tool, and narrow attack-the-premise to actor imbalances without treating an even census as proof. Earlier astack-added completion tests and one-off reply notes are removed. Upstream examples for pure functions, idempotency, and the reader-load/context-window cross-reference are retained. Minimize Reader Load links to Deep Modules, whose Matt Pocock provenance is recorded under codebase-design. Keeps the text that upstream 00b14f1, 08bd59b, 99743e9, b0b9c7a, and 70b2dc8 cut. Several of those cuts, in 08bd59b and 99743e9, leave a rule only in the frontmatter description astack removed. Astack trimmed its own copies instead, keeping every rule. Against e5136d8, keeps the five assertion shapes as an inspection list, the idempotency pattern list with a lock bullet safe from PID reuse, the attack-the-premise actor narrowing, and the fix-root-causes scope bound."
+    "note": "The 23 principle skills present at c1c0a32 as plain files under one user-invoked index. This entry does not cover Explain the Number, which upstream added later. Frontmatter removed, applicability retained in the bodies, links adapted to local files, and unavailable skill references removed. Headings use sentence case and duplicate applicability statements are removed. Adaptations put migration preconditions before the rule, bound root-cause fixes to the task's scope, preserve external-constraint explanations, clarify boundary guarantees, and consolidate the mechanism hierarchy. Autonomy follows the user's authorization and approval preferences; context guidance follows writing-for-agents. Other edits group failing-test and fix commits into one verified unit, allow reuse of a concrete tool, and narrow attack-the-premise to actor imbalances without treating an even census as proof. Earlier astack-added completion tests and one-off reply notes are removed. Upstream examples for pure functions, idempotency, and the reader-load/context-window cross-reference are retained. Minimize Reader Load links to Deep Modules, whose Matt Pocock provenance is recorded under codebase-design. Replaces the upstream cuts in 00b14f1, 08bd59b, 99743e9, b0b9c7a, and 70b2dc8 with astack's own trim, which keeps every rule. Several upstream cuts, in 08bd59b and 99743e9, leave a rule only in the frontmatter description astack removed. Against e5136d8, keeps the five assertion shapes as an inspection list, the idempotency pattern list with a lock bullet safe from PID reuse, the attack-the-premise actor narrowing, and the fix-root-causes scope bound."
   },
   "open-pr": {
     "repository": "https://github.com/cursor/plugins.git",
@@ -42,7 +42,7 @@
     "path": "pstack/skills/technical-writing",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/technical-writing/LICENSE",
-    "note": "Verbatim as of c1c0a32 apart from a shorter description, unslop pointers as sibling links, a rule 26 citation without the line against editing unslop, \"swarm logs\" shortened to \"logs\", and the tab-indentation rule removed. Keeps the text that upstream 00b14f1, 23e4138, and 70b2dc8 cut. Astack trimmed its own copies instead, keeping every rule."
+    "note": "Verbatim as of c1c0a32 apart from a shorter description, unslop pointers as sibling links, a rule 26 citation without the line against editing unslop, \"swarm logs\" shortened to \"logs\", and the tab-indentation rule removed. Replaces the upstream cuts in 00b14f1, 23e4138, and 70b2dc8 with astack's own trim, which keeps every rule."
   },
   "no-comments": {
     "repository": "https://github.com/cursor/plugins.git",
@@ -142,14 +142,14 @@
     "path": "pstack/skills/how",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, copied from pstack/LICENSE to skills/how/LICENSE",
-    "note": "Preserves the upstream opening directive, simple and complex delegation paths, separate explorer and explainer prompts, and explanation structure. Shortens the description to the 200-character cap. Replaces Cursor Task parameters and fixed models with available subagent tools and a read-only direct fallback. Uses portable file-search instructions, validated reference links, and sentence-case headings. Makes explorer findings conditional in the explainer prompt so the direct-explain path works. Keeps the text that upstream 00b14f1 and 08bd59b cut. Astack trimmed its own copies instead, keeping every rule."
+    "note": "Preserves the upstream opening directive, simple and complex delegation paths, separate explorer and explainer prompts, and explanation structure. Shortens the description to the 200-character cap. Replaces Cursor Task parameters and fixed models with available subagent tools and a read-only direct fallback. Uses portable file-search instructions, validated reference links, and sentence-case headings. Makes explorer findings conditional in the explainer prompt so the direct-explain path works. Replaces the upstream cuts in 00b14f1 and 08bd59b with astack's own trim, which keeps every rule."
   },
   "why": {
     "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/why",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, copied from pstack/LICENSE to skills/why/LICENSE",
-    "note": "Preserves the upstream investigation workflow, default parallel source sweep, confidence framework, separate investigator and synthesizer prompts, and all source playbooks. Shortens the description, adapts tool discovery and delegation to the active harness, permits explicitly scoped investigations, and reports unavailable sources as gaps. Treats provider tools and warehouse schemas as examples to verify. Uses validated links and sentence-case headings. Keeps the text that upstream 00b14f1 and 08bd59b cut. Astack trimmed its own copies instead, keeping every rule."
+    "note": "Preserves the upstream investigation workflow, default parallel source sweep, confidence framework, separate investigator and synthesizer prompts, and all source playbooks. Shortens the description, adapts tool discovery and delegation to the active harness, permits explicitly scoped investigations, and reports unavailable sources as gaps. Treats provider tools and warehouse schemas as examples to verify. Uses validated links and sentence-case headings. Replaces the upstream cuts in 00b14f1 and 08bd59b with astack's own trim, which keeps every rule."
   },
   "teach": {
     "repository": "https://github.com/cursor/plugins.git",
@@ -217,7 +217,7 @@
       "59db609eb1e18aaf59b63284d0e52255aff0c63c"
     ],
     "license": "MIT, kept in skills/implement/LICENSE-pstack and skills/implement/LICENSE-mattpocock",
-    "note": "The pstack Feature playbook supplies task ownership and delegation. Matt supplies TDD and implementation checks. Multi-phase work reuses the existing execution store so switching owners or workflows does not create competing state. Keeps the text that upstream 70b2dc8 and b0b9c7a cut. Astack trimmed its own copies instead, keeping every rule."
+    "note": "The pstack Feature playbook supplies task ownership and delegation. Matt supplies TDD and implementation checks. Multi-phase work reuses the existing execution store so switching owners or workflows does not create competing state. Replaces the upstream cuts in 70b2dc8 and b0b9c7a with astack's own trim, which keeps every rule."
   },
   "tdd": {
     "repository": [
@@ -233,7 +233,7 @@
       "59db609eb1e18aaf59b63284d0e52255aff0c63c"
     ],
     "license": "MIT, kept in skills/tdd/LICENSE-pstack and skills/tdd/LICENSE-mattpocock",
-    "note": "Matt supplies the main skill and test-quality references. Pstack supplies BUG-FIX.md. Existing agreed test boundaries carry forward. Refactoring after green is allowed when it simplifies code without changing behavior. Keeps the text that upstream b0b9c7a and 70b2dc8 cut. Astack trimmed its own copies instead, keeping every rule."
+    "note": "Matt supplies the main skill and test-quality references. Pstack supplies BUG-FIX.md. Existing agreed test boundaries carry forward. Refactoring after green is allowed when it simplifies code without changing behavior. Replaces the upstream cuts in b0b9c7a and 70b2dc8 with astack's own trim, which keeps every rule."
   },
   "to-spec": {
     "repository": "https://github.com/mattpocock/skills.git",
@@ -390,7 +390,7 @@
     "path": "pstack/skills/poteto-mode/playbooks/bug-fix.md",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/bug-fix/LICENSE-pstack",
-    "note": "Reuses diagnosing-bugs and tdd rather than defining a second diagnosis loop. Failing-before evidence is required without mandating a separate failing commit. Delivery stays within the task authorization. Keeps the text that upstream b0b9c7a cut. Astack trimmed its own copies instead, keeping every rule.",
+    "note": "Reuses diagnosing-bugs and tdd rather than defining a second diagnosis loop. Failing-before evidence is required without mandating a separate failing commit. Delivery stays within the task authorization. Replaces the upstream cuts in b0b9c7a with astack's own trim, which keeps every rule.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/bug-fix.md": "skills/bug-fix/SKILL.md"
     }

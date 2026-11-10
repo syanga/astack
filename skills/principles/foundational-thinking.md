@@ -2,6 +2,8 @@
 
 Apply before writing logic, when choosing core types and data structures, sequencing setup and feature work, or deciding what concurrent actors share.
 
+**Structural decisions** protect option value. **Code-level decisions** protect simplicity.
+
 **Data structures first.** Get the data shape right before writing logic. Define core types early, trace every access pattern, and choose structures that match the dominant paths.
 
 At code level, DRY the structure, not every line. Types and data models should converge. Three similar statements still beat a premature abstraction. Prefer explicit over clever. Test behavior and edge cases, not line counts.

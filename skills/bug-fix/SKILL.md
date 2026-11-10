@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 **You own this task. Plan, review, verify.** Delegate investigation and the fix with the available subagent tools. Review the findings and diff yourself. If delegation is unavailable, do the work directly and make the separate review pass explicit.
 
-Tie each fix to runtime evidence. When evidence refutes a hypothesis, remove the experimental changes it motivated while preserving unrelated work. Ship the smallest change the evidence justifies.
+Be scientific. Tie each fix to runtime evidence. When evidence refutes a hypothesis, remove the experimental changes it motivated while preserving unrelated work. Ship the smallest change the evidence justifies.
 
 1. Reproduce the user's failure yourself through the affected UI, CLI, or API in an authorized environment. Use [diagnosing-bugs](../diagnosing-bugs/SKILL.md) phases 1 through 4 for the feedback loop, minimization, and cause. This workflow owns implementation and delivery below. Use the available control tools. If access prevents reproduction, state what you tried and the specific missing access or artifact. Continue useful investigation with unverified hypotheses clearly labeled.
 2. Narrow the cause with the diagnosis loop. Use [how](../how/SKILL.md) for the affected subsystem and [why](../why/SKILL.md) for relevant regression history. Run independent code and history inquiries in parallel when possible. Each experiment should distinguish the remaining hypotheses. Confirm the mechanism with runtime evidence before designing a fix.

@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Technical writing
 
-The goal is writing a tired engineer understands on the first read. Apply all four layers.
+The goal is writing a tired engineer understands on the first read. Four layers get you there, one question each: what kind of document is this, how do sentences address the reader, how much does each sentence carry, and can any sentence be read two ways. Apply all four.
 
 Three rules sit above the layers:
 
@@ -20,7 +20,7 @@ Don't invent jargon. Use the words a developer would say out loud: "move", "dele
 
 ## Vary the rhythm
 
-A doc can obey all of the layers and still read machine-written: every sentence clipped short, no view anywhere, nothing specific.
+The layers decide what a document says and how much each sentence carries. A doc can obey all of them and still read machine-written: every sentence clipped short, no view anywhere, nothing specific.
 
 - Mix sentence lengths on purpose. Short sentences land a point. Longer ones carry a fact with its condition or consequence.
 - One thought per sentence does not mean one length per sentence. Split the sentence that carries two thoughts. Keep the long sentence that carries one.
@@ -91,7 +91,7 @@ Source: asd-ste100.org (Issue 9, 2025), fetched 2026-07-18. The numbered rules a
 - Use periods, not semicolons. Replace an em dash with a new sentence.
 - Make text in parentheses a full grammatical unit or its own sentence. Never form plurals with "(s)".
 - No slashes: write "a, b, or both" instead of "a/b" or "and/or".
-- Call each thing by one name, everywhere. A doc that says "the gate", "the ratchet", and "the budget check" for one thing teaches three things. Don't churn what didn't change.
+- Call each thing by one name, everywhere. A doc that says "the gate", "the ratchet", and "the budget check" for one thing teaches three things. Rewording an unchanged sentence between edits costs the same way. Don't churn what didn't change.
 - Skip idioms, colloquialisms, Latin abbreviations, and metaphors.
 
 Source: Kohl, The Global English Style Guide (SAS Press). Guideline text fetched from the Internet Archive and the SAS sample chapter, 2026-07-18.
