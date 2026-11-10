@@ -51,7 +51,9 @@ Each of these conditions is a gate:
 
 On the orchestrate route, park it through [orchestrate's escalation](../orchestrate/SKILL.md#escalation). Otherwise write its [decision request](../orchestrate/SKILL.md#messages-to-the-user) to the store's `open-decisions.md`, and record the answer there when it arrives. Continue unblocked work. When nothing can move, ask with the question tool if one exists, otherwise end the turn with the request. Send a push notification if the harness has one.
 
-Before ending a turn, check that a running worker, watcher, or timer will wake you, or that each unfinished unit waits on a gate. If neither holds, dispatch ready work first, including the review that [Merge](#5-merge) step 1 requires.
+Before ending a turn, check that a running worker, watcher, timer, or promised message from another thread will wake you, or that each unfinished unit waits on a gate. If neither holds, dispatch ready work first, including the review that [Merge](#5-merge) step 1 requires.
+
+In T3 Code, a PR watch ends without waking you when its PR merges, and it skips comments and reviews from your own GitHub account. To wait on another thread's merge or review, send that thread your thread ID. Ask it to message you with `t3_thread_send` after it merges or reviews the PR. T3 Code forbids polling loops for PR waits, so that message is the only wake for that merge or review.
 
 ## 5. Merge
 

@@ -35,9 +35,10 @@ costs one blocked stop per turn end:
 - A gate holds a `needs-verify` or `merge-ready` unit, which cannot be set
   `blocked`.
 - A `blocked` unit waits on something without an open gate.
-- A PR watch or a T3 Code delegate runs, because Claude Code does not report work
-  outside the session. The coordinator avoids the delegate case by setting the
-  unit `running`.
+- The session waits on a PR watch, a T3 Code delegate, or a message another
+  thread promised, because Claude Code does not report work outside the
+  session. The coordinator avoids the delegate case by setting the unit
+  `running`.
 - A program under "no merge" has finished.
 
 Gates do not name their units. So while any gate is open, every `blocked` unit

@@ -134,7 +134,10 @@ def block_message(store: Path, unfinished: list[Unit], gates: list[str]) -> str:
         '`orch unit set <unit> --state running` for each unit you start. Do the same for a unit whose worker runs '
         'outside this session. Park each decision you need from the user with `orch gate park`. Set a pending unit '
         'that waits on that decision blocked. If the user asked to pause, record it with '
-        '`orch standing add "Dispatch paused: <reason>"`. If a PR watch will wake you, end the turn.'
+        '`orch standing add "Dispatch paused: <reason>"`. A T3 Code PR watch ends without waking you when its PR '
+        "merges, and it skips comments and reviews from your own GitHub account. To wait on another thread's merge "
+        'or review, send that thread your thread ID and ask it to message you with `t3_thread_send`. If a PR watch '
+        'or a promised message will wake you, end the turn.'
     ).format(store=store, units=listed, gates=', '.join(gates) or 'none')
 
 
