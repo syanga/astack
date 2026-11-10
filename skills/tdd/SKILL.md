@@ -21,7 +21,7 @@ Read [Test Behavior, Not Implementation](../principles/test-behavior-not-impleme
 
 A **seam** is the public boundary you test at: the interface where you observe behavior without reaching inside. Tests live at seams, never against internals.
 
-**Reuse agreed seams.** Use the testing boundaries already established in the spec or conversation. Otherwise name the existing public interface that reaches the behavior and state your choice. Confirm with the user only when unresolved requirements or a new boundary would change the design. Testing effort belongs on the critical paths and complex logic.
+**Reuse agreed seams.** Use the testing boundaries already established in the spec or conversation. Otherwise name the existing public interface that reaches the behavior and state your choice. Give each proposed seam a one-line note on what it catches and what it misses. Confirm with the user only when unresolved requirements or a new boundary would change the design. Testing effort belongs on the critical paths and complex logic.
 
 When the shape of that interface is itself in question (how deep the module is, where the seam belongs, what the interface should expose), read [Deep Modules](../principles/deep-modules.md) for the vocabulary. It is the shared source of the module, interface, depth, seam, adapter, leverage and locality terms, and it is a reference to consult, not a session to run.
 

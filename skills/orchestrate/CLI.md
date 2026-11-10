@@ -49,7 +49,8 @@ bun "$ORCH_CLI" --json ledger check 42 "$verified_sha"
 bun "$ORCH_CLI" status
 ```
 
-Set `verified_sha` from the artifact actually tested. `--evidence` takes an
+Set `verified_sha` from the artifact actually tested, or for a carry-forward
+receipt, the new SHA its saved diff reaches. `--evidence` takes an
 http(s) URL or a file path, absolute or relative to the store; `ledger record`
 exits 1 and writes nothing when the path does not exist. Follow
 [STATE.md's verification procedure](STATE.md#accept-verification) when recording
