@@ -52,7 +52,7 @@ Write the result file as JSON:
 Fill in the fields as follows:
 
 - Set `base` to `git merge-base <tested commit> origin/<base branch>`.
-- Name each suite by the path or package its command runs, so later runs match it.
+- Name each suite by the path or package its command runs, so later runs match it. GitHub compares status contexts without case, so spell each suite the same way in every run, and keep suite names in one result different by more than case.
 - State the scope and why, such as `packages/api` and its dependents because no shared configuration changed.
 - Mark a covering suite that could not run as `incomplete`. It is a coverage limit, not a pass.
 - Omit `limits` when there are none.

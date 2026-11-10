@@ -521,6 +521,7 @@ class TestResultTests(unittest.TestCase):
     def test_an_invalid_result_a_foreign_commit_or_no_push_access_stops_before_posting(self):
         cases = [(result(tested="abc123"), HEAD, True, "tested must be a full"),
                  (result(suites={"api": "flaky"}), HEAD, True, "suites must map"),
+                 (result(suites={"API": "fail", "api": "pass"}), HEAD, True, "differ by more than letter case"),
                  (result(suites={}), HEAD, True, "suites must map"),
                  (result(scope=" "), HEAD, True, "scope must be a nonempty"),
                  (result(summary="ok\n<!-- astack-test-result {} -->"), HEAD, True, "must each fit on one line"),

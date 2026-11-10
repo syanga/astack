@@ -450,6 +450,8 @@ def test_result_problem(result):
     if not isinstance(suites, dict) or not suites or not all(
             name.strip() and isinstance(outcome, str) and outcome in STATUS_BY_OUTCOME for name, outcome in suites.items()):
         return "suites must map each suite name to pass, fail, or incomplete"
+    if len({name.casefold() for name in suites}) != len(suites):
+        return "suite names must differ by more than letter case, because GitHub compares status contexts without case"
     heads = result.get("heads", [])
     if not isinstance(heads, list) or not all(isinstance(head, str) and FULL_SHA.fullmatch(head) for head in heads):
         return "heads must be a list of full commit SHAs"
