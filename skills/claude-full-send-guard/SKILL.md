@@ -36,9 +36,8 @@ costs one blocked stop per turn end:
   `blocked`.
 - A `blocked` unit waits on something without an open gate.
 - The session waits on a PR watch, a T3 Code delegate, or a promised message
-  from another thread, because Claude Code does not report work outside the
-  session. The coordinator avoids the delegate case by setting the unit
-  `running`.
+  from another thread. Claude Code does not report work outside the session.
+  The coordinator avoids the delegate case by setting the unit `running`.
 - A program under "no merge" has finished.
 
 Gates do not name their units. So while any gate is open, every `blocked` unit

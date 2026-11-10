@@ -137,8 +137,8 @@ def block_message(store: Path, unfinished: list[Unit], gates: list[str]) -> str:
         '`orch standing add "Dispatch paused: <reason>"`. In T3 Code, a PR watch ends without waking you when its '
         'PR merges. It also skips comments and reviews from your GitHub account, which your other threads share. '
         "To wait on another thread's merge or review, send that thread your thread ID. Ask it to message you with "
-        '`t3_thread_send` after it merges or reviews the PR. T3 Code forbids polling loops for PR waits, so that '
-        'promised message is the only wake for that merge or review. If a PR watch or a promised message from '
+        '`t3_thread_send` after it merges or reviews the PR. T3 Code forbids polling loops for PR waits, so only '
+        'that promised message wakes you for that merge or review. If a PR watch or a promised message from '
         'another thread will wake you, end the turn.'
     ).format(store=store, units=listed, gates=', '.join(gates) or 'none')
 
