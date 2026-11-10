@@ -1,7 +1,6 @@
 ---
 name: create-verification-skill
-description: "Generate or maintain a project-local verification skill that drives your app the way a user does. Use when a project needs a scripted way to prove UI, CLI, or service behavior."
-disable-model-invocation: true
+description: Project verification skills that drive the app the way a user does. Use when asked to create or maintain one.
 ---
 
 # Create a verification skill

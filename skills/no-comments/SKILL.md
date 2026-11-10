@@ -1,10 +1,11 @@
 ---
 name: no-comments
-description: Delete comments from changed code and fix what needed them.
-disable-model-invocation: true
+description: Code comments judged against a keep list. Use when adding or changing code comments, or when asked to remove comments.
 ---
 
 # Delete the comments
+
+During other work, check only the comment text you write against the [keep list](#keep-list). Leave every existing comment the request does not name as it is, even one this skill would delete or your new comment makes redundant. Mention such a comment in your reply instead. When the user asks to remove comments, or a workflow tells you to apply this skill, run the whole procedure below.
 
 Delete every comment in scope that is not on the keep list. Flag the code that needed a comment to be understood, then fix what the flags name. A flag is one line in the report naming a symbol that needed a comment. Every flag names code inside the scope and tells the truth.
 

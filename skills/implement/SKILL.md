@@ -30,8 +30,9 @@ For a requested pause or transfer to another session, read [handoff](../handoff/
 6. Rebase into small, ordered commits. Stack follow-ups.
    Use the [sequence-verifiable-units](../principles/sequence-verifiable-units.md) principle skill, building, verifying, and committing each small unit before the next.
 7. Commit the work and use [open-pr](../open-pr/SKILL.md) for PR delivery within the task's authorized scope. Merging and deployment are separate actions. When that scope stops short of a PR, such as a request to stop at local edits, do this instead of open-pr:
-   1. Run the covering suites picked under [test results](../open-pr/test-results.md#pick-the-suites).
-   2. Run [review-pr](../review-pr/SKILL.md) in fix-and-review mode. For explicitly requested adversarial hardening, run [harden-pr](../harden-pr/SKILL.md) instead.
+   1. Apply [no-comments](../no-comments/SKILL.md) to the code diff.
+   2. Run the covering suites picked under [test results](../open-pr/test-results.md#pick-the-suites).
+   3. Run [review-pr](../review-pr/SKILL.md) in fix-and-review mode. For explicitly requested adversarial hardening, run [harden-pr](../harden-pr/SKILL.md) instead.
 
 Code-coupled work (one feature, one migration) goes to a single owner with the checkpoint inline. That owner fans out internally after the blocking phase. Parent-level fan-out is for slices that produce independent artifacts (audits, cross-subsystem investigations, competing experiments). Rewrite the checkpoint at phase boundaries. Spawn a fresh owner rather than chaining interrupts.
 

@@ -1,7 +1,6 @@
 ---
 name: grilling
-description: Stress-test a plan, decision, or idea through rounds of questions. Use before work that has open decisions the user owns.
-disable-model-invocation: true
+description: Grill the user relentlessly about a plan, decision, or idea. Use when the user asks to be grilled or to stress-test their thinking.
 ---
 
 Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.

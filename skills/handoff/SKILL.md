@@ -1,8 +1,7 @@
 ---
 name: handoff
-description: Prepare a handoff for another session, or resume from an existing handoff.
+description: Session handoffs. Use when asked for a handoff, to pause work for a later session, or to resume from an existing handoff.
 argument-hint: "What will the next session be used for?"
-disable-model-invocation: true
 ---
 
 Write a handoff document summarising the current conversation so a fresh agent can continue the work. If the request includes pausing work, first read [pause safely](PAUSE.md). To pick up an existing handoff, follow [session pickup](RESUME.md) instead.

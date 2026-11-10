@@ -1,7 +1,6 @@
 ---
 name: run-job
-description: Run a command in its own process group and stop the whole group at a deadline, on a signal, or when the command exits.
-disable-model-invocation: true
+description: Run bounded background jobs. Use before any Bash run_in_background command, or for background commands in a Codex subagent without a completion queue.
 ---
 
 # Run a bounded job

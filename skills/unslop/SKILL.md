@@ -1,7 +1,6 @@
 ---
 name: unslop
-description: Cut AI tells from any writing.
-disable-model-invocation: true
+description: Cut AI tells from text. Use when writing or editing prose that technical-writing does not cover, such as a post, an email, or a PR comment, or when asked to make text sound less AI-written.
 ---
 
 # Unslop

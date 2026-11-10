@@ -1,7 +1,6 @@
 ---
 name: technical-writing
-description: Technical writing standard for docs, PR bodies, and commit messages.
-disable-model-invocation: true
+description: Technical writing standard. Use when writing, editing, or reviewing docs, PR descriptions, or commit messages.
 ---
 
 # Technical writing
