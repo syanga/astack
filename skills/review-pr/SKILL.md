@@ -103,7 +103,7 @@ Run Correctness once, on the first candidate where the applicable Standards and 
 
 Converge when the final changes have no unresolved verified problems, required checks pass, and applicable reviews are complete. A native fallback completes the Correctness review for convergence. Optional suggestions do not block completion. If progress stalls or a decision is needed, report the remaining blockers.
 
-Each review-pr invocation is one run. All reviews of one candidate, from every axis, make one pass. A fix-and-review run's pass limit is three passes, or the number of passes the user names. When the last allowed pass does not converge, the run stops at its pass limit without more repairs. A required check that fails on the head pushed after that pass also leaves that pass unconverged. A request to loop or review until clean asks for fix-and-review and starts one run with this pass limit.
+Each review-pr invocation is one run. All reviews of one candidate, from every axis, make one pass. A fix-and-review run's pass limit is five passes, or the number of passes the user names. When the last allowed pass does not converge, the run stops at its pass limit without more repairs. A required check that fails on the head pushed after that pass also leaves that pass unconverged. A request to loop or review until clean asks for fix-and-review and starts one run with this pass limit.
 
 In fix-and-review mode with existing PRs, [finalize the PRs](../harden-pr/pr-work.md#finalize-reviewed-prs), including committing and pushing verified repairs. A fix made while finalizing, such as a CI fix, is a later repair. Handle it as step 5 handles every later repair, before step 6. Without a PR, return the reviewed changes to the caller's delivery workflow.
 
