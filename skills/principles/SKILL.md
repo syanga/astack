@@ -35,6 +35,7 @@ Before applying a principle, read its file in full. In the reply, name the decis
 ## Verifying the work
 
 - [`prove-it-works.md`](prove-it-works.md). Before you call the work done.
+- [`explain-the-number.md`](explain-the-number.md). Before you measure, and before you trust, report, or act on a measured number.
 - [`fix-root-causes.md`](fix-root-causes.md). Debugging.
 - [`sequence-verifiable-units.md`](sequence-verifiable-units.md). Multi-step work, and stacking commits and PRs.
 - [`test-behavior-not-implementation.md`](test-behavior-not-implementation.md). Writing, changing, or keeping a test.
