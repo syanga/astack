@@ -10,7 +10,7 @@ Actively build and sharpen the project's domain model as you design. This is the
 
 ## File structure
 
-Read [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md) to locate the project's glossary and follow its format.
+Read [GLOSSARY-FORMAT.md](./GLOSSARY-FORMAT.md) to locate the project's glossary and follow its format.
 
 Create files lazily: only when you have something to write. Create a glossary when the first term is resolved, and an ADR directory when the first ADR is needed.
 
