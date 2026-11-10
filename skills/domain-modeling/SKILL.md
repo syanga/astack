@@ -1,7 +1,6 @@
 ---
 name: domain-modeling
-description: Clarify domain terminology and maintain project glossaries and architecture decision records.
-disable-model-invocation: true
+description: Build and sharpen a project's domain model. Use when defining or challenging domain terms, writing or editing the domain glossary (GLOSSARY.md by default), or recording or editing an ADR.
 ---
 
 # Domain modeling

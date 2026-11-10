@@ -1,7 +1,6 @@
 ---
 name: wizard
-description: Generate an interactive Bash wizard for a manual procedure.
-disable-model-invocation: true
+description: Generate an interactive Bash wizard that walks a human through steps only they can perform. Use when provisioning, credential setup, or a one-off migration needs such steps.
 ---
 
 # Wizard

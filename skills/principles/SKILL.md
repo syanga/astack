@@ -1,7 +1,6 @@
 ---
 name: principles
-description: Engineering principles index.
-disable-model-invocation: true
+description: Engineering principles index. Use when writing, changing, or reviewing tests, or when the user cites an engineering principle or asks which one applies.
 ---
 
 # Principles
