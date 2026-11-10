@@ -4,7 +4,7 @@ Invoking review-pr or harden-pr authorizes publication on an existing PR unless 
 
 At the end of each invocation, post one informational GitHub review with event `COMMENT`, even when no findings remain. Combine internal repair passes in that record. A later invocation adds a new record.
 
-Include the reviewed commit, the review's fixed point, the outcome, repairs, remaining findings, verification, and completed and missing coverage in the body. Preserve review-pr's separate axes. Keep full transcripts in local review records. Also publish [test results](../open-pr/test-results.md) in the PR description.
+Include the reviewed commit, the review's fixed point, the outcome, repairs, remaining findings, verification, and completed and missing coverage in the body. Preserve review-pr's separate axes. Keep full transcripts in local review records. Also publish test results under [Publish the result](../open-pr/test-results.md#publish-the-result).
 
 If a run stops early after substantive review, mark its record incomplete. If no substantive review occurred, report the reason only in the conversation. Missing coverage is not a clean result.
 
