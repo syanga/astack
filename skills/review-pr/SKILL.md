@@ -5,7 +5,7 @@ description: Review changes for standards, requirements, and correctness. Use fo
 
 Three-axis review of the requested changes against a fixed point:
 
-- **Standards**: does the code conform to this repo's documented coding standards?
+- **Standards**: does the code conform to this repo's documented coding standards, and does a visual change match the shipped design?
 - **Spec**: does the code faithfully implement the originating issue / spec?
 - **Correctness**: does the code hold up under edge cases, failure paths, and hostile input?
 
@@ -28,6 +28,8 @@ Review the requested changes against the fixed point. Give every reviewer the sa
 Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, before dispatching reviewers.
 
 Save the reviewed source and diff in a temporary review directory, with the base SHA, the candidate identity (commit SHA, or HEAD plus the working-tree diff), and the capture command, for the Correctness reviewer. Refresh the snapshot before each Correctness review.
+
+[Implement](../implement/SKILL.md) step 5 defines a visual change. For a visual change, save that step's head and shipped-page screenshots in the review directory. Take them yourself when they are missing. Retake them after a repair that changes how the page renders.
 
 ### 2. Identify the spec source
 
@@ -76,6 +78,7 @@ Every reviewer reports findings without changing code.
 - The list of standards-source files you found in step 3, **plus the smell baseline from step 3** pasted in full (the sub-agent has no other access to it).
 - For tests relevant to the change, include [test-behavior-not-implementation.md](../principles/test-behavior-not-implementation.md) in full and instruct the reviewer to apply it.
 - The brief: "Report, per file/hunk where relevant, (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls: documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Under 400 words."
+- For a visual change, the screenshot paths from step 1 and the recorded prototype picks, with: "Compare the head screenshots with the shipped-page screenshots. Report each departure in color, typography, spacing, or components. Report each element the shipped page lacks that no recorded pick covers. Report each rendering defect, such as overflow, unreadable text, or a missing placeholder. Cite the screenshot."
 
 **Spec sub-agent prompt** should include:
 
@@ -109,7 +112,7 @@ In fix-and-review mode with existing PRs, [finalize the PRs](../harden-pr/pr-wor
 
 Verify Correctness findings against the evidence requirements before presenting or posting them. Present each report under its axis heading (`## Standards`, `## Spec`, `## Correctness`), verbatim or lightly cleaned. Under `## Correctness`, name the reviewer (outside provider, `native fallback`, or not run with the reason), each finding's disposition, and any repair-verification result. When Correctness never ran before the pass limit, the reason is the condition no candidate met: Standards, Spec, or required checks. Do **not** merge or rerank findings, because the axes are deliberately separate (see _Why three axes_).
 
-End the axis reports with a one-line summary: remaining findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent. When the run stopped at its pass limit, begin that line with `Not converged after <n> review-pr passes. Do not merge.`
+End the axis reports with a one-line summary: remaining findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent. When the run stopped at its pass limit, begin that line with `Not converged after <n> review-pr passes. Do not merge.` For a visual change without screenshots, add `Visual: not reviewed` and the reason.
 
 After a run stops at its pass limit, reassess the change's direction. Check each of these conditions:
 
