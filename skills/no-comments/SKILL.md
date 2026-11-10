@@ -14,13 +14,14 @@ Use the files or diff the caller names. With no caller scope, use the current di
 
 ## Keep list
 
-Only these comments survive. Each of the first four survives only with proof that it concerns something outside this repository or a contract this repository publishes. The fifth needs the rule lookup it describes:
+Only these comments survive. Each of the first four survives only with proof that it concerns something outside this repository or a contract this repository publishes. The last two need the lookups they describe:
 
 - A legal or license header.
 - Behaviour forced by an external dependency, platform, vendor, or protocol we cannot change. Behaviour a reader would not expect from the names and types in our own code does not qualify. Delete that comment and flag the symbol.
 - A doc comment that defines a public API contract.
 - An issue or RFC link that explains a constraint the code cannot express.
-- `// prettier-ignore`, a lint or type suppression whose rule is faulty, pedantic, or style-only, and a suppression that the repository's agent rule table records as an approved exception that has not expired. Look up the rule for every `eslint-disable`, `@ts-ignore`, `@ts-expect-error`, and similar suppression in scope, including the ones you did not write. If the rule catches real bugs or protects correctness or safety, delete the suppression and flag the symbol.
+- `// prettier-ignore`, and a lint or type suppression whose rule is faulty, pedantic, or style-only. Look up the rule for every `eslint-disable`, `@ts-ignore`, `@ts-expect-error`, and similar suppression in scope, including the ones you did not write. If the rule catches real bugs or protects correctness or safety, delete the suppression and flag the symbol, unless the next entry keeps it.
+- A suppression that the repository's agent rule table records as an approved exception for that file and rule, with an approver and an expiry date that has not passed. A row without an approver or an expiry date does not keep it.
 
 When unsure whether a keep-list entry applies, delete the comment.
 

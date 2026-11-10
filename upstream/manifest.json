@@ -52,7 +52,7 @@
     ],
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/no-comments/LICENSE",
-    "note": "The Comment Sicko subagent is gone; its keep list and flag rules are the skill body, applied by the agent itself. The /how, /why, and /architect calls became read-the-history and sketch-the-shape instructions; principle references point at ../principles files. Keeps a suppression that the repository's agent rule table records as an unexpired approved exception, so no-comments does not undo an exception that correct recorded."
+    "note": "The Comment Sicko subagent is gone; its keep list and flag rules are the skill body, applied by the agent itself. The /how, /why, and /architect calls became read-the-history and sketch-the-shape instructions; principle references point at ../principles files. Keeps a suppression that the repository's agent rule table approves for that file and rule, with an approver and an unexpired date, so no-comments does not undo an exception that correct recorded."
   },
   "harden-pr": {
     "repository": [
