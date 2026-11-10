@@ -42,7 +42,7 @@
     "path": "pstack/skills/technical-writing",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/technical-writing/LICENSE",
-    "note": "Verbatim as of c1c0a32 apart from a shorter description, unslop pointers as sibling links, a rule 26 citation without the line against editing unslop, \"swarm logs\" shortened to \"logs\", and the tab-indentation rule removed. Replaces the upstream cuts in 00b14f1, 23e4138, and 70b2dc8 with astack's own trim, which keeps every rule."
+    "note": "Verbatim as of c1c0a32 apart from a shorter description, unslop pointers as sibling links, a rule 26 citation without the line against editing unslop, \"swarm logs\" shortened to \"logs\", the tab-indentation rule removed, and astack's own trim, which replaces the upstream cuts in 00b14f1, 23e4138, and 70b2dc8 and keeps every rule."
   },
   "no-comments": {
     "repository": "https://github.com/cursor/plugins.git",
