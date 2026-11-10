@@ -30,7 +30,7 @@
   "review-pr": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/engineering/code-review",
-    "commit": "59db609eb1e18aaf59b63284d0e52255aff0c63c",
+    "commit": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
     "license": "MIT, kept in skills/review-pr/LICENSE-mattpocock",
     "note": "Preserves the independent Standards and Spec axes and Fowler smell baseline. Parent-owned repairs address implementation handoffs that previously stopped after reporting findings. An outside-provider Correctness axis gives delegated implementations cross-model bug review without full hardening. Posting the review record is its own step because agents often skipped a closing pointer to posting.md. The pass limit exists because a fix-and-review run that keeps finding problems may need a different direction. The Standards axis also compares screenshots of a visual change with the shipped page, because reviewers that read only code passed off-brand pages.",
     "files": {
@@ -77,7 +77,7 @@
   "grilling": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/productivity/grilling",
-    "commit": "59db609eb1e18aaf59b63284d0e52255aff0c63c",
+    "commit": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
     "license": "MIT, kept in skills/grilling/LICENSE-mattpocock",
     "note": "Preserves the design-tree interview, frontier rounds, recommendations, and shared-understanding checkpoint. Removes decorative emoji from the question template. Makes invocation explicit with matching Codex policy. Adds a trigger to the description so astack-help can recommend grilling. Allows direct factual lookups and delegates independent exploration that can run alongside the interview.",
     "files": {
@@ -88,7 +88,7 @@
   "improve-codebase-architecture": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/engineering/improve-codebase-architecture",
-    "commit": "59db609eb1e18aaf59b63284d0e52255aff0c63c",
+    "commit": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
     "license": "MIT, kept in skills/improve-codebase-architecture/LICENSE-mattpocock",
     "note": "Preserves exploration, visual candidate reports, user selection, grilling, domain-model updates, and optional interface alternatives. Uses local skill links, tolerates absent project documentation, and adds targeted astack principle references. Reports use t3-preview, inline assets, dark styling, and plain candidate sections. Reads the Deep Modules principle and permits boundary terminology. DEEPENING.md and DESIGN-IT-TWICE.md are tracked under codebase-design, their upstream source. Consolidates report instructions in HTML-REPORT.md and glossary/ADR actions in domain-modeling. Reads principles at the relevant decisions and applies the deletion test from Deep Modules instead of restating it. Passes identified glossary and ADR locations to domain-modeling. The report links to DEEPENING.md for dependency classification.",
     "files": {
@@ -113,7 +113,7 @@
   "codebase-design": {
     "repository": "https://github.com/mattpocock/skills.git",
     "path": "skills/engineering/codebase-design",
-    "commit": "59db609eb1e18aaf59b63284d0e52255aff0c63c",
+    "commit": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
     "license": "MIT, copied from repository-root LICENSE to skills/principles/LICENSE-mattpocock and skills/improve-codebase-architecture/LICENSE-mattpocock",
     "files": {
       "SKILL.md": "skills/principles/deep-modules.md",
@@ -327,7 +327,7 @@
       "skills/engineering/wayfinder",
       "skills/engineering/setup-matt-pocock-skills/issue-tracker-local.md"
     ],
-    "commit": "59db609eb1e18aaf59b63284d0e52255aff0c63c",
+    "commit": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
     "license": "MIT, kept in skills/wayfinder/LICENSE-mattpocock",
     "note": "TRACKER.md retains only wayfinding operations from Matt's local tracker. A coordinator serializes local claims because Markdown lacks atomic tracker operations. Cancellation does not satisfy dependents, and invalidated decisions retain their history.",
     "files": {
