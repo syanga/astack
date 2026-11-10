@@ -75,9 +75,10 @@ suites, decide which results carry forward with open-pr's
 [Reuse a published result](../open-pr/test-results.md#reuse-a-published-result).
 Record a carry-forward as a verifier receipt only when a verifier checked the
 diff and the earlier receipt was a verifier receipt. Otherwise record it as a
-worker receipt. A trunk-side failure in a plan's Regression lane against trunk,
-reproduced by a saved run at a named trunk SHA, is recorded against trunk in the
-receipt and does not fail the verdict.
+worker receipt. A failure of trunk behavior in a plan's Regression lane against
+trunk, outside what the PR changes or claims to fix and reproduced by a saved run
+at a named trunk SHA, is recorded against trunk in the receipt and does not fail
+the verdict.
 
 Verdicts are `live-ui-verified`, `unit-test-verified`, `type-check-only`,
 `verifier-blocked`, and `verifier-failed`. Inspect the evidence and compare its SHA,
