@@ -263,7 +263,7 @@
     "path": "skills/engineering/diagnosing-bugs",
     "commit": "59db609eb1e18aaf59b63284d0e52255aff0c63c",
     "license": "MIT, kept in skills/diagnosing-bugs/LICENSE-mattpocock",
-    "note": "Captured-artifact analysis bypasses the runnable-reproduction gate, but does not verify a fix. Early code reading can help build a loop. Theories remain provisional. Diagnosis-only completion requires findings and probe cleanup, not a code fix. Pstack references are recorded under debugging-forensics. The description leaves performance regressions to perf-issue and fixes to bug-fix, so each request has one entry."
+    "note": "Captured-artifact analysis bypasses the runnable-reproduction gate, but does not verify a fix. Early code reading can help build a loop. Theories remain provisional. Diagnosis-only completion requires findings and probe cleanup, not a code fix. Pstack references are recorded under debugging-forensics. The description leaves performance regressions to perf-issue and fixes to bug-fix."
   },
   "implementation-slicing": {
     "repository": "https://github.com/mattpocock/skills.git",
@@ -390,7 +390,7 @@
     "path": "pstack/skills/poteto-mode/playbooks/bug-fix.md",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/bug-fix/LICENSE-pstack",
-    "note": "Reuses diagnosing-bugs and tdd rather than defining a second diagnosis loop. Failing-before evidence is required without mandating a separate failing commit. Delivery stays within the task authorization. Keeps the text that upstream b0b9c7a cut. Model-invoked, because a request to fix a bug asks for the full sequence. A regression's history comes from its commit and PR through `gh`, with why only when the PR leaves the intent unclear, because why starts subagents to read what one PR shows.",
+    "note": "Reuses diagnosing-bugs and tdd rather than defining a second diagnosis loop. Failing-before evidence is required without mandating a separate failing commit. Delivery stays within the task authorization. Keeps the text that upstream b0b9c7a cut. Model-invoked, because a request to fix a bug asks for the full sequence. A regression's history comes from its commit and PR through `gh`, with why only when there is no PR or it leaves the intent unclear, because why starts subagents to read what one PR shows.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/bug-fix.md": "skills/bug-fix/SKILL.md"
     }
