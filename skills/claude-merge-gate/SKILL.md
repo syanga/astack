@@ -30,7 +30,7 @@ The hook denies every other Bash command that mentions a PR merge: `pr merge`
 `mergePullRequest`, `enablePullRequestAutoMerge`, or `enqueuePullRequest`. That
 includes chains, pipes, redirects, `sh -c`, heredocs, and quoted text such as a
 commit message that mentions `gh pr merge`. Its deny message asks for the lone
-form.
+form and says how to write or search for text that mentions a PR merge.
 
 Once the hook checks a merge, it fails closed. It denies the merge when `gh`
 fails or times out. If the event is malformed, or the script

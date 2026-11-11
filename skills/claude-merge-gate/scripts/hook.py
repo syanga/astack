@@ -27,8 +27,8 @@ GH_TIMEOUT_SECONDS = 25
 NOT_ALONE = ('This command mentions a PR merge in a form the merge gate cannot check. Run the merge alone on one '
              'line, with literal values, separate flags, and no quotes or shell syntax: gh pr merge <number> '
              '[--repo <owner>/<repo>] --match-head-commit <sha> [flags]. To write prose that mentions a PR merge, '
-             'such as a commit message or PR body, put it in a file with the Write tool and pass the file with -F '
-             'or --body-file. To search for it, use a pattern that breaks it up, such as pr.merge.')
+             'such as a commit message or PR body, put it in a file with the Write tool. Pass the file with -F or '
+             '--body-file. To search for a PR merge, put . in place of a letter of merge, as in pr merg.')
 UNSIGNED = ('No signed review exists on {url} at head {head}. Review this head, then post a signed review with '
             'python3 {script} review, following {posting}. '
             'If the user wants this merge without a review, ask them to merge it themselves.')
