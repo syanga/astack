@@ -43,12 +43,14 @@ class HookTests(unittest.TestCase):
         return subprocess.run(['sh', '-c', launcher], input=stdin, capture_output=True, text=True,
                               env={**self.env, **env}, timeout=15)
 
-    def decision(self, command, launcher=LAUNCHER, timeout=None, **env):
+    def output(self, command, launcher=LAUNCHER, timeout=None, **env):
         completed = self.hook(background(command, timeout), launcher, **env)
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        if not completed.stdout:
-            return 'allow'
-        return json.loads(completed.stdout)['hookSpecificOutput']['permissionDecision']
+        return json.loads(completed.stdout)['hookSpecificOutput'] if completed.stdout else None
+
+    def decision(self, command, launcher=LAUNCHER, timeout=None, **env):
+        output = self.output(command, launcher, timeout, **env)
+        return 'allow' if output is None else output['permissionDecision']
 
     def test_allows_only_literal_commands_that_run_the_installed_core(self):
         core = self.install(self.home / '.claude')
@@ -139,13 +141,15 @@ class HookTests(unittest.TestCase):
 
     def test_deadline_deny_names_the_timeout_to_send(self):
         core = self.install(self.home / '.claude')
-        reasons = {}
-        for seconds in (5400, 7200):
-            completed = self.hook(background('python3 {} --timeout {} -- make test'.format(core, seconds)))
-            self.assertEqual(completed.returncode, 0, completed.stderr)
-            reasons[seconds] = json.loads(completed.stdout)['hookSpecificOutput']['permissionDecisionReason']
-        self.assertIn('timeout set to 5430000', reasons[5400])
-        self.assertIn('--timeout 7170 or less', reasons[7200])
+        job = 'python3 {} --timeout {} -- make test'
+        self.assertIn('5430000', self.output(job.format(core, 5400))['permissionDecisionReason'])
+        self.assertIn('7170', self.output(job.format(core, 7200))['permissionDecisionReason'])
+
+    def test_reading_the_deadline_leaves_no_bytecode_in_the_installed_skills(self):
+        core = self.install(self.home / '.claude')
+        self.env.pop('PYTHONDONTWRITEBYTECODE', None)
+        self.assertEqual(self.decision('python3 {} --timeout 60 -- make test'.format(core)), 'allow')
+        self.assertEqual(list((self.home / '.claude' / 'skills').rglob('__pycache__')), [])
 
     def test_allowed_commands_run_the_installed_core_in_each_shell(self):
         core = self.install(self.home / '.claude')

@@ -29,9 +29,9 @@ python3 {core} --no-timeout -- COMMAND [ARG...]
 Write each argument as plain text or in single quotes. Put cd, pipes, redirections, and other shell syntax inside sh -c '...', and set variables with env VAR=value.
 For exit codes and watcher rules, read run-job/SKILL.md from the installed skills.'''.format(
     core=shlex.quote(str(CORE)), margin=MARGIN_SECONDS)
-SHORT = '''The Bash tool stops this background command after {timeout} ms, which is not {margin} seconds past run-job's --timeout {seconds:.15g} deadline.
+TIMEOUT_TOO_SHORT = '''The Bash tool stops this background command after {timeout} ms, which is not {margin} seconds past run-job's --timeout {seconds:.15g} deadline.
 Send the same command again with the Bash tool's timeout set to {needed}.'''
-LONG = '''The Bash tool stops a background command after at most {limit} ms, which is not {margin} seconds past run-job's --timeout {seconds:.15g} deadline.
+DEADLINE_TOO_LONG = '''The Bash tool stops a background command after at most {limit} ms, which is not {margin} seconds past run-job's --timeout {seconds:.15g} deadline.
 Use --timeout {longest} or less, and set the Bash tool's timeout to (the --timeout value + {margin}) * 1000.'''
 
 
@@ -68,12 +68,12 @@ def decide(event: dict) -> str | None:
         return None
     needed = math.ceil((seconds + MARGIN_SECONDS) * 1000)
     if needed > TOOL_MAX_MS:
-        return LONG.format(limit=TOOL_MAX_MS, seconds=seconds,
-                           longest=TOOL_MAX_MS // 1000 - MARGIN_SECONDS, margin=MARGIN_SECONDS)
+        return DEADLINE_TOO_LONG.format(limit=TOOL_MAX_MS, seconds=seconds,
+                                        longest=TOOL_MAX_MS // 1000 - MARGIN_SECONDS, margin=MARGIN_SECONDS)
     timeout = tool_input.get('timeout')
     if timeout is None:
         timeout = TOOL_DEFAULT_MS
-    return (SHORT.format(timeout=timeout, margin=MARGIN_SECONDS, seconds=seconds, needed=needed)
+    return (TIMEOUT_TOO_SHORT.format(timeout=timeout, margin=MARGIN_SECONDS, seconds=seconds, needed=needed)
             if timeout < needed else None)
 
 

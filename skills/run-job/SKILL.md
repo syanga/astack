@@ -19,10 +19,6 @@ Run a finite job with a deadline well past its normal duration:
 python3 <skill-directory>/scripts/run_job.py --timeout 1800 -- make test
 ```
 
-In Claude Code, the Bash tool stops a background command at its own `timeout`.
-Set that `timeout` to at least `(the --timeout value + 30) * 1000`, such as
-`1830000` for the command above. The longest deadline that fits is `--timeout 7170`.
-
 Run a long-lived process, such as a dev server, with `--no-timeout`. The helper
 still exits when the process exits or crashes:
 
