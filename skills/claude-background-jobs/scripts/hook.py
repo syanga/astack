@@ -66,10 +66,10 @@ def decide(event: dict) -> str | None:
     seconds = deadline(arguments)
     if seconds is None:
         return None
+    longest = TOOL_MAX_MS // 1000 - MARGIN_SECONDS
+    if seconds > longest:
+        return DEADLINE_TOO_LONG.format(limit=TOOL_MAX_MS, seconds=seconds, longest=longest, margin=MARGIN_SECONDS)
     needed = math.ceil((seconds + MARGIN_SECONDS) * 1000)
-    if needed > TOOL_MAX_MS:
-        return DEADLINE_TOO_LONG.format(limit=TOOL_MAX_MS, seconds=seconds,
-                                        longest=TOOL_MAX_MS // 1000 - MARGIN_SECONDS, margin=MARGIN_SECONDS)
     timeout = tool_input.get('timeout')
     if timeout is None:
         timeout = TOOL_DEFAULT_MS

@@ -125,6 +125,7 @@ class HookTests(unittest.TestCase):
             (3600, 3630000, 'allow'),
             (7171, 7200000, 'deny'),
             (7170, 7200000, 'allow'),
+            (1e308, 7200000, 'deny'),
             (0.5, None, 'allow'),
             (3600.4, 3630399, 'deny'),
             (3600.4, 3630400, 'allow'),
