@@ -16,7 +16,7 @@ group. It stops the whole group:
 Run a finite job with a deadline well past its normal duration:
 
 ```sh
-python3 <skill-directory>/scripts/run_job.py --timeout 1800 -- make test
+python3 <skill-directory>/scripts/run_job.py --timeout 1500 -- make test
 ```
 
 Run a long-lived process, such as a dev server, with `--no-timeout`. The helper
@@ -55,7 +55,7 @@ A watcher waits for one outcome, such as a ready line or a CI result. Give it a
 deadline:
 
 ```sh
-python3 <skill-directory>/scripts/run_job.py --timeout 5400 -- gh pr checks 42 --watch
+python3 <skill-directory>/scripts/run_job.py --timeout 1200 -- gh pr checks 42 --watch
 ```
 
 - Make the watcher exit on every outcome: success, failure, an error from the
