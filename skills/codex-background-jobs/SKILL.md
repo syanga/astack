@@ -102,7 +102,8 @@ message caused execution.
 
 The helper cannot report its own forced termination or a stopped host. A stale
 result does not show whether the helper or the job is still running. When you
-resume with a result whose `notification` is still `pending` or `sending`, run
+resume without the job's notification or final receipt and its result still says
+`running`, run
 `ps -ww -o command= -p <runner_pid>` with escalated permissions. If it no longer
 shows `run.py` with the job's label, no notification will arrive. Read the log and
 report the outcome as unverified. The job may still be running; stop it as in step
