@@ -215,6 +215,7 @@ class MergeGateTests(unittest.TestCase):
             bash('gh pr view 5 --json mergeStateStatus,mergeable'),
             bash('gh pr list --state merged --search "is:merged"'),
             bash('grep -rn "merge gate" skills'),
+            bash('grep -rn "pr.merge" skills'),
             bash('gh pr merge --disable-auto 5'),
             bash('gh pr merge --help'),
             {'hook_event_name': 'PreToolUse', 'cwd': '/tmp', 'tool_name': 'Write',
