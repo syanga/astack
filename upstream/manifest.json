@@ -390,7 +390,7 @@
     "path": "pstack/skills/poteto-mode/playbooks/bug-fix.md",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/bug-fix/LICENSE-pstack",
-    "note": "Reuses diagnosing-bugs and tdd rather than defining a second diagnosis loop. Failing-before evidence is required without mandating a separate failing commit. Delivery stays within the task authorization. Keeps the text that upstream b0b9c7a cut. Model-invoked, because a request to fix a bug asks for the full sequence. Scale the workflow limits how, why, delegation, and architect to bugs that need them, and keeps a delegated run from nesting.",
+    "note": "Reuses diagnosing-bugs and tdd rather than defining a second diagnosis loop. Failing-before evidence is required without mandating a separate failing commit. Delivery stays within the task authorization. Keeps the text that upstream b0b9c7a cut. Model-invoked, because a request to fix a bug asks for the full sequence. A regression's history comes from its commit and PR through `gh`, with why only when the PR leaves the intent unclear, because why starts subagents to read what one PR shows.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/bug-fix.md": "skills/bug-fix/SKILL.md"
     }
