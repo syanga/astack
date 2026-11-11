@@ -43,4 +43,4 @@ Before applying a principle, read its file in full. In the reply, name the decis
 
 - [`guard-the-context-window.md`](guard-the-context-window.md). Large outputs, long files, repeated reads, or plans for parallel work.
 - [`never-block-on-the-human.md`](never-block-on-the-human.md). Deciding whether to ask for permission during an authorized task.
-- [`scale-the-workflow.md`](scale-the-workflow.md). A fixing workflow deciding whether to delegate, run architect, or start its own review.
+- [`scale-the-workflow.md`](scale-the-workflow.md). Delegation, architect, review, and delivery in bug-fix and perf-issue.

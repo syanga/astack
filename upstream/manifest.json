@@ -201,7 +201,7 @@
     "path": "pstack/skills/architect",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/architect/LICENSE-pstack",
-    "note": "Arena owns candidate comparison. Architect retains design criteria and returns to the caller before implementation. UI exploration follows astack static-mock selection."
+    "note": "Arena owns candidate comparison. Architect retains design criteria and returns to the caller before implementation. UI exploration follows astack static-mock selection. Phase A reuses a caller's grounding, because bug-fix and perf-issue read the code before they run architect."
   },
   "implement": {
     "repository": [
@@ -400,7 +400,7 @@
     "path": "pstack/skills/poteto-mode/playbooks/perf-issue.md",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/perf-issue/LICENSE-pstack",
-    "note": "Repeated comparable measurements distinguish improvements from noise. Correctness checks accompany performance measurements. Keeps the eight strategy families that upstream e43c7ee replaced with bare performance mantras, because each family names the signal that earns it an attempt. The families take the mantras' cheapest-first order and stop rule, with Divide and conquer and Redundancy both under \"Do it concurrently\". Model-invoked so that performance work runs through its measurement discipline. Scale the workflow limits how, delegation, and architect to problems that need them, and keeps a delegated run from nesting. A change the user names is built as named, because a model-invoked run can start from a request that already picked the fix.",
+    "note": "Repeated comparable measurements distinguish improvements from noise. Correctness checks accompany performance measurements. Keeps the eight strategy families that upstream e43c7ee replaced with bare performance mantras, because each family names the signal that earns it an attempt. The families take the mantras' cheapest-first order and stop rule, with Divide and conquer and Redundancy both under \"Do it concurrently\". Model-invoked so that performance work runs through its measurement discipline. A change the user names is built as named, because a model-invoked run can start from a request that already picked the fix. A regression is bisected here, because diagnosing-bugs leaves performance regressions to perf-issue.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/perf-issue.md": "skills/perf-issue/SKILL.md"
     }
@@ -440,7 +440,7 @@
     "note": "Minimum attempts apply when requested. Repeated confirmation guards early wins otherwise. Existing logs and handoffs preserve progress without promising automatic wake. Remeasuring a moved base keeps base changes from counting as the run's gains. The accept step applies the checklist's questions 4 and 7 to the harness counts, which upstream states only in the checklist, and skips them when the harness prints no counts, as under hillclimb-council's vote. A harness for a metric other than performance is vetted with Explain the Number, because the benchmark checklist assumes a timing benchmark."
   },
   "benchmark-checklist": {
-    "repository": "https://github.com/cursor/plugins.git",
+    "repository": "https://github.com/cursor/plugins.git Step 1 reuses a caller's grounding, because perf-issue reads the code before it hands off.",
     "path": "pstack/skills/benchmark-checklist/SKILL.md",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/perf-issue/LICENSE-pstack",

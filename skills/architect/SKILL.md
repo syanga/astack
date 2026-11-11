@@ -20,7 +20,7 @@ Open a todolist with one entry per phase before starting.
 
 ## Phase A: Ground the problem
 
-Build a real mental model of every system the new code touches. Run [how](../how/SKILL.md) over the relevant subsystems.
+Build a real mental model of every system the new code touches. Run [how](../how/SKILL.md) over the relevant subsystems, reusing grounding the caller supplies and covering only what it leaves out.
 
 Naming a file isn't grounding. Produce the traced model `how` prescribes. If the design redefines ownership or layering, also run [why](../why/SKILL.md) on the existing shape so the rationale becomes a constraint, not a guess.
 
