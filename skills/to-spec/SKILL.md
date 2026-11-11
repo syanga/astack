@@ -1,12 +1,11 @@
 ---
 name: to-spec
-description: Turn the current conversation into an implementation spec, using the agreed local or issue-tracker destination.
-disable-model-invocation: true
+description: Implementation specs. Use when asked to turn the current conversation into a spec.
 ---
 
 This skill takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user; just synthesize what you already know.
 
-Use the destination requested by the user or established by the project. If neither exists, return the spec in the conversation. External publication follows the task's authorization and the project's actual labels.
+Deliver the spec where the user asks. Without a requested destination, write it to the project's local spec location when the project has one, and otherwise return it in the conversation. Publish to an issue tracker or another external system only when the user asks, directly or through a workflow they started. Use the project's actual labels there. If the project keeps specs in one, offer to publish there.
 
 ## Process
 
@@ -16,7 +15,7 @@ Use the destination requested by the user or established by the project. If neit
 
 Reuse testing boundaries already agreed in the conversation. Mark unresolved boundary choices as proposals rather than starting a new interview. Read [Test Behavior, Not Implementation](../principles/test-behavior-not-implementation.md) for the shared test-quality rules.
 
-3. Write the spec using the template below, then deliver it to the agreed destination. Separate settled decisions from assumptions and open questions. State whether any open question blocks implementation.
+3. Write the spec using the template below, then deliver it to the destination chosen above. Separate settled decisions from assumptions and open questions. State whether any open question blocks implementation.
 
 <spec-template>
 
