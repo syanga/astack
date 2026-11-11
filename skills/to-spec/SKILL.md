@@ -5,7 +5,7 @@ description: Implementation specs. Use when asked to turn the current conversati
 
 This skill takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user; just synthesize what you already know.
 
-Deliver the spec where the user asks. Without a requested destination, write it to the project's local spec location when the project has one, and otherwise return it in the conversation. Publish to an issue tracker or another external system only when the user asks, directly or through a workflow they started. Use the project's actual labels there. If the project keeps specs in one, offer to publish there.
+Deliver the spec where the user asks. If the user names no destination, write the spec to the project's local spec location. If the project has none, return the spec in the conversation. Publish to an issue tracker or another external system only when the user asks, directly or through a workflow they started. Use the project's actual labels there. If the project keeps its specs on such a system, offer to publish there.
 
 ## Process
 
