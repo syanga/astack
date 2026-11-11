@@ -19,7 +19,7 @@ Answer questions without editing files, even when the implied change is trivial.
 
 * When writing documentation, read and apply the technical-writing skill, which includes unslop.
 * When writing other prose, read and apply the unslop skill.
-* Report times to the user in the time zone of the machine you run on, labeled with the zone. On a machine set to Pacific time, report `2026-11-11T03:12:31Z` as `Nov 10, 7:12 PM PST`. Convert each timestamp with a tool that applies the zone rules for its date, such as Python's `datetime.astimezone()`. If a timestamp has no zone, find its source zone before you convert it, or say that the zone is unknown.
+* Report times to the user in the time zone of the machine you run on, labeled with the zone. On a machine set to Pacific time, report `2026-11-11T03:12:31Z` as `Nov 10, 7:12 PM PST`.
 
 ## Visual and design work
 
