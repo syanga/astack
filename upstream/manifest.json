@@ -437,10 +437,10 @@
     "files": {
       "pstack/skills/poteto-mode/playbooks/hillclimb.md": "skills/hillclimb/SKILL.md"
     },
-    "note": "Minimum attempts apply when requested. Repeated confirmation guards early wins otherwise. Existing logs and handoffs preserve progress without promising automatic wake. Remeasuring a moved base keeps base changes from counting as the run's gains. The accept step applies the checklist's questions 4 and 7 to the harness counts, which upstream states only in the checklist, and skips them when the harness prints no counts, as under hillclimb-council's vote. A harness for a metric other than performance is vetted with Explain the Number, because the benchmark checklist assumes a timing benchmark."
+    "note": "Minimum attempts apply when requested. Repeated confirmation guards early wins otherwise. Existing logs and handoffs preserve progress without promising automatic wake. Remeasuring a moved base keeps base changes from counting as the run's gains. The accept step applies the checklist's questions 4 and 7 to the harness counts, which upstream states only in the checklist, and skips them when the harness prints no counts, as under hillclimb-council's vote. A harness for a metric other than performance is vetted with Explain the Number, because the benchmark checklist assumes a timing benchmark. Step 1 reuses a caller's grounding, because perf-issue reads the code before it hands off."
   },
   "benchmark-checklist": {
-    "repository": "https://github.com/cursor/plugins.git Step 1 reuses a caller's grounding, because perf-issue reads the code before it hands off.",
+    "repository": "https://github.com/cursor/plugins.git",
     "path": "pstack/skills/benchmark-checklist/SKILL.md",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/perf-issue/LICENSE-pstack",
