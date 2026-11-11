@@ -254,7 +254,7 @@ sys.exit({code})
                     self.assert_stops(self.pid_from(pidfile))
                     result_path = Path(receipt['result'])
                     deadline = time.monotonic() + 10
-                    while json.loads(result_path.read_text())['notification'] in ('pending', 'sending'):
+                    while 'notification_finished_at' not in json.loads(result_path.read_text()):
                         self.assertLess(time.monotonic(), deadline, 'completion was never queued')
                         time.sleep(0.05)
                     result = json.loads(result_path.read_text())

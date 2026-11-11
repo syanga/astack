@@ -76,9 +76,8 @@ sandbox:
    label, run `kill -TERM <runner_pid>`, wait for `run.py` to exit, and read the
    result as above.
 2. If the helper is gone but the result still says `running`, the job's process
-   group may still be alive. Run
-   `pgrep -l -g <command_pid>`. If it lists only this job's processes, run
-   `kill -TERM -- -<command_pid>`.
+   group may still be alive. Run `pgrep -l -g <command_pid>`. If it lists only
+   this job's processes, run `kill -TERM -- -<command_pid>`.
 
 ## Recover a failed completion
 
@@ -102,7 +101,12 @@ prove that it started a turn. Report missing evidence instead of inferring which
 message caused execution.
 
 The helper cannot report its own forced termination or a stopped host. A stale
-result does not show whether the helper or the job is still running.
+result does not show whether the helper or the job is still running. When you
+resume with a result whose `notification` is still `pending` or `sending`, run
+`ps -ww -o command= -p <runner_pid>` with escalated permissions. If it no longer
+shows `run.py` with the job's label, no notification will arrive. Read the log and
+report the outcome as unverified. The job may still be running; stop it as in step
+2 of [Stop a replaced job](#stop-a-replaced-job) only when you no longer need it.
 
 An unloaded thread can accept a notification without starting a turn. Resuming the
 whole thread can execute other pending messages too. Leave automatic thread loading

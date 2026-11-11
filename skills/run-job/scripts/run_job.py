@@ -9,7 +9,7 @@ import signal
 import subprocess
 import sys
 import time
-from typing import Optional, Union
+from typing import Optional, TextIO, Union
 
 
 SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
@@ -96,7 +96,7 @@ def spec_from(args: argparse.Namespace) -> JobSpec:
     return JobSpec(tuple(args.command), None if args.no_timeout else args.timeout)
 
 
-def report(text, stream=None):
+def report(text: str, stream: Optional[TextIO] = None) -> None:
     stream = stream or sys.stderr
     try:
         print(text, file=stream, flush=True)
@@ -183,10 +183,14 @@ def supervise(spec: JobSpec, stdout=None, stderr=None, on_start=None) -> Result:
         return Result(outcome, cleanup_ok)
 
 
+def shell_status(returncode: int) -> int:
+    return returncode if returncode >= 0 else 128 - returncode
+
+
 def exit_code(spec, result):
     outcome = result.outcome
     if isinstance(outcome, Exited):
-        code = outcome.returncode if outcome.returncode >= 0 else 128 - outcome.returncode
+        code = shell_status(outcome.returncode)
     elif isinstance(outcome, TimedOut):
         stopped = '; stopped the process group' if result.cleanup_ok else ''
         report('run-job: deadline {:g}s reached{}'.format(outcome.seconds, stopped))

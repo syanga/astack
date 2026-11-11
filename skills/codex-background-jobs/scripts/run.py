@@ -126,8 +126,8 @@ def check_codex_home(parser):
                      f'escalated permissions, or {FALLBACK}')
 
 
-def detach(latch):
-    # Codex SIGKILLs the process group of an exec session it closes, so the runner leaves that group.
+def continue_in_new_session(latch):
+    # Codex SIGKILLs the process group of an exec session it closes.
     child = os.fork()
     if child == 0:
         os.setsid()
@@ -142,8 +142,7 @@ def detach(latch):
     if latch.signum is not None:
         forward(latch.signum, None)
     _, status = os.waitpid(child, 0)
-    code = os.waitstatus_to_exitcode(status)
-    sys.exit(code if code >= 0 else 128 - code)
+    sys.exit(run_job.shell_status(os.waitstatus_to_exitcode(status)))
 
 
 def main():
@@ -167,7 +166,7 @@ def main():
         check_queue(parser, codex)
         if latch.signum is not None:
             return 128 + latch.signum
-        detach(latch)
+        continue_in_new_session(latch)
         directory = Path(tempfile.mkdtemp(prefix='astack-codex-job-')).resolve()
         result_path = directory / 'result.json'
         log_path = directory / 'output.log'
@@ -208,7 +207,7 @@ def main():
             return 74
         if not job.cleanup_ok:
             return 125
-        return record['exit_code'] if record['exit_code'] >= 0 else 128 - record['exit_code']
+        return run_job.shell_status(record['exit_code'])
 
 
 if __name__ == '__main__':
