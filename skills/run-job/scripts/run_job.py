@@ -9,7 +9,7 @@ import signal
 import subprocess
 import sys
 import time
-from typing import Optional, Union
+from typing import Optional, TextIO, Union
 
 
 SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
@@ -96,6 +96,15 @@ def spec_from(args: argparse.Namespace) -> JobSpec:
     return JobSpec(tuple(args.command), None if args.no_timeout else args.timeout)
 
 
+def report(text: str, stream: Optional[TextIO] = None) -> None:
+    stream = stream or sys.stderr
+    try:
+        print(text, file=stream, flush=True)
+    except OSError:
+        with open(os.devnull, 'w') as sink:
+            os.dup2(sink.fileno(), stream.fileno())
+
+
 def send(pgid, signum):
     with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(pgid, signum)
@@ -137,14 +146,14 @@ def stop_group(process, outcome):
     if isinstance(outcome, Exited):
         if not group_alive(process.pid):
             return True
-        print('run-job: stopped leftover processes', file=sys.stderr)
+        report('run-job: stopped leftover processes')
     send(process.pid, outcome.signum if isinstance(outcome, Cancelled) else signal.SIGTERM)
     if wait_empty(process):
         return True
     send(process.pid, signal.SIGKILL)
     if wait_empty(process):
         return True
-    print('run-job: could not stop process group {}'.format(process.pid), file=sys.stderr)
+    report('run-job: could not stop process group {}'.format(process.pid))
     return False
 
 
@@ -174,18 +183,22 @@ def supervise(spec: JobSpec, stdout=None, stderr=None, on_start=None) -> Result:
         return Result(outcome, cleanup_ok)
 
 
+def shell_status(returncode: int) -> int:
+    return returncode if returncode >= 0 else 128 - returncode
+
+
 def exit_code(spec, result):
     outcome = result.outcome
     if isinstance(outcome, Exited):
-        code = outcome.returncode if outcome.returncode >= 0 else 128 - outcome.returncode
+        code = shell_status(outcome.returncode)
     elif isinstance(outcome, TimedOut):
         stopped = '; stopped the process group' if result.cleanup_ok else ''
-        print('run-job: deadline {:g}s reached{}'.format(outcome.seconds, stopped), file=sys.stderr)
+        report('run-job: deadline {:g}s reached{}'.format(outcome.seconds, stopped))
         code = 124
     elif isinstance(outcome, Cancelled):
         code = 128 + outcome.signum
     elif isinstance(outcome, LaunchFailed):
-        print('run-job: cannot start {}: {}'.format(spec.command[0], outcome.message), file=sys.stderr)
+        report('run-job: cannot start {}: {}'.format(spec.command[0], outcome.message))
         code = 127 if outcome.errno == errno.ENOENT else 126
     return code if result.cleanup_ok else 125
 

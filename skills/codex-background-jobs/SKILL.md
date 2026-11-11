@@ -6,9 +6,8 @@ description: Run Codex background commands and queue completion to their thread.
 # Resume when a job finishes
 
 Use this workflow in a loaded Codex thread with `CODEX_THREAD_ID` and a CLI that
-supports `codex queue`. Keep the hosting session open until the job finishes.
-Other harnesses and interactive commands use their native process sessions.
-A subagent started with `spawn_agent` runs the command through
+supports `codex queue`. Other harnesses and interactive commands use their native
+process sessions. A subagent started with `spawn_agent` runs the command through
 [`run-job`](../run-job/SKILL.md) in a native session instead, because
 `codex queue` rejects its notifications.
 
@@ -50,8 +49,9 @@ which wraps the [`run-job`](../run-job/SKILL.md) helper.
 
 The helper attempts one notification after success, failure, or timeout. When it
 receives SIGINT, SIGTERM, or SIGHUP while the job runs, it stops the job and
-skips notification. A host can kill the helper without running this cleanup,
-leaving the job alive and its result stale.
+skips notification. If Codex kills the process session's process group with
+SIGKILL, the helper still finishes the job, writes its result, and queues its
+notification.
 
 ## Stop a replaced job
 
@@ -75,10 +75,9 @@ sandbox:
 1. Run `ps -ww -o command= -p <runner_pid>`. If it shows `run.py` with the job's
    label, run `kill -TERM <runner_pid>`, wait for `run.py` to exit, and read the
    result as above.
-2. If the helper is gone but the result still says `running`, the host killed the
-   helper and the job's process group may still be alive. Run
-   `pgrep -l -g <command_pid>`. If it lists only this job's processes, run
-   `kill -TERM -- -<command_pid>`.
+2. If the helper is gone but the result still says `running`, the job's process
+   group may still be alive. Run `pgrep -l -g <command_pid>`. If it lists only
+   this job's processes, run `kill -TERM -- -<command_pid>`.
 
 ## Recover a failed completion
 
@@ -101,10 +100,14 @@ the first resumed action. A notification visible after a user message does not
 prove that it started a turn. Report missing evidence instead of inferring which
 message caused execution.
 
-The helper cannot report its own forced termination or a stopped host. Losing the
-launching tool connection can kill the helper even while the host and job continue.
-A stale result is not evidence that either process is still alive. Automatic recovery
-requires supervision outside that connection with a durable cancellation mechanism.
+The helper cannot report its own forced termination or a stopped host. A stale
+result does not show whether the helper or the job is still running. When you
+resume without the job's notification or final receipt and its result still says
+`running`, run
+`ps -ww -o command= -p <runner_pid>` with escalated permissions. If it no longer
+shows `run.py` with the job's label, no notification will arrive. Read the log and
+report the outcome as unverified. The job may still be running; stop it as in step
+2 of [Stop a replaced job](#stop-a-replaced-job) only when you no longer need it.
 
 An unloaded thread can accept a notification without starting a turn. Resuming the
 whole thread can execute other pending messages too. Leave automatic thread loading

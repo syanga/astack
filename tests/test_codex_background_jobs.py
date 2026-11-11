@@ -1,3 +1,4 @@
+import contextlib
 import json
 from datetime import datetime
 import os
@@ -7,9 +8,11 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
-from test_run_job import GRANDCHILD, LEFTOVER, ZOMBIE_MEMBER, SYSTEM_PYTHON, ProcessAssertions, system_python_before_3_10
+from test_run_job import (GRANDCHILD, LEFTOVER, WRITE_PID, ZOMBIE_MEMBER, SYSTEM_PYTHON, ProcessAssertions,
+                          system_python_before_3_10)
 
 
 SKILLS = Path(__file__).resolve().parents[1] / 'skills'
@@ -222,6 +225,53 @@ sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
         self.assertEqual(result['notification'], 'queued')
         self.assertEqual(Path(result['log']).read_text(), 'finished once\n')
         self.assertEqual(len(self.queued()), 1)
+
+    def test_killing_the_launching_process_group_still_queues_completion(self):
+        for code in (0, 3):
+            with self.subTest(code=code):
+                (self.root / 'queued.jsonl').unlink(missing_ok=True)
+                release = self.root / f'release-{code}'
+                pidfile = self.root / f'leftover-{code}.pid'
+                os.mkfifo(release)
+                job = 'import os, subprocess, sys\n' + WRITE_PID + f'''
+open({str(release)!r}).read()
+leftover = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+write_pid(sys.argv[1], leftover.pid)
+print("finished after host loss")
+sys.exit({code})
+'''
+                launcher = subprocess.Popen(self.argv(job, str(pidfile)), cwd=self.root, env=self.env,
+                                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                            start_new_session=True)
+                try:
+                    receipt = json.loads(launcher.stdout.readline())
+                    self.assertEqual(receipt['status'], 'running')
+                    os.killpg(launcher.pid, signal.SIGKILL)
+                    launcher.wait(timeout=5)
+                    launcher.stdout.close()
+                    launcher.stderr.close()
+                    release.write_text('go')
+                    self.assert_stops(self.pid_from(pidfile))
+                    result_path = Path(receipt['result'])
+                    deadline = time.monotonic() + 10
+                    while 'notification_finished_at' not in json.loads(result_path.read_text()):
+                        self.assertLess(time.monotonic(), deadline, 'completion was never queued')
+                        time.sleep(0.05)
+                    result = json.loads(result_path.read_text())
+                    self.assertEqual((result['status'], result['exit_code']), ('completed', code))
+                    self.assertEqual((result['cleanup'], result['notification']), ('ok', 'queued'))
+                    self.assertEqual(Path(result['log']).read_text(), 'finished after host loss\n')
+                    queued = self.queued()
+                    self.assertEqual(len(queued), 1)
+                    self.assertIn(f'Status: completed; exit code: {code}', queued[0][4])
+                finally:
+                    with contextlib.suppress(OSError):
+                        fd = os.open(release, os.O_WRONLY | os.O_NONBLOCK)
+                        os.write(fd, b'go')
+                        os.close(fd)
+                    if launcher.poll() is None:
+                        launcher.kill()
+                    launcher.communicate()
 
     def test_queue_timeout_records_uncertainty_without_repeating_job(self):
         self.env['HANG_QUEUE'] = '1'

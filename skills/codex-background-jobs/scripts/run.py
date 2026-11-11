@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import argparse
+import contextlib
 from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -31,11 +33,7 @@ def timestamp():
 
 
 def emit(record, stream=sys.stdout):
-    try:
-        print(json.dumps(record), file=stream, flush=True)
-    except OSError:
-        with open(os.devnull, 'w') as sink:
-            os.dup2(sink.fileno(), stream.fileno())
+    run_job.report(json.dumps(record), stream)
 
 
 def save(path, record, required=False):
@@ -128,6 +126,25 @@ def check_codex_home(parser):
                      f'escalated permissions, or {FALLBACK}')
 
 
+def continue_in_new_session(latch):
+    # Codex SIGKILLs the process group of an exec session it closes.
+    child = os.fork()
+    if child == 0:
+        os.setsid()
+        return
+
+    def forward(signum, frame):
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(child, signum)
+
+    for signum in run_job.SIGNALS:
+        signal.signal(signum, forward)
+    if latch.signum is not None:
+        forward(latch.signum, None)
+    _, status = os.waitpid(child, 0)
+    sys.exit(run_job.shell_status(os.waitstatus_to_exitcode(status)))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Run a noninteractive job and queue its completion to this Codex thread.')
@@ -149,6 +166,7 @@ def main():
         check_queue(parser, codex)
         if latch.signum is not None:
             return 128 + latch.signum
+        continue_in_new_session(latch)
         directory = Path(tempfile.mkdtemp(prefix='astack-codex-job-')).resolve()
         result_path = directory / 'result.json'
         log_path = directory / 'output.log'
@@ -189,7 +207,7 @@ def main():
             return 74
         if not job.cleanup_ok:
             return 125
-        return record['exit_code'] if record['exit_code'] >= 0 else 128 - record['exit_code']
+        return run_job.shell_status(record['exit_code'])
 
 
 if __name__ == '__main__':
