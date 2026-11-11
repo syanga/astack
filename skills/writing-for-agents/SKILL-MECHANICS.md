@@ -16,7 +16,7 @@ Make a skill user-invoked when a request that matches its description could set 
 - An action outside the conversation that is hard to undo, such as merging PRs, writing issue-tracker tickets, reinstalling skills, editing global guidance, or adding or editing installed skills.
 - Subagent fan-out, another provider's model, or long-running work.
 
-A request to ship a PR asks for the merge, and a request to review a PR asks for reviewer subagents. A quick question about how code works does not ask for subagent fan-out. Work that an earlier request authorized, such as a review that a running workflow requires before it hands back, counts as asked for. A skill whose procedure is an interview, waiting for the user's answers each round, triggers only when the user asks for it, because a headless run or a delegated worker cannot answer.
+A request to ship a PR asks for the merge, and a request to review a PR asks for reviewer subagents. A request to fix a bug or a performance problem asks for the investigation, design, and review that its fixing workflow runs. Such a workflow scales that work to the problem and keeps a delegated worker from starting the same fan-out again, as [scale the workflow](../principles/scale-the-workflow.md) describes. A quick question about how code works does not ask for subagent fan-out. Work that an earlier request authorized, such as a review that a running workflow requires before it hands back, counts as asked for. A skill whose procedure is an interview, waiting for the user's answers each round, triggers only when the user asks for it, because a headless run or a delegated worker cannot answer.
 
 A skill that only documents a harness hook is user-invoked too, because the hook runs without the agent.
 
