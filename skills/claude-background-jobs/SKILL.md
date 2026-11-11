@@ -1,6 +1,6 @@
 ---
 name: claude-background-jobs
-description: Claude Code hook that denies background Bash commands that do not run through the run-job helper.
+description: Claude Code hook that denies background Bash commands that do not run through the run-job helper, or that the Bash tool would stop before the helper's deadline.
 disable-model-invocation: true
 ---
 
@@ -24,7 +24,13 @@ Put shell syntax and `cd` inside `sh -c '...'`, and set variables with
 `env VAR=value`. The deny message gives the command forms for a finite job and a
 long-lived process, with the helper's absolute path.
 
-The hook checks only the command text. Shell functions and aliases in the user's
+The hook also denies a `--timeout SECONDS` job whose Bash tool `timeout` is below
+`(SECONDS + 30) * 1000`. The tool's default is 1800000 ms, so the hook denies
+`--timeout 1800` with no tool `timeout`. The longest deadline is `--timeout 7170`,
+because the tool allows at most 7200000 ms. The hook allows arguments the helper
+rejects, because the helper then exits with code 2 and starts nothing.
+
+The hook checks only the tool call. Shell functions and aliases in the user's
 shell setup, including zsh global aliases that expand inside arguments, can still
 change what runs.
 

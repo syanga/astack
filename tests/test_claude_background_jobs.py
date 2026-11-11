@@ -16,9 +16,11 @@ LAUNCHER = next(hook['command'] for entry in json.loads((REPO / 'settings/claude
 CORE = 'skills/run-job/scripts/run_job.py'
 
 
-def background(command):
-    return {'hook_event_name': 'PreToolUse', 'cwd': '/tmp', 'tool_name': 'Bash',
-            'tool_input': {'command': command, 'description': 'job', 'run_in_background': True}}
+def background(command, timeout=None):
+    tool_input = {'command': command, 'description': 'job', 'run_in_background': True}
+    if timeout is not None:
+        tool_input['timeout'] = timeout
+    return {'hook_event_name': 'PreToolUse', 'cwd': '/tmp', 'tool_name': 'Bash', 'tool_input': tool_input}
 
 
 class HookTests(unittest.TestCase):
@@ -41,18 +43,20 @@ class HookTests(unittest.TestCase):
         return subprocess.run(['sh', '-c', launcher], input=stdin, capture_output=True, text=True,
                               env={**self.env, **env}, timeout=15)
 
-    def decision(self, command, launcher=LAUNCHER, **env):
-        completed = self.hook(background(command), launcher, **env)
+    def output(self, command, launcher=LAUNCHER, timeout=None, **env):
+        completed = self.hook(background(command, timeout), launcher, **env)
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        if not completed.stdout:
-            return 'allow'
-        return json.loads(completed.stdout)['hookSpecificOutput']['permissionDecision']
+        return json.loads(completed.stdout)['hookSpecificOutput'] if completed.stdout else None
+
+    def decision(self, command, launcher=LAUNCHER, timeout=None, **env):
+        output = self.output(command, launcher, timeout, **env)
+        return 'allow' if output is None else output['permissionDecision']
 
     def test_allows_only_literal_commands_that_run_the_installed_core(self):
         core = self.install(self.home / '.claude')
         allowed = [
-            'python3 {} --timeout 1800 -- make test'.format(core),
-            'python3 {} --timeout 1800 -- make test\n'.format(core),
+            'python3 {} --timeout 1770 -- make test'.format(core),
+            'python3 {} --timeout 1770 -- make test\n'.format(core),
             'python3   {}  --timeout=60  --  make  test'.format(core),
             'python3.12 {} --timeout 60 -- make test'.format(core),
             '/opt/homebrew/bin/python3.12 {} --no-timeout -- npm run dev'.format(core),
@@ -109,6 +113,44 @@ class HookTests(unittest.TestCase):
         for command in denied:
             with self.subTest(command=command):
                 self.assertEqual(self.decision(command), 'deny')
+
+    def test_denies_a_tool_timeout_that_ends_before_the_deadline(self):
+        core = self.install(self.home / '.claude')
+        job = 'python3 {} --timeout {} -- make test'
+        cases = [
+            (1800, None, 'deny'),
+            (5400, None, 'deny'),
+            (1770, None, 'allow'),
+            (3600, 3629999, 'deny'),
+            (3600, 3630000, 'allow'),
+            (7171, 7200000, 'deny'),
+            (7170, 7200000, 'allow'),
+            (1e308, 7200000, 'deny'),
+            (0.5, None, 'allow'),
+            (3600.4, 3630399, 'deny'),
+            (3600.4, 3630400, 'allow'),
+        ]
+        for seconds, timeout, expected in cases:
+            with self.subTest(seconds=seconds, timeout=timeout):
+                self.assertEqual(self.decision(job.format(core, seconds), timeout=timeout), expected)
+        for command in ('python3 {} --no-timeout -- npm run dev'.format(core),
+                        "python3 {} --timeout 60 -- sh -c 'make --timeout 9999'".format(core),
+                        'python3 {} --timeout 0 -- make test'.format(core),
+                        'python3 {} --timeout 5400 --no-timeout -- make test'.format(core)):
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command), 'allow')
+
+    def test_deadline_deny_names_the_timeout_to_send(self):
+        core = self.install(self.home / '.claude')
+        job = 'python3 {} --timeout {} -- make test'
+        self.assertIn('5430000', self.output(job.format(core, 5400))['permissionDecisionReason'])
+        self.assertIn('7170', self.output(job.format(core, 7200))['permissionDecisionReason'])
+
+    def test_reading_the_deadline_leaves_no_bytecode_in_the_installed_skills(self):
+        core = self.install(self.home / '.claude')
+        self.env.pop('PYTHONDONTWRITEBYTECODE', None)
+        self.assertEqual(self.decision('python3 {} --timeout 60 -- make test'.format(core)), 'allow')
+        self.assertEqual(list((self.home / '.claude' / 'skills').rglob('__pycache__')), [])
 
     def test_allowed_commands_run_the_installed_core_in_each_shell(self):
         core = self.install(self.home / '.claude')
