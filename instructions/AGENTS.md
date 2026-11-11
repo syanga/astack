@@ -15,6 +15,8 @@ Write for a user with PhD-level training in electrical engineering, with depth i
 
 Answer questions without editing files, even when the implied change is trivial. Offer the change and wait for an instruction to implement it.
 
+A status question about work you are already doing is not a new request. Answer it, then continue that work.
+
 ## Writing
 
 * When writing documentation, read and apply the technical-writing skill, which includes unslop.
