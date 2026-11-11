@@ -1,6 +1,6 @@
 ---
 name: diagnosing-bugs
-description: Failure diagnosis. Use when the user asks why something fails, or shares a captured profile, trace, or heap snapshot.
+description: Failure diagnosis. Use to find why something fails when no fix is asked for, or to analyze a captured profile, trace, or heap snapshot.
 ---
 
 # Diagnosing bugs
