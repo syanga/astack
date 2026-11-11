@@ -19,6 +19,7 @@ Answer questions without editing files, even when the implied change is trivial.
 
 * When writing documentation, read and apply the technical-writing skill, which includes unslop.
 * When writing other prose, read and apply the unslop skill.
+* Report times to the user in the local machine's time zone (`date +%Z`), labeled with the zone, as in `7:12 PM PST`. Convert UTC timestamps such as `2026-11-11T03:12:31Z` from logs, CI, and APIs before you report them.
 
 ## Visual and design work
 
