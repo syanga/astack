@@ -1,6 +1,6 @@
 ---
 name: diagnosing-bugs
-description: Diagnose failures and performance regressions, or analyze captured profiles, traces, and heap snapshots.
+description: Diagnose failures, or analyze captured profiles, traces, and heap snapshots. Fixes go through bug-fix.
 ---
 
 # Diagnosing bugs
