@@ -400,7 +400,7 @@
     "path": "pstack/skills/poteto-mode/playbooks/perf-issue.md",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/perf-issue/LICENSE-pstack",
-    "note": "Repeated comparable measurements distinguish improvements from noise. Correctness checks accompany performance measurements. Keeps the eight strategy families that upstream e43c7ee replaced with bare performance mantras, because each family names the signal that earns it an attempt. The families take the mantras' cheapest-first order and stop rule, with Divide and conquer and Redundancy both under \"Do it concurrently\".",
+    "note": "Repeated comparable measurements distinguish improvements from noise. Correctness checks accompany performance measurements. Keeps the eight strategy families that upstream e43c7ee replaced with bare performance mantras, because each family names the signal that earns it an attempt. The families take the mantras' cheapest-first order and stop rule, with Divide and conquer and Redundancy both under \"Do it concurrently\". Model-invoked so that performance work runs through its measurement discipline. Keeps the work in the session, because every matching request would otherwise start subagents or another provider's model. Upstream runs how, architect, and a delegated fix, and it ends with a PR, which astack's open-pr follows with review-pr. In-session iteration needs an end, so the family order gains an attempt budget and two more stop conditions.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/perf-issue.md": "skills/perf-issue/SKILL.md"
     }
