@@ -36,3 +36,14 @@ A status question about work you are already doing is not a new request. Answer 
 * Never touch production, live databases, or daily-driver build/preview channels unless explicitly told to. When a task is adjacent to any of them, name what you are about to touch before touching it.
 * Read-only database queries are an exception. Treat them as explicitly approved on every database, production included, along with the tunnel each query needs. Name the database, then run the query without asking. Read only the database's own data and metadata, with statements such as `SELECT`, `SHOW`, or `EXPLAIN` and functions that only read. Return results only to your client. Ask the user before you read server files, run server programs, or have the database reach other servers, as `pg_read_file`, `COPY ... TO PROGRAM`, and `dblink` do. Where the database supports them, use its read-only mode and a statement timeout, such as a Postgres session with `default_transaction_read_only=on` and `statement_timeout`.
 * Read-only S3 requests are also an exception. They list buckets and objects, read bucket and object metadata, or read objects, whether printed or downloaded. Treat them as explicitly approved in every AWS account, production included, along with the AWS profile each request needs. Name the account or bucket, then run the request without asking. Download only the objects the task needs. Save them outside version control, such as in a scratch directory that Git ignores. Before `aws s3 cp --recursive`, `aws s3 sync`, or a loop over many objects, total the size of the objects that command will read, such as from `aws s3 ls --recursive` output filtered the same way. Ask the user before you change S3 state, grant access, pass `--request-payer requester`, or read more than 10 GB in one task, printed or downloaded. Uploads, `aws s3 rm`, `aws s3api restore-object`, `aws s3api put-bucket-policy`, and `aws s3 presign` all need that approval.
+
+## T3 Code threads
+
+A thread you launched is one whose first message names your thread as the sender.
+
+* Settle each thread you launched with `t3_thread_organize` after you check its final report, unless the report shows a failure or an unresolved hold.
+* Stop a thread you launched only when its work is dropped, replaced, or done another way, or when the user says so. Report to the user any other thread you would have stopped.
+* To stop a thread, send it the reason with `t3_thread_send` in `auto` mode, and tell it to:
+  1. commit work worth keeping
+  2. unless its branch gets a new owner, close its PR with the reason and a link to any replacement
+  3. close its lane with worktree-cleanup and report to your thread
