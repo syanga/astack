@@ -1471,9 +1471,9 @@ it first. Examples:
   response is still on its way to `ObserveOverage`.
 
 Every stamp the service passes to the router (`Observe`, `ObserveOverage`,
-and the attempt start in `Report`) comes from the service clock, read at the
-start of a read or attempt or at an arrival. It is never zero and never
-later than the clock at the time of the call. The service clock is wall time
+`ObserveUsage`, and the attempt start in `Report`) comes from the service
+clock, read at the start of a read or attempt or at an arrival. It is never
+zero and never later than the clock at the time of the call. The service clock is wall time
 without Go's monotonic reading and never moves backward, so a wall-clock step
 back does not reorder readings (PR4, "Wall time across sleep"). The
 service enforces the rule at the boundary (`Service.bounded`), because PR2
@@ -1486,6 +1486,8 @@ which is no earlier than the reading. A reading that only permits dispatch
 (`disabled`, or windows without a rejection) is dropped. Both cases record a
 `stamp_bounded` event
 (`TestObservationsReachTheRouterStampedNoLaterThanNowAndNeverZero`).
+`ObserveUsage` takes the start of a settings read straight from the service
+clock, so its stamp meets the rule without `Service.bounded`.
 
 Observed paid use does not expire (PR2 at `22d4342`): a later `enabled`
 check puts it back in force after a `disabled` check cleared it.
