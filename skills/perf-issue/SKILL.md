@@ -5,12 +5,13 @@ description: Measured performance work. Use when the user asks to make something
 
 # Perf issue
 
-**You own the measurements. Plan, review, verify the numbers.** Tie every fix to a measurement. Read [scale the workflow](../principles/scale-the-workflow.md) before step 1.
+**You own the measurements. Plan, review, verify the numbers.** Tie every fix to a measurement.
 
 When the user asks for sustained improvement against a metric, such as iterating toward a target, use [hillclimb](../hillclimb/SKILL.md). Pass the workload, target, baseline evidence, traced model, measurement command, correctness checks, delivery scope, and existing authorization. Hillclimb then owns the repeated experiments, stopping criteria, and delivery.
 
 For a diagnosis-only request, stop before implementation with the measurements, supported cause, and proposed next experiment. A read-only request also excludes instrumentation and code edits.
 
+0. Read [scale the workflow](../principles/scale-the-workflow.md) before anything else in this skill.
 1. Reproduce the reported problem in an authorized environment and capture a baseline through the affected UI, CLI, or API. Name the metric, unit, target, workload, revision, configuration, and repeatable command. Without a target from the user, use the metric value at which the complaint no longer reproduces. Record warmup, trial count, and variation so later comparisons can distinguish a change from noise. Vet the baseline, and each later number, with the [benchmark checklist](BENCHMARK-CHECKLIST.md). When the fix under test is a setting, such as an index or batching, keep that setting at production's current value on the baseline, and tune every other setting. For live capture and mechanism checks, follow [runtime forensics](../diagnosing-bugs/RUNTIME-FORENSICS.md). For an existing capture, follow [trace forensics](../diagnosing-bugs/TRACE-FORENSICS.md). For a diagnosis-only request, the capture can replace the live baseline. For a regression, also measure a known-good revision, and bisect to the change that slowed it. If the baseline does not reproduce the complaint, report the gap before optimizing.
 2. Use [how](../how/SKILL.md) to ground hypotheses, unless you already hold a traced model of the hot path. Measure the workload before claiming a performance limit.
    Most fixes come from eight strategy families. Try them in order, cheapest first. A family earns an attempt only when the trace shows the signal it names. When an earlier family meets the target, stop.
