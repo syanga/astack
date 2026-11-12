@@ -49,7 +49,8 @@ func (p weeklyPreference) slack(cfg Config, now Instant) float64 {
 }
 
 // ObserveWeeklyUsage keeps the newest valid account-wide weekly reading in
-// memory without changing admission or rejection evidence.
+// memory for placement preference. ObserveUsage applies a usage read to
+// rejection evidence.
 func (r *Router) ObserveWeeklyUsage(account AccountID, reading WeeklyUsage) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
