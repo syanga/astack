@@ -479,8 +479,9 @@ Feed the router what it cannot see:
   response, and `ObserveWeeklyCredits` for a successful reset-grants read.
   Both keep preference data in memory and preserve rejection evidence.
 - `ObserveUsage` for each account-wide five-hour or weekly window in a usage
-  response, with the start time of the read. A `used` fraction below 1
-  clears that window's earlier rejection, as after a manual reset.
+  response, with the start time of the read. A `used` fraction from 0 up
+  to but not including 1 clears that window's earlier rejection, as after
+  a manual reset.
 - `Report` for a failure before output. Pass the class it returns as
   `LastFailure` on the next attempt.
 - `ObserveOverage` for each paid-overflow check or observed paid use.

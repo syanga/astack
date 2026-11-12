@@ -1531,10 +1531,10 @@ to a fraction, and drops an entry of another shape without dropping the
 others (`TestASettingsReadRecordsTheLimitWindowsForStatus`). Routing also
 uses the account-wide `seven_day` window for weekly preference, and the
 `five_hour` and account-wide `seven_day` windows to clear rejections (Manual
-resets clear rejections at the next usage read, below). Model-scoped body windows remain status readings only. The
-service decodes these
-fields apart from `extra_usage`, so a field of another shape drops out of
-status and leaves the paid-overflow reading unchanged. A settings read with
+resets clear rejections at the next usage read, below). Model-scoped body
+windows remain status readings only. The service decodes these fields apart
+from `extra_usage`, so a field of another shape drops out of status and
+leaves the paid-overflow reading unchanged. A settings read with
 no readable window clears the last limit reading
 (`TestMalformedLimitFieldsLeaveThePaidOverflowReadingIntact`,
 `TestASettingsReadWithoutReadableLimitFieldsClearsTheLimitReading`).
@@ -1581,9 +1581,9 @@ readings for routing. The grants block and its query are undocumented. If
 they change, the router gains no new credit and status gains no new reset
 count. The weekly usage that placement preference reads, and reset credit,
 live only in memory. Neither changes admission, paid-overflow checks, or
-durable assignments. A settings read changes admission only through a
-rejection it clears (Manual resets clear rejections at the next usage read,
-below).
+durable assignments. The usage windows of a settings read change admission
+only through a rejection they clear (Manual resets clear rejections at the
+next usage read, below).
 
 ### Manual resets clear rejections at the next usage read
 
