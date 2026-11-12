@@ -1,6 +1,6 @@
 ---
 name: bug-fix
-description: Bug fixes. Use when the user asks to fix a bug, such as wrong behavior, a crash, a hang, or a failing test.
+description: Bug fixes. Use when the user asks to fix a bug, such as wrong behavior, a crash, a hang, or a failing test. For a slowdown, use perf-issue.
 ---
 
 # Bug fix

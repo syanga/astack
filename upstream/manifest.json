@@ -390,7 +390,7 @@
     "path": "pstack/skills/poteto-mode/playbooks/bug-fix.md",
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/bug-fix/LICENSE-pstack",
-    "note": "Reuses diagnosing-bugs and tdd rather than defining a second diagnosis loop. Failing-before evidence is required without mandating a separate failing commit. Delivery stays within the task authorization. Keeps the text that upstream b0b9c7a cut. Model-invoked, because a request to fix a bug asks for the full sequence. Delegation follows scale the workflow, because the closing review already gives a small fix an independent reviewer.",
+    "note": "Reuses diagnosing-bugs and tdd rather than defining a second diagnosis loop. Failing-before evidence is required without mandating a separate failing commit. Delivery stays within the task authorization. Keeps the text that upstream b0b9c7a cut. Model-invoked, because a request to fix a bug asks for the full sequence. Delegation follows scale the workflow, because the closing review already gives a small fix an independent reviewer. The description sends slowdowns to perf-issue, so a request to fix a slowdown takes one path.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/bug-fix.md": "skills/bug-fix/SKILL.md"
     }
