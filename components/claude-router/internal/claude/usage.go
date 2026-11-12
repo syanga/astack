@@ -207,15 +207,11 @@ func (o *overageReader) noteUsage(account router.AccountID, windows []UsageWindo
 	}
 	o.mu.Unlock()
 	for _, w := range windows {
-		if w.Model == "" && w.Used != nil {
-			o.s.router.ObserveUsage(account, start, w.Kind, *w.Used)
+		if w.Model != "" || w.Used == nil {
+			continue
 		}
-	}
-	if at.Held() {
-		return
-	}
-	for _, w := range windows {
-		if w.Kind == router.Weekly && w.Model == "" && w.Used != nil {
+		o.s.router.ObserveUsage(account, start, w.Kind, *w.Used)
+		if w.Kind == router.Weekly && !at.Held() {
 			o.s.router.ObserveWeeklyUsage(account, router.WeeklyUsage{At: at.Stamp, ResetsAt: w.ResetsAt, Used: *w.Used})
 		}
 	}

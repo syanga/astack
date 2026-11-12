@@ -66,10 +66,14 @@ func TestFreshWeeklyUsageBodiesPreserveExhaustionAndMigrationAffinity(t *testing
 	e.clock.set(now.Add(2 * time.Minute))
 	e.upstream.setUsage("acct-b", usageReply{Enabled: boolPtr(false), Fields: map[string]any{
 		"seven_day": map[string]any{"utilization": 100, "resets_at": now.Add(84 * time.Hour).Format(time.RFC3339)},
+		"limits": []any{map[string]any{
+			"kind": "weekly_scoped", "percent": 0, "resets_at": now.Add(84 * time.Hour).Format(time.RFC3339),
+			"scope": map[string]any{"model": map[string]any{"display_name": "Sonnet"}},
+		}},
 	}})
 	s.overage.read(context.Background(), "acct-b")
 	if reason := s.router.Admit(s.clock.instant(), "acct-b", "claude-sonnet-4-5"); reason != router.ReasonExhausted {
-		t.Fatalf("admission after fresh usage at the limit = %s, want exhausted", reason)
+		t.Fatalf("admission after fresh usage at the limit with an unused Sonnet window = %s, want exhausted", reason)
 	}
 	for _, session := range []int{1, 2} {
 		if r := e.send(msg{Session: sessionID(session)}); r.Text != served("acct-a") {
