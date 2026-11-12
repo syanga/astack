@@ -26,8 +26,6 @@ If neither mechanism exists, use one bounded watcher outside the model that
 returns on completion or an actionable change. Model-driven polling is a last
 resort: explain the limitation and back off between checks.
 
-A status question does not pause authorized work.
-
 Before your final answer as a subagent started with `spawn_agent`, stop each
 long-lived process you started and each job you no longer need. Wait for your
 other jobs to exit, and use `wait_agent` until each subagent you started reaches
