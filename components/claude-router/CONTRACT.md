@@ -710,6 +710,18 @@ cover these rules. `claude-router status` leaves idle moves out of its
 problem lines (`TestStatusLeavesIdleMovesOutOfItsLines`). `cache` counts
 their cost (Cache cost of account moves, below).
 
+Concurrent requests follow the Concurrency rule in Migration, below. Two
+requests of an idle conversation can get different decisions when their
+inputs differ, as when a reading changes the scores between them. A request
+that decided `dispatch` before the other request's idle `migrate` commits
+keeps the account the conversation leaves, and can write the conversation's
+cache there once. If it finishes after a request on the new account, `cache`
+counts its request and the next request on the new account as two more moves,
+with their cache writes.
+`TestADispatchedRequestKeepsItsAccountWhileTheConversationMigrates` covers the
+rule for a migration after exhaustion. No test runs this race for an idle
+migration.
+
 The threshold rests on the daily router's `events.jsonl` from 2026-10-20 to
 2026-11-12 20:00 PST. The table counts the status-200 requests with more than
 20,000 input tokens that followed a request of the same conversation on the

@@ -110,7 +110,7 @@ func TestMigratedConversationStaysAfterTheSourceRecovers(t *testing.T) {
 		t.Fatalf("a new conversation after the reset served %q, want the recovered acct-a", fresh.Text)
 	}
 	if n := len(e.migrations()); n != 1 {
-		t.Fatalf("%d migrations, want 1: the conversation does not return while its cache lives", n)
+		t.Fatalf("%d migrations, want 1: the conversation does not return when its source recovers", n)
 	}
 }
 
