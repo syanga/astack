@@ -5,7 +5,15 @@ description: Implementation specs. Use when asked to turn the current conversati
 
 This skill takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user; just synthesize what you already know.
 
-Deliver the spec where the user asks. If the user names no destination, write the spec to the project's local spec location. If the project has none, return the spec in the conversation. Publish to an issue tracker or another external system only when the user asks, directly or through a workflow they started. Use the project's actual labels there. If the project keeps its specs on such a system, offer to publish there.
+Some projects call their test files specs, such as RSpec `*_spec.rb` files and Jest `*.spec.js` files. In such a project, these requests ask for an implementation spec:
+
+- a request that points to the conversation, such as "turn this into a spec" or "write a spec for what we discussed"
+- a request for an implementation or design spec
+- a request that names this skill, directly or through a workflow the user started
+
+In such a project, any other request to write a spec asks for a test. Write that test instead of following this skill.
+
+Deliver the spec where the user asks. If the user names no destination, write the spec to the project's local location for implementation specs. If the project has none, return the spec in the conversation. Publish to an issue tracker or another external system only when the user asks, directly or through a workflow they started. Use the project's actual labels there. If the project keeps implementation specs on such a system, offer to publish there.
 
 ## Process
 
