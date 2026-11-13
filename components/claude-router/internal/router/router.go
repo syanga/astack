@@ -81,7 +81,7 @@ func (r *Router) Decide(now Instant, req Request) (Decision, error) {
 	if err != nil {
 		return Decision{}, err
 	}
-	last := r.lastRequest(req.Conversation, b)
+	last := r.lastRequestAt(req.Conversation, b)
 	if r.started.After(last) {
 		last = r.started
 	}
@@ -106,7 +106,7 @@ func (r *Router) Decide(now Instant, req Request) (Decision, error) {
 	return d, nil
 }
 
-func (r *Router) lastRequest(conv ConversationID, b Binding) time.Time {
+func (r *Router) lastRequestAt(conv ConversationID, b Binding) time.Time {
 	if last, ok := r.active[conv]; ok && last.After(b.Since) {
 		return last
 	}
@@ -120,7 +120,7 @@ func (r *Router) loads(now time.Time, skip ConversationID) ([]int, error) {
 		if conv == skip {
 			return
 		}
-		if idx, enrolled := r.index[b.Account]; enrolled && !r.lastRequest(conv, b).Before(horizon) {
+		if idx, enrolled := r.index[b.Account]; enrolled && !r.lastRequestAt(conv, b).Before(horizon) {
 			loads[idx]++
 		}
 	})

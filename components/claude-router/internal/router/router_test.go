@@ -429,7 +429,7 @@ func TestConcurrentCommitsWithDifferentProposalsAgree(t *testing.T) {
 	}
 }
 
-func TestAnAssignmentSurvivesAModelChangeAndARestartWhileItsCacheLives(t *testing.T) {
+func TestAnAssignmentSurvivesAModelChangeAndARestartWithinPlaceAgainAfter(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
 	first := h.route(t0, req("conv"))
 	later := t0.Add(time.Hour)
@@ -457,7 +457,7 @@ func TestAnAssignmentSurvivesAModelChangeAndARestartWhileItsCacheLives(t *testin
 	}
 }
 
-func TestOnlyExhaustionMovesABusyConversationAndItReturnsAfterItsCacheExpires(t *testing.T) {
+func TestOnlyExhaustionMovesABusyConversationAndItReturnsAfterPlaceAgainAfter(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
 	h.route(t0, req("conv"))
 

@@ -613,9 +613,8 @@ score = (active + 1) / (capacity * (1 + ResetBias * slack))
 - The destination of every `migrate` is chosen by this rule.
 - Reset preference affects only `place`, the destination of `migrate`, and
   whether an idle conversation moves at all. `Decide` moves a conversation
-  on a healthy account only after the
-  conversation has been idle longer than `PlaceAgainAfter` (Idle
-  conversations are placed again, below).
+  on a healthy account only after the conversation has been idle longer than
+  `PlaceAgainAfter` (Idle conversations are placed again, below).
 
 `Decision.Reason` is `reset_preference` when the reset-aware choice differs
 from the capacity-only choice for the same request, and `capacity` otherwise.
@@ -704,7 +703,7 @@ conversation:
 `TestAConversationIdleLongerThanPlaceAgainAfterIsPlacedAgain`,
 `TestAfterARestartIdleTimeCountsFromTheStart`,
 `TestAnIdleConversationOnAnUnhealthyAccountGetsTheDecisionForThatState`,
-`TestOnlyExhaustionMovesABusyConversationAndItReturnsAfterItsCacheExpires`,
+`TestOnlyExhaustionMovesABusyConversationAndItReturnsAfterPlaceAgainAfter`,
 and the service test
 `TestAConversationIdleLongerThanPlaceAgainAfterMovesToTheAccountWithMoreSlack`
 cover these rules. `claude-router status` leaves idle moves out of its
@@ -714,7 +713,8 @@ their cost (Cache cost of account moves, below).
 The threshold rests on the daily router's `events.jsonl` from 2026-10-20 to
 2026-11-12 20:00 PST. The table counts the status-200 requests with more than
 20,000 input tokens that followed a request of the same conversation on the
-same account, by the gap since that request. A request reads from the cache
+same account. It groups them by the gap between the two requests' `at`
+times, which mark when each request finished. A request reads from the cache
 when more than half of its input came from cache reads.
 
 | Gap | Requests | Read from the cache |
@@ -2910,8 +2910,8 @@ from `events.jsonl`, so the warning also shows while the router is stopped.
   its `duration_ms`. The previous request is the one with the latest start.
   No prompt cache lives longer than an hour, so the move's request writes the
   conversation's own cache again on either account. An `idle` move within
-  the hour,
-  as when `place_again_after` is below 1 h, costs its request's cache write
+  the hour, as when `place_again_after` is below 1 h, costs its request's
+  cache write
   (`TestAnIdleMoveCostsNoCacheWriteOnlyWhenItStartsMoreThanAnHourAfterThePreviousRequestStarted`,
   `TestAnIdleMoveCountsFromTheLatestStartWhenRequestsFinishOutOfOrder`).
 - **Unknown cost.** A move whose request is not a counted request has an
