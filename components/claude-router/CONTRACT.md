@@ -684,8 +684,8 @@ again by the placement rule, as it places a new conversation:
   `PlaceAgainAfter` before the request being decided. The latest request is
   the later of the binding's `since` and the last request this router
   routed for the conversation. The router does not save request times, so
-  after a restart a conversation with no request since the start counts as
-  active at the start.
+  after a restart a conversation with no request since the start is idle
+  from the start.
 - `Decide` answers `migrate` with reason `idle` when the placement rule picks
   another account, and `dispatch` on the current account otherwise. On a
   tie the current account wins.
@@ -697,11 +697,14 @@ again by the placement rule, as it places a new conversation:
   default `65m`.
 
 `TestAConversationIdleLongerThanPlaceAgainAfterIsPlacedAgain`,
-`TestAfterARestartAConversationCountsAsActiveAtTheStart`,
-`TestOnlyExhaustionMigratesAndTheConversationReturnsOnlyAfterItsCacheExpires`,
+`TestAfterARestartIdleTimeCountsFromTheStart`,
+`TestAnIdleConversationOnAnUnhealthyAccountGetsTheDecisionForThatState`,
+`TestOnlyExhaustionMovesABusyConversationAndItReturnsAfterItsCacheExpires`,
 and the service test
 `TestAConversationIdleLongerThanPlaceAgainAfterMovesToTheAccountWithMoreSlack`
-cover these rules.
+cover these rules. `claude-router status` leaves idle moves out of its
+problem lines (`TestStatusLeavesIdleMovesOutOfItsLines`), and `cache` counts
+their cost as Cache cost of account moves defines it.
 
 The threshold rests on the daily router's `events.jsonl` on 2026-11-12. The
 table counts the status-200 requests with at least 20,000 input tokens that
@@ -720,10 +723,10 @@ its input came from cache reads.
 
 No request had a gap of 60 to 62 minutes. The cache lives one hour after a
 request. The dip from 5 to 30 minutes fits some requests using the 5-minute
-cache. After 62 minutes, requests still read a mean of 3% to 18% of
-their input from the cache: the system prompt and tools, which the account's
-other conversations keep cached. A move writes that part again only when no
-conversation on the new account keeps it cached.
+cache. In each row from 62 minutes on, requests still read between 3% and
+18% of their input from the cache on average. That part is the system prompt
+and tools, which the account's other conversations keep cached. A move writes
+that part again only when no conversation on the new account keeps it cached.
 
 The simulator's cache lives `ttl_minutes` after each request. The simulator
 flags an `idle` migration as a healthy automatic migration when the
@@ -776,7 +779,8 @@ the check or response.
   `overage_observed` when another account is eligible. If none is, it waits
   for the earliest usable reset elsewhere or is refused with
   `paid_use_observed`, and keeps its assignment. New conversations skip the
-  account. A migrated conversation does not return. While recorded paid use
+  account. A migrated conversation returns only as an idle placement (Idle
+  conversations are placed again). While recorded paid use
   is in force, the transport sends the account no attempt, including the
   SDK's redispatch of a request that was waiting on a refresh.
 - **Ordering.** The router records the latest check (`disabled` or
@@ -2854,10 +2858,13 @@ from `events.jsonl`, so the warning also shows while the router is stopped.
   cannot exceed 100%.
 - **Move cost.** The `cache_creation_input_tokens` of the move's own request,
   when that request is a counted request. Later requests, and cold starts
-  after the cache expires, do not count. A move with reason `idle` costs 0,
-  also when its request is not a counted request: the conversation's cache
-  had expired, so its request writes the same cache on either account
-  (`TestAnIdleMoveCostsNoCacheWrite`).
+  after the cache expires, do not count. A move with reason `idle` whose
+  request comes more than an hour after the conversation's previous
+  status-200 request costs 0, also when its request is not a counted request.
+  No prompt cache lives longer than an hour, so that request writes the same
+  cache on either account. An `idle` move within the hour, which happens only
+  when `place_again_after` is below 1 h, costs its request's cache write
+  (`TestAnIdleMoveCostsNoCacheWriteOnlyMoreThanAnHourAfterTheConversationsLastRequest`).
 - **Unknown cost.** A move whose request is not a counted request has an
   unknown cost. Its request reported no usage, or a `null` input, cache
   write, or cache read counter. A later request on the new account does not
@@ -2946,7 +2953,7 @@ applies. On a stopped router the next step stays `claude-router start`.
 
 | Check | Tests |
 | --- | --- |
-| Moves and costs | `TestTheFirstRequestOfAConversationIsAPlacementNotAMove`, `TestAPolicyMoveCostsTheCacheWriteOfItsFirstRequestOnTheNewAccount`, `TestAManualMoveShowsTheReasonOfItsMigratedEvent`, `TestAMoveWhoseRequestHasNoUsageKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWhoseRequestHasANullCacheWriteKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWithNoUsageAfterItHasAnUnknownCost`, `TestAMoveCountsItsCostOnlyWhenItsRequestCountsTowardAllWrites`, `TestOnlyMovesWhoseRequestFallsInTheWindowCount`, `TestTwoConversationsThatMoveAtTheSameTimeEachCountTheirOwnCost`, `TestAFailedRequestOnAnotherAccountIsNotAMove`, `TestAFailedRequestWithoutUsageAddsNoAccountLine`, `TestCacheOfAnEmptyLogShowsEachAccountWithoutAShare` |
+| Moves and costs | `TestTheFirstRequestOfAConversationIsAPlacementNotAMove`, `TestAPolicyMoveCostsTheCacheWriteOfItsFirstRequestOnTheNewAccount`, `TestAnIdleMoveCostsNoCacheWriteOnlyMoreThanAnHourAfterTheConversationsLastRequest`, `TestAManualMoveShowsTheReasonOfItsMigratedEvent`, `TestAMoveWhoseRequestHasNoUsageKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWhoseRequestHasANullCacheWriteKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWithNoUsageAfterItHasAnUnknownCost`, `TestAMoveCountsItsCostOnlyWhenItsRequestCountsTowardAllWrites`, `TestOnlyMovesWhoseRequestFallsInTheWindowCount`, `TestTwoConversationsThatMoveAtTheSameTimeEachCountTheirOwnCost`, `TestAFailedRequestOnAnotherAccountIsNotAMove`, `TestAFailedRequestWithoutUsageAddsNoAccountLine`, `TestCacheOfAnEmptyLogShowsEachAccountWithoutAShare` |
 | Inputs | `TestCacheIgnoresAMalformedServiceRecord` |
 | Layout | `TestCacheMatchesTheSelectedLayout`; `TestStatusMatchesTheSelectedLayout` cases `cache-warning`, `cache-warning-off`, `stopped-cache-warning`, and `stopped-cache-warning-verbose` |
 | Setting and warning | `TestStatusWarnsAboveTheDefaultMoveShareOfTenPercent`, `TestTheStatusWarningSaysOrMoreWhenAMoveCostIsUnknown`, `TestAMoveCacheWarnPercentOfZeroTurnsTheWarningOff`, `TestStatusAndServeRefuseAMoveCacheWarnPercentOutsideZeroToHundred` |

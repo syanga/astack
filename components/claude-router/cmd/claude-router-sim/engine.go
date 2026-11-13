@@ -579,7 +579,7 @@ func (s *sim) audit(c *conversation, at time.Time, d router.Decision, agent stri
 		justified = q.loggedOut && c.servedOn != d.From
 		s.m.NeverServedMigrations++
 	case router.ReasonIdle:
-		justified = !s.warm(c, d.From, at)
+		justified = !c.warmOn(d.From, at)
 		s.m.IdleMigrations++
 	}
 	if !justified {
@@ -593,7 +593,7 @@ func (s *sim) audit(c *conversation, at time.Time, d router.Decision, agent stri
 		Account: d.Account, Reason: d.Reason, Observation: d.Observation})
 }
 
-func (s *sim) warm(c *conversation, account router.AccountID, at time.Time) bool {
+func (c *conversation) warmOn(account router.AccountID, at time.Time) bool {
 	for _, k := range c.cacheKey {
 		if k.account == account && !at.After(k.expires) {
 			return true

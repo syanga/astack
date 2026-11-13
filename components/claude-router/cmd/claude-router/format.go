@@ -318,7 +318,6 @@ var moveWords = map[string]string{
 	string(router.ReasonExhausted):       "after exhaustion",
 	string(router.ReasonManual):          "manual",
 	string(router.ReasonOverageObserved): "after paid overflow was seen",
-	string(router.ReasonIdle):            "after its cache expired",
 }
 
 func words(table map[string]string, code string) string {

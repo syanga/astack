@@ -22,7 +22,6 @@ type PerfResult struct {
 	NotServed             map[string]int     `json:"not_served"`
 	Placements            int                `json:"placements"`
 	ExhaustionMigrations  int                `json:"exhaustion_migrations"`
-	IdleMigrations        int                `json:"idle_migrations"`
 	HealthyAutoMigrations int                `json:"healthy_automatic_migrations"`
 	DecideMicros          Percentiles        `json:"decide_us"`
 	CommitMicros          Percentiles        `json:"commit_us"`
@@ -134,12 +133,9 @@ func cmdPerf(args []string, stdout io.Writer) error {
 			if got != d {
 				return fmt.Errorf("%s: committed %+v, decided %+v", req.Conversation, got, d)
 			}
-			switch {
-			case d.Kind == router.Place:
+			if d.Kind == router.Place {
 				res.Placements++
-			case d.Reason == router.ReasonIdle:
-				res.IdleMigrations++
-			default:
+			} else {
 				res.ExhaustionMigrations++
 				if !exhausted[d.From] {
 					res.HealthyAutoMigrations++

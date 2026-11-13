@@ -148,7 +148,7 @@ func TestTheSimulatorFlagsAnIdleMoveOnlyWhileTheConversationsCacheLives(t *testi
 				t.Fatal("no idle migrations, want some")
 			}
 			if flagged := m.HealthyAutoMigrations > 0; flagged != tc.flagged {
-				t.Fatalf("%d of %d idle migrations flagged as healthy, want flagged %v", m.HealthyAutoMigrations, m.IdleMigrations, tc.flagged)
+				t.Fatalf("%d migrations flagged as healthy with %d idle migrations, want flagged %v", m.HealthyAutoMigrations, m.IdleMigrations, tc.flagged)
 			}
 		})
 	}

@@ -169,7 +169,8 @@ last 24 hours' cache writes that account moves may cause before `status`
 warns. 0 turns the warning off. `place_again_after` (default `65m`) sets how
 long a conversation must be idle before the router places it again, as it
 places a new conversation. Keep it above the one-hour prompt-cache lifetime,
-or a move costs a cache write that staying would have saved.
+or a move costs a cache write that staying would have saved. `cache` counts
+that write.
 
 The service reads `config.json` and the credentials once, at start. To change
 either by hand, run `claude-router stop`, make the change, and run
@@ -301,7 +302,7 @@ while `setup`, `account`, activation, or `claude-router direct` runs.
 | `claude-router check` | Checks the router, the accounts, paid overflow, the Claude Code settings, and the accepted record, then sends one test message ([Check the router](#check-the-router)). |
 | `claude-router account add NAME` | Signs in one more account and adds it to `config.json`. |
 | `claude-router account remove NAME [-force]` | Removes an account and its login. Its conversations move to another account on their next request. |
-| `claude-router status` | One line for the service, one per account, and one per problem. On a terminal, each account gets a box instead of its line, with a bar for each limit window and a count of the account's limit resets. A problem is a recent move that was not for idleness, a quota or paid-overflow reading older than 15 minutes, or a conversation that waits, is refused, is held for login, or could not reach the provider. A `cache` line warns when account moves caused more than `move_cache_warn_percent` of the last 24 hours' cache writes, also while the service is stopped. The last line names the next command to run. A stopped service shows its last start error, or that it cannot record a start. |
+| `claude-router status` | One line for the service, one per account, and one per problem. On a terminal, each account gets a box instead of its line, with a bar for each limit window and a count of the account's limit resets. A problem is a recent move other than an idle move, a quota or paid-overflow reading older than 15 minutes, or a conversation that waits, is refused, is held for login, or could not reach the provider. A `cache` line warns when account moves caused more than `move_cache_warn_percent` of the last 24 hours' cache writes, also while the service is stopped. The last line names the next command to run. A stopped service shows its last start error, or that it cannot record a start. |
 | `claude-router status -v` | Every reading with its age, cache counters per account, every assigned conversation, and the migrations, newest first. |
 | `claude-router cache [-since 24h]` | For the window, each account's cache hit rate and token counters, then the number of account moves, the cache writes those moves caused, their share of all cache writes, and the moves per reason. It reads only `events.jsonl` and `config.json`, so it works while the service is stopped. |
 | `claude-router stop` | Stops the service and keeps it off, across logins and restarts, until `claude-router start`. Assignments stay. |

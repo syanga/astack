@@ -46,8 +46,9 @@ type Router struct {
 }
 
 // New returns a router over the enrolled accounts, in tie-break order, and an
-// open store, made at now. Account login and quota state start unknown and
-// live in memory only; Open keeps them across restarts.
+// open store. The router starts at now: a conversation with no request since
+// then is idle from now. Account login and quota state start unknown and live
+// in memory only; Open keeps them across restarts.
 func New(cfg Config, accounts []Account, store *Store, now time.Time) (*Router, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err

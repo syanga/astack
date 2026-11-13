@@ -457,7 +457,7 @@ func TestAnAssignmentSurvivesAModelChangeAndARestartWhileItsCacheLives(t *testin
 	}
 }
 
-func TestOnlyExhaustionMigratesAndTheConversationReturnsOnlyAfterItsCacheExpires(t *testing.T) {
+func TestOnlyExhaustionMovesABusyConversationAndItReturnsAfterItsCacheExpires(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
 	h.route(t0, req("conv"))
 
@@ -547,7 +547,7 @@ func TestAConversationIdleLongerThanPlaceAgainAfterIsPlacedAgain(t *testing.T) {
 	}
 }
 
-func TestAfterARestartAConversationCountsAsActiveAtTheStart(t *testing.T) {
+func TestAfterARestartIdleTimeCountsFromTheStart(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
 	h.route(t0, req("c1"))
 	h.route(t0, req("c2"))
@@ -570,6 +570,50 @@ func TestAfterARestartAConversationCountsAsActiveAtTheStart(t *testing.T) {
 	}
 	if late.Kind != Migrate || late.From != b || late.Account != a || late.Reason != ReasonIdle {
 		t.Fatalf("66 minutes after the restart c2 got %+v, want an idle migration from %s to %s", late, b, a)
+	}
+}
+
+func TestAnIdleConversationOnAnUnhealthyAccountGetsTheDecisionForThatState(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(h *harness, at time.Time)
+		want  Decision
+	}{
+		{"needs login after serving", func(h *harness, at time.Time) {
+			h.r.ObserveOverage(b, OverageDisabled, at)
+			if err := h.r.Served(t0, "conv", b); err != nil {
+				h.t.Fatal(err)
+			}
+			h.report(at, b, "claude-sonnet-4-5", ClassAuth)
+		}, Decision{Kind: Reauth, Account: b, Reason: ReasonNeedsLogin}},
+		{"exhausted", func(h *harness, at time.Time) {
+			h.r.ObserveOverage(b, OverageDisabled, at)
+			h.observe(b, Observation{At: at, Windows: []Window{rejected(Weekly, at.Add(48*time.Hour))}})
+		}, Decision{Kind: Migrate, From: b, Account: a, Reason: ReasonExhausted}},
+		{"paid use", func(h *harness, at time.Time) {
+			h.r.ObserveOverage(b, OveragePaidUse, at)
+		}, Decision{Kind: Migrate, From: b, Account: a, Reason: ReasonOverageObserved}},
+		{"paid overflow check stale", func(*harness, time.Time) {}, Decision{Kind: Refuse, Account: b, Reason: ReasonOverageStale}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
+			h.route(t0, req("first"))
+			if placed := h.route(t0, req("conv")); placed.Account != b {
+				t.Fatalf("conv placed on %s, want %s", placed.Account, b)
+			}
+			h.manualOverage = true
+			at := t0.Add(66 * time.Minute)
+			h.r.ObserveOverage(a, OverageDisabled, at)
+			tc.setup(h, at)
+
+			d := h.route(at, req("conv"))
+
+			got := Decision{Kind: d.Kind, From: d.From, Account: d.Account, Reason: d.Reason}
+			if got != tc.want {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }
 

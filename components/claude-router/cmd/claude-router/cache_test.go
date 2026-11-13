@@ -107,17 +107,17 @@ func TestAPolicyMoveCostsTheCacheWriteOfItsFirstRequestOnTheNewAccount(t *testin
 		"reasons   exhausted 1")
 }
 
-func TestAnIdleMoveCostsNoCacheWrite(t *testing.T) {
+func TestAnIdleMoveCostsNoCacheWriteOnlyMoreThanAnHourAfterTheConversationsLastRequest(t *testing.T) {
 	got := cacheLines(t,
-		served(ago(4*time.Hour), "aaaaaaaaaaaa", "work", counters(100, 6000, 0))+
-			served(ago(4*time.Hour), "bbbbbbbbbbbb", "work", counters(100, 2000, 0))+
-			movedEvent(ago(2*time.Hour), "aaaaaaaaaaaa", "work", "alumni", "idle")+
-			served(ago(2*time.Hour), "aaaaaaaaaaaa", "alumni", counters(100, 3000, 0))+
-			movedEvent(ago(time.Hour), "bbbbbbbbbbbb", "work", "alumni", "idle")+
-			served(ago(time.Hour), "bbbbbbbbbbbb", "alumni", ""))
+		served(ago(300*time.Minute), "aaaaaaaaaaaa", "work", counters(100, 6000, 0))+
+			served(ago(240*time.Minute), "bbbbbbbbbbbb", "work", counters(100, 2000, 0))+
+			movedEvent(ago(239*time.Minute), "aaaaaaaaaaaa", "work", "alumni", "idle")+
+			served(ago(239*time.Minute), "aaaaaaaaaaaa", "alumni", "")+
+			movedEvent(ago(181*time.Minute), "bbbbbbbbbbbb", "work", "alumni", "idle")+
+			served(ago(181*time.Minute), "bbbbbbbbbbbb", "alumni", counters(100, 1000, 0)))
 
 	wantLines(t, got,
-		"moves     2  cost 0  of 11k writes  share 0.0%",
+		"moves     2  cost 1k  of 9k writes  share 11.1%",
 		"reasons   idle 2")
 }
 
