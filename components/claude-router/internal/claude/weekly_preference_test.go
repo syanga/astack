@@ -159,12 +159,7 @@ func TestAConversationIdleLongerThanPlaceAgainAfterMovesToTheAccountWithMoreSlac
 	if late != served("acct-b") {
 		t.Fatalf("after 11 idle minutes = %q, want acct-b, which has more weekly slack", late)
 	}
-	var moves []Event
-	for _, ev := range e.events() {
-		if ev.Kind == "migrated" {
-			moves = append(moves, ev)
-		}
-	}
+	moves := e.migrations()
 	if len(moves) != 1 || moves[0].From != "acct-a" || moves[0].Account != "acct-b" || moves[0].Reason != string(router.ReasonIdle) {
 		t.Fatalf("migrated events = %+v, want one idle move from acct-a to acct-b", moves)
 	}

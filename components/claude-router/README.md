@@ -167,10 +167,10 @@ connection that failed before the request was written, for up to 25 s.
 `move_cache_warn_percent` (0 to 100, default 10) sets the share of the
 last 24 hours' cache writes that account moves may cause before `status`
 warns. 0 turns the warning off. `place_again_after` (default `65m`) sets how
-long a conversation must be idle before the router places it again, as it
-places a new conversation. Keep it above the one-hour prompt-cache lifetime,
-or a move costs a cache write that staying would have saved. `cache` counts
-that write.
+long a conversation must be idle before the router places the conversation
+again, as it would place a new one. Keep it above the one-hour prompt-cache
+lifetime, or an idle move can cost a cache write that staying would have
+saved. `cache` counts that write.
 
 The service reads `config.json` and the credentials once, at start. To change
 either by hand, run `claude-router stop`, make the change, and run

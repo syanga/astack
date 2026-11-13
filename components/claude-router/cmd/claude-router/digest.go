@@ -194,6 +194,7 @@ func (w *cacheWindow) track(c *conversationDigest, e claude.Event) {
 	if e.Status != http.StatusOK || e.Account == "" {
 		return
 	}
+	start := requestStart(e)
 	if c.servedOn != "" && c.servedOn != e.Account && !e.At.Before(w.Since) {
 		reason := c.moveReason
 		if reason == "" {
@@ -201,7 +202,7 @@ func (w *cacheWindow) track(c *conversationDigest, e claude.Event) {
 		}
 		m := accountMove{At: e.At, Conversation: e.Conversation, From: c.servedOn, To: e.Account, Reason: reason}
 		switch {
-		case reason == string(router.ReasonIdle) && requestStart(e).Sub(c.lastStart) > longestCacheLifetime:
+		case reason == string(router.ReasonIdle) && start.Sub(c.lastStart) > longestCacheLifetime:
 			m.Cost = new(int64)
 		case windowCounted(e.Usage):
 			cost := *e.Usage.CacheCreationInputTokens
@@ -209,7 +210,7 @@ func (w *cacheWindow) track(c *conversationDigest, e claude.Event) {
 		}
 		w.Moves = append(w.Moves, m)
 	}
-	if start := requestStart(e); start.After(c.lastStart) {
+	if start.After(c.lastStart) {
 		c.lastStart = start
 	}
 	c.servedOn, c.moveReason = e.Account, ""

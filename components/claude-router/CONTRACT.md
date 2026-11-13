@@ -582,7 +582,8 @@ score = (active + 1) / (capacity * (1 + ResetBias * slack))
   Those header terms retain their freshness and reset rules. Body windows
   other than account-wide weekly add no preference.
   `capacity_only` ignores all preferences.
-- Ties go to the earlier enrolled account.
+- Ties go to the earlier enrolled account, except that an idle conversation
+  placed again keeps its current account on a tie.
 - An account is blocked until the latest reset among its rejected windows that
   apply to the model. A five-hour reset therefore never unblocks an account
   whose weekly window is still rejected. A rejection with no reported reset
@@ -629,7 +630,7 @@ from the capacity-only choice for the same request, and `capacity` otherwise.
 | `ResetBias` | 8 | Simulator comparison below |
 | `FreshFor` | 15 min | Middle of the swept values 5, 15, and 60 min |
 | `ActiveFor` | 1 h | Not swept; the longest prompt-cache lifetime |
-| `PlaceAgainAfter` | 65 min | Above the measured prompt-cache lifetime of 1 h (Idle conversations are placed again, below) |
+| `PlaceAgainAfter` | 65 min | Above 1 h, the longest prompt-cache lifetime (Idle conversations are placed again, below) |
 | `UnknownResetRecheck` | 5 min | Not swept; bounds attempts on an account whose reset is unknown |
 | `OverageFreshFor` | 1 h | Not swept. PR3 sets the final freshness threshold with the check mechanism. |
 | `MaxAttempts` | 3 | Not swept |
@@ -674,10 +675,10 @@ comparison does not establish a percentage improvement, and none is required.
 
 ### Idle conversations are placed again
 
-A conversation stays on its account while its prompt cache lives, because a
-move makes its next request write the whole prompt again on the new account.
-Once the conversation's own cache has expired, its next request writes that
-cache again on any account, so staying no longer saves it. `Decide` then
+Keeping a conversation on its account saves its prompt cache, because a move
+makes its next request write the whole prompt again on the new account. Once
+the conversation's own cache has expired, its next request writes that cache
+again on any account, so staying no longer avoids that write. `Decide` then
 places the conversation again by the placement rule, as it places a new
 conversation:
 
@@ -696,6 +697,9 @@ conversation:
   above for that state.
 - The service reads the threshold from `place_again_after` in `config.json`,
   default `65m`.
+- Idle placement makes moves of healthy conversations routine. Row CC-2
+  still has no test of a conversation that relies on an account-scoped
+  artifact, so such a conversation could lose that artifact when it moves.
 
 `TestAConversationIdleLongerThanPlaceAgainAfterIsPlacedAgain`,
 `TestAfterARestartIdleTimeCountsFromTheStart`,
@@ -708,7 +712,7 @@ problem lines (`TestStatusLeavesIdleMovesOutOfItsLines`). `cache` counts
 their cost (Cache cost of account moves, below).
 
 The threshold rests on the daily router's `events.jsonl` from 2026-10-20 to
-2026-11-12 20:00 PST. The table counts the status-200 requests with at least
+2026-11-12 20:00 PST. The table counts the status-200 requests with more than
 20,000 input tokens that followed a request of the same conversation on the
 same account, by the gap since that request. A request reads from the cache
 when more than half of its input came from cache reads.
@@ -721,6 +725,44 @@ when more than half of its input came from cache reads.
 | 30 to 55 min | 51 | 88.2% |
 | 55 to 60 min | 38 | 94.7% |
 | 62 min or more | 98 | 1.0% |
+
+To regenerate the table, save this script as `cache_gaps.py` and run
+`python3 cache_gaps.py ~/.local/state/astack/claude-router/events.jsonl`:
+
+```python
+import json, re, sys
+from datetime import datetime
+
+cutoff = datetime.fromisoformat("2026-11-12T20:00:00-08:00")
+rows = [(0, 5), (5, 10), (10, 30), (30, 55), (55, 60), (60, 62), (62, float("inf"))]
+seen = {r: [0, 0, 0.0] for r in rows}
+last = {}
+for line in open(sys.argv[1]):
+    try:
+        e = json.loads(line)
+    except ValueError:
+        continue
+    if e.get("kind") != "request" or e.get("status") != 200 or not e.get("usage"):
+        continue
+    at = datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"\1", e["at"].replace("Z", "+00:00")))
+    if at >= cutoff:
+        break
+    u = e["usage"]
+    total = u["input_tokens"] + u["cache_creation_input_tokens"] + u["cache_read_input_tokens"]
+    prev = last.get(e["conversation"])
+    if prev and prev[1] == e["account"] and total > 20000:
+        gap = (at - prev[0]).total_seconds() / 60
+        for r in rows:
+            if r[0] <= gap < r[1]:
+                share = u["cache_read_input_tokens"] / total
+                seen[r][0] += 1
+                seen[r][1] += share > 0.5
+                seen[r][2] += share
+    last[e["conversation"]] = (at, e["account"])
+for r, (n, hits, shares) in seen.items():
+    if n:
+        print(f"{r[0]} to {r[1]} min: {n} requests, {100 * hits / n:.1f}% read from the cache, mean read share {100 * shares / n:.1f}%")
+```
 
 No request had a gap of 60 to 62 minutes. The cache lives one hour after a
 request. The dip from 5 to 30 minutes fits some requests using the 5-minute
@@ -1920,7 +1962,7 @@ destination receives the same session identity the source did
   dispatched keeps its pinned account, and a subagent request that follows
   the migration goes to the destination
   (`TestADispatchedRequestKeepsItsAccountWhileTheConversationMigrates`).
-- **No return while the cache lives.** A migrated conversation stays on its
+- **No return on recovery.** A migrated conversation stays on its
   destination when the source recovers
   (`TestMigratedConversationStaysAfterTheSourceRecovers`). It moves again
   only on a new confirmed exhaustion, observed paid use, a login requirement
@@ -2866,7 +2908,7 @@ from `events.jsonl`, so the warning also shows while the router is stopped.
   previous status-200 request started. The rule also applies to a request
   that is not a counted request. A request starts at its event's `at` minus
   its `duration_ms`. The previous request is the one with the latest start.
-  No prompt cache lives longer than an hour, so that request writes the
+  No prompt cache lives longer than an hour, so the move's request writes the
   conversation's own cache again on either account. An `idle` move within
   the hour,
   as when `place_again_after` is below 1 h, costs its request's cache write
@@ -2960,7 +3002,7 @@ applies. On a stopped router the next step stays `claude-router start`.
 
 | Check | Tests |
 | --- | --- |
-| Moves and costs | `TestTheFirstRequestOfAConversationIsAPlacementNotAMove`, `TestAPolicyMoveCostsTheCacheWriteOfItsFirstRequestOnTheNewAccount`, `TestAnIdleMoveCostsNoCacheWriteOnlyWhenItStartsMoreThanAnHourAfterThePreviousRequestStarted`, `TestAManualMoveShowsTheReasonOfItsMigratedEvent`, `TestAMoveWhoseRequestHasNoUsageKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWhoseRequestHasANullCacheWriteKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWithNoUsageAfterItHasAnUnknownCost`, `TestAMoveCountsItsCostOnlyWhenItsRequestCountsTowardAllWrites`, `TestOnlyMovesWhoseRequestFallsInTheWindowCount`, `TestTwoConversationsThatMoveAtTheSameTimeEachCountTheirOwnCost`, `TestAFailedRequestOnAnotherAccountIsNotAMove`, `TestAFailedRequestWithoutUsageAddsNoAccountLine`, `TestCacheOfAnEmptyLogShowsEachAccountWithoutAShare` |
+| Moves and costs | `TestTheFirstRequestOfAConversationIsAPlacementNotAMove`, `TestAPolicyMoveCostsTheCacheWriteOfItsFirstRequestOnTheNewAccount`, `TestAnIdleMoveCostsNoCacheWriteOnlyWhenItStartsMoreThanAnHourAfterThePreviousRequestStarted`, `TestAnIdleMoveCountsFromTheLatestStartWhenRequestsFinishOutOfOrder`, `TestAManualMoveShowsTheReasonOfItsMigratedEvent`, `TestAMoveWhoseRequestHasNoUsageKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWhoseRequestHasANullCacheWriteKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWithNoUsageAfterItHasAnUnknownCost`, `TestAMoveCountsItsCostOnlyWhenItsRequestCountsTowardAllWrites`, `TestOnlyMovesWhoseRequestFallsInTheWindowCount`, `TestTwoConversationsThatMoveAtTheSameTimeEachCountTheirOwnCost`, `TestAFailedRequestOnAnotherAccountIsNotAMove`, `TestAFailedRequestWithoutUsageAddsNoAccountLine`, `TestCacheOfAnEmptyLogShowsEachAccountWithoutAShare` |
 | Inputs | `TestCacheIgnoresAMalformedServiceRecord` |
 | Layout | `TestCacheMatchesTheSelectedLayout`; `TestStatusMatchesTheSelectedLayout` cases `cache-warning`, `cache-warning-off`, `stopped-cache-warning`, and `stopped-cache-warning-verbose` |
 | Setting and warning | `TestStatusWarnsAboveTheDefaultMoveShareOfTenPercent`, `TestTheStatusWarningSaysOrMoreWhenAMoveCostIsUnknown`, `TestAMoveCacheWarnPercentOfZeroTurnsTheWarningOff`, `TestStatusAndServeRefuseAMoveCacheWarnPercentOutsideZeroToHundred` |

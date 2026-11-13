@@ -108,23 +108,18 @@ if one follows.
 
 ## Know what the router costs and refuses
 
-While its prompt cache lives, a conversation stays on its account. The router
-moves it when that account can no longer serve it, as when its included
-allowance runs out. The first request on the new account writes the
-conversation's prompt cache again there.
+A conversation leaves its account when that account can no longer serve it,
+as when its included allowance runs out. The first request on the new account
+writes the conversation's prompt cache again there. `status` prints a `cache`
+line when moves caused more than 10% of the last 24 hours' cache writes.
 
 When a conversation has been idle longer than `place_again_after` in
-`config.json`, the router places it again as it places a new conversation.
-The conversation may move. At the default, 65 minutes, the conversation's
-own cache has expired, so `cache` counts such a move at no cost. A value
-below one hour, the longest prompt-cache lifetime, makes idle moves cost
-cache writes.
-
-`cache` prints a `reasons` line with a count per reason, such as `idle 2`.
-`status` leaves idle moves out of its problem lines. While the router runs,
-`status -v` lists up to 20 recent migrations with their reasons. `status`
-prints a `cache` line when moves caused more than 10% of the last 24 hours'
-cache writes.
+`config.json`, the router places the conversation again, as it would place a
+new one, and the conversation may move. Placement prefers a less busy account
+with more unused allowance before its reset. At the default, 65 minutes, the
+conversation's own cache has expired, so `cache` counts such a move at no
+cost. The problem lines of `status` leave idle moves out. `cache` and
+`status -v` show them with the reason `idle`.
 
 A Claude model newer than the router's model list gets a 503 that says the
 SDK refused the pinned account without an upstream attempt. The router
