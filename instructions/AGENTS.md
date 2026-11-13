@@ -46,6 +46,6 @@ A thread you launched is one whose first message names your thread as the sender
 * To stop a thread, send it the reason with `t3_thread_send` in `auto` mode, and tell it to:
   1. commit work worth keeping
   2. unless its branch gets a new owner, close its PR with the reason and a link to any replacement
-  3. close its lane with worktree-cleanup, keeping its branch, and its worktree if the branch gets a new owner
+  3. close its lane with worktree-cleanup, keeping its branch, and keeping its worktree if the branch gets a new owner
   4. report to your thread
 * After a stopped thread reports, launch its branch's new owner in its worktree with `existing_worktree`.
