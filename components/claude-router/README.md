@@ -432,8 +432,9 @@ the same request from there. That request writes the conversation's prompt
 cache again on the new account. `claude-router cache` reports each move and
 the cache writes it caused. When no account can serve, it answers with a 429
 that carries the earliest reset at which an account can serve again, and the
-client sleeps until then and sends again. A recovered account does not
-take a conversation back while the conversation's prompt cache lives. When
+client sleeps until then and sends again. At the default `place_again_after`,
+a recovered account does not take a conversation back while the
+conversation's prompt cache lives. When
 an account needs a new login, its conversations get an error that names
 `claude-router login`, and new conversations go elsewhere. `claude-router move` sends
 `POST /claude-router/move` with the client token and

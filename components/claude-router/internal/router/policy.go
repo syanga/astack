@@ -178,7 +178,7 @@ func place(cfg Config, now Instant, v view, model string) Decision {
 		if cfg.Rule == ResetAware {
 			score = base / (1 + cfg.ResetBias*slack(cfg, now, a, model))
 		}
-		if best < 0 || score < bestScore || score == bestScore && a.ID == v.binding.Account {
+		if best < 0 || score < bestScore || (score == bestScore && a.ID == v.binding.Account) {
 			best, bestScore = i, score
 		}
 	}

@@ -209,7 +209,10 @@ func (w *cacheWindow) track(c *conversationDigest, e claude.Event) {
 		}
 		w.Moves = append(w.Moves, m)
 	}
-	c.servedOn, c.lastStart, c.moveReason = e.Account, requestStart(e), ""
+	if start := requestStart(e); start.After(c.lastStart) {
+		c.lastStart = start
+	}
+	c.servedOn, c.moveReason = e.Account, ""
 }
 
 const longestCacheLifetime = time.Hour

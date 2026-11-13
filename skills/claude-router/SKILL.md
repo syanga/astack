@@ -110,14 +110,15 @@ if one follows.
 
 While its prompt cache lives, a conversation stays on its account. The router
 moves it when that account can no longer serve it, as when its included
-allowance runs out. The next request then writes the conversation's prompt
-cache again on the new account.
+allowance runs out. The first request on the new account writes the
+conversation's prompt cache again there.
 
 When a conversation has been idle longer than `place_again_after` in
-`config.json`, the router places it again, as it places a new conversation,
-and the conversation may move. Keep the setting above one hour, the longest
-prompt-cache lifetime. At the default, 65 minutes, the conversation's own
-cache has expired, so `cache` counts such a move at no cost.
+`config.json`, the router places it again as it places a new conversation.
+The conversation may move. At the default, 65 minutes, the conversation's
+own cache has expired, so `cache` counts such a move at no cost. A value
+below one hour, the longest prompt-cache lifetime, makes idle moves cost
+cache writes.
 
 `cache` prints a `reasons` line with a count per reason, such as `idle 2`.
 `status` leaves idle moves out of its problem lines. While the router runs,

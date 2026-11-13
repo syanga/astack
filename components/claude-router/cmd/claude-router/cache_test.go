@@ -125,6 +125,18 @@ func TestAnIdleMoveCostsNoCacheWriteOnlyWhenItStartsMoreThanAnHourAfterThePrevio
 		"reasons   idle 2")
 }
 
+func TestAnIdleMoveCountsFromTheLatestStartWhenRequestsFinishOutOfOrder(t *testing.T) {
+	got := cacheLines(t,
+		servedFor(ago(290*time.Minute), time.Minute, "aaaaaaaaaaaa", "work", counters(100, 2000, 0))+
+			servedFor(ago(300*time.Minute), 20*time.Minute, "aaaaaaaaaaaa", "work", counters(100, 6000, 0))+
+			movedEvent(ago(239*time.Minute), "aaaaaaaaaaaa", "work", "alumni", "idle")+
+			servedFor(ago(239*time.Minute), time.Second, "aaaaaaaaaaaa", "alumni", counters(100, 1000, 0)))
+
+	wantLines(t, got,
+		"moves     1  cost 1k  of 9k writes  share 11.1%",
+		"reasons   idle 1")
+}
+
 func TestAMoveOffARemovedAccountCountsAsAMove(t *testing.T) {
 	got := cacheLines(t,
 		served(ago(3*time.Hour), "aaaaaaaaaaaa", "school", counters(100, 6000, 0))+

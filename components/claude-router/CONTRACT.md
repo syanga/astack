@@ -610,8 +610,9 @@ score = (active + 1) / (capacity * (1 + ResetBias * slack))
   reports stamped at least one weekly period before it. Any evidence of the
   same window stamped earlier belongs to a window that has ended.
 - The destination of every `migrate` is chosen by this rule.
-- Reset preference affects only `place` and the destination of `migrate`.
-  `Decide` moves a conversation on a healthy account only after the
+- Reset preference affects only `place`, the destination of `migrate`, and
+  whether an idle conversation moves at all. `Decide` moves a conversation
+  on a healthy account only after the
   conversation has been idle longer than `PlaceAgainAfter` (Idle
   conversations are placed again, below).
 
@@ -675,9 +676,10 @@ comparison does not establish a percentage improvement, and none is required.
 
 A conversation stays on its account while its prompt cache lives, because a
 move makes its next request write the whole prompt again on the new account.
-Once the cache has expired, the next request writes the prompt again on any
-account, so staying saves nothing. `Decide` then places the conversation
-again by the placement rule, as it places a new conversation:
+Once the conversation's own cache has expired, its next request writes that
+cache again on any account, so staying no longer saves it. `Decide` then
+places the conversation again by the placement rule, as it places a new
+conversation:
 
 - A conversation is idle when its latest request is more than
   `PlaceAgainAfter` before the request being decided. The latest request is
@@ -2861,12 +2863,15 @@ from `events.jsonl`, so the warning also shows while the router is stopped.
   when that request is a counted request. Later requests, and cold starts
   after the cache expires, do not count. A move with reason `idle` costs 0
   when its request starts more than an hour after the conversation's
-  previous status-200 request started. That holds also when its request is
-  not a counted request. A request starts at its event's `at` minus its
-  `duration_ms`. No prompt cache lives longer than an hour, so that request
-  writes the same cache on either account. An `idle` move within the hour,
+  previous status-200 request started. The rule also applies to a request
+  that is not a counted request. A request starts at its event's `at` minus
+  its `duration_ms`. The previous request is the one with the latest start.
+  No prompt cache lives longer than an hour, so that request writes the
+  conversation's own cache again on either account. An `idle` move within
+  the hour,
   as when `place_again_after` is below 1 h, costs its request's cache write
-  (`TestAnIdleMoveCostsNoCacheWriteOnlyWhenItStartsMoreThanAnHourAfterThePreviousRequestStarted`).
+  (`TestAnIdleMoveCostsNoCacheWriteOnlyWhenItStartsMoreThanAnHourAfterThePreviousRequestStarted`,
+  `TestAnIdleMoveCountsFromTheLatestStartWhenRequestsFinishOutOfOrder`).
 - **Unknown cost.** A move whose request is not a counted request has an
   unknown cost. Its request reported no usage, or a `null` input, cache
   write, or cache read counter. A later request on the new account does not
