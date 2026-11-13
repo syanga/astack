@@ -39,11 +39,11 @@ A status question about work you are already doing is not a new request. Answer 
 
 ## T3 Code threads
 
-A thread you launched is one whose first message names your thread as the sender.
+A thread you launched is one whose first message names your thread as the sender. Check the sender before you stop or settle a thread.
 
 * Settle each thread you launched with `t3_thread_organize` after you check its final report, unless the report shows a failure or an unresolved hold.
-* Stop a thread you launched only when its work is dropped, replaced, or done another way, or when the user says so. Report to the user any other thread you would have stopped.
+* Stop a thread you launched only when its work is dropped, replaced, or done another way, or when the user says so. Report to the user any other thread you would have stopped, even after a general request to clean up. Stop one only when the user names it.
 * To stop a thread, send it the reason with `t3_thread_send` in `auto` mode, and tell it to:
   1. commit work worth keeping
   2. unless its branch gets a new owner, close its PR with the reason and a link to any replacement
-  3. close its lane with worktree-cleanup and report to your thread
+  3. close its lane with worktree-cleanup, keeping its branch, and report to your thread
