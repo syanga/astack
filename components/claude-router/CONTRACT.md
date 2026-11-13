@@ -612,8 +612,7 @@ score = (active + 1) / (capacity * (1 + ResetBias * slack))
 - The destination of every `migrate` is chosen by this rule.
 - Reset preference affects only `place` and the destination of `migrate`.
   `Decide` moves a conversation on a healthy account only after the
-  conversation has been idle longer than `PlaceAgainAfter`. A migrated
-  conversation returns to its source on its own only then (Idle
+  conversation has been idle longer than `PlaceAgainAfter` (Idle
   conversations are placed again, below).
 
 `Decision.Reason` is `reset_preference` when the reset-aware choice differs
@@ -684,8 +683,8 @@ again by the placement rule, as it places a new conversation:
   `PlaceAgainAfter` before the request being decided. The latest request is
   the later of the binding's `since` and the last request this router
   routed for the conversation. The router does not save request times, so
-  after a restart a conversation with no request since the start is idle
-  from the start.
+  after a restart, the idle time of a conversation with no request since the
+  start counts from the start.
 - `Decide` answers `migrate` with reason `idle` when the placement rule picks
   another account, and `dispatch` on the current account otherwise. On a
   tie the current account wins.
@@ -703,29 +702,29 @@ again by the placement rule, as it places a new conversation:
 and the service test
 `TestAConversationIdleLongerThanPlaceAgainAfterMovesToTheAccountWithMoreSlack`
 cover these rules. `claude-router status` leaves idle moves out of its
-problem lines (`TestStatusLeavesIdleMovesOutOfItsLines`), and `cache` counts
-their cost as Cache cost of account moves defines it.
+problem lines (`TestStatusLeavesIdleMovesOutOfItsLines`). `cache` counts
+their cost (Cache cost of account moves, below).
 
-The threshold rests on the daily router's `events.jsonl` on 2026-11-12. The
-table counts the status-200 requests with at least 20,000 input tokens that
-followed a request of the same conversation on the same account, by the gap
-since that request. A request reads from the cache when more than half of
-its input came from cache reads.
+The threshold rests on the daily router's `events.jsonl` from 2026-10-20 to
+2026-11-12 20:00 PST. The table counts the status-200 requests with at least
+20,000 input tokens that followed a request of the same conversation on the
+same account, by the gap since that request. A request reads from the cache
+when more than half of its input came from cache reads.
 
 | Gap | Requests | Read from the cache |
 | --- | --- | --- |
-| 0 to 5 min | 22,164 | 98.8% |
-| 5 to 10 min | 259 | 45.9% |
-| 10 to 30 min | 234 | 67.9% |
+| 0 to 5 min | 22,060 | 98.8% |
+| 5 to 10 min | 256 | 45.3% |
+| 10 to 30 min | 233 | 67.8% |
 | 30 to 55 min | 51 | 88.2% |
 | 55 to 60 min | 38 | 94.7% |
-| 62 min or more | 100 | 1.0% |
+| 62 min or more | 98 | 1.0% |
 
 No request had a gap of 60 to 62 minutes. The cache lives one hour after a
 request. The dip from 5 to 30 minutes fits some requests using the 5-minute
-cache. In each row from 62 minutes on, requests still read between 3% and
-18% of their input from the cache on average. That part is the system prompt
-and tools, which the account's other conversations keep cached. A move writes
+cache. Requests 62 minutes or more after the previous one still read 15.1% of
+their input from the cache on average. That part is the system prompt and
+tools, which the account's other conversations keep cached. A move writes
 that part again only when no conversation on the new account keeps it cached.
 
 The simulator's cache lives `ttl_minutes` after each request. The simulator
@@ -779,10 +778,11 @@ the check or response.
   `overage_observed` when another account is eligible. If none is, it waits
   for the earliest usable reset elsewhere or is refused with
   `paid_use_observed`, and keeps its assignment. New conversations skip the
-  account. A migrated conversation returns only as an idle placement (Idle
-  conversations are placed again). While recorded paid use
-  is in force, the transport sends the account no attempt, including the
-  SDK's redispatch of a request that was waiting on a refresh.
+  account. A migrated conversation does not return when the paid use
+  clears. It moves again only for one of the reasons in Migration, below.
+  While recorded paid use is in force, the transport sends the account no
+  attempt, including the SDK's redispatch of a request that was waiting on a
+  refresh.
 - **Ordering.** The router records the latest check (`disabled` or
   `enabled`) and, separately, the latest paid use, each with its time. A
   check stamped before the latest recorded check is ignored. Of two checks
@@ -1681,9 +1681,9 @@ before the read started. The router saves the change, so a restart does not
 bring the rejection back
 (`TestAUsageReadBelowTheLimitClearsAnEarlierRejectionOfTheSameWindow`,
 `TestARejectionClearedByAUsageReadStaysClearedAfterRestart`,
-`TestAUsageReadAfterAManualResetReturnsTheAccountToNewConversations`). A
-conversation that migrated away stays on its new account until it has been
-idle longer than `PlaceAgainAfter`.
+`TestAUsageReadAfterAManualResetReturnsTheAccountToNewConversations`). The
+cleared rejection alone does not move a migrated conversation back
+(Migration, below).
 
 The threshold rests on the provider's live answers on 2026-11-12. Three
 weekly rejections carried a header utilization of exactly 1. The two
@@ -1923,7 +1923,8 @@ destination receives the same session identity the source did
   (`TestMigratedConversationStaysAfterTheSourceRecovers`). It moves again
   only on a new confirmed exhaustion, observed paid use, a login requirement
   before it was served (PR2), removal of its account from `config.json`, a
-  manual move, or an idle placement (Idle conversations are placed again).
+  manual move, or an idle placement (Idle conversations are placed again,
+  above).
 - **Cancellation.** A client that goes away during the destination's
   response cancels that attempt; the committed migration stays
   (`TestClientCancellationDuringTheMovedResponseKeepsTheMigration`).
@@ -2858,13 +2859,14 @@ from `events.jsonl`, so the warning also shows while the router is stopped.
   cannot exceed 100%.
 - **Move cost.** The `cache_creation_input_tokens` of the move's own request,
   when that request is a counted request. Later requests, and cold starts
-  after the cache expires, do not count. A move with reason `idle` whose
-  request comes more than an hour after the conversation's previous
-  status-200 request costs 0, also when its request is not a counted request.
-  No prompt cache lives longer than an hour, so that request writes the same
-  cache on either account. An `idle` move within the hour, which happens only
-  when `place_again_after` is below 1 h, costs its request's cache write
-  (`TestAnIdleMoveCostsNoCacheWriteOnlyMoreThanAnHourAfterTheConversationsLastRequest`).
+  after the cache expires, do not count. A move with reason `idle` costs 0
+  when its request starts more than an hour after the conversation's
+  previous status-200 request started. That holds also when its request is
+  not a counted request. A request starts at its event's `at` minus its
+  `duration_ms`. No prompt cache lives longer than an hour, so that request
+  writes the same cache on either account. An `idle` move within the hour,
+  as when `place_again_after` is below 1 h, costs its request's cache write
+  (`TestAnIdleMoveCostsNoCacheWriteOnlyWhenItStartsMoreThanAnHourAfterThePreviousRequestStarted`).
 - **Unknown cost.** A move whose request is not a counted request has an
   unknown cost. Its request reported no usage, or a `null` input, cache
   write, or cache read counter. A later request on the new account does not
@@ -2953,7 +2955,7 @@ applies. On a stopped router the next step stays `claude-router start`.
 
 | Check | Tests |
 | --- | --- |
-| Moves and costs | `TestTheFirstRequestOfAConversationIsAPlacementNotAMove`, `TestAPolicyMoveCostsTheCacheWriteOfItsFirstRequestOnTheNewAccount`, `TestAnIdleMoveCostsNoCacheWriteOnlyMoreThanAnHourAfterTheConversationsLastRequest`, `TestAManualMoveShowsTheReasonOfItsMigratedEvent`, `TestAMoveWhoseRequestHasNoUsageKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWhoseRequestHasANullCacheWriteKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWithNoUsageAfterItHasAnUnknownCost`, `TestAMoveCountsItsCostOnlyWhenItsRequestCountsTowardAllWrites`, `TestOnlyMovesWhoseRequestFallsInTheWindowCount`, `TestTwoConversationsThatMoveAtTheSameTimeEachCountTheirOwnCost`, `TestAFailedRequestOnAnotherAccountIsNotAMove`, `TestAFailedRequestWithoutUsageAddsNoAccountLine`, `TestCacheOfAnEmptyLogShowsEachAccountWithoutAShare` |
+| Moves and costs | `TestTheFirstRequestOfAConversationIsAPlacementNotAMove`, `TestAPolicyMoveCostsTheCacheWriteOfItsFirstRequestOnTheNewAccount`, `TestAnIdleMoveCostsNoCacheWriteOnlyWhenItStartsMoreThanAnHourAfterThePreviousRequestStarted`, `TestAManualMoveShowsTheReasonOfItsMigratedEvent`, `TestAMoveWhoseRequestHasNoUsageKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWhoseRequestHasANullCacheWriteKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWithNoUsageAfterItHasAnUnknownCost`, `TestAMoveCountsItsCostOnlyWhenItsRequestCountsTowardAllWrites`, `TestOnlyMovesWhoseRequestFallsInTheWindowCount`, `TestTwoConversationsThatMoveAtTheSameTimeEachCountTheirOwnCost`, `TestAFailedRequestOnAnotherAccountIsNotAMove`, `TestAFailedRequestWithoutUsageAddsNoAccountLine`, `TestCacheOfAnEmptyLogShowsEachAccountWithoutAShare` |
 | Inputs | `TestCacheIgnoresAMalformedServiceRecord` |
 | Layout | `TestCacheMatchesTheSelectedLayout`; `TestStatusMatchesTheSelectedLayout` cases `cache-warning`, `cache-warning-off`, `stopped-cache-warning`, and `stopped-cache-warning-verbose` |
 | Setting and warning | `TestStatusWarnsAboveTheDefaultMoveShareOfTenPercent`, `TestTheStatusWarningSaysOrMoreWhenAMoveCostIsUnknown`, `TestAMoveCacheWarnPercentOfZeroTurnsTheWarningOff`, `TestStatusAndServeRefuseAMoveCacheWarnPercentOutsideZeroToHundred` |

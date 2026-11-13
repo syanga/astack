@@ -432,10 +432,10 @@ the same request from there. That request writes the conversation's prompt
 cache again on the new account. `claude-router cache` reports each move and
 the cache writes it caused. When no account can serve, it answers with a 429
 that carries the earliest reset at which an account can serve again, and the
-client sleeps until then and sends again. A conversation never
-returns to its first account on its own. When an account needs a new
-login, its conversations get an error that names `claude-router login`,
-and new conversations go elsewhere. `claude-router move` sends
+client sleeps until then and sends again. A recovered account does not
+take a conversation back while the conversation's prompt cache lives. When
+an account needs a new login, its conversations get an error that names
+`claude-router login`, and new conversations go elsewhere. `claude-router move` sends
 `POST /claude-router/move` with the client token and
 `{"conversation": "<session id or hash>", "to": "<account>"}`. Exhaustion,
 login, and paid-overflow state survive a restart.
@@ -502,9 +502,9 @@ as another weekly allowance. For example, 10% remaining plus two resets is
 router uses the newest valid weekly usage from headers or the usage body,
 fresh for 15 minutes by default, and reset grants read within one hour.
 This preference affects new placements, migration destinations, and
-conversations idle longer than `place_again_after`, whose prompt cache has
-expired. It moves no other conversation on a healthy account, and it never
-redeems a reset automatically.
+conversations idle longer than `place_again_after`. It moves no other
+conversation on a healthy account, and it never redeems a reset
+automatically.
 
 ## Run the simulator
 

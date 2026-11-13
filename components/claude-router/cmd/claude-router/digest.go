@@ -36,7 +36,7 @@ type conversationDigest struct {
 	Context  int64
 
 	servedOn   router.AccountID
-	servedAt   time.Time
+	lastStart  time.Time
 	moveReason string
 }
 
@@ -201,7 +201,7 @@ func (w *cacheWindow) track(c *conversationDigest, e claude.Event) {
 		}
 		m := accountMove{At: e.At, Conversation: e.Conversation, From: c.servedOn, To: e.Account, Reason: reason}
 		switch {
-		case reason == string(router.ReasonIdle) && e.At.Sub(c.servedAt) > longestCacheLifetime:
+		case reason == string(router.ReasonIdle) && requestStart(e).Sub(c.lastStart) > longestCacheLifetime:
 			m.Cost = new(int64)
 		case windowCounted(e.Usage):
 			cost := *e.Usage.CacheCreationInputTokens
@@ -209,10 +209,17 @@ func (w *cacheWindow) track(c *conversationDigest, e claude.Event) {
 		}
 		w.Moves = append(w.Moves, m)
 	}
-	c.servedOn, c.servedAt, c.moveReason = e.Account, e.At, ""
+	c.servedOn, c.lastStart, c.moveReason = e.Account, requestStart(e), ""
 }
 
 const longestCacheLifetime = time.Hour
+
+func requestStart(e claude.Event) time.Time {
+	if e.DurationMS == nil {
+		return e.At
+	}
+	return e.At.Add(-time.Duration(*e.DurationMS) * time.Millisecond)
+}
 
 func val(p *int64) int64 {
 	if p == nil {
