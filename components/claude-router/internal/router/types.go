@@ -152,7 +152,7 @@ const (
 	Dispatch Kind = "dispatch"
 	// Place assigns a new conversation. Commit it before dispatch.
 	Place Kind = "place"
-	// Migrate moves the conversation after confirmed exhaustion. Commit it
+	// Migrate moves the conversation to another account for Reason. Commit it
 	// before dispatch.
 	Migrate Kind = "migrate"
 	// Retry resends after a transient failure on the same account.
@@ -160,7 +160,8 @@ const (
 	// Wait answers locally: no eligible account can serve the model until Until.
 	Wait Kind = "wait"
 	// Reauth reports that the assigned account needs a browser login. The
-	// assignment stays until relogin or an explicit move.
+	// assignment stays until relogin, an explicit move, or an idle placement
+	// on another account.
 	Reauth Kind = "reauth"
 	// Fail reports a failure to the client after the retry budget is spent.
 	Fail Kind = "fail"
@@ -254,10 +255,10 @@ type Config struct {
 	// ActiveFor is how long after its last request a conversation counts
 	// toward its account's workload.
 	ActiveFor time.Duration `json:"active_for"`
-	// PlaceAgainAfter is how long after its last request a conversation is
-	// placed again, as a new conversation is. Above one hour, the longest
-	// prompt-cache lifetime, the conversation's cache on its account has
-	// expired before it moves.
+	// PlaceAgainAfter is the idle time after which a conversation is placed
+	// again, as a new conversation is (CONTRACT.md, Idle conversations are
+	// placed again). Above one hour, the longest prompt-cache lifetime, the
+	// conversation's cache on its account has expired before it moves.
 	PlaceAgainAfter time.Duration `json:"place_again_after"`
 	// UnknownResetRecheck is how long a rejection without a reported reset
 	// blocks its account before a request may probe it again.

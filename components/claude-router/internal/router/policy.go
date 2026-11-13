@@ -103,7 +103,7 @@ func decide(cfg Config, now Instant, v view, req Request) Decision {
 				return d
 			}
 		}
-		if d, ok := placeIdle(cfg, now, v, req.Model); ok {
+		if d, ok := migrateIfIdle(cfg, now, v, req.Model); ok {
 			return d
 		}
 		return Decision{Kind: Reauth, Account: current, Reason: ReasonNeedsLogin}
@@ -127,7 +127,7 @@ func decide(cfg Config, now Instant, v view, req Request) Decision {
 		return d
 	}
 	if bar := overageBar(cfg, now.Stamp, v.checksFrom, acct); bar != "" {
-		if d, ok := placeIdle(cfg, now, v, req.Model); ok {
+		if d, ok := migrateIfIdle(cfg, now, v, req.Model); ok {
 			return d
 		}
 		return Decision{Kind: Refuse, Account: current, Reason: bar, RecheckOverage: recheck(bar)}
@@ -139,13 +139,13 @@ func decide(cfg Config, now Instant, v view, req Request) Decision {
 		}
 		return Decision{Kind: Retry, Account: current, Reason: ReasonTransient}
 	}
-	if d, ok := placeIdle(cfg, now, v, req.Model); ok {
+	if d, ok := migrateIfIdle(cfg, now, v, req.Model); ok {
 		return d
 	}
 	return Decision{Kind: Dispatch, Account: current, Reason: ReasonAssigned}
 }
 
-func placeIdle(cfg Config, now Instant, v view, model string) (Decision, bool) {
+func migrateIfIdle(cfg Config, now Instant, v view, model string) (Decision, bool) {
 	if !v.idle {
 		return Decision{}, false
 	}

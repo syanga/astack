@@ -574,12 +574,15 @@ func TestAfterARestartIdleTimeCountsFromTheStart(t *testing.T) {
 }
 
 func TestAnIdleConversationOnAnAccountThatCannotServeItMovesWhenAnotherAccountCan(t *testing.T) {
-	needsLogin := func(h *harness, at time.Time) {
+	markNeedsLogin := func(h *harness, at time.Time) {
 		h.r.ObserveOverage(b, OverageDisabled, at)
+		h.report(at, b, "claude-sonnet-4-5", ClassAuth)
+	}
+	needsLogin := func(h *harness, at time.Time) {
 		if err := h.r.Served(t0, "conv", b); err != nil {
 			h.t.Fatal(err)
 		}
-		h.report(at, b, "claude-sonnet-4-5", ClassAuth)
+		markNeedsLogin(h, at)
 	}
 	overflowOn := func(h *harness, at time.Time) {
 		h.r.ObserveOverage(b, OverageEnabled, at)
@@ -591,6 +594,7 @@ func TestAnIdleConversationOnAnAccountThatCannotServeItMovesWhenAnotherAccountCa
 		want         Decision
 	}{
 		{"needs login after serving", needsLogin, false, Decision{Kind: Migrate, From: b, Account: a, Reason: ReasonIdle}},
+		{"needs login before serving keeps its reason", markNeedsLogin, false, Decision{Kind: Migrate, From: b, Account: a, Reason: ReasonNeverServed}},
 		{"paid overflow on", overflowOn, false, Decision{Kind: Migrate, From: b, Account: a, Reason: ReasonIdle}},
 		{"paid overflow check stale", func(*harness, time.Time) {}, false, Decision{Kind: Migrate, From: b, Account: a, Reason: ReasonIdle}},
 		{"exhausted keeps its reason", func(h *harness, at time.Time) {
@@ -631,30 +635,47 @@ func TestAnIdleConversationOnAnAccountThatCannotServeItMovesWhenAnotherAccountCa
 	}
 }
 
-func TestAConversationHeldForLoginBecomesIdleAfterItsLastRoutedRequest(t *testing.T) {
-	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
-	h.route(t0, req("first"))
-	if placed := h.route(t0, req("conv")); placed.Account != b {
-		t.Fatalf("conv placed on %s, want %s", placed.Account, b)
+func TestALoginErrorOrARefusalDoesNotRestartAConversationsIdleTime(t *testing.T) {
+	cases := []struct {
+		name  string
+		block func(h *harness, at time.Time)
+		held  Decision
+	}{
+		{"login error", func(h *harness, at time.Time) {
+			if err := h.r.Served(t0, "conv", b); err != nil {
+				h.t.Fatal(err)
+			}
+			h.report(at, b, "claude-sonnet-4-5", ClassAuth)
+		}, Decision{Kind: Reauth, Account: b, Reason: ReasonNeedsLogin}},
+		{"paid overflow refusal", func(h *harness, at time.Time) {
+			h.r.ObserveOverage(b, OverageEnabled, at)
+		}, Decision{Kind: Refuse, Account: b, Reason: ReasonOverageEnabled}},
 	}
-	if err := h.r.Served(t0, "conv", b); err != nil {
-		t.Fatal(err)
-	}
-	h.manualOverage = true
-	h.report(t0.Add(time.Minute), b, "claude-sonnet-4-5", ClassAuth)
-	route := func(at time.Time) Decision {
-		h.r.ObserveOverage(a, OverageDisabled, at)
-		return h.route(at, req("conv"))
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
+			h.route(t0, req("first"))
+			if placed := h.route(t0, req("conv")); placed.Account != b {
+				t.Fatalf("conv placed on %s, want %s", placed.Account, b)
+			}
+			h.manualOverage = true
+			tc.block(h, t0.Add(time.Minute))
+			route := func(at time.Time) Decision {
+				h.r.ObserveOverage(a, OverageDisabled, at)
+				return h.route(at, req("conv"))
+			}
 
-	held := route(t0.Add(65 * time.Minute))
-	moved := route(t0.Add(66 * time.Minute))
+			held := route(t0.Add(65 * time.Minute))
+			moved := route(t0.Add(66 * time.Minute))
 
-	if held.Kind != Reauth || held.Account != b {
-		t.Fatalf("65 minutes after its last routed request conv got %+v, want reauth on %s", held, b)
-	}
-	if moved.Kind != Migrate || moved.From != b || moved.Account != a || moved.Reason != ReasonIdle {
-		t.Fatalf("66 minutes after its last routed request conv got %+v, want an idle migration from %s to %s", moved, b, a)
+			got := Decision{Kind: held.Kind, Account: held.Account, Reason: held.Reason}
+			if got != tc.held {
+				t.Fatalf("conv got %+v 65 minutes after its last request sent to an account, want %+v", got, tc.held)
+			}
+			if moved.Kind != Migrate || moved.From != b || moved.Account != a || moved.Reason != ReasonIdle {
+				t.Fatalf("conv got %+v 66 minutes after its last request sent to an account, want an idle migration from %s to %s", moved, b, a)
+			}
+		})
 	}
 }
 
@@ -923,7 +944,7 @@ func TestUnverifiedOverageWithholdsDispatch(t *testing.T) {
 	}
 }
 
-func TestStaleOverageCheckRefusesWithoutMigrating(t *testing.T) {
+func TestStaleOverageCheckRefusesWithoutMigratingWithinPlaceAgainAfter(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0, b, 1.0)...)
 	h.manualOverage = true
 	h.r.ObserveOverage(a, OverageDisabled, t0)

@@ -108,34 +108,44 @@ if one follows.
 
 ## Know what the router costs and refuses
 
-The router moves a conversation to another account for several reasons, such
-as `exhausted` when the conversation's account runs out of included
-allowance, or `overage_observed` when the account shows paid use. The first
-request on the new account writes the conversation's prompt cache again.
-`status` prints a `cache` line when moves caused more than 10% of the last 24
-hours' cache writes. `cache` lists each move with its reason, and so does
-`status -v` while the router runs.
+The router moves a conversation to another account for several reasons. For
+example, the reason is `exhausted` when the conversation's account runs out
+of included allowance, and `overage_observed` when the account shows paid
+use. The first request on the new account writes the conversation's prompt
+cache again. `status` prints a `cache` line when moves caused more than 10%
+of the last 24 hours' cache writes. `cache` counts moves by reason. While the
+router runs, `status -v` lists recent moves with their reasons.
 
-When a conversation's request comes more than `place_again_after` in
-`config.json` after the last request the router sent for it, the router
-places the conversation again, as it would place a new one. Placement
-prefers a less busy account with more unused allowance before its reset.
-This `idle` move also takes a conversation off an account that needs a login
-or has paid overflow on, when another account can serve it. At the default
-of 65 minutes, the conversation's prompt cache has expired, so `cache` counts
-an idle move at no cost. The problem lines of `status` leave idle moves out.
+Paid overflow is the claude.ai setting that bills usage past the plan's
+included allowance, shown there as extra usage or usage credits. The router
+sends requests only to accounts whose latest reading shows paid overflow off.
+That reading must be newer than `overage_fresh_for`, default 30 minutes. If
+the user turns paid overflow on after the last reading, while the account's
+included allowance is used up, one paid response can happen before the router
+sees it.
+
+`place_again_after` in `config.json`, default 65 minutes, sets when a
+conversation counts as idle. Idle time counts from the last request the
+router sent to an account for the conversation. A manual move or a router
+start also restarts idle time. A request the router answers with a login
+error or a paid-overflow refusal, without sending it to an account, does
+not.
+
+At an idle conversation's next request, the router places the conversation
+again, as it places a new one. Placement prefers a less busy account with
+more unused allowance before its reset. Placement never picks an account
+that needs a login or fails the paid-overflow rule above. An idle
+conversation therefore also leaves such an account when another account can
+serve the conversation. The move gets the reason `idle`, unless the
+account's state would move the conversation anyway, as with `exhausted` or
+`overage_observed`. At the default of 65 minutes, the conversation's prompt
+cache has expired, so `cache` usually counts an idle move at no cost. The
+problem lines of `status` leave idle moves out.
 
 A Claude model newer than the router's model list gets a 503 that says the
 SDK refused the pinned account without an upstream attempt. The router
 reads the published model catalog at each start, so give the user
 `claude-router stop` and `claude-router start`.
-
-Paid overflow is the claude.ai setting that bills usage past the plan's
-included allowance, shown there as extra usage or usage credits. The router
-sends requests only to accounts whose latest reading shows paid overflow off.
-If the user turns paid overflow on after the last reading, while the account's
-included allowance is used up, one paid response can happen before the router
-sees it.
 
 ## Set up from nothing
 

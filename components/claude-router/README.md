@@ -429,19 +429,20 @@ happen before the router sees it.
 When an account's included allowance runs out before a response starts,
 the router moves the conversation to another eligible account and answers
 the same request from there. That request writes the conversation's prompt
-cache again on the new account. `claude-router cache` reports each move and
-the cache writes it caused. When no account can serve, it answers with a 429
-that carries the earliest reset at which an account can serve again, and the
-client sleeps until then and sends again. At the default `place_again_after`,
-a recovered account does not take a conversation back while the
-conversation's prompt cache lives. When an account needs a new login, its
-conversations get an error that names `claude-router login`, and new
-conversations go elsewhere. A conversation idle longer than
-`place_again_after` leaves such an account, or one with paid overflow on,
-for another account that can serve it. `claude-router move` sends
-`POST /claude-router/move` with the client token and
-`{"conversation": "<session id or hash>", "to": "<account>"}`. Exhaustion,
-login, and paid-overflow state survive a restart.
+cache again on the new account. `claude-router cache` counts the moves and
+the cache writes they caused. When no account can serve, the router answers
+with a 429 that carries the earliest reset at which an account can serve
+again, and the client sleeps until then and sends again. At the default
+`place_again_after`, a recovered account does not take a conversation back
+while the conversation's prompt cache lives. When an account needs a new
+login, its conversations get an error that names `claude-router login`, and
+new conversations go elsewhere. A conversation idle longer than
+`place_again_after` leaves such an account for another account that can
+serve it. So does an idle conversation on an account with paid overflow on,
+or with no reading of that setting within `overage_fresh_for`.
+`claude-router move` sends `POST /claude-router/move` with the client token
+and `{"conversation": "<session id or hash>", "to": "<account>"}`.
+Exhaustion, login, and paid-overflow state survive a restart.
 
 At each start, the service reads the model catalog that its SDK's
 maintainers publish and adds the Claude models the SDK's built-in list lacks.
@@ -461,11 +462,11 @@ CONTRACT.md's PR3 section lists every local answer and event.
 ## Use the routing policy
 
 `router.OpenStore(dir)` locks the state directory and replays its journal.
-`router.New(router.DefaultConfig(), accounts, store)` returns a `Router`
-that keeps account state in memory. `router.Open(cfg, accounts, store, now)`
-also loads and saves it in the state directory, as the service does. For
-each request, call `Route(now, request)` and dispatch only on the returned
-`Decision`:
+`router.New(router.DefaultConfig(), accounts, store, now)` returns a
+`Router` that keeps account state in memory and counts idle time from `now`.
+`router.Open(cfg, accounts, store, now)` also loads and saves that state in
+the state directory, as the service does. For each request, call
+`Route(now, request)` and dispatch only on the returned `Decision`:
 
 - `place`, `dispatch`, `migrate`, and `retry` name the account to pin the
   request to. `Route` has already synced any new assignment to disk.

@@ -40,9 +40,10 @@ type Config struct {
 	// OverageCheckEvery is the interval of the background settings read.
 	// Default 10 minutes. It must be shorter than OverageFreshFor.
 	OverageCheckEvery Duration `json:"overage_check_every,omitzero"`
-	// PlaceAgainAfter is how long after its last request a conversation is
-	// placed again, as a new conversation is. Default 65 minutes, above the
-	// one-hour prompt-cache lifetime.
+	// PlaceAgainAfter is the idle time after which a conversation is placed
+	// again, as a new conversation is (CONTRACT.md, Idle conversations are
+	// placed again). Default 65 minutes, above the one-hour prompt-cache
+	// lifetime.
 	PlaceAgainAfter Duration `json:"place_again_after,omitzero"`
 	// MaxUpstreamAttempts caps the upstream attempts of one client request,
 	// from 1 to 4. Default 4: three router dispatches and the SDK's
