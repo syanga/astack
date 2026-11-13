@@ -109,18 +109,21 @@ if one follows.
 ## Know what the router costs and refuses
 
 The router moves a conversation to another account for several reasons, such
-as when the conversation's account runs out of included allowance or shows
-paid use. The first request on the new account writes the conversation's
-prompt cache again. `status` prints a `cache` line when moves caused more
-than 10% of the last 24 hours' cache writes.
+as `exhausted` when the conversation's account runs out of included
+allowance, or `overage_observed` when the account shows paid use. The first
+request on the new account writes the conversation's prompt cache again.
+`status` prints a `cache` line when moves caused more than 10% of the last 24
+hours' cache writes. `cache` lists each move with its reason, and so does
+`status -v` while the router runs.
 
-A conversation can also move after it has been idle longer than
-`place_again_after` in `config.json`. The router then places the conversation
-again, as it would place a new one. Placement prefers a less busy account
-with more unused allowance before its reset. At the default of 65 minutes,
-the conversation's prompt cache has expired, so `cache` counts such a move
-at no cost. The problem lines of `status` leave idle moves out. `cache` shows
-them with the reason `idle`, and so does `status -v` while the router runs.
+When a conversation's request comes more than `place_again_after` in
+`config.json` after the last request the router sent for it, the router
+places the conversation again, as it would place a new one. Placement
+prefers a less busy account with more unused allowance before its reset.
+This `idle` move also takes a conversation off an account that needs a login
+or has paid overflow on, when another account can serve it. At the default
+of 65 minutes, the conversation's prompt cache has expired, so `cache` counts
+an idle move at no cost. The problem lines of `status` leave idle moves out.
 
 A Claude model newer than the router's model list gets a 503 that says the
 SDK refused the pinned account without an upstream attempt. The router

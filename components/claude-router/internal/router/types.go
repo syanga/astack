@@ -254,10 +254,10 @@ type Config struct {
 	// ActiveFor is how long after its last request a conversation counts
 	// toward its account's workload.
 	ActiveFor time.Duration `json:"active_for"`
-	// PlaceAgainAfter is how long after its last request a conversation on a
-	// healthy account is placed again, as a new conversation is. Above one
-	// hour, the longest prompt-cache lifetime, the conversation's cache on its
-	// account has expired before it moves.
+	// PlaceAgainAfter is how long after its last request a conversation is
+	// placed again, as a new conversation is. Above one hour, the longest
+	// prompt-cache lifetime, the conversation's cache on its account has
+	// expired before it moves.
 	PlaceAgainAfter time.Duration `json:"place_again_after"`
 	// UnknownResetRecheck is how long a rejection without a reported reset
 	// blocks its account before a request may probe it again.

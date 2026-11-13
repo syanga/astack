@@ -103,6 +103,9 @@ func decide(cfg Config, now Instant, v view, req Request) Decision {
 				return d
 			}
 		}
+		if d, ok := placeIdle(cfg, now, v, req.Model); ok {
+			return d
+		}
 		return Decision{Kind: Reauth, Account: current, Reason: ReasonNeedsLogin}
 	}
 	if acct.paidUse() {
@@ -124,6 +127,9 @@ func decide(cfg Config, now Instant, v view, req Request) Decision {
 		return d
 	}
 	if bar := overageBar(cfg, now.Stamp, v.checksFrom, acct); bar != "" {
+		if d, ok := placeIdle(cfg, now, v, req.Model); ok {
+			return d
+		}
 		return Decision{Kind: Refuse, Account: current, Reason: bar, RecheckOverage: recheck(bar)}
 	}
 	switch req.LastFailure {
@@ -133,13 +139,22 @@ func decide(cfg Config, now Instant, v view, req Request) Decision {
 		}
 		return Decision{Kind: Retry, Account: current, Reason: ReasonTransient}
 	}
-	if v.idle {
-		if d := place(cfg, now, v, req.Model); d.Kind == Place && d.Account != current {
-			d.Kind, d.From, d.Reason = Migrate, current, ReasonIdle
-			return d
-		}
+	if d, ok := placeIdle(cfg, now, v, req.Model); ok {
+		return d
 	}
 	return Decision{Kind: Dispatch, Account: current, Reason: ReasonAssigned}
+}
+
+func placeIdle(cfg Config, now Instant, v view, model string) (Decision, bool) {
+	if !v.idle {
+		return Decision{}, false
+	}
+	d := place(cfg, now, v, model)
+	if d.Kind != Place || d.Account == v.binding.Account {
+		return Decision{}, false
+	}
+	d.Kind, d.From, d.Reason = Migrate, v.binding.Account, ReasonIdle
+	return d, true
 }
 
 func place(cfg Config, now Instant, v view, model string) Decision {

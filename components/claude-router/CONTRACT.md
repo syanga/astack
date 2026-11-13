@@ -545,11 +545,11 @@ the assignment.
 | --- | --- |
 | `place` | A new conversation. Commit before dispatch. |
 | `dispatch` | An existing assignment on a usable account. |
-| `migrate` | Another account is eligible, and the assigned account has a known rejection that blocks the model (`exhausted`), showed paid use (`overage_observed`), needs login before the assignment served any response (`never_served_relogin`), or is no longer enrolled (`not_enrolled`). Or the conversation has been idle longer than `PlaceAgainAfter`, and the placement rule picks another account (`idle`). Commit before dispatch. A conversation whose account is no longer enrolled and that no account can take gets the `wait`, `refuse`, or `unavailable` of a new conversation and keeps its assignment (`TestAConversationOnAnAccountNoLongerEnrolledIsPlacedAgain`, `TestAConversationOnAnAccountNoLongerEnrolledKeepsItsAssignmentWhenNoAccountCanTakeIt`). |
+| `migrate` | Another account is eligible, and the assigned account has a known rejection that blocks the model (`exhausted`), showed paid use (`overage_observed`), needs login before the assignment served any response (`never_served_relogin`), or is no longer enrolled (`not_enrolled`). Or the conversation has been idle longer than `PlaceAgainAfter`, the placement rule picks another account, and no reason above applies (`idle`). Commit before dispatch. A conversation whose account is no longer enrolled and that no account can take gets the `wait`, `refuse`, or `unavailable` of a new conversation and keeps its assignment (`TestAConversationOnAnAccountNoLongerEnrolledIsPlacedAgain`, `TestAConversationOnAnAccountNoLongerEnrolledKeepsItsAssignmentWhenNoAccountCanTakeIt`). |
 | `retry` | `transient`, `network`, or `throttle` on the previous attempt, within `MaxAttempts`. |
 | `fail` | The retry budget is spent, or the previous attempt failed `request_scoped`. |
 | `wait` | No eligible account. `Until` is the earliest usable reset; `ResetKnown` is false when `Until` is only a recheck time. |
-| `reauth` | The assigned account needs a browser login and the assignment has served a response, or no other account is eligible. |
+| `reauth` | The assigned account needs a browser login and no migration applies. |
 | `refuse` | The included-only check fails for the assigned account and no migration applies, or it fails for every logged-in account when placing. `RecheckOverage` is set when a check is unknown or stale. |
 | `unavailable` | No enrolled account is logged in. |
 | `reject` | The request has no conversation identity. |
@@ -690,10 +690,17 @@ conversation:
 - `Decide` answers `migrate` with reason `idle` when the placement rule picks
   another account, and `dispatch` on the current account otherwise. On a
   tie the current account wins.
-- Only a conversation on a healthy account is placed again. A conversation
-  on an account that needs login, has seen paid use, is blocked by a
-  rejection, or fails the included-only check gets the decision described
-  above for that state.
+- The placement rule never picks an account that needs login, has seen paid
+  use, fails the included-only check, or is blocked by a rejection. An idle
+  conversation on such an account therefore moves when another account is
+  eligible, and otherwise gets the decision described above for that state.
+  The move's reason is `idle` when the account needs login after the
+  assignment served a response, or fails the included-only check. Otherwise
+  it is that state's reason: `never_served_relogin`, `overage_observed`, or
+  `exhausted`.
+- A request that gets `reauth`, `refuse`, or `wait` is not routed. A
+  conversation the router holds that way becomes idle `PlaceAgainAfter`
+  after its last routed request, and moves once another account is eligible.
 - The service reads the threshold from `place_again_after` in `config.json`,
   default `65m`.
 - Idle placement makes moves of healthy conversations routine. Row CC-2
@@ -702,7 +709,8 @@ conversation:
 
 `TestAConversationIdleLongerThanPlaceAgainAfterIsPlacedAgain`,
 `TestAfterARestartIdleTimeCountsFromTheStart`,
-`TestAnIdleConversationOnAnUnhealthyAccountGetsTheDecisionForThatState`,
+`TestAnIdleConversationOnAnAccountThatCannotServeItMovesWhenAnotherAccountCan`,
+`TestAConversationHeldForLoginBecomesIdleAfterItsLastRoutedRequest`,
 `TestOnlyExhaustionMovesABusyConversationAndItReturnsAfterPlaceAgainAfter`,
 and the service test
 `TestAConversationIdleLongerThanPlaceAgainAfterMovesToTheAccountWithMoreSlack`
@@ -712,12 +720,13 @@ their cost (Cache cost of account moves, below).
 
 Concurrent requests follow the Concurrency rule in Migration, below. Two
 requests of an idle conversation can get different decisions when their
-inputs differ, as when a reading changes the scores between them. A request
-that decided `dispatch` before the other request's idle `migrate` commits
-keeps the account the conversation leaves, and can write the conversation's
-cache there once. If it finishes after a request on the new account, `cache`
-counts its request and the next request on the new account as two more moves,
-with their cache writes.
+inputs differ, as when a reading changes the scores between them. Say request
+A decides `dispatch` before request B's idle `migrate` commits. A stays on
+the source and can write the conversation's cache there once. If A finishes
+before B, `cache` charges the idle move B's cache write, because the two
+requests started less than an hour apart. If A finishes after a request on
+the destination, `cache` counts A and the next request on the destination as
+two more moves, with their cache writes.
 `TestADispatchedRequestKeepsItsAccountWhileTheConversationMigrates` covers the
 rule for a migration after exhaustion. No test runs this race for an idle
 migration.
@@ -855,9 +864,10 @@ the check or response.
     either arrival order of the two checks.
 - **Unknown or stale check**, older than `OverageFreshFor`: `Decide` refuses
   dispatch with `overage_unknown` or `overage_stale`, sets `RecheckOverage`,
-  and does not migrate.
+  and migrates only an idle conversation (Idle conversations are placed
+  again, above).
 - **Overflow enabled**: `Decide` refuses dispatch with `overage_enabled` and
-  does not migrate.
+  migrates only an idle conversation.
 - A new conversation is placed only on accounts that pass. When none pass and
   no account is waiting on a reset, it is refused with
   `no_included_only_account`. `RecheckOverage` is set if any account's check
@@ -872,7 +882,7 @@ overage state. A conversation whose account is exhausted migrates with reason
 the destination must pass the check: its latest check found overflow
 `disabled` within `OverageFreshFor`. With no such destination, the
 conversation keeps its assignment and gets `refuse` or `wait`. An unknown or
-stale check alone never causes a migration.
+stale check causes a migration only of an idle conversation.
 
 PR3 owns the check mechanism and the documented remaining gap: usage credits
 enabled outside the proxy while included windows are exhausted.
@@ -892,8 +902,9 @@ unmarked assignment. When the assigned account needs a browser login:
 
 - An unmarked assignment moves with reason `never_served_relogin` when another
   account is eligible. Otherwise `Decide` returns `reauth`.
-- A marked assignment keeps the spec rule: `reauth` until relogin or a manual
-  `Move`.
+- A marked assignment gets `reauth` until relogin, a manual `Move`, or an
+  idle placement on another account (Idle conversations are placed again,
+  above).
 
 PR3 contract item (N13): PR3 calls `Served` for every successful response on
 a binding, including responses to subagent requests, which share the
