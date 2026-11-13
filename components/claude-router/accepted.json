@@ -1,75 +1,94 @@
 {
- "head": "e16ff141c5ff2fca7e059811763986766532f817",
- "code_sha256": "c05a83e0fccbc0635d4062ad123727fe571d2fb170a5c9ef5f0379a9e3f64434",
- "binary_sha256": "9f2825598af32a4bed8bed9184559c5b03ac0495b9c26c685744bb6f749660a8",
+ "head": "d4600fcba2c0d1db0c9a5aa6a4d4328c3be472a1",
+ "code_sha256": "03bab19c12838a065eddfddbccd3341712467090487d57cab653365c771ff183",
+ "binary_sha256": "d1ed0368a9bc37f085e3eb9e4f85e8983d2a849565d8243ea282c9bca93557fa",
  "helpers_sha256": "4bc4da547f346e0cf0ad12832eccfdcb972257e91876189234cab1e424400243",
  "sdk": "v8.0.11",
  "go": "go1.27.3",
  "platform": "darwin/arm64",
  "clients": {
-  "claude_code": "2.1.318"
+  "claude_code": "2.1.322"
  },
  "result": "pass",
- "scope": "PR127 sign-in callback prompt: paste guide, blank Enter then paste, an automatic callback while the prompt waits, and the 5-minute timeout, through the lane binary's login -no-browser against the real SDK with a callback whose state does not match, so no token exchange ran; real-account new/resume/restart checks; a real-account sign-in was not run; unchanged historical scenarios are references and were not rerun",
- "evidence_root": "/Users/alan/.local/state/astack/claude-router-lanes/pr127/evidence",
+ "scope": "PR169 usage reads clear rejections: a foreground lane router on port 18797 with copies of the severus and personal logins and a planted weekly rejection on severus, run first with the installed router at the prior record and then with this code, against the real usage endpoint; real-account new/resume/restart checks; unchanged historical scenarios are references and were not rerun",
+ "evidence_root": "/Users/alan/.local/state/astack/claude-router-lanes/pr169/evidence",
  "matrix": [
   {
-   "scenario": "work token is outside the four-hour refresh lead",
+   "scenario": "severus token is outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 401
+    "expires_in_min": 471
    }
   },
   {
    "scenario": "personal token is outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 347
+    "expires_in_min": 298
    }
   },
   {
-   "scenario": "The paste guide prints before the sign-in URL and every router line fits 80 columns",
+   "scenario": "Lane code and executable match the build at d4600fc",
    "status": "pass",
    "detail": {
-    "guide_line": 1,
-    "url_line": 3,
-    "widest": 77
-   }
-  },
-  {
-   "scenario": "The SDK prompts for the callback 15 s after it prints the URL",
-   "status": "pass",
-   "detail": {
-    "after_s": 15.4
-   }
-  },
-  {
-   "scenario": "After a blank Enter, the pasted callback reaches the SDK's state check",
-   "status": "pass",
-   "detail": {
-    "exit": 1,
-    "after_s": 15.7
-   }
-  },
-  {
-   "scenario": "A callback to the SDK's own server while the prompt waits ends the sign-in, with the error on its own line",
-   "status": "pass",
-   "detail": {
-    "exit": 1,
-    "after_s": 15.7
-   }
-  },
-  {
-   "scenario": "Lane code and executable match the build at e16ff14",
-   "status": "pass",
-   "detail": {
-    "code_sha256": "c05a83e0fccbc0635d4062ad123727fe571d2fb170a5c9ef5f0379a9e3f64434",
-    "binary_sha256": "9f2825598af32a4bed8bed9184559c5b03ac0495b9c26c685744bb6f749660a8",
+    "code_sha256": "03bab19c12838a065eddfddbccd3341712467090487d57cab653365c771ff183",
+    "binary_sha256": "d1ed0368a9bc37f085e3eb9e4f85e8983d2a849565d8243ea282c9bca93557fa",
     "sdk": "v8.0.11"
    }
   },
   {
-   "scenario": "work is admissible with paid overflow disabled",
+   "scenario": "The installed router at the prior record keeps a planted weekly rejection after its start read shows the window below its limit",
+   "status": "pass",
+   "detail": {
+    "code_sha256": "c05a83e0fccbc0635d4062ad123727fe571d2fb170a5c9ef5f0379a9e3f64434",
+    "weekly_used": 0.43,
+    "rejections": [
+     "weekly"
+    ]
+   }
+  },
+  {
+   "scenario": "A start read that shows the weekly window below its limit clears the planted weekly rejection, and the account is ready",
+   "status": "pass",
+   "detail": {
+    "account": "severus",
+    "weekly_used": 0.43,
+    "rejections": [],
+    "saved_rejections": []
+   }
+  },
+  {
+   "scenario": "A start read at the weekly limit keeps the weekly rejection, while the five-hour and Fable windows read 0",
+   "status": "pass",
+   "detail": {
+    "account": "personal",
+    "windows": [
+     [
+      "five_hour",
+      null,
+      0
+     ],
+     [
+      "weekly",
+      null,
+      1
+     ],
+     [
+      "weekly",
+      "Fable",
+      0
+     ]
+    ],
+    "rejections": [
+     "weekly"
+    ],
+    "saved_rejections": [
+     "weekly"
+    ]
+   }
+  },
+  {
+   "scenario": "severus is admissible with paid overflow disabled",
    "status": "pass",
    "detail": {
     "state": "disabled",
@@ -77,7 +96,7 @@
    }
   },
   {
-   "scenario": "personal is admissible with paid overflow disabled",
+   "scenario": "personal reads paid overflow disabled",
    "status": "pass",
    "detail": {
     "state": "disabled",
@@ -85,11 +104,13 @@
    }
   },
   {
-   "scenario": "new receives a routed 200",
+   "scenario": "new receives a routed 200 on the cleared account",
    "status": "pass",
    "detail": {
     "exit": 0,
-    "requests": 2
+    "account": "severus",
+    "decision": "place",
+    "status": 200
    }
   },
   {
@@ -97,15 +118,24 @@
    "status": "pass",
    "detail": {
     "exit": 0,
-    "requests": 1
+    "account": "severus",
+    "status": 200
    }
   },
   {
    "scenario": "Resume preserves account and conversation content",
    "status": "pass",
    "detail": {
-    "account": "work",
+    "account": "severus",
     "answer": "kumquat"
+   }
+  },
+  {
+   "scenario": "After restart, the cleared rejection stays cleared",
+   "status": "pass",
+   "detail": {
+    "severus_status": "ready",
+    "saved_rejections": []
    }
   },
   {
@@ -113,22 +143,25 @@
    "status": "pass",
    "detail": {
     "exit": 0,
-    "requests": 1
+    "account": "severus",
+    "status": 200
    }
   },
   {
-   "scenario": "Restart preserves the served conversation's account",
+   "scenario": "Restart preserves the served conversation's account and content",
    "status": "pass",
    "detail": {
-    "account": "work"
+    "account": "severus",
+    "conversation": "9a4097cfabac",
+    "answer": "kumquat"
    }
   },
   {
    "scenario": "Identity is the same at the start and the end",
    "status": "pass",
    "detail": {
-    "code_sha256": "c05a83e0fccbc0635d4062ad123727fe571d2fb170a5c9ef5f0379a9e3f64434",
-    "binary_sha256": "9f2825598af32a4bed8bed9184559c5b03ac0495b9c26c685744bb6f749660a8",
+    "code_sha256": "03bab19c12838a065eddfddbccd3341712467090487d57cab653365c771ff183",
+    "binary_sha256": "d1ed0368a9bc37f085e3eb9e4f85e8983d2a849565d8243ea282c9bca93557fa",
     "sdk": "v8.0.11"
    }
   },
@@ -140,44 +173,42 @@
   {
    "scenario": "No lane token refresh occurred",
    "status": "pass",
-   "detail": null
+   "detail": {
+    "credential_refresh_events": 0,
+    "refresh_unchanged": true
+   }
   },
   {
    "scenario": "Live checks remain within the scoped request budget",
    "status": "pass",
    "detail": {
-    "attempts": 4,
-    "input": 86031,
-    "output": 162
-   }
-  },
-  {
-   "scenario": "With no answer, the sign-in times out after 5 minutes and says to retry with a new sign-in URL",
-   "status": "pass",
-   "detail": {
-    "prompted": true,
-    "exit": 1,
-    "after_s": 300.6
+    "attempts": 3,
+    "input": 12823,
+    "output": 39
    }
   },
   {
    "scenario": "Evidence contains no copied access token",
    "status": "pass",
    "detail": {
-    "files_scanned": 11,
+    "files_scanned": 30,
     "hits": []
    }
   }
  ],
  "open": [],
+ "incidents": [
+  "The first restart attempt got 429 from the usage endpoint (retry-after 4m57s) on the fourth lane start read in 21 s for each account, so the lane refused dispatch and sent no inference. The daily router's next background read of the same two accounts also got 429 (retry-after 3m54s). Its readings stayed fresh, and its retry read succeeded at 2026-11-12T19:53:29-08:00. The restart step then ran once and passed.",
+  "The resume after restart came 5 min 11 s after the previous request, past the 5-minute prompt-cache lifetime, so it wrote the cache again on the same account (4,304 tokens) instead of reading it."
+ ],
  "prior_acceptance": {
-  "record": "components/claude-router/accepted.json at 8977cdb",
+  "record": "components/claude-router/accepted.json at 1a539b3",
   "status": "historical reference, not rerun at this code"
  },
  "offline_verification": {
-  "head": "e16ff141c5ff2fca7e059811763986766532f817",
+  "head": "d4600fcba2c0d1db0c9a5aa6a4d4328c3be472a1",
   "go_test_race": "pass",
-  "evidence": "/Users/alan/.local/state/astack/claude-router-lanes/pr127/evidence/go-test.txt"
+  "evidence": "/Users/alan/.local/state/astack/claude-router-lanes/pr169/evidence/go-test.txt"
  },
- "written": "2026-11-05T01:38:22.214339+00:00"
+ "written": "2026-11-13T03:58:38.386506+00:00"
 }
