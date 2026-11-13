@@ -29,6 +29,7 @@ type Metrics struct {
 	ExhaustionMigrations    int     `json:"exhaustion_migrations"`
 	OverageMigrations       int     `json:"overage_migrations"`
 	NeverServedMigrations   int     `json:"never_served_relogin_migrations"`
+	IdleMigrations          int     `json:"idle_migrations"`
 	SubagentMigrations      int     `json:"migrations_on_subagent_requests"`
 	ManualMigrations        int     `json:"manual_migrations"`
 	HealthyAutoMigrations   int     `json:"healthy_automatic_migrations"`
@@ -193,7 +194,7 @@ func Simulate(fx Fixture, seed uint64, cfg router.Config, dir string) (Metrics, 
 		s.accounts = append(s.accounts, router.Account{ID: a.ID, Capacity: a.Capacity})
 		s.quotas[a.ID] = s.newQuota(a)
 	}
-	if err := s.open(); err != nil {
+	if err := s.open(fx.Start); err != nil {
 		return Metrics{}, nil, err
 	}
 	defer func() {
@@ -252,12 +253,12 @@ func ratio(a, b float64) float64 {
 	return math.Round(a/b*10000) / 10000
 }
 
-func (s *sim) open() error {
+func (s *sim) open(at time.Time) error {
 	st, err := router.OpenStore(s.dir)
 	if err != nil {
 		return err
 	}
-	r, err := router.New(s.cfg, s.accounts, st)
+	r, err := router.New(s.cfg, s.accounts, st, at)
 	if err != nil {
 		st.Close()
 		return err
@@ -458,7 +459,7 @@ func (s *sim) crash(at time.Time) error {
 		return err
 	}
 	s.store = nil
-	if err := s.open(); err != nil {
+	if err := s.open(at); err != nil {
 		return err
 	}
 	after, err := s.store.Bindings()
@@ -577,6 +578,9 @@ func (s *sim) audit(c *conversation, at time.Time, d router.Decision, agent stri
 	case router.ReasonNeverServed:
 		justified = q.loggedOut && c.servedOn != d.From
 		s.m.NeverServedMigrations++
+	case router.ReasonIdle:
+		justified = !s.warm(c, d.From, at)
+		s.m.IdleMigrations++
 	}
 	if !justified {
 		s.m.HealthyAutoMigrations++
@@ -587,6 +591,15 @@ func (s *sim) audit(c *conversation, at time.Time, d router.Decision, agent stri
 	c.servedOn = ""
 	s.trace = append(s.trace, Event{At: at, Event: "migrate", Conversation: c.id, Agent: agent, Model: c.model, From: d.From,
 		Account: d.Account, Reason: d.Reason, Observation: d.Observation})
+}
+
+func (s *sim) warm(c *conversation, account router.AccountID, at time.Time) bool {
+	for _, k := range c.cacheKey {
+		if k.account == account && !at.After(k.expires) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *sim) resume(c *conversation, at time.Time) {

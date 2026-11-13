@@ -107,6 +107,20 @@ func TestAPolicyMoveCostsTheCacheWriteOfItsFirstRequestOnTheNewAccount(t *testin
 		"reasons   exhausted 1")
 }
 
+func TestAnIdleMoveCostsNoCacheWrite(t *testing.T) {
+	got := cacheLines(t,
+		served(ago(4*time.Hour), "aaaaaaaaaaaa", "work", counters(100, 6000, 0))+
+			served(ago(4*time.Hour), "bbbbbbbbbbbb", "work", counters(100, 2000, 0))+
+			movedEvent(ago(2*time.Hour), "aaaaaaaaaaaa", "work", "alumni", "idle")+
+			served(ago(2*time.Hour), "aaaaaaaaaaaa", "alumni", counters(100, 3000, 0))+
+			movedEvent(ago(time.Hour), "bbbbbbbbbbbb", "work", "alumni", "idle")+
+			served(ago(time.Hour), "bbbbbbbbbbbb", "alumni", ""))
+
+	wantLines(t, got,
+		"moves     2  cost 0  of 11k writes  share 0.0%",
+		"reasons   idle 2")
+}
+
 func TestAMoveOffARemovedAccountCountsAsAMove(t *testing.T) {
 	got := cacheLines(t,
 		served(ago(3*time.Hour), "aaaaaaaaaaaa", "school", counters(100, 6000, 0))+

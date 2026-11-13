@@ -139,6 +139,24 @@ func needsLoginReport() report {
 	return r
 }
 
+func TestStatusLeavesIdleMovesOutOfItsLines(t *testing.T) {
+	r := healthyReport()
+	r.Digest.Migrations = []migration{
+		{At: at(0, 14, 7), Conversation: "9a41c07e2b13", From: "alumni", To: "work", Reason: string(router.ReasonIdle)},
+		{At: at(0, 14, 8), Conversation: "e91f675b4f8a", From: "work", To: "alumni", Reason: string(router.ReasonExhausted)},
+	}
+
+	var got bytes.Buffer
+	writeStatus(&got, r, false)
+
+	if strings.Contains(got.String(), "9a41c07e2b13") {
+		t.Fatalf("status lists an idle move:\n%s", got.String())
+	}
+	if !strings.Contains(got.String(), "moved   e91f675b4f8a  work to alumni 14:08, after exhaustion\n") {
+		t.Fatalf("status lacks the exhaustion move:\n%s", got.String())
+	}
+}
+
 func unreachableReport() report {
 	r := healthyReport()
 	r.Status.Bindings = []claude.BindingStatus{

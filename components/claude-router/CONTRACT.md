@@ -545,7 +545,7 @@ the assignment.
 | --- | --- |
 | `place` | A new conversation. Commit before dispatch. |
 | `dispatch` | An existing assignment on a usable account. |
-| `migrate` | Another account is eligible, and the assigned account has a known rejection that blocks the model (`exhausted`), showed paid use (`overage_observed`), needs login before the assignment served any response (`never_served_relogin`), or is no longer enrolled (`not_enrolled`). Commit before dispatch. A conversation whose account is no longer enrolled and that no account can take gets the `wait`, `refuse`, or `unavailable` of a new conversation and keeps its assignment (`TestAConversationOnAnAccountNoLongerEnrolledIsPlacedAgain`, `TestAConversationOnAnAccountNoLongerEnrolledKeepsItsAssignmentWhenNoAccountCanTakeIt`). |
+| `migrate` | Another account is eligible, and the assigned account has a known rejection that blocks the model (`exhausted`), showed paid use (`overage_observed`), needs login before the assignment served any response (`never_served_relogin`), or is no longer enrolled (`not_enrolled`). Or the conversation has been idle longer than `PlaceAgainAfter`, and the placement rule picks another account (`idle`). Commit before dispatch. A conversation whose account is no longer enrolled and that no account can take gets the `wait`, `refuse`, or `unavailable` of a new conversation and keeps its assignment (`TestAConversationOnAnAccountNoLongerEnrolledIsPlacedAgain`, `TestAConversationOnAnAccountNoLongerEnrolledKeepsItsAssignmentWhenNoAccountCanTakeIt`). |
 | `retry` | `transient`, `network`, or `throttle` on the previous attempt, within `MaxAttempts`. |
 | `fail` | The retry budget is spent, or the previous attempt failed `request_scoped`. |
 | `wait` | No eligible account. `Until` is the earliest usable reset; `ResetKnown` is false when `Until` is only a recheck time. |
@@ -611,8 +611,10 @@ score = (active + 1) / (capacity * (1 + ResetBias * slack))
   same window stamped earlier belongs to a window that has ended.
 - The destination of every `migrate` is chosen by this rule.
 - Reset preference affects only `place` and the destination of `migrate`.
-  `Decide` never moves a healthy assignment, and a migrated conversation never
-  returns on its own.
+  `Decide` moves a conversation on a healthy account only after the
+  conversation has been idle longer than `PlaceAgainAfter`. A migrated
+  conversation returns to its source on its own only then (Idle
+  conversations are placed again, below).
 
 `Decision.Reason` is `reset_preference` when the reset-aware choice differs
 from the capacity-only choice for the same request, and `capacity` otherwise.
@@ -627,6 +629,7 @@ from the capacity-only choice for the same request, and `capacity` otherwise.
 | `ResetBias` | 8 | Simulator comparison below |
 | `FreshFor` | 15 min | Middle of the swept values 5, 15, and 60 min |
 | `ActiveFor` | 1 h | Not swept; the longest prompt-cache lifetime |
+| `PlaceAgainAfter` | 65 min | Above the measured prompt-cache lifetime of 1 h (Idle conversations are placed again, below) |
 | `UnknownResetRecheck` | 5 min | Not swept; bounds attempts on an account whose reset is unknown |
 | `OverageFreshFor` | 1 h | Not swept. PR3 sets the final freshness threshold with the check mechanism. |
 | `MaxAttempts` | 3 | Not swept |
@@ -668,6 +671,79 @@ The cost was more cold cache writes from migration, and on `mixed-48h`
 slightly more exhaustion migrations. No run of any variant had a healthy
 automatic migration, counting migrations returned to subagent requests. The
 comparison does not establish a percentage improvement, and none is required.
+
+### Idle conversations are placed again
+
+A conversation stays on its account while its prompt cache lives, because a
+move makes its next request write the whole prompt again on the new account.
+Once the cache has expired, the next request writes the prompt again on any
+account, so staying saves nothing. `Decide` then places the conversation
+again by the placement rule, as it places a new conversation:
+
+- A conversation is idle when its latest request is more than
+  `PlaceAgainAfter` before the request being decided. The latest request is
+  the later of the binding's `since` and the last request this router
+  routed for the conversation. The router does not save request times, so
+  after a restart a conversation with no request since the start counts as
+  active at the start.
+- `Decide` answers `migrate` with reason `idle` when the placement rule picks
+  another account, and `dispatch` on the current account otherwise. On a
+  tie the current account wins.
+- Only a conversation on a healthy account is placed again. A conversation
+  on an account that needs login, has seen paid use, is blocked by a
+  rejection, or fails the included-only check gets the decision described
+  above for that state.
+- The service reads the threshold from `place_again_after` in `config.json`,
+  default `65m`.
+
+`TestAConversationIdleLongerThanPlaceAgainAfterIsPlacedAgain`,
+`TestAfterARestartAConversationCountsAsActiveAtTheStart`,
+`TestOnlyExhaustionMigratesAndTheConversationReturnsOnlyAfterItsCacheExpires`,
+and the service test
+`TestAConversationIdleLongerThanPlaceAgainAfterMovesToTheAccountWithMoreSlack`
+cover these rules.
+
+The threshold rests on the daily router's `events.jsonl` on 2026-11-12. The
+table counts the status-200 requests with at least 20,000 input tokens that
+followed a request of the same conversation on the same account, by the gap
+since that request. A request reads from the cache when more than half of
+its input came from cache reads.
+
+| Gap | Requests | Read from the cache |
+| --- | --- | --- |
+| 0 to 5 min | 22,164 | 98.8% |
+| 5 to 10 min | 259 | 45.9% |
+| 10 to 30 min | 234 | 67.9% |
+| 30 to 55 min | 51 | 88.2% |
+| 55 to 60 min | 38 | 94.7% |
+| 62 min or more | 100 | 1.0% |
+
+No request had a gap of 60 to 62 minutes. The cache lives one hour after a
+request. The dip from 5 to 30 minutes fits some requests using the 5-minute
+cache. After 62 minutes, requests still read a mean of 3% to 18% of
+their input from the cache: the system prompt and tools, which the account's
+other conversations keep cached. A move writes that part again only when no
+conversation on the new account keeps it cached.
+
+The simulator's cache lives `ttl_minutes` after each request. The simulator
+flags an `idle` migration as a healthy automatic migration when the
+conversation's cache on the source is still alive
+(`TestTheSimulatorFlagsAnIdleMoveOnlyWhileTheConversationsCacheLives`). Over
+seeds 1 to 5 at the defaults, against the same code without idle placement:
+
+| Fixture | Idle placement | Completed turns | Unused weekly share at reset | Exhaustion migrations | Idle migrations | Migration cache writes (tokens) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `weekly-expiry-72h` | off | 2590 | 0.169 | 61.6 | 0 | 846,800 |
+| `weekly-expiry-72h` | on | 2595 | 0.157 | 51.6 | 116.2 | 756,800 |
+| `mixed-48h` | off | 2991 | 0.180 | 388.0 | 0 | 1,358,200 |
+| `mixed-48h` | on | 3005 | 0.176 | 386.4 | 13.0 | 1,363,000 |
+
+Unused weekly allowance at reset fell in 7 of 10 seed runs, and no idle
+migration was flagged. The fixtures' cache lives 5 minutes, so they do not
+test the threshold itself. To regenerate a row, run
+`go run ./cmd/claude-router-sim run -fixture testdata/sim/<fixture>.json -seed <n> -trace=false`
+for `on`, and add `-place-again-after 10000h` for `off`. The `off` runs match
+the code before idle placement in every metric above.
 
 ### Quota evidence must come from the attempt
 
@@ -804,7 +880,7 @@ The store is the single-writer JSON-lines journal from PR1,
 
 The scripts in `testdata/scripts/` record hand-derived outcomes. Both
 `claude-router-sim check` and `go test ./cmd/...` run them under both rules
-with the defaults above, for 124 checks.
+with the defaults above, for 126 checks.
 
 | Script | Expected outcome |
 | --- | --- |
@@ -813,7 +889,7 @@ with the defaults above, for 124 checks.
 | `03-weekly-blocks-near-reset` | `acct-a`, near a five-hour reset but weekly rejected, receives neither the new conversation nor the migration; both go to `acct-b`. With every account blocked, the wait ends at `acct-c`'s reset at minute 60, not `acct-a`'s at minute 20. At minute 61 the conversation moves to `acct-c`. |
 | `04-stale-observations` | A 30-minute-old near-reset observation is ignored: `a b a b` under both rules. A three-hour-old weekly rejection still excludes `acct-c` until its reset. |
 | `05-subagent-inheritance` | Child and nested-child requests dispatch on the parent's account, then on the migration destination. |
-| `06-restart-and-no-return` | The conversation stays on `acct-a` across a restart, 3 idle hours, and a model change. After exhaustion and another restart it stays on `acct-b` when `acct-a` recovers; a new conversation goes to `acct-a`. |
+| `06-restart-and-idle-return` | Within `PlaceAgainAfter` of its last request, the conversation stays on `acct-a` across a restart and a model change, although `acct-b` scores better. After exhaustion and another restart it stays on `acct-b` when `acct-a` recovers; a new conversation goes to `acct-a`. After 66 idle minutes, reset-aware placement returns it to `acct-a` for `idle`, and capacity-only placement keeps it on `acct-b`, which ties. |
 | `07-auth-and-included-only` | With no verified account, a new conversation is refused with a recheck. An auth failure excludes `acct-a` from new placement. Its served conversation gets `reauth` and stays; its never-served conversation moves to `acct-b`. Paid use on `acct-b`, with `acct-a` logged out, refuses without moving; after relogin it moves to `acct-a` for `overage_observed`. A stale check on `acct-a` then refuses with a recheck and does not move, although `acct-b` is verified. |
 | `08-exhaustion-evidence` | A 429 with 10-minute-old evidence retries on `acct-a` and fails at attempt 4 without moving. Fresh evidence migrates to `acct-b`. A rejection with no reset waits inexactly until minute 17, then dispatches. |
 
@@ -1602,7 +1678,8 @@ bring the rejection back
 (`TestAUsageReadBelowTheLimitClearsAnEarlierRejectionOfTheSameWindow`,
 `TestARejectionClearedByAUsageReadStaysClearedAfterRestart`,
 `TestAUsageReadAfterAManualResetReturnsTheAccountToNewConversations`). A
-conversation that migrated away stays on its new account.
+conversation that migrated away stays on its new account until it has been
+idle longer than `PlaceAgainAfter`.
 
 The threshold rests on the provider's live answers on 2026-11-12. Three
 weekly rejections carried a header utilization of exactly 1. The two
@@ -1837,11 +1914,12 @@ destination receives the same session identity the source did
   dispatched keeps its pinned account, and a subagent request that follows
   the migration goes to the destination
   (`TestADispatchedRequestKeepsItsAccountWhileTheConversationMigrates`).
-- **No return.** A migrated conversation stays on its destination when the
-  source recovers (`TestMigratedConversationStaysAfterTheSourceRecovers`).
-  It moves again only on a new confirmed exhaustion, observed paid use, a
-  login requirement before it was served (PR2), removal of its account from
-  `config.json`, or a manual move.
+- **No return while the cache lives.** A migrated conversation stays on its
+  destination when the source recovers
+  (`TestMigratedConversationStaysAfterTheSourceRecovers`). It moves again
+  only on a new confirmed exhaustion, observed paid use, a login requirement
+  before it was served (PR2), removal of its account from `config.json`, a
+  manual move, or an idle placement (Idle conversations are placed again).
 - **Cancellation.** A client that goes away during the destination's
   response cancels that attempt; the committed migration stays
   (`TestClientCancellationDuringTheMovedResponseKeepsTheMigration`).
@@ -2776,7 +2854,10 @@ from `events.jsonl`, so the warning also shows while the router is stopped.
   cannot exceed 100%.
 - **Move cost.** The `cache_creation_input_tokens` of the move's own request,
   when that request is a counted request. Later requests, and cold starts
-  after the cache expires, do not count.
+  after the cache expires, do not count. A move with reason `idle` costs 0,
+  also when its request is not a counted request: the conversation's cache
+  had expired, so its request writes the same cache on either account
+  (`TestAnIdleMoveCostsNoCacheWrite`).
 - **Unknown cost.** A move whose request is not a counted request has an
   unknown cost. Its request reported no usage, or a `null` input, cache
   write, or cache read counter. A later request on the new account does not

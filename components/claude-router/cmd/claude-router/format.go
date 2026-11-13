@@ -318,6 +318,7 @@ var moveWords = map[string]string{
 	string(router.ReasonExhausted):       "after exhaustion",
 	string(router.ReasonManual):          "manual",
 	string(router.ReasonOverageObserved): "after paid overflow was seen",
+	string(router.ReasonIdle):            "after its cache expired",
 }
 
 func words(table map[string]string, code string) string {
@@ -360,7 +361,7 @@ func problemLines(r report) []string {
 		flagged[b.Conversation] = true
 	}
 	for _, m := range r.Digest.Migrations {
-		if flagged[m.Conversation] || r.Now.Sub(m.At) > recentMove {
+		if flagged[m.Conversation] || r.Now.Sub(m.At) > recentMove || m.Reason == string(router.ReasonIdle) {
 			continue
 		}
 		moves = append(moves, fmt.Sprintf("moved   %s  %s to %s %s, %s", m.Conversation, m.From, m.To, when(r.Now, m.At), words(moveWords, m.Reason)))

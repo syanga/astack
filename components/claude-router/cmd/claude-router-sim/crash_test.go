@@ -202,7 +202,7 @@ func TestKilledSimulatorRecoversAcknowledgedAssignments(t *testing.T) {
 	check(t, ph.Checks, "all 8 parallel first requests for s-parent acknowledged acct-a", parentAcks == 8)
 	phases = append(phases, ph)
 
-	p2 := startServe(t, state, "-kill-before", "3")
+	p2 := startServe(t, state, "-start", "180", "-kill-before", "3")
 	p2.send("overage 180 disabled")
 	p2.send("route 180 s-parent agent-1 - claude-opus-4-5")
 	p2.send("route 180 s-parent agent-2 agent-1 claude-opus-4-5")
@@ -216,7 +216,7 @@ func TestKilledSimulatorRecoversAcknowledgedAssignments(t *testing.T) {
 		len(acks2) == 2 && acks2[0].Kind == "dispatch" && acks2[0].Account == "acct-a" && acks2[1].Kind == "dispatch" && acks2[1].Account == "acct-a")
 	phases = append(phases, ph)
 
-	p3 := startServe(t, state, "-kill-after", "1")
+	p3 := startServe(t, state, "-start", "182", "-kill-after", "1")
 	before := dump(p3)
 	p3.send("overage 182 disabled")
 	p3.send("report 182 acct-a claude-opus-4-5 exhausted five_hour:rejected:240")
@@ -231,7 +231,7 @@ func TestKilledSimulatorRecoversAcknowledgedAssignments(t *testing.T) {
 	check(t, ph.Checks, "the migration was not acknowledged", len(acks3) == 0)
 	phases = append(phases, ph)
 
-	p4 := startServe(t, state)
+	p4 := startServe(t, state, "-start", "300")
 	recovered := dump(p4)
 	p4.send("overage 300 disabled")
 	p4.send("observe 300 acct-a five_hour:0:320")

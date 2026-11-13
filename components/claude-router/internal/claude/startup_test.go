@@ -37,11 +37,17 @@ func TestStartRefusesUnsafeSettings(t *testing.T) {
 	e.cfg.OverageCheckEvery = Duration(-time.Minute)
 	_, negative := Start(e.cfg, offline(Options{Upstream: fixed(e.upstream)}))
 	e.cfg.OverageCheckEvery = 0
+	e.cfg.PlaceAgainAfter = Duration(-time.Minute)
+	_, negativeIdle := Start(e.cfg, offline(Options{Upstream: fixed(e.upstream)}))
+	e.cfg.PlaceAgainAfter = 0
 	t.Setenv("MANAGEMENT_PASSWORD", " ")
 	_, management := Start(e.cfg, offline(Options{Upstream: fixed(e.upstream)}))
 
 	if negative == nil || !strings.Contains(negative.Error(), "positive") {
 		t.Fatalf("negative interval: %v, want a refusal", negative)
+	}
+	if negativeIdle == nil || !strings.Contains(negativeIdle.Error(), "place_again_after") {
+		t.Fatalf("negative place_again_after: %v, want a refusal", negativeIdle)
 	}
 	if management == nil || !strings.Contains(management.Error(), "MANAGEMENT_PASSWORD") {
 		t.Fatalf("management password: %v, want a refusal", management)

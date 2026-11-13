@@ -166,7 +166,10 @@ a request that the provider already ran. The router still retries a
 connection that failed before the request was written, for up to 25 s.
 `move_cache_warn_percent` (0 to 100, default 10) sets the share of the
 last 24 hours' cache writes that account moves may cause before `status`
-warns. 0 turns the warning off.
+warns. 0 turns the warning off. `place_again_after` (default `65m`) sets how
+long a conversation must be idle before the router places it again, as it
+places a new conversation. Keep it above the one-hour prompt-cache lifetime,
+or a move costs a cache write that staying would have saved.
 
 The service reads `config.json` and the credentials once, at start. To change
 either by hand, run `claude-router stop`, make the change, and run
@@ -298,7 +301,7 @@ while `setup`, `account`, activation, or `claude-router direct` runs.
 | `claude-router check` | Checks the router, the accounts, paid overflow, the Claude Code settings, and the accepted record, then sends one test message ([Check the router](#check-the-router)). |
 | `claude-router account add NAME` | Signs in one more account and adds it to `config.json`. |
 | `claude-router account remove NAME [-force]` | Removes an account and its login. Its conversations move to another account on their next request. |
-| `claude-router status` | One line for the service, one per account, and one per problem. On a terminal, each account gets a box instead of its line, with a bar for each limit window and a count of the account's limit resets. A problem is a recent move, a quota or paid-overflow reading older than 15 minutes, or a conversation that waits, is refused, is held for login, or could not reach the provider. A `cache` line warns when account moves caused more than `move_cache_warn_percent` of the last 24 hours' cache writes, also while the service is stopped. The last line names the next command to run. A stopped service shows its last start error, or that it cannot record a start. |
+| `claude-router status` | One line for the service, one per account, and one per problem. On a terminal, each account gets a box instead of its line, with a bar for each limit window and a count of the account's limit resets. A problem is a recent move that was not for idleness, a quota or paid-overflow reading older than 15 minutes, or a conversation that waits, is refused, is held for login, or could not reach the provider. A `cache` line warns when account moves caused more than `move_cache_warn_percent` of the last 24 hours' cache writes, also while the service is stopped. The last line names the next command to run. A stopped service shows its last start error, or that it cannot record a start. |
 | `claude-router status -v` | Every reading with its age, cache counters per account, every assigned conversation, and the migrations, newest first. |
 | `claude-router cache [-since 24h]` | For the window, each account's cache hit rate and token counters, then the number of account moves, the cache writes those moves caused, their share of all cache writes, and the moves per reason. It reads only `events.jsonl` and `config.json`, so it works while the service is stopped. |
 | `claude-router stop` | Stops the service and keeps it off, across logins and restarts, until `claude-router start`. Assignments stay. |
@@ -497,8 +500,10 @@ as another weekly allowance. For example, 10% remaining plus two resets is
 210% effective weekly remaining. Session resets add no weekly credit. The
 router uses the newest valid weekly usage from headers or the usage body,
 fresh for 15 minutes by default, and reset grants read within one hour.
-This preference affects new placements and necessary migration destinations.
-It preserves healthy assignments and never redeems a reset automatically.
+This preference affects new placements, migration destinations, and
+conversations idle longer than `place_again_after`, whose prompt cache has
+expired. It moves no other conversation on a healthy account, and it never
+redeems a reset automatically.
 
 ## Run the simulator
 
@@ -513,7 +518,7 @@ GOPROXY=off GOSUMDB=off go build -o claude-router-sim ./cmd/claude-router-sim
 | `claude-router-sim check -scripts testdata/scripts` | Runs each scripted fixture under both placement rules and compares every decision with the fixture's hand-derived expectation. Exits 1 on a mismatch. |
 | `claude-router-sim run -fixture testdata/sim/mixed-48h.json -seed 1 -out run.json` | Simulates one workload and writes metrics and the routing trace. The same seed and fixture give byte-identical output. |
 | `claude-router-sim compare -fixtures A.json,B.json -seeds 1,2,3 -out comparison.json` | Runs capacity-only and a sweep of reset-aware variants on the same workloads. |
-| `claude-router-sim serve -state DIR` | Reads routing commands from stdin, one per line, and prints `ACK` after each durable commit. The crash test in `cmd/claude-router-sim/crash_test.go` drives it with SIGKILL. |
+| `claude-router-sim serve -state DIR` | Reads routing commands from stdin, one per line, and prints `ACK` after each durable commit. `-start MINUTE` sets the minute at which the process starts, on the commands' clock, so a restarted process counts idle time from its start as the router does. The crash test in `cmd/claude-router-sim/crash_test.go` drives it with SIGKILL. |
 | `claude-router-sim perf -state DIR` | Places 10,000 conversations on 100 accounts, sends 10,000 more requests, and reports decision and commit latency. `recover -state DIR` times a cold reopen of that state. |
 
 Every quota, cost, and cache quantity in `testdata/sim/` is synthetic. Each

@@ -22,6 +22,7 @@ type PerfResult struct {
 	NotServed             map[string]int     `json:"not_served"`
 	Placements            int                `json:"placements"`
 	ExhaustionMigrations  int                `json:"exhaustion_migrations"`
+	IdleMigrations        int                `json:"idle_migrations"`
 	HealthyAutoMigrations int                `json:"healthy_automatic_migrations"`
 	DecideMicros          Percentiles        `json:"decide_us"`
 	CommitMicros          Percentiles        `json:"commit_us"`
@@ -82,7 +83,7 @@ func cmdPerf(args []string, stdout io.Writer) error {
 	if existing, err := st.Bindings(); err != nil || len(existing) != 0 {
 		return errors.New("perf needs an empty state directory")
 	}
-	r, err := router.New(router.DefaultConfig(), accounts, st)
+	r, err := router.New(router.DefaultConfig(), accounts, st, serveStart)
 	if err != nil {
 		return err
 	}
@@ -133,9 +134,12 @@ func cmdPerf(args []string, stdout io.Writer) error {
 			if got != d {
 				return fmt.Errorf("%s: committed %+v, decided %+v", req.Conversation, got, d)
 			}
-			if d.Kind == router.Place {
+			switch {
+			case d.Kind == router.Place:
 				res.Placements++
-			} else {
+			case d.Reason == router.ReasonIdle:
+				res.IdleMigrations++
+			default:
 				res.ExhaustionMigrations++
 				if !exhausted[d.From] {
 					res.HealthyAutoMigrations++
@@ -193,7 +197,7 @@ func cmdRecover(args []string, stdout io.Writer) error {
 		return err
 	}
 	defer st.Close()
-	if _, err := router.New(router.DefaultConfig(), perfAccounts(*nAccounts), st); err != nil {
+	if _, err := router.New(router.DefaultConfig(), perfAccounts(*nAccounts), st, serveStart); err != nil {
 		return err
 	}
 	open := time.Since(t)

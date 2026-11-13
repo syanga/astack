@@ -40,6 +40,10 @@ type Config struct {
 	// OverageCheckEvery is the interval of the background settings read.
 	// Default 10 minutes. It must be shorter than OverageFreshFor.
 	OverageCheckEvery Duration `json:"overage_check_every,omitzero"`
+	// PlaceAgainAfter is how long after its last request a conversation on a
+	// healthy account is placed again, as a new conversation is. Default 65
+	// minutes, above the one-hour prompt-cache lifetime.
+	PlaceAgainAfter Duration `json:"place_again_after,omitzero"`
 	// MaxUpstreamAttempts caps the upstream attempts of one client request,
 	// from 1 to 4. Default 4: three router dispatches and the SDK's
 	// redispatch after a 401. With 1 the router never resends a request that
@@ -189,6 +193,9 @@ func (c Config) withDefaults() Config {
 	if c.MaxUpstreamAttempts == 0 {
 		c.MaxUpstreamAttempts = defaultMaxAttempts
 	}
+	if c.PlaceAgainAfter == 0 {
+		c.PlaceAgainAfter = Duration(router.DefaultConfig().PlaceAgainAfter)
+	}
 	return c
 }
 
@@ -216,6 +223,9 @@ func (c Config) validate() error {
 	}
 	if c.OverageCheckEvery >= c.OverageFreshFor {
 		return errors.New("overage_check_every must be shorter than overage_fresh_for")
+	}
+	if c.PlaceAgainAfter <= 0 {
+		return errors.New("place_again_after must be positive")
 	}
 	if c.MaxUpstreamAttempts < 1 || c.MaxUpstreamAttempts > defaultMaxAttempts {
 		return fmt.Errorf("max_upstream_attempts: %d is outside 1 to %d", c.MaxUpstreamAttempts, defaultMaxAttempts)

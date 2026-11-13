@@ -199,7 +199,10 @@ func (w *cacheWindow) track(c *conversationDigest, e claude.Event) {
 			reason = e.Reason
 		}
 		m := accountMove{At: e.At, Conversation: e.Conversation, From: c.servedOn, To: e.Account, Reason: reason}
-		if windowCounted(e.Usage) {
+		switch {
+		case reason == string(router.ReasonIdle):
+			m.Cost = new(int64)
+		case windowCounted(e.Usage):
 			cost := *e.Usage.CacheCreationInputTokens
 			m.Cost = &cost
 		}

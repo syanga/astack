@@ -184,6 +184,7 @@ const (
 	ReasonConcurrentFirst Reason = "concurrent_first_request"
 	ReasonExhausted       Reason = "exhausted"
 	ReasonOverageObserved Reason = "overage_observed"
+	ReasonIdle            Reason = "idle"
 	ReasonNeverServed     Reason = "never_served_relogin"
 	ReasonRequestScoped   Reason = "request_scoped"
 	ReasonManual          Reason = "manual"
@@ -253,6 +254,11 @@ type Config struct {
 	// ActiveFor is how long after its last request a conversation counts
 	// toward its account's workload.
 	ActiveFor time.Duration `json:"active_for"`
+	// PlaceAgainAfter is how long after its last request a conversation on a
+	// healthy account is placed again, as a new conversation is. Set it
+	// above the prompt-cache lifetime, so that the conversation's cache on
+	// its account has expired before it moves.
+	PlaceAgainAfter time.Duration `json:"place_again_after"`
 	// UnknownResetRecheck is how long a rejection without a reported reset
 	// blocks its account before a request may probe it again.
 	UnknownResetRecheck time.Duration `json:"unknown_reset_recheck"`
@@ -271,7 +277,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("unknown rule %q", c.Rule)
 	case !(c.ResetBias >= 0) || math.IsInf(c.ResetBias, 0):
 		return fmt.Errorf("reset bias %v is not a finite non-negative number", c.ResetBias)
-	case c.FreshFor <= 0, c.ActiveFor <= 0, c.UnknownResetRecheck <= 0, c.OverageFreshFor <= 0:
+	case c.FreshFor <= 0, c.ActiveFor <= 0, c.PlaceAgainAfter <= 0, c.UnknownResetRecheck <= 0, c.OverageFreshFor <= 0:
 		return errors.New("every duration must be positive")
 	case c.UnknownResetRecheck > Weekly.Period():
 		return errors.New("unknown reset recheck must not exceed one week, the horizon for forgetting reset rejections")
@@ -288,6 +294,7 @@ func DefaultConfig() Config {
 		ResetBias:           8,
 		FreshFor:            15 * time.Minute,
 		ActiveFor:           time.Hour,
+		PlaceAgainAfter:     65 * time.Minute,
 		UnknownResetRecheck: 5 * time.Minute,
 		OverageFreshFor:     time.Hour,
 		MaxAttempts:         3,

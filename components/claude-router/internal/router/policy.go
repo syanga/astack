@@ -72,6 +72,7 @@ type view struct {
 	loads      func() []int
 	binding    Binding
 	bound      bool
+	idle       bool
 	checksFrom time.Time
 }
 
@@ -132,6 +133,12 @@ func decide(cfg Config, now Instant, v view, req Request) Decision {
 		}
 		return Decision{Kind: Retry, Account: current, Reason: ReasonTransient}
 	}
+	if v.idle {
+		if d := place(cfg, now, v, req.Model); d.Kind == Place && d.Account != current {
+			d.Kind, d.From, d.Reason = Migrate, current, ReasonIdle
+			return d
+		}
+	}
 	return Decision{Kind: Dispatch, Account: current, Reason: ReasonAssigned}
 }
 
@@ -171,7 +178,7 @@ func place(cfg Config, now Instant, v view, model string) Decision {
 		if cfg.Rule == ResetAware {
 			score = base / (1 + cfg.ResetBias*slack(cfg, now, a, model))
 		}
-		if best < 0 || score < bestScore {
+		if best < 0 || score < bestScore || score == bestScore && a.ID == v.binding.Account {
 			best, bestScore = i, score
 		}
 	}
