@@ -198,7 +198,7 @@ func clearedType(clears []string) ResetKind {
 	return ""
 }
 
-func (o *overageReader) noteUsage(account router.AccountID, windows []UsageWindow, at router.Instant) {
+func (o *overageReader) noteUsage(account router.AccountID, windows []UsageWindow, start time.Time, at router.Instant) {
 	o.mu.Lock()
 	if len(windows) == 0 {
 		delete(o.usage, account)
@@ -206,11 +206,12 @@ func (o *overageReader) noteUsage(account router.AccountID, windows []UsageWindo
 		o.usage[account] = UsageReading{At: at.Stamp, Windows: windows}
 	}
 	o.mu.Unlock()
-	if at.Held() {
-		return
-	}
 	for _, w := range windows {
-		if w.Kind == router.Weekly && w.Model == "" && w.Used != nil {
+		if w.Model != "" || w.Used == nil {
+			continue
+		}
+		o.s.router.ObserveUsage(account, start, w.Kind, *w.Used)
+		if w.Kind == router.Weekly && !at.Held() {
 			o.s.router.ObserveWeeklyUsage(account, router.WeeklyUsage{At: at.Stamp, ResetsAt: w.ResetsAt, Used: *w.Used})
 		}
 	}

@@ -195,7 +195,7 @@ func (o *overageReader) readLocked(ctx context.Context, account router.AccountID
 	end := now.Stamp
 	var state router.Overage
 	if err == nil {
-		o.noteUsage(account, body.windows(), now)
+		o.noteUsage(account, body.windows(), start, now)
 		state, err = body.overage()
 	}
 	dur := end.Sub(start).Milliseconds()

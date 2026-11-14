@@ -524,6 +524,7 @@ calls the same `Router`; it has no second placement algorithm.
 | `Router.Report(Failure) Class` | Records a failure before output and returns the class the policy acts on. |
 | `Router.Observe(account, attemptStart, Observation)` | Records the quota headers of one response. |
 | `Router.ObserveWeeklyUsage(account, WeeklyUsage)` | Keeps the newest valid account-wide weekly usage in memory without changing rejection evidence. |
+| `Router.ObserveUsage(account, start, kind, used)` | Records one account-wide five-hour or weekly window from a usage read that started at `start`. A `used` fraction from 0 up to but not including 1 counts as a report that the window is not rejected. Any other value changes nothing. |
 | `Router.ObserveWeeklyCredits(account, WeeklyCredits)` | Keeps a successful reset reading in memory. An empty reading clears prior credit. |
 | `Router.Served(now, conv, account)` | Appends and syncs a mark that the conversation's current assignment has served a successful response. Written once per assignment. |
 | `Router.ObserveOverage`, `Relogin`, `Move` | The paid-overflow check or observed paid use, relogin, and the manual override. |
@@ -579,7 +580,7 @@ score = (active + 1) / (capacity * (1 + ResetBias * slack))
 - `slack` is the maximum of the account-wide weekly term and the existing
   five-hour and model-scoped header terms that apply to the requested model.
   Those header terms retain their freshness and reset rules. Body windows
-  other than account-wide weekly remain status readings only.
+  other than account-wide weekly add no preference.
   `capacity_only` ignores all preferences.
 - Ties go to the earlier enrolled account.
 - An account is blocked until the latest reset among its rejected windows that
@@ -592,8 +593,13 @@ score = (active + 1) / (capacity * (1 + ResetBias * slack))
   model scope in any prefix order, as not rejected. An observation that omits
   the window does not clear it. A rejection stamped before such an allowed
   report is not recorded. Five-hour and model-scoped utilization and freshness
-  come from the newest header observation. Usage-body readings never clear
-  rejections.
+  come from the newest header observation.
+- A usage read also clears a rejection when the read started after the
+  rejection and reports the same account-wide five-hour or weekly window
+  below 100%. A rejection stamped before such a read started is not
+  recorded. A usage read at 100% changes nothing. Usage reads never clear a
+  model-scoped rejection (Manual resets clear rejections at the next usage
+  read, below).
 - Per window, the router keeps the newest rejection after it resets, when it
   no longer blocks, so that a delayed rejection stamped earlier is not
   recorded. Of two rejections stamped at the same time, the one that ends
@@ -1465,9 +1471,9 @@ it first. Examples:
   response is still on its way to `ObserveOverage`.
 
 Every stamp the service passes to the router (`Observe`, `ObserveOverage`,
-and the attempt start in `Report`) comes from the service clock, read at the
-start of a read or attempt or at an arrival. It is never zero and never
-later than the clock at the time of the call. The service clock is wall time
+`ObserveUsage`, and the attempt start in `Report`) comes from the service
+clock, read at the start of a read or attempt or at an arrival. It is never
+zero and never later than the clock at the time of the call. The service clock is wall time
 without Go's monotonic reading and never moves backward, so a wall-clock step
 back does not reorder readings (PR4, "Wall time across sleep"). The
 service enforces the rule at the boundary (`Service.bounded`), because PR2
@@ -1480,6 +1486,8 @@ which is no earlier than the reading. A reading that only permits dispatch
 (`disabled`, or windows without a rejection) is dropped. Both cases record a
 `stamp_bounded` event
 (`TestObservationsReachTheRouterStampedNoLaterThanNowAndNeverZero`).
+`ObserveUsage` takes the start of a settings read straight from the service
+clock, so its stamp meets the rule without `Service.bounded`.
 
 Observed paid use does not expire (PR2 at `22d4342`): a later `enabled`
 check puts it back in force after a `disabled` check cleared it.
@@ -1523,10 +1531,12 @@ with a `scope.model.display_name`, such as `Fable`, as a model-scoped weekly
 window. The service converts `utilization` and `percent` from a percentage
 to a fraction, and drops an entry of another shape without dropping the
 others (`TestASettingsReadRecordsTheLimitWindowsForStatus`). Routing also
-uses the account-wide `seven_day` window for weekly preference. The other
-body windows remain status readings only. The service decodes these
-fields apart from `extra_usage`, so a field of another shape drops out of
-status and leaves the paid-overflow reading unchanged. A settings read with
+uses the account-wide `seven_day` window for weekly preference, and the
+`five_hour` and account-wide `seven_day` windows to clear rejections (Manual
+resets clear rejections at the next usage read, below). Model-scoped body
+windows remain status readings only. The service decodes these fields apart
+from `extra_usage`, so a field of another shape drops out of status and
+leaves the paid-overflow reading unchanged. A settings read with
 no readable window clears the last limit reading
 (`TestMalformedLimitFieldsLeaveThePaidOverflowReadingIntact`,
 `TestASettingsReadWithoutReadableLimitFieldsClearsTheLimitReading`).
@@ -1571,8 +1581,48 @@ the account keeps serving
 router's transport, a resets response's rate-limit and overage headers are
 readings for routing. The grants block and its query are undocumented. If
 they change, the router gains no new credit and status gains no new reset
-count. Weekly usage and reset credit live only in memory. They do not change
-admission, paid-overflow checks, or durable assignments.
+count. The weekly usage that placement preference reads, and reset credit,
+live only in memory. Neither changes admission, paid-overflow checks, or
+durable assignments. The usage windows of a settings read change admission
+only through a rejection they clear (Manual resets clear rejections at the
+next usage read, below).
+
+### Manual resets clear rejections at the next usage read
+
+A manual limit reset, such as a redeemed reset grant, sets a window's usage
+to zero and leaves its `resets_at` as it was. Inference response headers
+cannot report the window allowed again, because the router sends no request
+to an account while a rejection blocks it. So each settings read applies the
+usage response's `five_hour` and account-wide `seven_day` windows to
+rejection evidence through `Router.ObserveUsage`. A window below 100% is a
+report that the window is not rejected, stamped at the start of the read, as
+a `disabled` reading is. The report clears that window's rejections stamped
+before the read started. The router saves the change, so a restart does not
+bring the rejection back
+(`TestAUsageReadBelowTheLimitClearsAnEarlierRejectionOfTheSameWindow`,
+`TestARejectionClearedByAUsageReadStaysClearedAfterRestart`,
+`TestAUsageReadAfterAManualResetReturnsTheAccountToNewConversations`). A
+conversation that migrated away stays on its new account.
+
+The threshold rests on the provider's live answers on 2026-11-12. Three
+weekly rejections carried a header utilization of exactly 1. The two
+accounts whose rejections still held read `utilization: 100` in the usage
+response. The account whose weekly limit was reset read `utilization: 0`
+with an unchanged `resets_at`. A usage read at 100% therefore keeps the
+rejection (`TestFreshWeeklyUsageBodiesPreserveExhaustionAndMigrationAffinity`).
+If the provider ever rejects a window that the usage response reports below
+100%, the next request placed on the account gets a 429 that records the
+rejection again, and the conversation migrates. The router can repeat that
+cycle at most once per settings read until the reset. No usage read of a
+rejected five-hour window has been observed yet. The five-hour window
+follows the same rule on the assumption that the provider reports it the
+same way.
+
+A usage response names a model-scoped window by its display name, such as
+`Fable`, and a rejection names model-name prefixes. The router does not
+match the two, so a model-scoped rejection still blocks until its reset or
+an allowed header report. A model-scoped usage window clears nothing, even
+at 0% (`TestFreshWeeklyUsageBodiesPreserveExhaustionAndMigrationAffinity`).
 
 ### Configuration and credentials change only by restart
 

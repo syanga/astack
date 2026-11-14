@@ -24,6 +24,14 @@ func nestedHeaders(fiveHour, weekly time.Time) map[string]string {
 	return h
 }
 
+func usageAtLimit(windows ...string) usageReply {
+	fields := map[string]any{}
+	for _, w := range windows {
+		fields[w] = map[string]any{"utilization": 100.0}
+	}
+	return usageReply{Enabled: boolPtr(false), Fields: fields}
+}
+
 func (e *env) migrations() []Event {
 	var out []Event
 	for _, ev := range e.events() {
@@ -114,6 +122,8 @@ func TestEveryAccountExhaustedWaitsForTheEarliestUsableReset(t *testing.T) {
 	aFiveHour, aWeekly, bFiveHour := now.Add(time.Hour), now.Add(72*time.Hour), now.Add(2*time.Hour)
 	e.upstream.script("acct-a", reply{Status: 429, Header: nestedHeaders(aFiveHour, aWeekly)})
 	e.upstream.script("acct-b", reply{Status: 429, Header: exhaustedHeaders(bFiveHour)})
+	e.upstream.setUsage("acct-a", usageAtLimit("five_hour", "seven_day"))
+	e.upstream.setUsage("acct-b", usageAtLimit("five_hour"))
 
 	first := e.send(msg{Session: sessionID(1)})
 	again := e.send(msg{Session: sessionID(1)})
@@ -425,6 +435,7 @@ func TestRestartDuringAWaitKeepsTheResetAndResumesAfterIt(t *testing.T) {
 	e.send(msg{Session: sessionID(1)})
 	reset := time.Now().Add(time.Hour).Truncate(time.Second)
 	e.upstream.script("acct-a", reply{Status: 429, Header: exhaustedHeaders(reset)})
+	e.upstream.setUsage("acct-a", usageAtLimit("five_hour"))
 	e.send(msg{Session: sessionID(1)})
 
 	e.restart()

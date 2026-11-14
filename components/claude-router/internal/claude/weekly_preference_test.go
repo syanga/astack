@@ -65,16 +65,62 @@ func TestFreshWeeklyUsageBodiesPreserveExhaustionAndMigrationAffinity(t *testing
 	}
 	e.clock.set(now.Add(2 * time.Minute))
 	e.upstream.setUsage("acct-b", usageReply{Enabled: boolPtr(false), Fields: map[string]any{
-		"seven_day": map[string]any{"utilization": 1, "resets_at": now.Add(84 * time.Hour).Format(time.RFC3339)},
+		"seven_day": map[string]any{"utilization": 100, "resets_at": now.Add(84 * time.Hour).Format(time.RFC3339)},
+		"limits": []any{map[string]any{
+			"kind": "weekly_scoped", "percent": 0, "resets_at": now.Add(84 * time.Hour).Format(time.RFC3339),
+			"scope": map[string]any{"model": map[string]any{"display_name": "Sonnet"}},
+		}},
 	}})
 	s.overage.read(context.Background(), "acct-b")
 	if reason := s.router.Admit(s.clock.instant(), "acct-b", "claude-sonnet-4-5"); reason != router.ReasonExhausted {
-		t.Fatalf("admission after fresh usage = %s, want exhausted", reason)
+		t.Fatalf("admission after fresh usage at the limit with an unused Sonnet window = %s, want exhausted", reason)
 	}
 	for _, session := range []int{1, 2} {
 		if r := e.send(msg{Session: sessionID(session)}); r.Text != served("acct-a") {
 			t.Fatalf("session %d after fresh usage = %d %q, want acct-a", session, r.Status, r.Text)
 		}
+	}
+}
+
+func TestAUsageReadAfterAManualResetReturnsTheAccountToNewConversations(t *testing.T) {
+	e := newEnv(t, "acct-a", "acct-b")
+	now := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC)
+	e.clock.set(now)
+	reset := now.Add(84 * time.Hour)
+	weekly := func(percent float64) usageReply {
+		return usageReply{Enabled: boolPtr(false), Fields: map[string]any{
+			"seven_day": map[string]any{"utilization": percent, "resets_at": reset.Format(time.RFC3339)},
+		}}
+	}
+	e.upstream.setUsage("acct-b", weekly(10))
+	s := e.start()
+	if r := e.send(msg{Session: sessionID(1)}); r.Text != served("acct-b") {
+		t.Fatalf("first placement = %d %q, want acct-b", r.Status, r.Text)
+	}
+	e.clock.set(now.Add(time.Minute))
+	e.upstream.script("acct-b", reply{Status: 429, Header: map[string]string{
+		"anthropic-ratelimit-unified-7d-status": "rejected",
+		"anthropic-ratelimit-unified-7d-reset":  fmt.Sprint(reset.Unix()),
+	}})
+	if r := e.send(msg{Session: sessionID(1)}); r.Text != served("acct-a") {
+		t.Fatalf("exhausted conversation = %d %q, want migration to acct-a", r.Status, r.Text)
+	}
+
+	e.clock.set(now.Add(2 * time.Minute))
+	e.upstream.setUsage("acct-b", weekly(0))
+	s.overage.read(context.Background(), "acct-b")
+
+	if reason := s.router.Admit(s.clock.instant(), "acct-b", "claude-sonnet-4-5"); reason != "" {
+		t.Fatalf("admission after a usage read of 0%% = %s, want none", reason)
+	}
+	if got := accountStatus(t, s, "acct-b").Rejections; len(got) != 0 {
+		t.Fatalf("status rejections = %+v, want none", got)
+	}
+	if r := e.send(msg{Session: sessionID(2)}); r.Text != served("acct-b") {
+		t.Fatalf("new conversation = %d %q, want acct-b", r.Status, r.Text)
+	}
+	if r := e.send(msg{Session: sessionID(1)}); r.Text != served("acct-a") {
+		t.Fatalf("migrated conversation = %d %q, want it to stay on acct-a", r.Status, r.Text)
 	}
 }
 

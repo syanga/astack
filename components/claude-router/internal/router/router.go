@@ -254,10 +254,11 @@ func fromAttempt(attemptStart time.Time, obs Observation) bool {
 // Observe records the quota headers of one response to an attempt that
 // started at attemptStart. Evidence observed before the attempt started is
 // ignored, as in Report. A rejected window is remembered until its reset, or
-// until a newer observation reports the same window not rejected; a newer
-// observation that omits it does not clear it. Account-wide weekly
-// preference keeps the newest valid usage from headers or ObserveWeeklyUsage.
-// Other utilization comes from the newest observation.
+// until a newer observation reports the same window not rejected or
+// ObserveUsage reports it below its limit; a newer observation that omits it
+// does not clear it. Account-wide weekly preference keeps the newest valid
+// usage from headers or ObserveWeeklyUsage. Other utilization comes from the
+// newest observation.
 func (r *Router) Observe(account AccountID, attemptStart time.Time, obs Observation) {
 	if !fromAttempt(attemptStart, obs) {
 		return
@@ -298,18 +299,10 @@ func (r *Router) observe(account AccountID, obs Observation) {
 	if !obs.At.Before(a.observation.At) {
 		a.observation = obs
 	}
-	if a.allowedAt == nil {
-		a.allowedAt = map[string]time.Time{}
-	}
 	for _, w := range obs.Windows {
 		key := windowKey(w)
 		if !w.Rejected {
-			if obs.At.After(a.allowedAt[key]) {
-				a.allowedAt[key] = obs.At
-			}
-			a.rejections = slices.DeleteFunc(a.rejections, func(x rejection) bool {
-				return windowKey(x.Window) == key && x.at.Before(obs.At)
-			})
+			a.allow(key, obs.At)
 			continue
 		}
 		if a.allowedAt[key].After(obs.At) {
@@ -331,6 +324,38 @@ func (r *Router) observe(account AccountID, obs Observation) {
 		return !x.end(r.cfg).After(obs.At) && !x.at.After(horizon)
 	})
 	maps.DeleteFunc(a.allowedAt, func(_ string, at time.Time) bool { return !at.After(horizon) })
+}
+
+func (a *accountView) allow(key string, at time.Time) {
+	if a.allowedAt == nil {
+		a.allowedAt = map[string]time.Time{}
+	}
+	if at.After(a.allowedAt[key]) {
+		a.allowedAt[key] = at
+	}
+	a.rejections = slices.DeleteFunc(a.rejections, func(x rejection) bool {
+		return windowKey(x.Window) == key && x.at.Before(at)
+	})
+}
+
+// ObserveUsage records the fraction used of an account-wide five-hour or
+// weekly window, from a usage-endpoint read that started at start. The
+// endpoint reports usage, not rejection. A window below its limit counts as a
+// report, stamped at start, that the window is not rejected, as in Observe,
+// so a manual reset clears the window's rejection at the next read. A window
+// at its limit changes nothing, because only a response confirms a rejection.
+func (r *Router) ObserveUsage(account AccountID, start time.Time, kind WindowKind, used float64) {
+	if kind.Period() == 0 || !(used >= 0 && used < 1) {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	idx, ok := r.index[account]
+	if !ok {
+		return
+	}
+	r.accounts[idx].allow(windowKey(Window{Kind: kind}), start)
+	r.persist()
 }
 
 // Report records a failure before output and returns the class the policy

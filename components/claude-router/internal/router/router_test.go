@@ -1391,6 +1391,50 @@ func TestAllowedReportClearsARejectionWhateverTheModelOrder(t *testing.T) {
 	}
 }
 
+func TestAUsageReadBelowTheLimitClearsAnEarlierRejectionOfTheSameWindow(t *testing.T) {
+	reset := t0.Add(72 * time.Hour)
+	sonnetWeekly := Window{Kind: Weekly, Models: []string{"claude-sonnet"}, Utilization: ptr(1), Rejected: true, ResetsAt: reset}
+	for _, tc := range []struct {
+		name     string
+		rejected Window
+		kind     WindowKind
+		used     float64
+		readAt   time.Duration
+		late     bool
+		cleared  bool
+	}{
+		{name: "weekly after a manual reset", rejected: rejected(Weekly, reset), kind: Weekly, used: 0, readAt: time.Minute, cleared: true},
+		{name: "five-hour after a manual reset", rejected: rejected(FiveHour, reset), kind: FiveHour, used: 0.02, readAt: time.Minute, cleared: true},
+		{name: "rejection stamped before the read arrives after it", rejected: rejected(Weekly, reset), kind: Weekly, used: 0, readAt: time.Minute, late: true, cleared: true},
+		{name: "weekly at its limit", rejected: rejected(Weekly, reset), kind: Weekly, used: 1, readAt: time.Minute},
+		{name: "read started before the rejection", rejected: rejected(Weekly, reset), kind: Weekly, used: 0, readAt: -time.Second},
+		{name: "another window", rejected: rejected(Weekly, reset), kind: FiveHour, used: 0, readAt: time.Minute},
+		{name: "model-scoped rejection", rejected: sonnetWeekly, kind: Weekly, used: 0, readAt: time.Minute},
+		{name: "negative usage", rejected: rejected(Weekly, reset), kind: Weekly, used: -0.1, readAt: time.Minute},
+		{name: "nan usage", rejected: rejected(Weekly, reset), kind: Weekly, used: math.NaN(), readAt: time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+			rejection := Observation{At: t0, Windows: []Window{tc.rejected}}
+			if !tc.late {
+				h.observe(a, rejection)
+			}
+			h.r.ObserveUsage(a, t0.Add(tc.readAt), tc.kind, tc.used)
+			if tc.late {
+				h.observe(a, rejection)
+			}
+
+			want := b
+			if tc.cleared {
+				want = a
+			}
+			if got := h.route(t0.Add(2*time.Minute), req("new")).Account; got != want {
+				t.Fatalf("new conversation went to %s, want %s", got, want)
+			}
+		})
+	}
+}
+
 func TestLaterEnabledCheckKeepsPaidUseRecorded(t *testing.T) {
 	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
 	h.manualOverage = true

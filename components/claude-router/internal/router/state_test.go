@@ -106,6 +106,20 @@ func TestRestartBeforeTheResetNeverDispatchesToTheExhaustedAccount(t *testing.T)
 	}
 }
 
+func TestARejectionClearedByAUsageReadStaysClearedAfterRestart(t *testing.T) {
+	h := newDurable(t, accts(a, 1.0)...)
+	h.report(t0, a, "claude-sonnet-4-5", ClassExhausted, rejected(Weekly, t0.Add(72*time.Hour)))
+	h.r.ObserveUsage(a, t0.Add(time.Minute), Weekly, 0)
+
+	later := t0.Add(2 * time.Minute)
+	h.restartDurable(later)
+	h.r.ObserveOverage(a, OverageDisabled, later)
+
+	if d := h.decide(later, "new"); d.Kind != Place || d.Account != a {
+		t.Fatalf("after a restart: %+v, want placement on acct-a, whose rejection a usage read cleared", d)
+	}
+}
+
 func TestAMemoryOnlyRouterForgetsAccountStateAtRestart(t *testing.T) {
 	h := newHarness(t, cfgWith(ResetAware), accts(a, 1.0)...)
 	h.manualOverage = true
