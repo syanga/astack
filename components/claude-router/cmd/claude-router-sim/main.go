@@ -117,6 +117,7 @@ func cmdRun(args []string, stdout io.Writer) error {
 	rule := fs.String("rule", string(router.DefaultConfig().Rule), "capacity_only or reset_aware")
 	bias := fs.Float64("bias", router.DefaultConfig().ResetBias, "reset bias")
 	fresh := fs.Duration("fresh", router.DefaultConfig().FreshFor, "observation freshness threshold")
+	placeAgainAfter := fs.Duration("place-again-after", router.DefaultConfig().PlaceAgainAfter, "idle time after which a conversation is placed again")
 	out := fs.String("out", "", "write the result here instead of stdout")
 	trace := fs.Bool("trace", true, "include the routing trace")
 	if err := fs.Parse(args); err != nil {
@@ -127,6 +128,7 @@ func cmdRun(args []string, stdout io.Writer) error {
 		return err
 	}
 	v := variantConfig(router.Rule(*rule), *bias, *fresh)
+	v.Config.PlaceAgainAfter = *placeAgainAfter
 	dir, cleanup, err := tempState()
 	if err != nil {
 		return err
@@ -175,7 +177,7 @@ type FixtureStats struct {
 var meanFields = []string{
 	"completed_turns", "useful_output_tokens", "unfinished_conversations", "waits", "wait_minutes",
 	"unused_five_hour_share", "unused_weekly_share", "upstream_attempts_rejected_for_quota",
-	"exhaustion_migrations", "healthy_automatic_migrations", "cache_write_tokens_from_migration",
+	"exhaustion_migrations", "idle_migrations", "healthy_automatic_migrations", "cache_write_tokens_from_migration",
 	"cache_write_tokens_ordinary", "cache_read_tokens", "recovery_mismatches",
 	"parallel_first_disagreements", "subagent_requests_not_inherited",
 }

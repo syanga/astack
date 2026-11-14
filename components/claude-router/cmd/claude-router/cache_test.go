@@ -22,8 +22,12 @@ func counters(input, write, read int64) string {
 }
 
 func served(at time.Time, conv, account, usage string) string {
-	line := fmt.Sprintf(`{"at":%q,"kind":"request","conversation":%q,"account":%q,"decision":"dispatch","status":200`,
-		at.Format(time.RFC3339Nano), conv, account)
+	return servedFor(at, 0, conv, account, usage)
+}
+
+func servedFor(start time.Time, took time.Duration, conv, account, usage string) string {
+	line := fmt.Sprintf(`{"at":%q,"kind":"request","conversation":%q,"account":%q,"decision":"dispatch","status":200,"duration_ms":%d`,
+		start.Add(took).Format(time.RFC3339Nano), conv, account, took.Milliseconds())
 	if usage != "" {
 		line += `,"usage":` + usage
 	}
@@ -105,6 +109,32 @@ func TestAPolicyMoveCostsTheCacheWriteOfItsFirstRequestOnTheNewAccount(t *testin
 	wantLines(t, got,
 		"moves     1  cost 3k  of 10k writes  share 30.0%",
 		"reasons   exhausted 1")
+}
+
+func TestAnIdleMoveCostsNoCacheWriteOnlyWhenItStartsMoreThanAnHourAfterThePreviousRequestStarted(t *testing.T) {
+	got := cacheLines(t,
+		servedFor(ago(300*time.Minute), 8*time.Minute, "aaaaaaaaaaaa", "work", counters(100, 6000, 0))+
+			served(ago(240*time.Minute), "bbbbbbbbbbbb", "work", counters(100, 2000, 0))+
+			movedEvent(ago(239*time.Minute), "aaaaaaaaaaaa", "work", "alumni", "idle")+
+			servedFor(ago(239*time.Minute), time.Second, "aaaaaaaaaaaa", "alumni", "")+
+			movedEvent(ago(181*time.Minute), "bbbbbbbbbbbb", "work", "alumni", "idle")+
+			servedFor(ago(181*time.Minute), 6*time.Minute, "bbbbbbbbbbbb", "alumni", counters(100, 1000, 0)))
+
+	wantLines(t, got,
+		"moves     2  cost 1k  of 9k writes  share 11.1%",
+		"reasons   idle 2")
+}
+
+func TestAnIdleMoveCountsFromTheLatestStartWhenRequestsFinishOutOfOrder(t *testing.T) {
+	got := cacheLines(t,
+		servedFor(ago(290*time.Minute), time.Minute, "aaaaaaaaaaaa", "work", counters(100, 2000, 0))+
+			servedFor(ago(300*time.Minute), 20*time.Minute, "aaaaaaaaaaaa", "work", counters(100, 6000, 0))+
+			movedEvent(ago(239*time.Minute), "aaaaaaaaaaaa", "work", "alumni", "idle")+
+			servedFor(ago(239*time.Minute), time.Second, "aaaaaaaaaaaa", "alumni", counters(100, 1000, 0)))
+
+	wantLines(t, got,
+		"moves     1  cost 1k  of 9k writes  share 11.1%",
+		"reasons   idle 1")
 }
 
 func TestAMoveOffARemovedAccountCountsAsAMove(t *testing.T) {

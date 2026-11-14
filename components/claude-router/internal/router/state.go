@@ -82,7 +82,7 @@ func needsWrite(saved, cur AccountState) bool {
 // stepped back, is clamped as the service clamps live readings: blocking
 // evidence is kept and stamped now, and a disabled check is dropped.
 func Open(cfg Config, accounts []Account, store *Store, now time.Time) (*Router, error) {
-	r, err := New(cfg, accounts, store)
+	r, err := New(cfg, accounts, store, now)
 	if err != nil {
 		return nil, err
 	}

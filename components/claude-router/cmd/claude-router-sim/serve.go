@@ -245,6 +245,7 @@ func cmdServe(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	state := fs.String("state", "", "durable state directory")
 	spec := fs.String("accounts", "acct-a:1,acct-b:1,acct-c:1", "id:capacity list in tie-break order")
+	start := fs.Float64("start", 0, "minute at which this process starts, as in the commands")
 	killBefore := fs.Int("kill-before", 0, "SIGKILL before the Nth route")
 	killAfter := fs.Int("kill-after", 0, "SIGKILL after the Nth route commits, before its ACK")
 	if err := fs.Parse(args); err != nil {
@@ -262,7 +263,7 @@ func cmdServe(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	defer st.Close()
-	r, err := router.New(router.DefaultConfig(), accounts, st)
+	r, err := router.New(router.DefaultConfig(), accounts, st, serveStart.Add(minutes(*start)))
 	if err != nil {
 		return err
 	}

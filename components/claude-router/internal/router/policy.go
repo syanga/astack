@@ -72,6 +72,7 @@ type view struct {
 	loads      func() []int
 	binding    Binding
 	bound      bool
+	idle       bool
 	checksFrom time.Time
 }
 
@@ -102,6 +103,9 @@ func decide(cfg Config, now Instant, v view, req Request) Decision {
 				return d
 			}
 		}
+		if d, ok := migrateIfIdle(cfg, now, v, req.Model); ok {
+			return d
+		}
 		return Decision{Kind: Reauth, Account: current, Reason: ReasonNeedsLogin}
 	}
 	if acct.paidUse() {
@@ -123,6 +127,9 @@ func decide(cfg Config, now Instant, v view, req Request) Decision {
 		return d
 	}
 	if bar := overageBar(cfg, now.Stamp, v.checksFrom, acct); bar != "" {
+		if d, ok := migrateIfIdle(cfg, now, v, req.Model); ok {
+			return d
+		}
 		return Decision{Kind: Refuse, Account: current, Reason: bar, RecheckOverage: recheck(bar)}
 	}
 	switch req.LastFailure {
@@ -132,7 +139,22 @@ func decide(cfg Config, now Instant, v view, req Request) Decision {
 		}
 		return Decision{Kind: Retry, Account: current, Reason: ReasonTransient}
 	}
+	if d, ok := migrateIfIdle(cfg, now, v, req.Model); ok {
+		return d
+	}
 	return Decision{Kind: Dispatch, Account: current, Reason: ReasonAssigned}
+}
+
+func migrateIfIdle(cfg Config, now Instant, v view, model string) (Decision, bool) {
+	if !v.idle {
+		return Decision{}, false
+	}
+	d := place(cfg, now, v, model)
+	if d.Kind != Place || d.Account == v.binding.Account {
+		return Decision{}, false
+	}
+	d.Kind, d.From, d.Reason = Migrate, v.binding.Account, ReasonIdle
+	return d, true
 }
 
 func place(cfg Config, now Instant, v view, model string) Decision {
@@ -171,7 +193,7 @@ func place(cfg Config, now Instant, v view, model string) Decision {
 		if cfg.Rule == ResetAware {
 			score = base / (1 + cfg.ResetBias*slack(cfg, now, a, model))
 		}
-		if best < 0 || score < bestScore {
+		if best < 0 || score < bestScore || (score == bestScore && a.ID == v.binding.Account) {
 			best, bestScore = i, score
 		}
 	}

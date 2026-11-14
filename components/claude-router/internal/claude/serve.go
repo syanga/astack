@@ -383,7 +383,7 @@ func loginMessage(d router.Decision) string {
 	if d.Kind == router.Unavailable {
 		return "claude-router: no enrolled account is logged in; run claude-router login"
 	}
-	return fmt.Sprintf("claude-router: account %s needs a new proxy login (claude-router login -account %s); the conversation stays on it", d.Account, d.Account)
+	return fmt.Sprintf("claude-router: account %s needs a new proxy login (claude-router login -account %s)", d.Account, d.Account)
 }
 
 // answerWait is the local 429 clients wait through: unified status rejected,

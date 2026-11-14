@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -32,8 +33,8 @@ func TestScriptedFixturesMatchTheirLiteralExpectations(t *testing.T) {
 			}
 		}
 	}
-	if checks != 124 {
-		t.Fatalf("ran %d checks across the scripts, want 124", checks)
+	if checks != 126 {
+		t.Fatalf("ran %d checks across the scripts, want 126", checks)
 	}
 }
 
@@ -123,6 +124,33 @@ func TestSimulationKeepsHealthyConversationsAndRecoversEveryBinding(t *testing.T
 	if m.SubagentRequests == 0 || m.SubagentNotInherited != 0 || m.SubagentServed != m.SubagentRequests {
 		t.Fatalf("%d subagent requests with %d not inherited and %d served, want requests, all inherited and all served",
 			m.SubagentRequests, m.SubagentNotInherited, m.SubagentServed)
+	}
+}
+
+func TestTheSimulatorFlagsAnIdleMoveOnlyWhileTheConversationsCacheLives(t *testing.T) {
+	for _, tc := range []struct {
+		ttl     float64
+		flagged bool
+	}{{5, false}, {120, true}} {
+		t.Run(fmt.Sprintf("cache lives %v minutes", tc.ttl), func(t *testing.T) {
+			var fx Fixture
+			if err := loadJSON("../../testdata/sim/weekly-expiry-72h.json", &fx); err != nil {
+				t.Fatal(err)
+			}
+			fx.Cache.TTLMinutes = tc.ttl
+
+			m, _, err := Simulate(fx, 1, router.DefaultConfig(), t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if m.IdleMigrations == 0 {
+				t.Fatal("no idle migrations, want some")
+			}
+			if flagged := m.HealthyAutoMigrations > 0; flagged != tc.flagged {
+				t.Fatalf("%d migrations flagged as healthy with %d idle migrations, want flagged %v", m.HealthyAutoMigrations, m.IdleMigrations, tc.flagged)
+			}
+		})
 	}
 }
 

@@ -42,19 +42,21 @@ type Router struct {
 	saved      map[AccountID]AccountState
 	unenrolled []AccountState
 	expiry     Instant
+	started    time.Time
 }
 
 // New returns a router over the enrolled accounts, in tie-break order, and an
-// open store. Account login and quota state start unknown and live in memory
-// only; Open keeps them across restarts.
-func New(cfg Config, accounts []Account, store *Store) (*Router, error) {
+// open store. The router starts at now. The idle time of a conversation with no
+// request since then counts from now. Account login and quota state start
+// unknown and live in memory only; Open keeps them across restarts.
+func New(cfg Config, accounts []Account, store *Store, now time.Time) (*Router, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	if len(accounts) == 0 {
 		return nil, errors.New("no enrolled accounts")
 	}
-	r := &Router{cfg: cfg, store: store, index: map[AccountID]int{}, active: map[ConversationID]time.Time{}}
+	r := &Router{cfg: cfg, store: store, index: map[AccountID]int{}, active: map[ConversationID]time.Time{}, started: now}
 	for i, a := range accounts {
 		if a.ID == "" || !(a.Capacity > 0) || math.IsInf(a.Capacity, 0) {
 			return nil, fmt.Errorf("account %d: need an ID and a finite positive capacity", i)
@@ -79,12 +81,17 @@ func (r *Router) Decide(now Instant, req Request) (Decision, error) {
 	if err != nil {
 		return Decision{}, err
 	}
+	last := r.lastRequestAt(req.Conversation, b)
+	if r.started.After(last) {
+		last = r.started
+	}
 	var loadErr error
 	v := view{
 		accounts:   r.accounts,
 		index:      r.index,
 		binding:    b,
 		bound:      bound,
+		idle:       now.Stamp.Sub(last) > r.cfg.PlaceAgainAfter,
 		checksFrom: r.expiry.Stamp,
 		loads: func() []int {
 			l, err := r.loads(now.Stamp, req.Conversation)
@@ -99,6 +106,13 @@ func (r *Router) Decide(now Instant, req Request) (Decision, error) {
 	return d, nil
 }
 
+func (r *Router) lastRequestAt(conv ConversationID, b Binding) time.Time {
+	if last, ok := r.active[conv]; ok && last.After(b.Since) {
+		return last
+	}
+	return b.Since
+}
+
 func (r *Router) loads(now time.Time, skip ConversationID) ([]int, error) {
 	loads := make([]int, len(r.accounts))
 	horizon := now.Add(-r.cfg.ActiveFor)
@@ -106,11 +120,7 @@ func (r *Router) loads(now time.Time, skip ConversationID) ([]int, error) {
 		if conv == skip {
 			return
 		}
-		last, ok := r.active[conv]
-		if !ok || b.Since.After(last) {
-			last = b.Since
-		}
-		if idx, enrolled := r.index[b.Account]; enrolled && !last.Before(horizon) {
+		if idx, enrolled := r.index[b.Account]; enrolled && !r.lastRequestAt(conv, b).Before(horizon) {
 			loads[idx]++
 		}
 	})

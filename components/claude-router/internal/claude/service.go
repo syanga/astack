@@ -179,6 +179,7 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	}
 	policy := router.DefaultConfig()
 	policy.OverageFreshFor = time.Duration(cfg.OverageFreshFor)
+	policy.PlaceAgainAfter = time.Duration(cfg.PlaceAgainAfter)
 	if s.router, err = router.Open(policy, cfg.Accounts, s.store, wall().Round(0)); err != nil {
 		return nil, err
 	}

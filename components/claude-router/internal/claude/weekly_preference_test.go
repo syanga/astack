@@ -124,6 +124,47 @@ func TestAUsageReadAfterAManualResetReturnsTheAccountToNewConversations(t *testi
 	}
 }
 
+func TestAConversationIdleLongerThanPlaceAgainAfterMovesToTheAccountWithMoreSlack(t *testing.T) {
+	e := newEnv(t, "acct-a", "acct-b")
+	e.cfg.PlaceAgainAfter = Duration(10 * time.Minute)
+	now := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC)
+	e.clock.set(now)
+	reset := now.Add(84 * time.Hour)
+	weekly := func(percent float64) usageReply {
+		return usageReply{Enabled: boolPtr(false), Fields: map[string]any{
+			"seven_day": map[string]any{"utilization": percent, "resets_at": reset.Format(time.RFC3339)},
+		}}
+	}
+	e.upstream.setUsage("acct-a", weekly(50))
+	e.upstream.setUsage("acct-b", weekly(50))
+	s := e.start()
+	send := func(at time.Duration) string {
+		e.clock.set(now.Add(at))
+		s.overage.read(context.Background(), "acct-a")
+		s.overage.read(context.Background(), "acct-b")
+		return e.send(msg{Session: sessionID(1)}).Text
+	}
+
+	first := send(0)
+	e.upstream.setUsage("acct-b", weekly(0))
+	early := send(9 * time.Minute)
+	late := send(20 * time.Minute)
+
+	if first != served("acct-a") {
+		t.Fatalf("first placement = %q, want acct-a on the tie", first)
+	}
+	if early != served("acct-a") {
+		t.Fatalf("after 9 idle minutes = %q, want it to stay on acct-a", early)
+	}
+	if late != served("acct-b") {
+		t.Fatalf("after 11 idle minutes = %q, want acct-b, which has more weekly slack", late)
+	}
+	moves := e.migrations()
+	if len(moves) != 1 || moves[0].From != "acct-a" || moves[0].Account != "acct-b" || moves[0].Reason != string(router.ReasonIdle) {
+		t.Fatalf("migrated events = %+v, want one idle move from acct-a to acct-b", moves)
+	}
+}
+
 func TestResetGrantsDoNotBoostBodyFiveHourOrScopedWeeklyWindows(t *testing.T) {
 	for _, kind := range []string{"five_hour", "scoped weekly", "missing"} {
 		t.Run(kind, func(t *testing.T) {

@@ -129,19 +129,19 @@ func windows(at time.Time, ws []ScriptWindow) []router.Window {
 // durable state in dir.
 func RunScript(sc Script, cfg router.Config, dir string) (ScriptResult, error) {
 	res := ScriptResult{Script: sc.Name, Rule: cfg.Rule, Config: cfg, Pass: true}
-	open := func() (*router.Store, *router.Router, error) {
+	open := func(at time.Time) (*router.Store, *router.Router, error) {
 		st, err := router.OpenStore(dir)
 		if err != nil {
 			return nil, nil, err
 		}
-		r, err := router.New(cfg, sc.Accounts, st)
+		r, err := router.New(cfg, sc.Accounts, st, at)
 		if err != nil {
 			st.Close()
 			return nil, nil, err
 		}
 		return st, r, nil
 	}
-	st, r, err := open()
+	st, r, err := open(sc.Start)
 	if err != nil {
 		return res, err
 	}
@@ -206,7 +206,7 @@ func RunScript(sc Script, cfg router.Config, dir string) (ScriptResult, error) {
 			if err := st.Close(); err != nil {
 				return res, err
 			}
-			if st, r, err = open(); err != nil {
+			if st, r, err = open(at); err != nil {
 				return res, fmt.Errorf("step %d: reopen: %w", i, err)
 			}
 		default:

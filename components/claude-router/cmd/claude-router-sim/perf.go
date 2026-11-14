@@ -82,7 +82,7 @@ func cmdPerf(args []string, stdout io.Writer) error {
 	if existing, err := st.Bindings(); err != nil || len(existing) != 0 {
 		return errors.New("perf needs an empty state directory")
 	}
-	r, err := router.New(router.DefaultConfig(), accounts, st)
+	r, err := router.New(router.DefaultConfig(), accounts, st, serveStart)
 	if err != nil {
 		return err
 	}
@@ -193,7 +193,7 @@ func cmdRecover(args []string, stdout io.Writer) error {
 		return err
 	}
 	defer st.Close()
-	if _, err := router.New(router.DefaultConfig(), perfAccounts(*nAccounts), st); err != nil {
+	if _, err := router.New(router.DefaultConfig(), perfAccounts(*nAccounts), st, serveStart); err != nil {
 		return err
 	}
 	open := time.Since(t)

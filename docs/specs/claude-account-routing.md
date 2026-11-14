@@ -23,9 +23,12 @@ pool. Claude clients use that proxy as their default connection after acceptance
 tests pass.
 
 The proxy assigns a new conversation according to account capacity and observed
-quota. It favors unused allowance approaching reset without moving healthy
-conversations. A conversation keeps its account across idle periods and proxy
-restarts. Subagents inherit their parent's account.
+quota. It favors unused allowance approaching reset without moving
+conversations in active use. A conversation keeps its account across proxy
+restarts and idle periods up to an idle threshold, 65 minutes by default. An
+idle conversation is placed again at its next request, as a new conversation
+is. At the default threshold, its prompt cache has already expired. Subagents
+inherit their parent's account.
 
 Confirmed quota exhaustion permits automatic migration within the same
 conversation. Authentication failures and transient errors have distinct recovery
@@ -39,17 +42,18 @@ policy. Bounded live tests establish client compatibility and actual cache costs
 ## User Stories
 
 1. As a user with several subscriptions, I want new conversations spread according to capacity and reset times, so that included allowance does not expire unused.
-2. As a user continuing a conversation, I want its account assignment to survive idle periods and proxy restarts, so that routing does not cause unnecessary cache writes.
+2. As a user continuing a conversation, I want its account assignment to survive proxy restarts and idle periods up to the idle threshold, so that routing does not cause unnecessary cache writes.
 3. As a T3 Code user, I want quota exhaustion to change the account within my existing thread, so that I retain messages, tool results, and working context.
 4. As a user running subagents, I want them to inherit their parent's account, so that related work follows the same assignment policy.
 5. As a subscription user, I want paid overflow disabled and no automatic paid fallback, so that routing consumes only included allowance.
 6. As a user encountering a transient failure, I want recovery on the same account, so that a temporary error does not cause account churn.
 7. As a user whose response was interrupted, I want to retry explicitly without repeating completed tool actions, so that recovery preserves my work.
 8. As a user whose accounts are exhausted, I want the system to report when useful capacity returns and wait with cancellation, so that I can resume without repeated manual checks.
-9. As a user whose login needs renewal, I want a clear reauthentication status, so that I can restore access without silently moving existing conversations.
+9. As a user whose login needs renewal, I want a clear reauthentication status, so that I can restore access without silently moving conversations in active use.
 10. As a user working on several machines, I want independent local proxies and logins, so that one machine does not depend on another machine's availability.
 11. As a user diagnosing routing, I want command-line status and persistent events, so that I can understand account selection and cache costs without inspecting credentials.
 12. As an astack maintainer, I want deterministic simulation and isolated live acceptance, so that I can verify routing before making it the default.
+13. As a user resuming an idle conversation, I want it placed again like a new conversation, so that allowance approaching reset gets used without an extra cache write.
 
 ## Implementation Decisions
 
@@ -66,7 +70,8 @@ glossary or applicable ADR was found during repository inspection.
 | Request | One inference attempt within a conversation. A conversation can have concurrent requests. |
 | Subagent | A child conversation or execution whose account derives from a known parent conversation. |
 | Assignment | The durable relationship between a conversation and a subscription account. |
-| Migration | An explicit change of an existing assignment, caused by confirmed quota exhaustion or manual override. |
+| Migration | An explicit change of an existing assignment, caused by confirmed quota exhaustion, manual override, or placing an idle conversation again. |
+| Idle conversation | A conversation with no request sent to an account, no new or changed assignment, and no proxy start for longer than the idle threshold. The threshold is `place_again_after`, default 65 minutes, above the one-hour prompt-cache lifetime. |
 | Quota observation | Reported utilization, reset times, applicable limits, and the observation time. It can be stale or incomplete. |
 | Usable reset | A reset after which all known quota constraints blocking the requested model can permit work on an otherwise eligible account. |
 
@@ -111,8 +116,9 @@ glossary or applicable ADR was found during repository inspection.
   five-hour limits, weekly limits, and model-specific limits when available.
   A near five-hour reset does not make an account usable if a weekly limit still
   blocks the requested model.
-- Apply reset urgency only to new assignments. Do not migrate a healthy
-  conversation to rebalance accounts or drain allowance before reset.
+- Apply reset urgency to new assignments and to idle conversations placed
+  again. Do not migrate a conversation in active use to rebalance accounts or
+  drain allowance before reset.
 - Use fresh observations for reset urgency. With missing or stale observations,
   fall back to capacity weights and known exhaustion information. Expose the
   observation age rather than inventing precision.
@@ -130,17 +136,22 @@ glossary or applicable ADR was found during repository inspection.
 - Create the first assignment atomically. Concurrent first requests for one
   conversation must obtain the same account. Persist the assignment before
   dispatch so a crash cannot silently create a different assignment on restart.
-- Keep assignments across idle periods and proxy restarts. A model change within
-  a conversation does not create a new assignment.
+- Keep assignments across proxy restarts and idle periods up to the idle
+  threshold. Place an idle conversation again at its next request, as a new
+  conversation is placed. The proxy does not save request times, so idle time
+  restarts at a proxy start. A model change within a conversation does not
+  create a new assignment.
 - Pin each dispatched request to the account selected by the component. SDK
   defaults, configuration reloads, and client retries must not introduce hidden
   account selection or migration.
 - A subagent inherits the parent's current account. A required parent migration
   must not turn later child requests into independent placement decisions.
   Already dispatched requests retain their pinned account.
-- Automatically change an assignment only after confirmed quota exhaustion.
-  Provide an explicit manual override. A migrated conversation does not
-  automatically return to its original account when that account recovers.
+- Automatically change an assignment only after confirmed quota exhaustion,
+  or when an idle conversation is placed again. Provide an explicit manual
+  override. A migrated conversation does not return to its original account
+  because that account recovered. It can return when it is placed again as an
+  idle conversation.
 - Missing conversation or parent identity is a blocking compatibility question.
   Per-request balancing is not an acceptable fallback. A fixed assignment or
   rejection is a proposal to evaluate in the feasibility probes.
@@ -155,7 +166,7 @@ The routing contract distinguishes these outcomes.
 | Confirmed quota exhaustion before response output | Record exhaustion and migrate to an eligible account. Exclude accounts already exhausted for this request. |
 | Failure after response output reaches the client | Report the interruption and preserve conversation state. Require explicit retry. Record confirmed exhaustion so the next explicit attempt can use the migration policy. |
 | Normal OAuth expiry | Refresh automatically using the machine-local credential. |
-| Invalid or revoked login requiring browser reauthentication | Exclude the account from new assignments. Keep existing assignments and report the need to log in again or move explicitly. |
+| Invalid or revoked login requiring browser reauthentication | Exclude the account from new assignments. Keep existing assignments and report the need to log in again or move explicitly. An idle conversation is placed again. |
 | All eligible accounts exhausted | Report the earliest known usable reset, wait automatically with cancellation, and avoid inference attempts against known exhausted accounts before their reset. |
 | Unknown reset time | Report uncertainty rather than promise an exact resume time. The recovery mechanism must be established by the waiting probe. |
 | Proxy failure | Report the outage, restart the local service automatically, and recover assignments. Do not silently connect directly. |
@@ -241,16 +252,17 @@ The offline suite and simulator cover these behaviors.
 | Scenario | Observable expectation |
 | --- | --- |
 | Equal quota conditions, unequal capacity | Over a controlled workload, new assignments reflect the configured capacity ratio. |
-| Account near reset with available allowance | New work favors that account compared with the capacity-only baseline. Existing healthy assignments remain unchanged. |
+| Account near reset with available allowance | New work favors that account compared with the capacity-only baseline. Healthy assignments in active use remain unchanged. |
 | Near five-hour reset with exhausted weekly allowance | The account does not become a migration destination solely because the five-hour reset is near. |
 | Parallel first requests for one conversation | Every request receives the same durable account assignment. |
-| Idle period, model change, or proxy restart | The conversation retains its assignment. |
+| Idle period up to the idle threshold, model change, or proxy restart | The conversation retains its assignment. |
+| Idle period longer than the idle threshold | The conversation is placed again, as a new conversation is, and may move. |
 | Parent and nested subagents | Child requests inherit the parent's account and do not balance independently. |
 | Transient failure before output | Recovery uses the assigned account and returns the expected response. |
 | Confirmed exhaustion before output | Recovery moves to an eligible account, preserves the conversation, and records the migration reason. |
-| Original account recovers after migration | The migrated conversation remains on its destination account. |
+| Original account recovers after migration | The migrated conversation remains on its destination account until it is placed again as an idle conversation. |
 | Interrupted response or cancellation | The client observes interruption or cancellation. Completed tool results remain intact, and explicit retry can resume without automatic replay. |
-| Revoked authentication | New work uses another eligible account. Existing assignments report reauthentication until relogin or explicit movement. |
+| Revoked authentication | New work uses another eligible account. Existing assignments report reauthentication until relogin or explicit movement. An idle conversation is placed again. |
 | Every account exhausted | The system reports the earliest usable reset and resumes automatically when eligible capacity returns. Cancellation stops pending work. |
 | Missing, stale, or externally changed quota | Status exposes uncertainty. Placement uses the fallback rule and respects known exhaustion. |
 | Crash during assignment or migration | Restart recovers one committed assignment rather than creating competing assignments. |
@@ -272,8 +284,8 @@ a wait or preserved tool results after an interruption.
   migrations, and estimated additional cache writes caused by migration.
 - Model growing cacheable prefixes and cache expiry. Attribute ordinary prefix
   growth separately from a migration's cold cache write.
-- Require no avoidable account churn for healthy conversations. Do not generate
-  inference merely to keep a cache warm or drain allowance.
+- Require no avoidable account churn for healthy conversations in active use.
+  Do not generate inference merely to keep a cache warm or drain allowance.
 - Live validation measures `cache_creation_input_tokens` and
   `cache_read_input_tokens`. API price equivalents, if reported, remain separate
   from included subscription allowance consumption.
@@ -311,7 +323,7 @@ a wait or preserved tool results after an interruption.
 - Separate account pools, a graphical dashboard, or changes to T3 Code itself.
 - Claude Remote Control support through the proxy.
 - Paid overflow, paid API fallback, automatic direct bypass, or model substitution.
-- Periodic migration of healthy conversations or background cache-warming inference.
+- Periodic migration of healthy conversations or background cache-warming inference. Idle placement happens only at a conversation's next request.
 - A maintained CLIProxyAPI fork or generalized routing for other providers.
 - Exact forecasts of subscription allowance from API token prices.
 

@@ -467,7 +467,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | ID | Contract behavior | Status | Evidence | Owner |
 | --- | --- | --- | --- | --- |
 | IO-5 | The remaining guarantee limit is stated | passed | `included-only.json`, `guarantee_limit`; "Included-only: the documented limit is accepted" above | PR1 |
-| IO-6 | The router refuses unknown or stale overage state and stops routing on observed paid use | passed | `TestUnknownOverageStateRefusesDispatch`, `TestAnAccountWithUnknownStateIsSkippedForPlacement`, `TestEnabledOverflowRefusesDispatch`, `TestStaleReadingIsRecheckedBeforeDispatch`, `TestResponseHeadersRefreshTheReading`, `TestPaidUseStopsRoutingToTheAccount`, `TestPaidUseWithoutAnotherAccountRefuses`, `TestRefreshRedispatchIsRefusedAfterABlockingObservation`. Paid-use detection needs every attempt to pass the router's transport: `TestCredentialsThatChangeTheUpstreamPathAreRefused` refuses a credential proxy or header override, and `TestTransportCapsAttemptsAndRefusesAnotherAccount` refuses an off-pin attempt; lane 2 `unsafe_account_not_placed`, `paid_use_stops_routing` (`evidence/PR3/lane-2/controls.json`). The policy half is PR2's: `TestUnverifiedOverageWithholdsDispatch`, `TestStaleOverageCheckRefusesWithoutMigrating`, `TestObservedPaidUseMigratesAndDoesNotReturn`, `TestObservedPaidUseWithoutADestinationRefusesAndKeepsTheBinding`. Controlled upstream only; the real usage endpoint is IO-4. | PR2, PR3 |
+| IO-6 | The router refuses unknown or stale overage state and stops routing on observed paid use | passed | `TestUnknownOverageStateRefusesDispatch`, `TestAnAccountWithUnknownStateIsSkippedForPlacement`, `TestEnabledOverflowRefusesDispatch`, `TestStaleReadingIsRecheckedBeforeDispatch`, `TestResponseHeadersRefreshTheReading`, `TestPaidUseStopsRoutingToTheAccount`, `TestPaidUseWithoutAnotherAccountRefuses`, `TestRefreshRedispatchIsRefusedAfterABlockingObservation`. Paid-use detection needs every attempt to pass the router's transport: `TestCredentialsThatChangeTheUpstreamPathAreRefused` refuses a credential proxy or header override, and `TestTransportCapsAttemptsAndRefusesAnotherAccount` refuses an off-pin attempt; lane 2 `unsafe_account_not_placed`, `paid_use_stops_routing` (`evidence/PR3/lane-2/controls.json`). The policy half is PR2's: `TestUnverifiedOverageWithholdsDispatch`, `TestStaleOverageCheckRefusesWithoutMigratingWithinPlaceAgainAfter`, `TestObservedPaidUseMigratesAndDoesNotReturn`, `TestObservedPaidUseWithoutADestinationRefusesAndKeepsTheBinding`. Controlled upstream only; the real usage endpoint is IO-4. | PR2, PR3 |
 
 ### Waiting and cancellation
 
@@ -535,8 +535,11 @@ with a deterministic clock.
 
 `Commit`, `Served`, `Relogin`, and `Move` share one lock. A `Served` or
 `Relogin` call that lands between `Decide` and `Commit` is therefore seen by
-the commit: a `never_served_relogin` migration decided before `Served` becomes
-`reauth`, and one decided before `Relogin` becomes `dispatch`.
+the commit. A `never_served_relogin` migration decided before `Served`
+becomes `reauth`, or an `idle` migration when the conversation is idle and
+another account is eligible. One decided before `Relogin` becomes
+`dispatch`, or an `idle` migration when the conversation is idle and another
+account scores better.
 
 `Decide` returns one of these outcomes. Every outcome except `migrate` keeps
 the assignment.
@@ -545,11 +548,11 @@ the assignment.
 | --- | --- |
 | `place` | A new conversation. Commit before dispatch. |
 | `dispatch` | An existing assignment on a usable account. |
-| `migrate` | Another account is eligible, and the assigned account has a known rejection that blocks the model (`exhausted`), showed paid use (`overage_observed`), needs login before the assignment served any response (`never_served_relogin`), or is no longer enrolled (`not_enrolled`). Commit before dispatch. A conversation whose account is no longer enrolled and that no account can take gets the `wait`, `refuse`, or `unavailable` of a new conversation and keeps its assignment (`TestAConversationOnAnAccountNoLongerEnrolledIsPlacedAgain`, `TestAConversationOnAnAccountNoLongerEnrolledKeepsItsAssignmentWhenNoAccountCanTakeIt`). |
+| `migrate` | Another account is eligible, and the assigned account is no longer enrolled (`not_enrolled`) or needs login before the assignment served any response (`never_served_relogin`). Or another account is eligible and the assigned account needs no login. Then paid use gives `overage_observed`, and otherwise a known rejection that blocks the model gives `exhausted`. Or the conversation has been idle longer than `PlaceAgainAfter`, the placement rule picks another account, and none of these reasons applies (`idle`). Commit before dispatch. A conversation whose account is no longer enrolled and that no account can take gets the `wait`, `refuse`, or `unavailable` of a new conversation and keeps its assignment (`TestAConversationOnAnAccountNoLongerEnrolledIsPlacedAgain`, `TestAConversationOnAnAccountNoLongerEnrolledKeepsItsAssignmentWhenNoAccountCanTakeIt`). |
 | `retry` | `transient`, `network`, or `throttle` on the previous attempt, within `MaxAttempts`. |
 | `fail` | The retry budget is spent, or the previous attempt failed `request_scoped`. |
 | `wait` | No eligible account. `Until` is the earliest usable reset; `ResetKnown` is false when `Until` is only a recheck time. |
-| `reauth` | The assigned account needs a browser login and the assignment has served a response, or no other account is eligible. |
+| `reauth` | The assigned account needs a browser login and no migration applies. |
 | `refuse` | The included-only check fails for the assigned account and no migration applies, or it fails for every logged-in account when placing. `RecheckOverage` is set when a check is unknown or stale. |
 | `unavailable` | No enrolled account is logged in. |
 | `reject` | The request has no conversation identity. |
@@ -582,7 +585,8 @@ score = (active + 1) / (capacity * (1 + ResetBias * slack))
   Those header terms retain their freshness and reset rules. Body windows
   other than account-wide weekly add no preference.
   `capacity_only` ignores all preferences.
-- Ties go to the earlier enrolled account.
+- Ties go to the earlier enrolled account, except that an idle conversation
+  placed again keeps its current account on a tie.
 - An account is blocked until the latest reset among its rejected windows that
   apply to the model. A five-hour reset therefore never unblocks an account
   whose weekly window is still rejected. A rejection with no reported reset
@@ -610,9 +614,10 @@ score = (active + 1) / (capacity * (1 + ResetBias * slack))
   reports stamped at least one weekly period before it. Any evidence of the
   same window stamped earlier belongs to a window that has ended.
 - The destination of every `migrate` is chosen by this rule.
-- Reset preference affects only `place` and the destination of `migrate`.
-  `Decide` never moves a healthy assignment, and a migrated conversation never
-  returns on its own.
+- Reset preference affects only `place`, the destination of `migrate`, and
+  whether an idle conversation moves at all. `Decide` moves a conversation
+  on a healthy account only after the conversation has been idle longer than
+  `PlaceAgainAfter` (Idle conversations are placed again, below).
 
 `Decision.Reason` is `reset_preference` when the reset-aware choice differs
 from the capacity-only choice for the same request, and `capacity` otherwise.
@@ -627,6 +632,7 @@ from the capacity-only choice for the same request, and `capacity` otherwise.
 | `ResetBias` | 8 | Simulator comparison below |
 | `FreshFor` | 15 min | Middle of the swept values 5, 15, and 60 min |
 | `ActiveFor` | 1 h | Not swept; the longest prompt-cache lifetime |
+| `PlaceAgainAfter` | 65 min | Above 1 h, the longest prompt-cache lifetime (Idle conversations are placed again, below) |
 | `UnknownResetRecheck` | 5 min | Not swept; bounds attempts on an account whose reset is unknown |
 | `OverageFreshFor` | 1 h | Not swept. PR3 sets the final freshness threshold with the check mechanism. |
 | `MaxAttempts` | 3 | Not swept |
@@ -669,6 +675,154 @@ slightly more exhaustion migrations. No run of any variant had a healthy
 automatic migration, counting migrations returned to subagent requests. The
 comparison does not establish a percentage improvement, and none is required.
 
+### Idle conversations are placed again
+
+Keeping a conversation on its account saves its prompt cache, because a move
+makes its next request write the whole prompt again on the new account. Once
+the conversation's own cache has expired, its next request writes that cache
+again on any account, so staying no longer avoids that write. `Decide` then
+places the conversation again by the placement rule, as it places a new
+conversation:
+
+- A conversation is idle when its latest request is more than
+  `PlaceAgainAfter` before the request being decided. The latest request is
+  the later of the binding's `since` and the last request this router sent
+  to an account for the conversation. A request goes to an account when
+  `Route` returns `place`, `migrate`, `dispatch`, or `retry`. The router
+  does not save request times, so after a restart, the idle time of a
+  conversation with no request since the start counts from the start.
+- If the conversation's account is eligible, `Decide` answers `migrate`
+  with reason `idle` when the placement rule picks another account, and
+  `dispatch` on the current account otherwise. On a tie the current account
+  wins. A failed attempt's `retry` or `fail` comes first.
+- The placement rule never picks an account that needs login, fails the
+  included-only check, or is blocked by a rejection. Observed paid use fails
+  the included-only check. An idle conversation on such an account therefore
+  moves when another account is eligible, and otherwise gets the decision
+  described above for that state. `Decide` checks the states in this order:
+  login, paid use, rejection, the included-only check. The first state that
+  applies sets the move's reason:
+  - `never_served_relogin` for a login needed before the assignment served a
+    response, `overage_observed` for paid use, and `exhausted` for a
+    rejection. When one of these states applies first, it moves the
+    conversation whether or not the conversation is idle.
+  - `idle` for a login needed after the assignment served a response, and
+    for an account whose latest check is unknown, stale, or `enabled`.
+- A conversation that keeps getting `reauth` or `refuse` sends no request to
+  an account, so it becomes idle `PlaceAgainAfter` after its last request
+  that went to one. Its next request then moves it when another account is
+  eligible.
+- The service reads the threshold from `place_again_after` in `config.json`,
+  default `65m`.
+- Idle placement makes moves of healthy conversations routine. Row CC-2
+  still has no test of a conversation that relies on an account-scoped
+  artifact, so such a conversation could lose that artifact when it moves.
+
+`TestAConversationIdleLongerThanPlaceAgainAfterIsPlacedAgain`,
+`TestAfterARestartIdleTimeCountsFromTheStart`,
+`TestAnIdleConversationOnAnAccountThatCannotServeItMovesWhenAnotherAccountCan`,
+`TestALoginErrorOrARefusalDoesNotRestartAConversationsIdleTime`,
+`TestOnlyExhaustionMovesABusyConversationAndItReturnsAfterPlaceAgainAfter`,
+and the service test
+`TestAConversationIdleLongerThanPlaceAgainAfterMovesToTheAccountWithMoreSlack`
+cover these rules. `claude-router status` leaves idle moves out of its
+problem lines (`TestStatusLeavesIdleMovesOutOfItsLines`). `cache` counts
+their cost (Cache cost of account moves, below).
+
+Concurrent requests follow the Concurrency rule in Migration, below. Two
+requests of an idle conversation can get different decisions when their
+inputs differ, as when a reading changes the scores between them. When
+request A decides `dispatch` before request B's idle `migrate` commits, A
+stays on the source and can write the conversation's cache there once. If A
+finishes before B, `cache` counts B's cache write as the idle move's cost,
+because the two requests started less than an hour apart. If A finishes
+after a request on the destination, `cache` counts A and the next request on
+the destination as two more moves, with their cache writes.
+`TestADispatchedRequestKeepsItsAccountWhileTheConversationMigrates` covers the
+rule for a migration after exhaustion. No test runs this race for an idle
+migration.
+
+The threshold rests on the daily router's `events.jsonl` from 2026-10-20 to
+2026-11-12 20:00 PST. The table counts the status-200 requests with more than
+20,000 input tokens that followed a request of the same conversation on the
+same account. It groups them by the gap between the two requests' `at`
+times, which mark when each request finished. A request reads from the cache
+when more than half of its input came from cache reads.
+
+| Gap | Requests | Read from the cache |
+| --- | --- | --- |
+| 0 to 5 min | 22,060 | 98.8% |
+| 5 to 10 min | 256 | 45.3% |
+| 10 to 30 min | 233 | 67.8% |
+| 30 to 55 min | 51 | 88.2% |
+| 55 to 60 min | 38 | 94.7% |
+| 62 min or more | 98 | 1.0% |
+
+To regenerate the table, save this script as `cache_gaps.py` and run
+`python3 cache_gaps.py ~/.local/state/astack/claude-router/events.jsonl`:
+
+```python
+import json, re, sys
+from datetime import datetime
+
+cutoff = datetime.fromisoformat("2026-11-12T20:00:00-08:00")
+rows = [(0, 5), (5, 10), (10, 30), (30, 55), (55, 60), (60, 62), (62, float("inf"))]
+seen = {r: [0, 0, 0.0] for r in rows}
+last = {}
+for line in open(sys.argv[1]):
+    try:
+        e = json.loads(line)
+    except ValueError:
+        continue
+    if e.get("kind") != "request" or e.get("status") != 200 or not e.get("usage"):
+        continue
+    at = datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"\1", e["at"].replace("Z", "+00:00")))
+    if at >= cutoff:
+        break
+    u = e["usage"]
+    total = u["input_tokens"] + u["cache_creation_input_tokens"] + u["cache_read_input_tokens"]
+    prev = last.get(e["conversation"])
+    if prev and prev[1] == e["account"] and total > 20000:
+        gap = (at - prev[0]).total_seconds() / 60
+        for r in rows:
+            if r[0] <= gap < r[1]:
+                share = u["cache_read_input_tokens"] / total
+                seen[r][0] += 1
+                seen[r][1] += share > 0.5
+                seen[r][2] += share
+    last[e["conversation"]] = (at, e["account"])
+for r, (n, hits, shares) in seen.items():
+    if n:
+        print(f"{r[0]} to {r[1]} min: {n} requests, {100 * hits / n:.1f}% read from the cache, mean read share {100 * shares / n:.1f}%")
+```
+
+No request had a gap of 60 to 62 minutes. The cache lives one hour after a
+request. The dip from 5 to 30 minutes fits some requests using the 5-minute
+cache. Requests 62 minutes or more after the previous one still read 15.1% of
+their input from the cache on average. That part is the system prompt and
+tools, which the account's other conversations keep cached. A move writes
+that part again only when no conversation on the new account keeps it cached.
+
+The simulator's cache lives `ttl_minutes` after each request. The simulator
+flags an `idle` migration as a healthy automatic migration when the
+conversation's cache on the source is still alive
+(`TestTheSimulatorFlagsAnIdleMoveOnlyWhileTheConversationsCacheLives`). Over
+seeds 1 to 5 at the defaults, against the same code without idle placement:
+
+| Fixture | Idle placement | Completed turns | Unused weekly share at reset | Exhaustion migrations | Idle migrations | Migration cache writes (tokens) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `weekly-expiry-72h` | off | 2590 | 0.169 | 61.6 | 0 | 846,800 |
+| `weekly-expiry-72h` | on | 2595 | 0.157 | 51.6 | 116.2 | 756,800 |
+| `mixed-48h` | off | 2991 | 0.180 | 388.0 | 0 | 1,358,200 |
+| `mixed-48h` | on | 3005 | 0.176 | 386.4 | 13.0 | 1,363,000 |
+
+Unused weekly allowance at reset fell in 7 of 10 seed runs, and no idle
+migration was flagged. The fixtures' cache lives 5 minutes, so they do not
+test the threshold itself. To regenerate a row, run
+`go run ./cmd/claude-router-sim run -fixture testdata/sim/<fixture>.json -seed <n> -trace=false`
+for `on`, and add `-place-again-after 10000h` for `off`. The `off` runs match
+the code before idle placement in every metric above.
+
 ### Quota evidence must come from the attempt
 
 The SDK keeps its previous quota snapshot when a response carries no quota
@@ -696,13 +850,17 @@ from `ObserveOverage`: `disabled`, `enabled`, or `paid_use`, with the time of
 the check or response.
 
 - **Observed paid use** counts as confirmed exhaustion of the account's
-  included allowance. A conversation on that account migrates with reason
-  `overage_observed` when another account is eligible. If none is, it waits
-  for the earliest usable reset elsewhere or is refused with
-  `paid_use_observed`, and keeps its assignment. New conversations skip the
-  account. A migrated conversation does not return. While recorded paid use
-  is in force, the transport sends the account no attempt, including the
-  SDK's redispatch of a request that was waiting on a refresh.
+  included allowance. An account that also needs login follows the login
+  rules (`Decide` outcomes, above). Otherwise a conversation on the account
+  migrates with reason `overage_observed` when another account is eligible.
+  If none is, the conversation waits for the earliest usable reset elsewhere
+  or is refused with `paid_use_observed`, and keeps its assignment. New
+  conversations skip the account. A migrated conversation does not return
+  when the paid use clears. It moves again only for a reason in the
+  `migrate` row of the `Decide` outcomes, above, or by a manual move.
+  While recorded paid use is in force, the transport sends the account no
+  attempt, including the SDK's redispatch of a request that was waiting on a
+  refresh.
 - **Ordering.** The router records the latest check (`disabled` or
   `enabled`) and, separately, the latest paid use, each with its time. A
   check stamped before the latest recorded check is ignored. Of two checks
@@ -718,10 +876,11 @@ the check or response.
     and `enabled` at +3m migrate the conversation with `overage_observed` in
     either arrival order of the two checks.
 - **Unknown or stale check**, older than `OverageFreshFor`: `Decide` refuses
-  dispatch with `overage_unknown` or `overage_stale`, sets `RecheckOverage`,
-  and does not migrate.
-- **Overflow enabled**: `Decide` refuses dispatch with `overage_enabled` and
-  does not migrate.
+  dispatch with `overage_unknown` or `overage_stale` and sets
+  `RecheckOverage`. An idle conversation migrates instead when another
+  account is eligible (Idle conversations are placed again, above).
+- **Overflow enabled**: `Decide` refuses dispatch with `overage_enabled`. An
+  idle conversation migrates instead when another account is eligible.
 - A new conversation is placed only on accounts that pass. When none pass and
   no account is waiting on a reset, it is refused with
   `no_included_only_account`. `RecheckOverage` is set if any account's check
@@ -736,7 +895,7 @@ overage state. A conversation whose account is exhausted migrates with reason
 the destination must pass the check: its latest check found overflow
 `disabled` within `OverageFreshFor`. With no such destination, the
 conversation keeps its assignment and gets `refuse` or `wait`. An unknown or
-stale check alone never causes a migration.
+stale check causes a migration only of an idle conversation.
 
 PR3 owns the check mechanism and the documented remaining gap: usage credits
 enabled outside the proxy while included windows are exhausted.
@@ -756,8 +915,8 @@ unmarked assignment. When the assigned account needs a browser login:
 
 - An unmarked assignment moves with reason `never_served_relogin` when another
   account is eligible. Otherwise `Decide` returns `reauth`.
-- A marked assignment keeps the spec rule: `reauth` until relogin or a manual
-  `Move`.
+- A marked assignment gets `reauth` until relogin, a manual `Move`, or a
+  migration in the `migrate` row of the `Decide` outcomes, above.
 
 PR3 contract item (N13): PR3 calls `Served` for every successful response on
 a binding, including responses to subagent requests, which share the
@@ -804,7 +963,7 @@ The store is the single-writer JSON-lines journal from PR1,
 
 The scripts in `testdata/scripts/` record hand-derived outcomes. Both
 `claude-router-sim check` and `go test ./cmd/...` run them under both rules
-with the defaults above, for 124 checks.
+with the defaults above, for 126 checks.
 
 | Script | Expected outcome |
 | --- | --- |
@@ -813,8 +972,8 @@ with the defaults above, for 124 checks.
 | `03-weekly-blocks-near-reset` | `acct-a`, near a five-hour reset but weekly rejected, receives neither the new conversation nor the migration; both go to `acct-b`. With every account blocked, the wait ends at `acct-c`'s reset at minute 60, not `acct-a`'s at minute 20. At minute 61 the conversation moves to `acct-c`. |
 | `04-stale-observations` | A 30-minute-old near-reset observation is ignored: `a b a b` under both rules. A three-hour-old weekly rejection still excludes `acct-c` until its reset. |
 | `05-subagent-inheritance` | Child and nested-child requests dispatch on the parent's account, then on the migration destination. |
-| `06-restart-and-no-return` | The conversation stays on `acct-a` across a restart, 3 idle hours, and a model change. After exhaustion and another restart it stays on `acct-b` when `acct-a` recovers; a new conversation goes to `acct-a`. |
-| `07-auth-and-included-only` | With no verified account, a new conversation is refused with a recheck. An auth failure excludes `acct-a` from new placement. Its served conversation gets `reauth` and stays; its never-served conversation moves to `acct-b`. Paid use on `acct-b`, with `acct-a` logged out, refuses without moving; after relogin it moves to `acct-a` for `overage_observed`. A stale check on `acct-a` then refuses with a recheck and does not move, although `acct-b` is verified. |
+| `06-restart-and-idle-return` | Within `PlaceAgainAfter` of its last request, the conversation stays on `acct-a` across a restart and a model change, although `acct-b` scores better. After exhaustion and another restart it stays on `acct-b` when `acct-a` recovers; a new conversation goes to `acct-a`. After 66 idle minutes, reset-aware placement returns it to `acct-a` for `idle`, and capacity-only placement keeps it on `acct-b`, which ties. |
+| `07-auth-and-included-only` | With no verified account, a new conversation is refused with a recheck. An auth failure excludes `acct-a` from new placement. Its served conversation gets `reauth` and stays; its never-served conversation moves to `acct-b`. Paid use on `acct-b`, with `acct-a` logged out, refuses without moving; after relogin it moves to `acct-a` for `overage_observed`. A stale check on `acct-a` then refuses with a recheck and does not move within `PlaceAgainAfter` of its last request, although `acct-b` is verified. |
 | `08-exhaustion-evidence` | A 429 with 10-minute-old evidence retries on `acct-a` and fails at attempt 4 without moving. Fresh evidence migrates to `acct-b`. A rejection with no reset waits inexactly until minute 17, then dispatches. |
 
 ## Local service (PR3)
@@ -1601,8 +1760,9 @@ before the read started. The router saves the change, so a restart does not
 bring the rejection back
 (`TestAUsageReadBelowTheLimitClearsAnEarlierRejectionOfTheSameWindow`,
 `TestARejectionClearedByAUsageReadStaysClearedAfterRestart`,
-`TestAUsageReadAfterAManualResetReturnsTheAccountToNewConversations`). A
-conversation that migrated away stays on its new account.
+`TestAUsageReadAfterAManualResetReturnsTheAccountToNewConversations`). The
+cleared rejection alone does not move a migrated conversation back
+(Migration, below).
 
 The threshold rests on the provider's live answers on 2026-11-12. Three
 weekly rejections carried a header utilization of exactly 1. The two
@@ -1837,11 +1997,11 @@ destination receives the same session identity the source did
   dispatched keeps its pinned account, and a subagent request that follows
   the migration goes to the destination
   (`TestADispatchedRequestKeepsItsAccountWhileTheConversationMigrates`).
-- **No return.** A migrated conversation stays on its destination when the
-  source recovers (`TestMigratedConversationStaysAfterTheSourceRecovers`).
-  It moves again only on a new confirmed exhaustion, observed paid use, a
-  login requirement before it was served (PR2), removal of its account from
-  `config.json`, or a manual move.
+- **No return on recovery.** A migrated conversation stays on its
+  destination when the source recovers
+  (`TestMigratedConversationStaysAfterTheSourceRecovers`). It moves again
+  only for a reason in the `migrate` row of the `Decide` outcomes (PR2,
+  above), or by a manual move.
 - **Cancellation.** A client that goes away during the destination's
   response cancels that attempt; the committed migration stays
   (`TestClientCancellationDuringTheMovedResponseKeepsTheMigration`).
@@ -1861,7 +2021,8 @@ every account without a rejection in force is barred by paid overflow
 enabled, paid use, or an unknown or stale check, and no account is blocked
 until a reset. A conversation's own account is refused the same way when
 it has no rejection in force and its check is enabled, or unknown or stale
-after one reread.
+after one reread. An idle conversation moves instead when another account
+is eligible (Idle conversations are placed again).
 
 The waiting is the client's: with
 `CLAUDE_CODE_RETRY_WATCHDOG=1`, both clients sleep until the reset with no
@@ -1942,9 +2103,11 @@ behavior is the client's own continuation turn.
 
 An `auth` failure marks the account as needing login. New conversations
 skip it. A conversation that has been served on it gets 503 naming
-`claude-router login -account ID`, never 401, and keeps its assignment. One
-that never served moves (PR2). That move rests on a coordinator decision,
-which the user has not accepted. The mark is cleared by:
+`claude-router login -account ID`, never 401, and keeps its assignment. An
+idle one moves instead when another account is eligible (Idle conversations
+are placed again). One that never served moves (PR2). That move rests on a
+coordinator decision, which the user has not accepted. The mark is cleared
+by:
 
 - `claude-router login`, which clears it in the saved account state while
   it holds the state directory, so it applies at the next start;
@@ -2776,11 +2939,22 @@ from `events.jsonl`, so the warning also shows while the router is stopped.
   cannot exceed 100%.
 - **Move cost.** The `cache_creation_input_tokens` of the move's own request,
   when that request is a counted request. Later requests, and cold starts
-  after the cache expires, do not count.
+  after the cache expires, do not count. A move with reason `idle` costs 0
+  when its request starts more than an hour after the conversation's
+  previous status-200 request started. The rule also applies to a request
+  that is not a counted request. A request starts at its event's `at` minus
+  its `duration_ms`. The previous request is the one with the latest start.
+  No prompt cache lives longer than an hour, so the move's request writes the
+  conversation's own cache again on either account. An `idle` move within
+  the hour, as when `place_again_after` is below 1 h, costs its request's
+  cache write
+  (`TestAnIdleMoveCostsNoCacheWriteOnlyWhenItStartsMoreThanAnHourAfterThePreviousRequestStarted`,
+  `TestAnIdleMoveCountsFromTheLatestStartWhenRequestsFinishOutOfOrder`).
 - **Unknown cost.** A move whose request is not a counted request has an
   unknown cost. Its request reported no usage, or a `null` input, cache
   write, or cache read counter. A later request on the new account does not
-  set the cost.
+  set the cost. The exception is an `idle` move that costs 0 by the rule
+  above.
 - **Reason.** The reason of the conversation's latest `migrated` event since
   its previous status-200 request, for example `exhausted` or `manual`. A move
   without one takes the `reason` of its own `request` event.
@@ -2865,7 +3039,7 @@ applies. On a stopped router the next step stays `claude-router start`.
 
 | Check | Tests |
 | --- | --- |
-| Moves and costs | `TestTheFirstRequestOfAConversationIsAPlacementNotAMove`, `TestAPolicyMoveCostsTheCacheWriteOfItsFirstRequestOnTheNewAccount`, `TestAManualMoveShowsTheReasonOfItsMigratedEvent`, `TestAMoveWhoseRequestHasNoUsageKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWhoseRequestHasANullCacheWriteKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWithNoUsageAfterItHasAnUnknownCost`, `TestAMoveCountsItsCostOnlyWhenItsRequestCountsTowardAllWrites`, `TestOnlyMovesWhoseRequestFallsInTheWindowCount`, `TestTwoConversationsThatMoveAtTheSameTimeEachCountTheirOwnCost`, `TestAFailedRequestOnAnotherAccountIsNotAMove`, `TestAFailedRequestWithoutUsageAddsNoAccountLine`, `TestCacheOfAnEmptyLogShowsEachAccountWithoutAShare` |
+| Moves and costs | `TestTheFirstRequestOfAConversationIsAPlacementNotAMove`, `TestAPolicyMoveCostsTheCacheWriteOfItsFirstRequestOnTheNewAccount`, `TestAnIdleMoveCostsNoCacheWriteOnlyWhenItStartsMoreThanAnHourAfterThePreviousRequestStarted`, `TestAnIdleMoveCountsFromTheLatestStartWhenRequestsFinishOutOfOrder`, `TestAManualMoveShowsTheReasonOfItsMigratedEvent`, `TestAMoveWhoseRequestHasNoUsageKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWhoseRequestHasANullCacheWriteKeepsAnUnknownCostAfterALaterWrite`, `TestAMoveWithNoUsageAfterItHasAnUnknownCost`, `TestAMoveCountsItsCostOnlyWhenItsRequestCountsTowardAllWrites`, `TestOnlyMovesWhoseRequestFallsInTheWindowCount`, `TestTwoConversationsThatMoveAtTheSameTimeEachCountTheirOwnCost`, `TestAFailedRequestOnAnotherAccountIsNotAMove`, `TestAFailedRequestWithoutUsageAddsNoAccountLine`, `TestCacheOfAnEmptyLogShowsEachAccountWithoutAShare` |
 | Inputs | `TestCacheIgnoresAMalformedServiceRecord` |
 | Layout | `TestCacheMatchesTheSelectedLayout`; `TestStatusMatchesTheSelectedLayout` cases `cache-warning`, `cache-warning-off`, `stopped-cache-warning`, and `stopped-cache-warning-verbose` |
 | Setting and warning | `TestStatusWarnsAboveTheDefaultMoveShareOfTenPercent`, `TestTheStatusWarningSaysOrMoreWhenAMoveCostIsUnknown`, `TestAMoveCacheWarnPercentOfZeroTurnsTheWarningOff`, `TestStatusAndServeRefuseAMoveCacheWarnPercentOutsideZeroToHundred` |
