@@ -7,7 +7,7 @@ This skill takes the current conversation context and codebase understanding and
 
 Some projects call their test files specs, such as RSpec `*_spec.rb` files and Jest `*.spec.js` files. In such a project, these requests ask for an implementation spec:
 
-- a request that points to the conversation, such as "turn this into a spec" or "write a spec for what we discussed"
+- a request whose subject is the conversation, such as "turn this into a spec" or "write a spec for what we discussed"
 - a request for an implementation or design spec
 - a request that names this skill, directly or through a workflow the user started
 
