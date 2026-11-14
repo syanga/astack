@@ -159,9 +159,8 @@ const (
 	Retry Kind = "retry"
 	// Wait answers locally: no eligible account can serve the model until Until.
 	Wait Kind = "wait"
-	// Reauth reports that the assigned account needs a browser login. The
-	// assignment stays until relogin, an explicit move, or an idle placement
-	// on another account.
+	// Reauth reports that the assigned account needs a browser login, and
+	// keeps the assignment.
 	Reauth Kind = "reauth"
 	// Fail reports a failure to the client after the retry budget is spent.
 	Fail Kind = "fail"

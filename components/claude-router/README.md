@@ -437,9 +437,9 @@ again, and the client sleeps until then and sends again. At the default
 while the conversation's prompt cache lives. When an account needs a new
 login, its conversations get an error that names `claude-router login`, and
 new conversations go elsewhere. A conversation idle longer than
-`place_again_after` leaves such an account for another account that can
-serve it. So does an idle conversation on an account with paid overflow on,
-or with no reading of that setting within `overage_fresh_for`.
+`place_again_after` leaves such an account for another eligible account.
+So does an idle conversation on an account with paid overflow on, or with
+no reading of that setting within `overage_fresh_for`.
 `claude-router move` sends `POST /claude-router/move` with the client token
 and `{"conversation": "<session id or hash>", "to": "<account>"}`.
 Exhaustion, login, and paid-overflow state survive a restart.

@@ -574,15 +574,15 @@ func TestAfterARestartIdleTimeCountsFromTheStart(t *testing.T) {
 }
 
 func TestAnIdleConversationOnAnAccountThatCannotServeItMovesWhenAnotherAccountCan(t *testing.T) {
-	markNeedsLogin := func(h *harness, at time.Time) {
+	needsLogin := func(h *harness, at time.Time) {
 		h.r.ObserveOverage(b, OverageDisabled, at)
 		h.report(at, b, "claude-sonnet-4-5", ClassAuth)
 	}
-	needsLogin := func(h *harness, at time.Time) {
+	servedNeedsLogin := func(h *harness, at time.Time) {
 		if err := h.r.Served(t0, "conv", b); err != nil {
 			h.t.Fatal(err)
 		}
-		markNeedsLogin(h, at)
+		needsLogin(h, at)
 	}
 	overflowOn := func(h *harness, at time.Time) {
 		h.r.ObserveOverage(b, OverageEnabled, at)
@@ -593,8 +593,12 @@ func TestAnIdleConversationOnAnAccountThatCannotServeItMovesWhenAnotherAccountCa
 		otherBlocked bool
 		want         Decision
 	}{
-		{"needs login after serving", needsLogin, false, Decision{Kind: Migrate, From: b, Account: a, Reason: ReasonIdle}},
-		{"needs login before serving keeps its reason", markNeedsLogin, false, Decision{Kind: Migrate, From: b, Account: a, Reason: ReasonNeverServed}},
+		{"needs login after serving", servedNeedsLogin, false, Decision{Kind: Migrate, From: b, Account: a, Reason: ReasonIdle}},
+		{"needs login before serving keeps its reason", needsLogin, false, Decision{Kind: Migrate, From: b, Account: a, Reason: ReasonNeverServed}},
+		{"needs login after serving comes before a rejection", func(h *harness, at time.Time) {
+			servedNeedsLogin(h, at)
+			h.observe(b, Observation{At: at, Windows: []Window{rejected(Weekly, at.Add(48*time.Hour))}})
+		}, false, Decision{Kind: Migrate, From: b, Account: a, Reason: ReasonIdle}},
 		{"paid overflow on", overflowOn, false, Decision{Kind: Migrate, From: b, Account: a, Reason: ReasonIdle}},
 		{"paid overflow check stale", func(*harness, time.Time) {}, false, Decision{Kind: Migrate, From: b, Account: a, Reason: ReasonIdle}},
 		{"exhausted keeps its reason", func(h *harness, at time.Time) {
@@ -604,7 +608,7 @@ func TestAnIdleConversationOnAnAccountThatCannotServeItMovesWhenAnotherAccountCa
 		{"paid use keeps its reason", func(h *harness, at time.Time) {
 			h.r.ObserveOverage(b, OveragePaidUse, at)
 		}, false, Decision{Kind: Migrate, From: b, Account: a, Reason: ReasonOverageObserved}},
-		{"needs login after serving, no other account can serve", needsLogin, true, Decision{Kind: Reauth, Account: b, Reason: ReasonNeedsLogin}},
+		{"needs login after serving, no other account can serve", servedNeedsLogin, true, Decision{Kind: Reauth, Account: b, Reason: ReasonNeedsLogin}},
 		{"paid overflow on, no other account can serve", overflowOn, true, Decision{Kind: Refuse, Account: b, Reason: ReasonOverageEnabled}},
 	}
 	for _, tc := range cases {
@@ -637,19 +641,13 @@ func TestAnIdleConversationOnAnAccountThatCannotServeItMovesWhenAnotherAccountCa
 
 func TestALoginErrorOrARefusalDoesNotRestartAConversationsIdleTime(t *testing.T) {
 	cases := []struct {
-		name  string
-		block func(h *harness, at time.Time)
-		held  Decision
+		name       string
+		needsLogin bool
+		bReading   Overage
+		held       Decision
 	}{
-		{"login error", func(h *harness, at time.Time) {
-			if err := h.r.Served(t0, "conv", b); err != nil {
-				h.t.Fatal(err)
-			}
-			h.report(at, b, "claude-sonnet-4-5", ClassAuth)
-		}, Decision{Kind: Reauth, Account: b, Reason: ReasonNeedsLogin}},
-		{"paid overflow refusal", func(h *harness, at time.Time) {
-			h.r.ObserveOverage(b, OverageEnabled, at)
-		}, Decision{Kind: Refuse, Account: b, Reason: ReasonOverageEnabled}},
+		{"login error", true, OverageDisabled, Decision{Kind: Reauth, Account: b, Reason: ReasonNeedsLogin}},
+		{"paid overflow refusal", false, OverageEnabled, Decision{Kind: Refuse, Account: b, Reason: ReasonOverageEnabled}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -659,9 +657,15 @@ func TestALoginErrorOrARefusalDoesNotRestartAConversationsIdleTime(t *testing.T)
 				t.Fatalf("conv placed on %s, want %s", placed.Account, b)
 			}
 			h.manualOverage = true
-			tc.block(h, t0.Add(time.Minute))
+			if tc.needsLogin {
+				if err := h.r.Served(t0, "conv", b); err != nil {
+					t.Fatal(err)
+				}
+				h.report(t0.Add(time.Minute), b, "claude-sonnet-4-5", ClassAuth)
+			}
 			route := func(at time.Time) Decision {
 				h.r.ObserveOverage(a, OverageDisabled, at)
+				h.r.ObserveOverage(b, tc.bReading, at)
 				return h.route(at, req("conv"))
 			}
 

@@ -548,7 +548,7 @@ the assignment.
 | --- | --- |
 | `place` | A new conversation. Commit before dispatch. |
 | `dispatch` | An existing assignment on a usable account. |
-| `migrate` | Another account is eligible, and the assigned account has a known rejection that blocks the model (`exhausted`), showed paid use (`overage_observed`), needs login before the assignment served any response (`never_served_relogin`), or is no longer enrolled (`not_enrolled`). Or the conversation has been idle longer than `PlaceAgainAfter`, the placement rule picks another account, and no reason above applies (`idle`). Commit before dispatch. A conversation whose account is no longer enrolled and that no account can take gets the `wait`, `refuse`, or `unavailable` of a new conversation and keeps its assignment (`TestAConversationOnAnAccountNoLongerEnrolledIsPlacedAgain`, `TestAConversationOnAnAccountNoLongerEnrolledKeepsItsAssignmentWhenNoAccountCanTakeIt`). |
+| `migrate` | Another account is eligible, and the assigned account is no longer enrolled (`not_enrolled`) or needs login before the assignment served any response (`never_served_relogin`). Or another account is eligible and the assigned account needs no login. Then paid use gives `overage_observed`, and otherwise a known rejection that blocks the model gives `exhausted`. Or the conversation has been idle longer than `PlaceAgainAfter`, the placement rule picks another account, and none of these reasons applies (`idle`). Commit before dispatch. A conversation whose account is no longer enrolled and that no account can take gets the `wait`, `refuse`, or `unavailable` of a new conversation and keeps its assignment (`TestAConversationOnAnAccountNoLongerEnrolledIsPlacedAgain`, `TestAConversationOnAnAccountNoLongerEnrolledKeepsItsAssignmentWhenNoAccountCanTakeIt`). |
 | `retry` | `transient`, `network`, or `throttle` on the previous attempt, within `MaxAttempts`. |
 | `fail` | The retry budget is spent, or the previous attempt failed `request_scoped`. |
 | `wait` | No eligible account. `Until` is the earliest usable reset; `ResetKnown` is false when `Until` is only a recheck time. |
@@ -691,18 +691,21 @@ conversation:
   `Route` returns `place`, `migrate`, `dispatch`, or `retry`. The router
   does not save request times, so after a restart, the idle time of a
   conversation with no request since the start counts from the start.
-- On an account that can serve the conversation, `Decide` answers `migrate`
+- If the conversation's account is eligible, `Decide` answers `migrate`
   with reason `idle` when the placement rule picks another account, and
   `dispatch` on the current account otherwise. On a tie the current account
-  wins.
+  wins. A failed attempt's `retry` or `fail` comes first.
 - The placement rule never picks an account that needs login, fails the
   included-only check, or is blocked by a rejection. Observed paid use fails
   the included-only check. An idle conversation on such an account therefore
   moves when another account is eligible, and otherwise gets the decision
-  described above for that state. The move's reason depends on the state:
-  - `exhausted` for a rejection, `overage_observed` for paid use, and
-    `never_served_relogin` for a login needed before the assignment served a
-    response. These states move a conversation whether or not it is idle.
+  described above for that state. `Decide` checks the states in this order:
+  login, paid use, rejection, the included-only check. The first state that
+  applies sets the move's reason:
+  - `never_served_relogin` for a login needed before the assignment served a
+    response, `overage_observed` for paid use, and `exhausted` for a
+    rejection. When one of these states applies first, it moves the
+    conversation whether or not the conversation is idle.
   - `idle` for a login needed after the assignment served a response, and
     for an account whose latest check is unknown, stale, or `enabled`.
 - A conversation that keeps getting `reauth` or `refuse` sends no request to
@@ -847,12 +850,14 @@ from `ObserveOverage`: `disabled`, `enabled`, or `paid_use`, with the time of
 the check or response.
 
 - **Observed paid use** counts as confirmed exhaustion of the account's
-  included allowance. A conversation on that account migrates with reason
-  `overage_observed` when another account is eligible. If none is, it waits
-  for the earliest usable reset elsewhere or is refused with
-  `paid_use_observed`, and keeps its assignment. New conversations skip the
-  account. A migrated conversation does not return when the paid use
-  clears. It moves again only for one of the reasons in Migration, below.
+  included allowance. An account that also needs login follows the login
+  rules (`Decide` outcomes, above). Otherwise a conversation on the account
+  migrates with reason `overage_observed` when another account is eligible.
+  If none is, the conversation waits for the earliest usable reset elsewhere
+  or is refused with `paid_use_observed`, and keeps its assignment. New
+  conversations skip the account. A migrated conversation does not return
+  when the paid use clears. It moves again only for a reason in the
+  `migrate` row of the `Decide` outcomes, above, or by a manual move.
   While recorded paid use is in force, the transport sends the account no
   attempt, including the SDK's redispatch of a request that was waiting on a
   refresh.
@@ -910,9 +915,8 @@ unmarked assignment. When the assigned account needs a browser login:
 
 - An unmarked assignment moves with reason `never_served_relogin` when another
   account is eligible. Otherwise `Decide` returns `reauth`.
-- A marked assignment gets `reauth` until relogin, a manual `Move`, or an
-  idle placement on another account (Idle conversations are placed again,
-  above).
+- A marked assignment gets `reauth` until relogin, a manual `Move`, or a
+  migration in the `migrate` row of the `Decide` outcomes, above.
 
 PR3 contract item (N13): PR3 calls `Served` for every successful response on
 a binding, including responses to subagent requests, which share the
@@ -1996,10 +2000,8 @@ destination receives the same session identity the source did
 - **No return on recovery.** A migrated conversation stays on its
   destination when the source recovers
   (`TestMigratedConversationStaysAfterTheSourceRecovers`). It moves again
-  only on a new confirmed exhaustion, observed paid use, a login requirement
-  before it was served (PR2), removal of its account from `config.json`, a
-  manual move, or an idle placement (Idle conversations are placed again,
-  above).
+  only for a reason in the `migrate` row of the `Decide` outcomes (PR2,
+  above), or by a manual move.
 - **Cancellation.** A client that goes away during the destination's
   response cancels that attempt; the committed migration stays
   (`TestClientCancellationDuringTheMovedResponseKeepsTheMigration`).
@@ -2951,7 +2953,8 @@ from `events.jsonl`, so the warning also shows while the router is stopped.
 - **Unknown cost.** A move whose request is not a counted request has an
   unknown cost. Its request reported no usage, or a `null` input, cache
   write, or cache read counter. A later request on the new account does not
-  set the cost.
+  set the cost. The exception is an `idle` move that costs 0 by the rule
+  above.
 - **Reason.** The reason of the conversation's latest `migrated` event since
   its previous status-200 request, for example `exhausted` or `manual`. A move
   without one takes the `reason` of its own `request` event.

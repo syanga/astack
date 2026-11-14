@@ -108,39 +108,51 @@ if one follows.
 
 ## Know what the router costs and refuses
 
-The router moves a conversation to another account for several reasons. For
-example, the reason is `exhausted` when the conversation's account runs out
-of included allowance, and `overage_observed` when the account shows paid
-use. The first request on the new account writes the conversation's prompt
-cache again. `status` prints a `cache` line when moves caused more than 10%
-of the last 24 hours' cache writes. `cache` counts moves by reason. While the
-router runs, `status -v` lists recent moves with their reasons.
+The router can move a conversation to another account. Each move records a
+reason, such as `exhausted` when the conversation's account runs out of
+included allowance, or `overage_observed` when the account shows paid use.
+The first request on the new account writes the conversation's prompt cache
+again. `status` prints a `cache` line when moves caused more than 10% of the
+last 24 hours' cache writes. `claude-router cache` counts moves by reason.
+While the router runs, `status -v` lists recent moves with their reasons.
 
 Paid overflow is the claude.ai setting that bills usage past the plan's
 included allowance, shown there as extra usage or usage credits. The router
 sends requests only to accounts whose latest reading shows paid overflow off.
-That reading must be newer than `overage_fresh_for`, default 30 minutes. If
-the user turns paid overflow on after the last reading, while the account's
-included allowance is used up, one paid response can happen before the router
-sees it.
+The reading must be less than `overage_fresh_for` old, a `config.json`
+setting with a default of 30 minutes. If the user turns paid overflow on
+after the last reading, while the account's included allowance is used up,
+one paid response can happen before the router sees it.
 
 `place_again_after` in `config.json`, default 65 minutes, sets when a
 conversation counts as idle. Idle time counts from the last request the
-router sent to an account for the conversation. A manual move or a router
-start also restarts idle time. A request the router answers with a login
-error or a paid-overflow refusal, without sending it to an account, does
-not.
+router sent to an account for the conversation. It also counts from a manual
+move (`claude-router move`) or a router start, when either is later. A login
+error, paid-overflow refusal, or wait from the router sends nothing to an
+account, so it does not restart idle time. The router reads `config.json`
+only at start. In `status -v`, the state `idle` is a different measure. It
+means no request sent to an account and no placement or move in the last
+hour, counting requests only since the router started.
 
 At an idle conversation's next request, the router places the conversation
 again, as it places a new one. Placement prefers a less busy account with
 more unused allowance before its reset. Placement never picks an account
 that needs a login or fails the paid-overflow rule above. An idle
 conversation therefore also leaves such an account when another account can
-serve the conversation. The move gets the reason `idle`, unless the
-account's state would move the conversation anyway, as with `exhausted` or
-`overage_observed`. At the default of 65 minutes, the conversation's prompt
-cache has expired, so `cache` usually counts an idle move at no cost. The
-problem lines of `status` leave idle moves out.
+serve the conversation. The move's reason is `idle`, except for states that
+also move a conversation that is not idle. Exhaustion, paid use, removal
+from `config.json`, and a login needed before the account answered the
+conversation keep their own reasons. The router checks a login needed after
+the account answered the conversation before exhaustion and paid use. A move
+off an account in that state therefore has the reason `idle`, even when the
+account is also exhausted or shows paid use.
+
+At the default of 65 minutes, the conversation's prompt cache has expired,
+so `claude-router cache` counts a move with reason `idle` at no cost. The
+exception is a move whose request started less than an hour after the
+conversation's previous answered request started. That happens when two
+requests race, or when `place_again_after` is below one hour. The problem
+lines of `status` leave out moves with reason `idle`.
 
 A Claude model newer than the router's model list gets a 503 that says the
 SDK refused the pinned account without an upstream attempt. The router
