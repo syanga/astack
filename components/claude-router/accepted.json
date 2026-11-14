@@ -1,7 +1,7 @@
 {
- "head": "d4600fcba2c0d1db0c9a5aa6a4d4328c3be472a1",
- "code_sha256": "03bab19c12838a065eddfddbccd3341712467090487d57cab653365c771ff183",
- "binary_sha256": "d1ed0368a9bc37f085e3eb9e4f85e8983d2a849565d8243ea282c9bca93557fa",
+ "head": "e912bea24543bab045a9b033f437fb8774dfc768",
+ "code_sha256": "965715f3632102eb4404b45249ff4cd4e96787ca053bd6726ad1735fd5a1385e",
+ "binary_sha256": "12383618463812b3ca84cdad3e44b4a9c01b6d60680fa0130c802c6d165a2450",
  "helpers_sha256": "4bc4da547f346e0cf0ad12832eccfdcb972257e91876189234cab1e424400243",
  "sdk": "v8.0.11",
  "go": "go1.27.3",
@@ -10,158 +10,139 @@
   "claude_code": "2.1.323"
  },
  "result": "pass",
- "scope": "PR169, usage reads that clear rejections. A foreground lane router on port 18797 had copies of the severus and personal logins and a planted weekly rejection on severus. The lane ran the installed router at the prior record first, and then this code, against the real usage endpoint. Real-account checks covered a new conversation, a resume, and a restart. The run built the code at d4600fc, which the rebase onto e560fe1 replaced with b3f6e25 at the same code digest. Unchanged historical scenarios are references and were not rerun. The saved lane.py includes the restart phase, which was added after the route phase ran.",
- "evidence_root": "/Users/alan/.local/state/astack/claude-router-lanes/pr169/evidence",
+ "scope": "PR173 idle placement: a foreground lane router on port 18797 with copies of the dobby and severus logins and place_again_after 3m, run at this code against the real accounts, through three starts with capacities that favor one account and then the other; real-account new, resume, restart, idle move, and idle return checks. The idle moves off an account that needs a login or fails the included-only check are covered offline only: a lane cannot hold a login requirement through its start reads or turn paid overflow on. Unchanged historical scenarios are references and were not rerun",
+ "evidence_root": "/Users/alan/.local/state/astack/claude-router-lanes/pr173/evidence",
  "matrix": [
+  {
+   "scenario": "dobby token is outside the four-hour refresh lead",
+   "status": "pass",
+   "detail": {
+    "expires_in_min": 339
+   }
+  },
   {
    "scenario": "severus token is outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 471
+    "expires_in_min": 307
    }
   },
   {
-   "scenario": "personal token is outside the four-hour refresh lead",
+   "scenario": "Lane code and executable match the build at e912bea",
    "status": "pass",
    "detail": {
-    "expires_in_min": 298
-   }
-  },
-  {
-   "scenario": "Lane code and executable match the build at d4600fc",
-   "status": "pass",
-   "detail": {
-    "code_sha256": "03bab19c12838a065eddfddbccd3341712467090487d57cab653365c771ff183",
-    "binary_sha256": "d1ed0368a9bc37f085e3eb9e4f85e8983d2a849565d8243ea282c9bca93557fa",
+    "code_sha256": "965715f3632102eb4404b45249ff4cd4e96787ca053bd6726ad1735fd5a1385e",
+    "binary_sha256": "12383618463812b3ca84cdad3e44b4a9c01b6d60680fa0130c802c6d165a2450",
     "sdk": "v8.0.11"
    }
   },
   {
-   "scenario": "The installed router at the prior record keeps a planted weekly rejection after its start read shows the window below its limit",
+   "scenario": "The lane config sets place_again_after to 3m",
    "status": "pass",
    "detail": {
-    "code_sha256": "c05a83e0fccbc0635d4062ad123727fe571d2fb170a5c9ef5f0379a9e3f64434",
-    "weekly_used": 0.43,
-    "rejections": [
-     "weekly"
-    ]
+    "place_again_after": "3m"
    }
   },
   {
-   "scenario": "A start read that shows the weekly window below its limit clears the planted weekly rejection, and the account is ready",
+   "scenario": "new is placed and receives a routed 200",
    "status": "pass",
    "detail": {
     "account": "severus",
-    "weekly_used": 0.43,
-    "rejections": [],
-    "saved_rejections": []
+    "decision": "place",
+    "reason": "reset_preference",
+    "status": 200
    }
   },
   {
-   "scenario": "A start read at the weekly limit keeps the weekly rejection, while the five-hour and Fable windows read 0",
+   "scenario": "resume within place_again_after stays on the account and keeps the conversation",
    "status": "pass",
    "detail": {
-    "account": "personal",
-    "windows": [
+    "account": "severus",
+    "decision": "dispatch",
+    "answer": "kumquat"
+   }
+  },
+  {
+   "scenario": "After a restart that makes the other account score better, a request right after the start stays, because idle time counts from the start",
+   "status": "pass",
+   "detail": {
+    "capacity": {
+     "severus": 0.1,
+     "dobby": 1
+    },
+    "account": "severus",
+    "decision": "dispatch",
+    "reason": "assigned",
+    "answer": "kumquat"
+   }
+  },
+  {
+   "scenario": "After more than place_again_after without a request, the conversation migrates for idle and keeps its content",
+   "status": "pass",
+   "detail": {
+    "from": "severus",
+    "to": "dobby",
+    "decision": "migrate",
+    "reason": "idle",
+    "seconds_since_previous_request": 212,
+    "answer": "kumquat"
+   }
+  },
+  {
+   "scenario": "After a restart that favors the first account and more than place_again_after from the start, the conversation returns for idle",
+   "status": "pass",
+   "detail": {
+    "capacity": {
+     "severus": 1,
+     "dobby": 0.1
+    },
+    "from": "dobby",
+    "to": "severus",
+    "decision": "migrate",
+    "reason": "idle",
+    "seconds_since_previous_request": 328,
+    "answer": "kumquat"
+   }
+  },
+  {
+   "scenario": "status -v lists both moves with reason idle, and no problem line names them",
+   "status": "pass",
+   "detail": {
+    "migrated_events": [
      [
-      "five_hour",
-      null,
-      0
+      "severus",
+      "dobby",
+      "idle"
      ],
      [
-      "weekly",
-      null,
-      1
-     ],
-     [
-      "weekly",
-      "Fable",
-      0
+      "dobby",
+      "severus",
+      "idle"
      ]
     ],
-    "rejections": [
-     "weekly"
+    "problem_lines_with_moved": []
+   }
+  },
+  {
+   "scenario": "cache counts both idle moves at their cache writes, because each started within an hour of the previous request",
+   "status": "pass",
+   "detail": {
+    "moves": [
+     "moves     2  cost 9k  of 18k writes  share 49.4%",
+     "reasons   idle 2"
     ],
-    "saved_rejections": [
-     "weekly"
+    "move_writes": [
+     4311,
+     4339
     ]
-   }
-  },
-  {
-   "scenario": "severus is admissible with paid overflow disabled",
-   "status": "pass",
-   "detail": {
-    "state": "disabled",
-    "source": "settings"
-   }
-  },
-  {
-   "scenario": "personal reads paid overflow disabled",
-   "status": "pass",
-   "detail": {
-    "state": "disabled",
-    "source": "settings"
-   }
-  },
-  {
-   "scenario": "new receives a routed 200 on the cleared account",
-   "status": "pass",
-   "detail": {
-    "exit": 0,
-    "account": "severus",
-    "decision": "place",
-    "status": 200
-   }
-  },
-  {
-   "scenario": "resume receives a routed 200",
-   "status": "pass",
-   "detail": {
-    "exit": 0,
-    "account": "severus",
-    "status": 200
-   }
-  },
-  {
-   "scenario": "Resume preserves account and conversation content",
-   "status": "pass",
-   "detail": {
-    "account": "severus",
-    "answer": "kumquat"
-   }
-  },
-  {
-   "scenario": "After restart, the cleared rejection stays cleared",
-   "status": "pass",
-   "detail": {
-    "severus_status": "ready",
-    "saved_rejections": []
-   }
-  },
-  {
-   "scenario": "restart receives a routed 200",
-   "status": "pass",
-   "detail": {
-    "exit": 0,
-    "account": "severus",
-    "status": 200
-   }
-  },
-  {
-   "scenario": "Restart preserves the served conversation's account and content",
-   "status": "pass",
-   "detail": {
-    "account": "severus",
-    "conversation": "9a4097cfabac",
-    "answer": "kumquat"
    }
   },
   {
    "scenario": "Identity is the same at the start and the end",
    "status": "pass",
    "detail": {
-    "code_sha256": "03bab19c12838a065eddfddbccd3341712467090487d57cab653365c771ff183",
-    "binary_sha256": "d1ed0368a9bc37f085e3eb9e4f85e8983d2a849565d8243ea282c9bca93557fa",
+    "code_sha256": "965715f3632102eb4404b45249ff4cd4e96787ca053bd6726ad1735fd5a1385e",
+    "binary_sha256": "12383618463812b3ca84cdad3e44b4a9c01b6d60680fa0130c802c6d165a2450",
     "sdk": "v8.0.11"
    }
   },
@@ -169,9 +150,8 @@
    "scenario": "Paid overflow remains disabled",
    "status": "pass",
    "detail": {
-    "severus": "disabled",
-    "personal": "disabled",
-    "evidence": "route-3-after-status.json"
+    "dobby": "disabled",
+    "severus": "disabled"
    }
   },
   {
@@ -183,38 +163,34 @@
    }
   },
   {
-   "scenario": "The lane's requests and tokens",
+   "scenario": "Live checks remain within the scoped request budget",
    "status": "pass",
    "detail": {
-    "attempts": 3,
-    "input": 12823,
-    "output": 39
+    "requests": 5,
+    "attempts": 5,
+    "input": 21436,
+    "output": 28
    }
   },
   {
    "scenario": "Evidence contains no copied access token",
    "status": "pass",
    "detail": {
-    "files_scanned": 34,
-    "hits": [],
-    "method": "The scan looked for the sk-ant-, JWT, and Bearer token patterns. The run had already deleted the lane's login copies."
+    "files_scanned": 32,
+    "hits": []
    }
   }
  ],
  "open": [],
- "incidents": [
-  "The first restart attempt was the fourth lane start in 21 s. Its start read of each account got 429 from the usage endpoint, with retry-after 4m57s, so no fresh usage reading arrived. The harness waited 120 s for that reading, then stopped the lane without sending the request. The daily router's next background read of the same two accounts also got 429, with retry-after 3m54s. Its retry read succeeded at 2026-11-12T19:53:29-08:00 (daily-429-events.jsonl). The restart step then ran once and passed.",
-  "The resume after the restart came 5 min 11 s after the previous request, past the 5-minute prompt-cache lifetime. That request therefore wrote the conversation's cache again on the same account (4,304 tokens)."
- ],
+ "incidents": [],
  "prior_acceptance": {
-  "record": "components/claude-router/accepted.json at 1a539b3",
+  "record": "components/claude-router/accepted.json at ade701f (PR169)",
   "status": "historical reference, not rerun at this code"
  },
  "offline_verification": {
-  "head": "cc95a429f81f7358d8d054e2ad05a5c846d61c34",
+  "head": "e912bea24543bab045a9b033f437fb8774dfc768",
   "go_test_race": "pass",
-  "evidence": "/Users/alan/.local/state/astack/claude-router-lanes/pr169/evidence/go-test-result.json",
-  "note": "cc95a42 has the same Go code as d4600fc."
+  "evidence": "/Users/alan/.local/state/astack/claude-router-lanes/pr173/evidence/go-test.txt"
  },
- "written": "2026-11-13T03:58:38.386506+00:00"
+ "written": "2026-11-14T02:46:35.686894+00:00"
 }
