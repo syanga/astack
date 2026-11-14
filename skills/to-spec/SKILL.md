@@ -1,12 +1,19 @@
 ---
 name: to-spec
-description: Turn the current conversation into an implementation spec, using the agreed local or issue-tracker destination.
-disable-model-invocation: true
+description: Implementation specs. Use when asked to turn the current conversation into a spec.
 ---
 
 This skill takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user; just synthesize what you already know.
 
-Use the destination requested by the user or established by the project. If neither exists, return the spec in the conversation. External publication follows the task's authorization and the project's actual labels.
+Some projects call their test files specs, such as RSpec `*_spec.rb` files and Jest `*.spec.js` files. In such a project, these requests ask for an implementation spec:
+
+- a request whose subject is the conversation, such as "turn this into a spec" or "write a spec for what we discussed"
+- a request for an implementation or design spec
+- a request that names this skill, directly or through a workflow the user started
+
+In such a project, any other request to write a spec asks for a test. Write that test instead of following this skill.
+
+Deliver the spec where the user asks. If the user names no destination, write the spec to the project's local location for implementation specs. If the project has none, return the spec in the conversation. Publish to an issue tracker or another external system only when the user asks, directly or through a workflow they started. Use the project's actual labels there. If the project keeps implementation specs on such a system, offer to publish there.
 
 ## Process
 
@@ -16,7 +23,7 @@ Use the destination requested by the user or established by the project. If neit
 
 Reuse testing boundaries already agreed in the conversation. Mark unresolved boundary choices as proposals rather than starting a new interview. Read [Test Behavior, Not Implementation](../principles/test-behavior-not-implementation.md) for the shared test-quality rules.
 
-3. Write the spec using the template below, then deliver it to the agreed destination. Separate settled decisions from assumptions and open questions. State whether any open question blocks implementation.
+3. Write the spec using the template below, then deliver it to the destination chosen above. Separate settled decisions from assumptions and open questions. State whether any open question blocks implementation.
 
 <spec-template>
 
