@@ -10,7 +10,7 @@
   "claude_code": "2.1.323"
  },
  "result": "pass",
- "scope": "PR173 idle placement: a foreground lane router on port 18797 with copies of the dobby and severus logins and place_again_after 3m, run at this code against the real accounts, through three starts with capacities that favor one account and then the other; real-account new, resume, restart, idle move, and idle return checks. The idle moves off an account that needs a login or fails the included-only check are covered offline only: a lane cannot hold a login requirement through its start reads or turn paid overflow on. Unchanged historical scenarios are references and were not rerun",
+ "scope": "PR173 idle placement. A foreground lane router on port 18797 ran this code against the real accounts. It used copies of the dobby and severus logins, and every start set place_again_after to 3m (lane.py, lane-config.json). The second start favored dobby by capacity, and the third favored severus. Real-account checks covered a new conversation, a resume, a restart, an idle move, and an idle return. The run built the code at e912bea, and later rebases of the branch kept the same code digest. Offline tests alone cover the idle move off an account that needs a login, or whose paid-overflow reading is enabled or stale. An unknown reading takes the same branch, but no test sets it. A lane cannot keep a login requirement through its start reads, choose the result of a settings read, or turn paid overflow on. TestStatusLeavesIdleMovesOutOfItsLines covers the status filter offline, because the lane saved status -v output, which has no problem lines. record.py built the record, and its prose was edited afterwards. Unchanged historical scenarios are references and were not rerun.",
  "evidence_root": "/Users/alan/.local/state/astack/claude-router-lanes/pr173/evidence",
  "matrix": [
   {
@@ -40,7 +40,8 @@
    "scenario": "The lane config sets place_again_after to 3m",
    "status": "pass",
    "detail": {
-    "place_again_after": "3m"
+    "place_again_after": "3m",
+    "evidence": "lane.py sets it at every start. lane-config.json is the third start's config."
    }
   },
   {
@@ -54,7 +55,7 @@
    }
   },
   {
-   "scenario": "resume within place_again_after stays on the account and keeps the conversation",
+   "scenario": "resume within place_again_after stays on the account and keeps the conversation's content",
    "status": "pass",
    "detail": {
     "account": "severus",
@@ -63,7 +64,7 @@
    }
   },
   {
-   "scenario": "After a restart that makes the other account score better, a request right after the start stays, because idle time counts from the start",
+   "scenario": "At the second start, which favors dobby, a request right after the start stays on severus, because idle time counts from the start",
    "status": "pass",
    "detail": {
     "capacity": {
@@ -77,7 +78,7 @@
    }
   },
   {
-   "scenario": "After more than place_again_after without a request, the conversation migrates for idle and keeps its content",
+   "scenario": "After more than place_again_after without a request, the conversation moves to dobby for idle and keeps its content",
    "status": "pass",
    "detail": {
     "from": "severus",
@@ -85,11 +86,12 @@
     "decision": "migrate",
     "reason": "idle",
     "seconds_since_previous_request": 212,
-    "answer": "kumquat"
+    "answer": "kumquat",
+    "seconds_between_request_starts": 211
    }
   },
   {
-   "scenario": "After a restart that favors the first account and more than place_again_after from the start, the conversation returns for idle",
+   "scenario": "After the third start, which favors severus, the conversation returns to severus for idle once place_again_after has passed since that start",
    "status": "pass",
    "detail": {
     "capacity": {
@@ -101,11 +103,13 @@
     "decision": "migrate",
     "reason": "idle",
     "seconds_since_previous_request": 328,
-    "answer": "kumquat"
+    "answer": "kumquat",
+    "seconds_between_request_starts": 329,
+    "seconds_after_third_start": 210
    }
   },
   {
-   "scenario": "status -v lists both moves with reason idle, and no problem line names them",
+   "scenario": "status -v lists both moves with reason idle",
    "status": "pass",
    "detail": {
     "migrated_events": [
@@ -120,7 +124,10 @@
       "idle"
      ]
     ],
-    "problem_lines_with_moved": []
+    "status_v_migration_rows": [
+     "18:45         fdfb12cf6597  dobby    severus  idle",
+     "18:40         fdfb12cf6597  severus  dobby    idle"
+    ]
    }
   },
   {
@@ -151,7 +158,8 @@
    "status": "pass",
    "detail": {
     "dobby": "disabled",
-    "severus": "disabled"
+    "severus": "disabled",
+    "evidence": "s3-after-status.json"
    }
   },
   {
@@ -163,7 +171,7 @@
    }
   },
   {
-   "scenario": "Live checks remain within the scoped request budget",
+   "scenario": "The lane's requests and tokens",
    "status": "pass",
    "detail": {
     "requests": 5,
@@ -176,15 +184,16 @@
    "scenario": "Evidence contains no copied access token",
    "status": "pass",
    "detail": {
-    "files_scanned": 32,
-    "hits": []
+    "files_scanned": 35,
+    "hits": [],
+    "method": "The record builder scanned for the exact client token and the exact tokens in the lane's login copies, before the run deleted the copies. A later scan for the sk-ant-, JWT, and Bearer token patterns and the client token covered lane-config.json, lane.py, and record.py."
    }
   }
  ],
  "open": [],
  "incidents": [],
  "prior_acceptance": {
-  "record": "components/claude-router/accepted.json at ade701f (PR169)",
+  "record": "components/claude-router/accepted.json from PR #169, code_sha256 03bab19c\u2026",
   "status": "historical reference, not rerun at this code"
  },
  "offline_verification": {
