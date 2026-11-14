@@ -7,10 +7,10 @@
  "go": "go1.27.3",
  "platform": "darwin/arm64",
  "clients": {
-  "claude_code": "2.1.322"
+  "claude_code": "2.1.323"
  },
  "result": "pass",
- "scope": "PR169 usage reads clear rejections: a foreground lane router on port 18797 with copies of the severus and personal logins and a planted weekly rejection on severus, run first with the installed router at the prior record and then with this code, against the real usage endpoint; real-account new/resume/restart checks; unchanged historical scenarios are references and were not rerun",
+ "scope": "PR169, usage reads that clear rejections. A foreground lane router on port 18797 had copies of the severus and personal logins and a planted weekly rejection on severus. The lane ran the installed router at the prior record first, and then this code, against the real usage endpoint. Real-account checks covered a new conversation, a resume, and a restart. The run built the code at d4600fc, which the rebase onto e560fe1 replaced with b3f6e25 at the same code digest. Unchanged historical scenarios are references and were not rerun. The saved lane.py includes the restart phase, which was added after the route phase ran.",
  "evidence_root": "/Users/alan/.local/state/astack/claude-router-lanes/pr169/evidence",
  "matrix": [
   {
@@ -168,7 +168,11 @@
   {
    "scenario": "Paid overflow remains disabled",
    "status": "pass",
-   "detail": null
+   "detail": {
+    "severus": "disabled",
+    "personal": "disabled",
+    "evidence": "route-3-after-status.json"
+   }
   },
   {
    "scenario": "No lane token refresh occurred",
@@ -179,7 +183,7 @@
    }
   },
   {
-   "scenario": "Live checks remain within the scoped request budget",
+   "scenario": "The lane's requests and tokens",
    "status": "pass",
    "detail": {
     "attempts": 3,
@@ -191,24 +195,26 @@
    "scenario": "Evidence contains no copied access token",
    "status": "pass",
    "detail": {
-    "files_scanned": 30,
-    "hits": []
+    "files_scanned": 34,
+    "hits": [],
+    "method": "The scan looked for the sk-ant-, JWT, and Bearer token patterns. The run had already deleted the lane's login copies."
    }
   }
  ],
  "open": [],
  "incidents": [
-  "The first restart attempt got 429 from the usage endpoint (retry-after 4m57s) on the fourth lane start read in 21 s for each account, so the lane refused dispatch and sent no inference. The daily router's next background read of the same two accounts also got 429 (retry-after 3m54s). Its readings stayed fresh, and its retry read succeeded at 2026-11-12T19:53:29-08:00. The restart step then ran once and passed.",
-  "The resume after restart came 5 min 11 s after the previous request, past the 5-minute prompt-cache lifetime, so it wrote the cache again on the same account (4,304 tokens) instead of reading it."
+  "The first restart attempt was the fourth lane start in 21 s. Its start read of each account got 429 from the usage endpoint, with retry-after 4m57s, so no fresh usage reading arrived. The harness waited 120 s for that reading, then stopped the lane without sending the request. The daily router's next background read of the same two accounts also got 429, with retry-after 3m54s. Its retry read succeeded at 2026-11-12T19:53:29-08:00 (daily-429-events.jsonl). The restart step then ran once and passed.",
+  "The resume after the restart came 5 min 11 s after the previous request, past the 5-minute prompt-cache lifetime. That request therefore wrote the conversation's cache again on the same account (4,304 tokens)."
  ],
  "prior_acceptance": {
   "record": "components/claude-router/accepted.json at 1a539b3",
   "status": "historical reference, not rerun at this code"
  },
  "offline_verification": {
-  "head": "d4600fcba2c0d1db0c9a5aa6a4d4328c3be472a1",
+  "head": "cc95a429f81f7358d8d054e2ad05a5c846d61c34",
   "go_test_race": "pass",
-  "evidence": "/Users/alan/.local/state/astack/claude-router-lanes/pr169/evidence/go-test.txt"
+  "evidence": "/Users/alan/.local/state/astack/claude-router-lanes/pr169/evidence/go-test-result.json",
+  "note": "cc95a42 has the same Go code as d4600fc."
  },
  "written": "2026-11-13T03:58:38.386506+00:00"
 }
