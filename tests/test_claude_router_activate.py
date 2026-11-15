@@ -108,6 +108,16 @@ SIGNALED_AT_EXIT = HELPER_WITH_MANAGED_SETTINGS.replace("import claude_router\n"
 import atexit, signal
 atexit.register(lambda: (signal.signal(signal.SIGTERM, signal.SIG_DFL), os.kill(os.getpid(), signal.SIGTERM)))
 """)
+SIGNALED_AT_UNDO = HELPER_WITH_MANAGED_SETTINGS.replace("import claude_router\n", """import claude_router
+import signal
+original = claude_router.undo_journal
+def signaled_undo_journal(*arguments, **options):
+    for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        os.kill(os.getpid(), signum)
+    Path(os.environ["SIGNALED_MARKER"]).touch()
+    return original(*arguments, **options)
+claude_router.undo_journal = signaled_undo_journal
+""")
 
 OTHER = "6f1d2c3b-0000-4000-8000-00000000000b"
 OTHER_CONVERSATION = hashlib.sha256(OTHER.encode()).hexdigest()[:12]
@@ -724,22 +734,15 @@ class ActivationTests(ActivationFixture):
         self.assertEqual(self.journal()["phase"], "active")
 
     def test_signals_during_the_undo_after_a_failed_continuation_do_not_stop_it(self):
-        process = self.start_activate((SESSION, "exit 5"), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-        watchdog = threading.Timer(30, process.kill)
-        watchdog.start()
-        self.addCleanup(watchdog.cancel)
-        failure = process.stderr.readline()
-        deadline, sent = time.time() + 10, 0
-        while True:
-            os.kill(process.pid, STOPS[sent % len(STOPS)])
-            sent += 1
-            if process.poll() is not None or time.time() > deadline:
-                break
-        _, rest = process.communicate(timeout=30)
+        signaled = self.root / "signaled"
+        command = self.activate_command((SESSION, "exit 5"))
+        command[2] = SIGNALED_AT_UNDO
+        result = subprocess.run(command, env=dict(self.activate_env(), SIGNALED_MARKER=str(signaled)),
+                                capture_output=True, text=True, timeout=60)
 
-        self.assertEqual(failure, "claude-router: activate: exit (conversation {}) exited 5\n".format(CONVERSATION))
-        self.assertEqual(rest, UNDONE)
-        self.assertEqual(process.returncode, 1)
+        self.assertEqual((result.returncode, result.stderr),
+                         (1, "claude-router: activate: exit (conversation {}) exited 5\n".format(CONVERSATION) + UNDONE))
+        self.assertTrue(signaled.exists(), "activate undid the failed activation without the helper's signals")
         self.assert_direct_and_state_kept()
 
     def test_signals_ignored_when_activation_starts_stay_ignored(self):
