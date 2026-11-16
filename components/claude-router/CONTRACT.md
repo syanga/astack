@@ -139,7 +139,7 @@ SDK allows, and owns every retry and migration decision.
 | `routing.strategy` | any | A pin overrides every strategy tested. |
 | `routing.retry.max-retry-credentials` | any | `0` means unlimited, but the scheduler filters candidates to the pinned ID. |
 | `requests.passthrough-headers` | `false` | It does not affect error values. The router reads headers at its transport. |
-| `upstream.claude.disable-claude-cloak-mode` | `true` | With cloaking on, the SDK rewrites every request it does not confirm as native Claude Code into its Claude Code 2.1.280 baseline. That includes every T3 and Agent SDK request. See [Client identity](#client-identity). |
+| `upstream.claude.disable-claude-cloak-mode` | `true` | With cloaking on, the SDK rewrites every request it does not confirm as native Claude Code into its Claude Code 2.1.280 baseline. Every T3 and Agent SDK request is such a request. See [Client identity](#client-identity). |
 | Proxy settings | none at any level | No global `requests.proxy-url`, no credential `proxy_url`, and no request-level proxy in execution options. Any of them bypasses the router's transport, so RP-17 attempt evidence and IO-6 paid-use detection would fail open. PR3 refuses to start or enroll when one is set. |
 
 Limits of this posture:

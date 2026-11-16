@@ -17,14 +17,20 @@
    "scenario": "dobby token is outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 453
+    "expires_in_min": 453,
+    "evidence": [
+     "lane.py"
+    ]
    }
   },
   {
    "scenario": "work token is outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 452
+    "expires_in_min": 452,
+    "evidence": [
+     "lane.py"
+    ]
    }
   },
   {
@@ -237,8 +243,10 @@
     "credential_refresh_events": 0,
     "refresh_unchanged": true,
     "evidence": [
-     "events.jsonl"
-    ]
+     "events.jsonl",
+     "lane.py"
+    ],
+    "method": "lane.py hashed each login copy's refresh token before the start and after the stop, then deleted the copies; events.jsonl holds no credential_refresh event."
    }
   },
   {
@@ -263,7 +271,8 @@
     "method": "Exact client token and the tokens in the lane's login copies, plus sk-ant-, JWT, and Bearer patterns, before the copies were deleted.",
     "evidence": [
      "lane.py"
-    ]
+    ],
+    "rescan": "A second scan after the record was rebuilt covered all evidence files and accepted.json, with the daily router's client token and every daily login's tokens, and found none."
    }
   }
  ],
@@ -277,12 +286,12 @@
   "head": "e91d66267f378fe37eaab5a72aafbbf0a844988d",
   "go_test_race": "pass",
   "go_vet": "pass",
-  "command": "cd components/claude-router && GOPROXY=off GOSUMDB=off go vet ./... && go test -race ./...",
+  "command": "cd components/claude-router && export GOPROXY=off GOSUMDB=off && go vet ./... && go test -race ./...",
   "evidence": [
    "/home/alany/.local/state/astack/claude-router-lanes/issue176/evidence/go-test.txt",
    "/home/alany/.local/state/astack/claude-router-lanes/issue176/evidence/vet.txt",
    "https://github.com/syanga/astack/pull/178#issuecomment-6909977119"
   ]
  },
- "written": "2026-11-16T07:44:54.057553+00:00"
+ "written": "2026-11-16T08:10:36.920154+00:00"
 }
