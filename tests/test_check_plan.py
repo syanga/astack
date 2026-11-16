@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -64,6 +65,17 @@ NAMED_PLAN = (
     + "```sh probe=PR1.unit\npython3 -m unittest test_cli\n```\n"
     + "~~~sh probe=PR1.live.1\npython3 cli.py --config bad.json\n~~~\n"
 )
+SECTION = PLAN[PLAN.index("## Reject invalid"):PLAN.index("## Close the program")]
+
+
+def graph_plan(depends, *graph):
+    sections = "".join(
+        SECTION.replace("(PR1)", f"({unit})").replace("**Depends on.** None.", f"**Depends on.** {line}")
+        for unit, line in depends.items()
+    )
+    boxes = "".join(f"  - [ ] {box}\n" for box in graph)
+    follow = "- [ ] Follow this dependency graph. Start each unit under orchestrate's Stack safety.\n"
+    return PLAN.replace(SECTION, sections).replace("### PR mechanics", follow + boxes + "### PR mechanics")
 
 
 class CheckPlanTests(unittest.TestCase):
@@ -231,6 +243,83 @@ class CheckPlanTests(unittest.TestCase):
         result = self.run_plan(plan.replace("- [ ] Record the operator's decision.\n", ""))
         self.assertEqual(result.returncode, 1)
         self.assertIn("operator decision", result.stderr)
+
+    def assert_one_cycle(self, result, *edges):
+        self.assertEqual(result.returncode, 1)
+        cycles = re.findall(r"dependency cycle\. ([^.]+)\.", result.stderr)
+        self.assertEqual(len(cycles), 1, result.stderr)
+        found = re.findall(r"(\w+) (depends on|stacks on) (\w+)", cycles[0])
+        self.assertEqual(sorted(found), sorted(edges))
+
+    def test_live_lane_that_needs_a_pr_built_on_its_stack_child_is_a_cycle(self):
+        for b_depends, relation in [("A, `stack order`.", "depends on"), ("None.", "stacks on")]:
+            with self.subTest(b_depends=b_depends):
+                plan = graph_plan(
+                    {"A": "C, the service its lane 1 runs against.", "B": b_depends, "C": "B, its parser."},
+                    "A, B, in that order. The coordinator is the stacker.",
+                )
+                result = self.run_plan(plan)
+                self.assert_one_cycle(result, ("A", "depends on", "C"), ("C", "depends on", "B"), ("B", relation, "A"))
+
+    def test_cycle_of_depends_on_lines_alone_fails(self):
+        cyclic = {"PR1": "PR2, its schema.", "PR2": "PR1, its parser and the PR1 fixture."}
+        result = self.run_plan(graph_plan(cyclic, "No stacks."))
+        self.assert_one_cycle(result, ("PR1", "depends on", "PR2"), ("PR2", "depends on", "PR1"))
+        for label, depends in [
+            ("None", {**cyclic, "PR2": "None. PR2 consumes nothing from PR1."}),
+            ("own ID", {"PR1": "PR2, its schema. PR1 runs again after PR2 changes.", "PR2": "None."}),
+        ]:
+            with self.subTest(label):
+                result = self.run_plan(graph_plan(depends, "No stacks."))
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_acyclic_stacked_plan_passes(self):
+        plan = graph_plan(
+            {"PR1": "None.", "PR2": "PR1, `stack order`.", "PR3": "PR1 and PR2, their parser."},
+            "Start now. PR1.", "PR2 after PR1. Its base is PR1's branch.",
+            "PR3 after PR2. Its base is PR2's branch.", "PR1, PR2, and PR3. The coordinator is the stacker.",
+        )
+        result = self.run_plan(plan)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_depends_on_a_later_pr_without_a_cycle_passes(self):
+        plan = graph_plan({"PR1": "PR2, the service its lane 1 runs against.", "PR2": "None."}, "No stacks.")
+        result = self.run_plan(plan)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_stack_edges_come_only_from_stack_boxes_in_the_dependency_graph(self):
+        depends = {"PR1": "PR3, the service its lane 1 runs against.", "PR2": "None.", "PR3": "PR2, its parser."}
+        stack = "PR1, PR2. The coordinator is the stacker."
+        result = self.run_plan(graph_plan(depends, stack))
+        self.assert_one_cycle(result, ("PR1", "depends on", "PR3"), ("PR3", "depends on", "PR2"), ("PR2", "stacks on", "PR1"))
+        gate = f"- [ ] Hold the review gate.\n  - [ ] {stack}\n"
+        for label, plan in [
+            ("outside the graph", graph_plan(depends, "No stacks.").replace("### PR mechanics", gate + "### PR mechanics")),
+            ("dependent", graph_plan(depends, "PR4 after PR1 and PR2. The stacker restacks it after each merge.")),
+            ("grouped dependents", graph_plan(depends, "PR4 and PR5 after PR1 and PR2. The stacker restacks them.")),
+            ("no stacker", graph_plan(depends, "Gate G1 starts now, and PR1 and PR2 read its fixture.")),
+        ]:
+            with self.subTest(label):
+                result = self.run_plan(plan)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_stack_line_written_top_first_names_the_stack_edge(self):
+        plan = graph_plan({"PR1": "None.", "PR2": "PR1, `stack order`."}, "PR2, PR1. The coordinator is the stacker.")
+        self.assert_one_cycle(self.run_plan(plan), ("PR1", "stacks on", "PR2"), ("PR2", "depends on", "PR1"))
+
+    def test_each_stack_is_its_own_chain(self):
+        depends = {"PR1": "None.", "PR2": "PR1, `stack order`, and PR4, its parser.", "PR3": "None.",
+                   "PR4": "PR3, `stack order`."}
+        stacker = "The coordinator is the stacker"
+        result = self.run_plan(graph_plan(depends, f"PR1, PR2, PR3, PR4. {stacker}."))
+        self.assert_one_cycle(result, ("PR2", "depends on", "PR4"), ("PR4", "depends on", "PR3"), ("PR3", "stacks on", "PR2"))
+        for label, graph in [
+            ("one box each", [f"PR1, PR2. {stacker}.", f"PR3, PR4. {stacker}."]),
+            ("prose between", [f"Stacks are PR1, PR2 in repo-a and PR3, PR4 in repo-b. {stacker} of both."]),
+        ]:
+            with self.subTest(label):
+                result = self.run_plan(graph_plan(depends, *graph))
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_missing_file_reports_usage_failure_without_traceback(self):
         with tempfile.TemporaryDirectory() as directory:
