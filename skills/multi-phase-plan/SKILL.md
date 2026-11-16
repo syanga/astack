@@ -70,7 +70,7 @@ Select a probe with `python3 <installed skills directory>/multi-phase-plan/scrip
 - [ ] Follow this dependency graph. Start each unit under orchestrate's Stack safety.
   - [ ] Start now. <PR ids, and each gate that needs no merged PR, whose owner builds and publishes its artifact now.> These PRs branch from `main`.
   - [ ] <PR id> after <each PR or gate id>, consuming <what from each, or `stack order`>. <Its base, the PR below it in its stack or `main`. Or write No dependent PRs.>
-  - [ ] <Each stack's PR ids in order from the bottom, and its stacker. Or write No stacks.>
+  - [ ] <One box per stack, with its PR ids in order from the bottom and its stacker. Or write No stacks.>
 - [ ] Limit <each shared serial resource> to <its slots> among <the PRs that use it, in merge order>. <Or write No shared serial resource.>
 - [ ] Hold the file boundaries. <PR id or class> touches only `<glob>`.
 - [ ] Hold the review gate. <Each gate that needs no merged PR, with the owner who publishes its artifact and where the operator's decision is recorded before any dependent starts. Each remaining approval by PR id with its user or repository requirement. Record which approvals remain.>

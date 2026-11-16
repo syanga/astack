@@ -183,7 +183,7 @@ def check(text):
             box = BOX.match(line.text)
             if graph is not None and line.text.strip() and depth <= graph:
                 graph = None
-            if graph is not None and box and re.search(r"\bstacker", box[1], re.I):
+            if graph is not None and box and re.search(r"\bstacker", box[1], re.I) and not re.match(r"\S+ after\b", box[1]):
                 stack_lines.append(box[1])
             elif box and box[1].startswith("Follow this dependency graph"):
                 graph = depth
@@ -296,8 +296,9 @@ def check(text):
                     fail(block.number, f"{prefix} needs the gate, evidence boxes, and operator decision")
         report.append(f"{pr.title}  boxes={len(pr.boxes())}")
     for cycle in cycles(dependency_edges(depends, stack_lines)):
-        fail(depends_lines[cycle[0]], f"dependency cycle {' -> '.join(cycle)}; reorder the units, stack them "
-             "differently, or move a live check to the unit that builds its environment")
+        steps = [f"{unit} depends on {prerequisite}" for unit, prerequisite in zip(cycle, cycle[1:])]
+        fail(depends_lines[cycle[0]], f"dependency cycle. {', '.join(steps[:-1])}, and {steps[-1]}. Break it by "
+             "moving work between these PRs, restacking them, or moving a live lane to the PR that builds its environment")
     if close:
         tail = [section for section in sections if section.number > close.number]
         for section in tail:
