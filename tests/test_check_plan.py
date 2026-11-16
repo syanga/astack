@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -64,6 +65,17 @@ NAMED_PLAN = (
     + "```sh probe=PR1.unit\npython3 -m unittest test_cli\n```\n"
     + "~~~sh probe=PR1.live.1\npython3 cli.py --config bad.json\n~~~\n"
 )
+SECTION = PLAN[PLAN.index("## Reject invalid"):PLAN.index("## Close the program")]
+
+
+def graph_plan(depends, *graph):
+    sections = "".join(
+        SECTION.replace("(PR1)", f"({unit})").replace("**Depends on.** None.", f"**Depends on.** {line}")
+        for unit, line in depends.items()
+    )
+    boxes = "".join(f"  - [ ] {box}\n" for box in graph)
+    follow = "- [ ] Follow this dependency graph. Start each unit under orchestrate's Stack safety.\n"
+    return PLAN.replace(SECTION, sections).replace("### PR mechanics", follow + boxes + "### PR mechanics")
 
 
 class CheckPlanTests(unittest.TestCase):
@@ -231,6 +243,59 @@ class CheckPlanTests(unittest.TestCase):
         result = self.run_plan(plan.replace("- [ ] Record the operator's decision.\n", ""))
         self.assertEqual(result.returncode, 1)
         self.assertIn("operator decision", result.stderr)
+
+    def assert_one_cycle(self, result, *edges):
+        self.assertEqual(result.returncode, 1)
+        cycles = re.findall(r"dependency cycle ([^;]+);", result.stderr)
+        self.assertEqual(len(cycles), 1, result.stderr)
+        units = cycles[0].split(" -> ")
+        self.assertEqual(units[0], units[-1])
+        self.assertEqual(set(zip(units, units[1:])), set(edges))
+        self.assertEqual(len(units) - 1, len(edges))
+
+    def test_live_check_that_needs_a_unit_built_on_its_stack_child_is_a_cycle(self):
+        for b_depends in ("A, `stack order`.", "None."):
+            with self.subTest(b_depends=b_depends):
+                plan = graph_plan(
+                    {"A": "C, the service its lane 1 runs against.", "B": b_depends, "C": "B, its parser."},
+                    "A, B, in that order. The coordinator is the stacker.",
+                )
+                self.assert_one_cycle(self.run_plan(plan), ("A", "C"), ("C", "B"), ("B", "A"))
+
+    def test_cycle_of_depends_on_lines_alone_fails(self):
+        plan = graph_plan({"PR1": "PR2, its schema.", "PR2": "PR1, its parser."}, "No stacks.")
+        self.assert_one_cycle(self.run_plan(plan), ("PR1", "PR2"), ("PR2", "PR1"))
+
+    def test_acyclic_stacked_plan_passes(self):
+        plan = graph_plan(
+            {"PR1": "None.", "PR2": "PR1, `stack order`.", "PR3": "PR1 and PR2, their parser."},
+            "Start now. PR1.", "PR2 after PR1. Its base is PR1's branch.",
+            "PR3 after PR2. Its base is PR2's branch.", "PR1, PR2, and PR3. The coordinator is the stacker.",
+        )
+        result = self.run_plan(plan)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.endswith("3 PR sections, 0 problems\n"))
+
+    def test_depends_on_a_later_unit_without_a_cycle_passes(self):
+        plan = graph_plan({"PR1": "PR2, the service its lane 1 runs against.", "PR2": "None."}, "No stacks.")
+        result = self.run_plan(plan)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_prose_that_names_units_outside_a_dependency_or_stack_adds_no_edge(self):
+        gate = "- [ ] Hold the review gate.\n  - [ ] PR1 and PR2 need no approval, and the stacker merges them.\n"
+        for case, plan in enumerate([
+            graph_plan({"PR1": "PR2, its schema.", "PR2": "None. PR2 consumes nothing from PR1."}, "No stacks."),
+            graph_plan({"PR1": "PR2, its schema. PR1 runs again after PR2 changes.", "PR2": "None."}, "No stacks."),
+            graph_plan({"PR1": "PR2, its schema.", "PR2": "None.", "PR3": "None."},
+                       "PR3 after PR1 and PR2, consuming `stack order`."),
+            graph_plan({"PR1": "PR2, its schema.", "PR2": "None."}, "No stacks.")
+            .replace("### PR mechanics", gate + "### PR mechanics"),
+            graph_plan({"PR1": "None.", "PR2": "PR1 and PR3, their parsers.", "PR3": "None.", "PR4": "PR3, `stack order`."},
+                       "Stacks are PR1, PR2 in repo-a and PR3, PR4 in repo-b. The coordinator is the stacker of both."),
+        ]):
+            with self.subTest(case=case):
+                result = self.run_plan(plan)
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_missing_file_reports_usage_failure_without_traceback(self):
         with tempfile.TemporaryDirectory() as directory:

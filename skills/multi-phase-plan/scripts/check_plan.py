@@ -24,6 +24,7 @@ PERF_ITEMS = ["Metric.", "Probe.", "Baseline.", "Rule."]
 BOX = re.compile(r"^\s*- \[[ x]\] (.*)$")
 PROBE_REF = re.compile(r"\bProbe\.? `([^`]+)`")
 PROBE_ID = r"[A-Za-z0-9_-]+\.(?:unit(?:\.[A-Za-z0-9_-]+)?|live\.[1-9][0-9]*|perf)"
+STACK_SEPARATOR = re.compile(r",?\s*(?:(?:and|then)\s+)?")
 
 
 @dataclass
@@ -44,6 +45,51 @@ class Section:
 
     def boxes(self):
         return [Line(line.number, match[1]) for line in self.lines if (match := BOX.match(line.text))]
+
+
+def mentions(text, units):
+    return [match for match in re.finditer(r"[A-Za-z0-9_-]+", text) if match[0] in units]
+
+
+def dependency_edges(depends, stack_lines):
+    edges = {unit: [] for unit in depends}
+
+    def add(unit, prerequisite):
+        if unit != prerequisite and prerequisite not in edges[unit]:
+            edges[unit].append(prerequisite)
+
+    for unit, line in depends.items():
+        if not line.startswith("None"):
+            for match in mentions(line, edges):
+                add(unit, match[0])
+    for line in stack_lines:
+        found = mentions(line, edges)
+        for below, above in zip(found, found[1:]):
+            if STACK_SEPARATOR.fullmatch(line, below.end(), above.start()):
+                add(above[0], below[0])
+    return edges
+
+
+def cycles(edges):
+    found = []
+    state = {}
+    path = []
+
+    def visit(unit):
+        state[unit] = "open"
+        path.append(unit)
+        for prerequisite in edges[unit]:
+            if state.get(prerequisite) == "open":
+                found.append(path[path.index(prerequisite):] + [prerequisite])
+            elif prerequisite not in state:
+                visit(prerequisite)
+        path.pop()
+        state[unit] = "done"
+
+    for unit in edges:
+        if unit not in state:
+            visit(unit)
+    return found
 
 
 def check(text):
@@ -129,7 +175,18 @@ def check(text):
         for marker in HOW_MARKERS:
             if marker not in how.text():
                 fail(how.number, f'How to read this lacks "{marker}"')
+    stack_lines = []
     if program:
+        graph = None
+        for line in program.lines:
+            depth = len(line.text) - len(line.text.lstrip())
+            box = BOX.match(line.text)
+            if graph is not None and line.text.strip() and depth <= graph:
+                graph = None
+            if graph is not None and box and re.search(r"\bstacker", box[1], re.I):
+                stack_lines.append(box[1])
+            elif box and box[1].startswith("Follow this dependency graph"):
+                graph = depth
         headings = [line.text[4:].strip() for line in program.lines if line.text.startswith("### ")]
         cursor = 0
         for name in PROGRAM_H3:
@@ -150,6 +207,8 @@ def check(text):
     named_probes = bool(probes) or any(PROBE_REF.search(line.text) for line in lines)
     referenced = set()
     units = set()
+    depends = {}
+    depends_lines = {}
     for pr in prs:
         unit = re.search(r"\(([A-Za-z0-9_-]+)\)$", pr.title)
         if named_probes and not unit:
@@ -172,6 +231,9 @@ def check(text):
             prefix = f"{pr.title}: {block.title}"
             if block.title == "Depends on." and not block.rest:
                 fail(block.number, f"{prefix} names nothing")
+            if block.title == "Depends on." and unit:
+                depends[unit[1]] = "\n".join([block.rest, block.text()])
+                depends_lines[unit[1]] = block.number
             if block.title in ["Files.", "Build.", "You see.", "Verify, unit.", "Merge."] and not boxes:
                 fail(block.number, f"{prefix} has no box")
             for box in boxes:
@@ -233,6 +295,9 @@ def check(text):
                 elif not block.rest or not boxes or "operator" not in block.text().lower():
                     fail(block.number, f"{prefix} needs the gate, evidence boxes, and operator decision")
         report.append(f"{pr.title}  boxes={len(pr.boxes())}")
+    for cycle in cycles(dependency_edges(depends, stack_lines)):
+        fail(depends_lines[cycle[0]], f"dependency cycle {' -> '.join(cycle)}; reorder the units, stack them "
+             "differently, or move a live check to the unit that builds its environment")
     if close:
         tail = [section for section in sections if section.number > close.number]
         for section in tail:
