@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -86,6 +87,116 @@ func TestAFailedSyncRecoversToTheBindingsARestartLoads(t *testing.T) {
 	want["c3"] = Binding{Account: third.Account, Reason: third.Reason, Since: t0}
 	if !maps.Equal(restarted, want) {
 		t.Fatalf("a restart loaded %v, want the recovered bindings plus c3: %v", restarted, want)
+	}
+}
+
+type pageCache struct {
+	cache, disk []byte
+	dirty       []bool
+	failSync    bool
+}
+
+type pageCacheFile struct {
+	pc  *pageCache
+	off int64
+}
+
+func (f *pageCacheFile) Read(p []byte) (int, error) {
+	if f.off >= int64(len(f.pc.cache)) {
+		return 0, io.EOF
+	}
+	n := copy(p, f.pc.cache[f.off:])
+	f.off += int64(n)
+	return n, nil
+}
+
+func (f *pageCacheFile) Write(p []byte) (int, error) {
+	end := f.off + int64(len(p))
+	for int64(len(f.pc.cache)) < end {
+		f.pc.cache, f.pc.dirty = append(f.pc.cache, 0), append(f.pc.dirty, false)
+	}
+	copy(f.pc.cache[f.off:], p)
+	for i := f.off; i < end; i++ {
+		f.pc.dirty[i] = true
+	}
+	f.off = end
+	return len(p), nil
+}
+
+func (f *pageCacheFile) Seek(offset int64, whence int) (int64, error) {
+	switch whence {
+	case io.SeekStart:
+		f.off = offset
+	case io.SeekCurrent:
+		f.off += offset
+	case io.SeekEnd:
+		f.off = int64(len(f.pc.cache)) + offset
+	}
+	return f.off, nil
+}
+
+func (f *pageCacheFile) Truncate(size int64) error {
+	f.pc.cache, f.pc.dirty = f.pc.cache[:size], f.pc.dirty[:size]
+	return nil
+}
+
+func (f *pageCacheFile) Sync() error {
+	if f.pc.failSync {
+		clear(f.pc.dirty)
+		return errors.New("injected sync failure that marked the dirty bytes clean")
+	}
+	disk := make([]byte, len(f.pc.cache))
+	copy(disk, f.pc.disk)
+	for i, dirty := range f.pc.dirty {
+		if dirty {
+			disk[i] = f.pc.cache[i]
+		}
+	}
+	clear(f.pc.dirty)
+	f.pc.disk = disk
+	return nil
+}
+
+func (f *pageCacheFile) Close() error { return nil }
+
+func TestACrashAfterRecoveryLoadsWhatTheRecoveredStoreAcknowledged(t *testing.T) {
+	h := newHarness(t, DefaultConfig(), accts(a, 1.0, b, 1.0)...)
+	clock := h.stopClock()
+	h.route(t0, req("c1"))
+	synced, err := os.ReadFile(filepath.Join(h.dir, journalName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pc := &pageCache{cache: bytes.Clone(synced), disk: bytes.Clone(synced), dirty: make([]bool, len(synced)), failSync: true}
+	h.store.file = &pageCacheFile{pc: pc, off: int64(len(synced))}
+	h.store.open = func(string) (journalFile, error) { return &pageCacheFile{pc: pc}, nil }
+
+	_, errSync := h.r.Route(At(t0), req("c2"))
+	pc.failSync = false
+	clock.at = t0.Add(recoverEvery)
+	errRecover := h.r.Recover()
+	recovered := h.bindings()
+	third := h.route(t0, req("c3"))
+	crashed := t.TempDir()
+	if err := os.WriteFile(filepath.Join(crashed, journalName), pc.disk, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, errReopen := OpenStore(crashed)
+	if errReopen == nil {
+		defer s.Close()
+	}
+
+	if !errors.Is(errSync, ErrFailed) || errRecover != nil {
+		t.Fatalf("failed sync returned %v and recovery %v, want ErrFailed then nil", errSync, errRecover)
+	}
+	if errReopen != nil {
+		t.Fatalf("the journal left on disk after a crash does not open: %v", errReopen)
+	}
+	got, _ := s.Bindings()
+	want := maps.Clone(recovered)
+	want["c3"] = Binding{Account: third.Account, Reason: third.Reason, Since: t0}
+	if !maps.Equal(got, want) {
+		t.Fatalf("after a crash the journal on disk holds %v, want what the recovered store acknowledged: %v", got, want)
 	}
 }
 
