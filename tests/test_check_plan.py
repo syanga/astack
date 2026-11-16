@@ -251,7 +251,7 @@ class CheckPlanTests(unittest.TestCase):
         found = re.findall(r"(\w+) depends on (\w+)", cycles[0])
         self.assertEqual(sorted(found), sorted(edges))
 
-    def test_live_check_that_needs_a_unit_built_on_its_stack_child_is_a_cycle(self):
+    def test_live_lane_that_needs_a_pr_built_on_its_stack_child_is_a_cycle(self):
         for b_depends in ("A, `stack order`.", "None."):
             with self.subTest(b_depends=b_depends):
                 plan = graph_plan(
@@ -264,7 +264,7 @@ class CheckPlanTests(unittest.TestCase):
         plan = graph_plan({"PR1": "PR2, its schema.", "PR2": "PR1, its parser."}, "No stacks.")
         self.assert_one_cycle(self.run_plan(plan), ("PR1", "PR2"), ("PR2", "PR1"))
 
-    def test_none_and_the_units_own_id_on_its_depends_on_line_add_no_edge(self):
+    def test_none_and_the_prs_own_id_on_its_depends_on_line_add_no_edge(self):
         cyclic = {"PR1": "PR2, its schema.", "PR2": "PR1, its parser."}
         self.assert_one_cycle(self.run_plan(graph_plan(cyclic, "No stacks.")), ("PR1", "PR2"), ("PR2", "PR1"))
         for depends in (
@@ -285,7 +285,7 @@ class CheckPlanTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(result.stdout.endswith("3 PR sections, 0 problems\n"))
 
-    def test_depends_on_a_later_unit_without_a_cycle_passes(self):
+    def test_depends_on_a_later_pr_without_a_cycle_passes(self):
         plan = graph_plan({"PR1": "PR2, the service its lane 1 runs against.", "PR2": "None."}, "No stacks.")
         result = self.run_plan(plan)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -298,6 +298,7 @@ class CheckPlanTests(unittest.TestCase):
         for case, plan in enumerate([
             graph_plan(depends, "No stacks.").replace("### PR mechanics", gate + "### PR mechanics"),
             graph_plan(depends, "PR3 after PR1 and PR2, consuming their parsers. The stacker restacks it after each merge."),
+            graph_plan(depends, "PR3 and PR4 after PR1 and PR2, consuming their parsers. The stacker restacks them."),
             graph_plan(depends, "Gate G1 starts now, and PR1 and PR2 read its fixture."),
         ]):
             with self.subTest(case=case):
