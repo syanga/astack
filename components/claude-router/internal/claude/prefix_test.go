@@ -133,8 +133,14 @@ func TestT3AndAgentSDKRequestsReachTheUpstreamWithTheClientsUserAgentAndBody(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, entrypoint := range []string{"cli", "t3-code", "t3-code, agent-sdk/0.3.321", "sdk-ts, agent-sdk/0.3.321"} {
-		t.Run(entrypoint, func(t *testing.T) {
+	for _, c := range []struct{ name, entrypoint string }{
+		{"cli", "cli"},
+		{"t3-code", "t3-code"},
+		{"t3-code-agent-sdk", "t3-code, agent-sdk/0.3.321"},
+		{"sdk-ts-agent-sdk", "sdk-ts, agent-sdk/0.3.321"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			entrypoint := c.entrypoint
 			label := strings.SplitN(entrypoint, ",", 2)[0]
 			body := bytes.Replace(fixture, []byte("cc_version=2.1.285.f3a; cc_entrypoint=cli;"),
 				[]byte("cc_version=2.1.323.f3a; cc_entrypoint="+label+";"), 1)
@@ -156,13 +162,13 @@ func TestT3AndAgentSDKRequestsReachTheUpstreamWithTheClientsUserAgentAndBody(t *
 			if r := e.sendRaw(body, h); r.Status != 200 {
 				t.Fatalf("status %d after %s was exhausted, want 200 from the other account", r.Status, first)
 			}
-			if moved := e.binding(fixtureSession).Account; moved == first {
-				t.Fatalf("conversation stayed on %s after its exhaustion", first)
-			}
 
 			seen := e.upstream.inference()
 			if len(seen) != 3 {
 				t.Fatalf("%d upstream attempts, want 3: served, exhausted, served after the move", len(seen))
+			}
+			if seen[0].Token != seen[1].Token || seen[2].Token == seen[1].Token {
+				t.Fatal("upstream attempts did not run first, first, then the other account")
 			}
 			in := rawFields(t, body)
 			for i, s := range seen {
