@@ -8,7 +8,9 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strings"
 	"testing"
+	"time"
 )
 
 var claudeCodeHeaders = map[string]string{
@@ -123,5 +125,68 @@ func TestUpstreamReceivesTheClientsCacheablePrefix(t *testing.T) {
 		if s.Header.Get(headerSessionID) != fixtureSession {
 			t.Fatalf("upstream session header %q, want the client's", s.Header.Get(headerSessionID))
 		}
+	}
+}
+
+func TestT3AndAgentSDKRequestsReachTheUpstreamWithTheClientsUserAgentAndBody(t *testing.T) {
+	fixture, err := os.ReadFile("../../testdata/requests/claude-code-tool-turn.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entrypoint := range []string{"cli", "t3-code", "t3-code, agent-sdk/0.3.321", "sdk-ts, agent-sdk/0.3.321"} {
+		t.Run(entrypoint, func(t *testing.T) {
+			label := strings.SplitN(entrypoint, ",", 2)[0]
+			body := bytes.Replace(fixture, []byte("cc_version=2.1.285.f3a; cc_entrypoint=cli;"),
+				[]byte("cc_version=2.1.323.f3a; cc_entrypoint="+label+";"), 1)
+			if bytes.Equal(body, fixture) {
+				t.Fatal("the fixture's billing header no longer matches; the request would not carry the entrypoint under test")
+			}
+			e := newEnv(t, "acct-a", "acct-b")
+			e.start()
+			h := map[string]string{headerSessionID: fixtureSession}
+			for k, v := range claudeCodeHeaders {
+				h[k] = v
+			}
+			h["User-Agent"] = "claude-cli/2.1.323 (external, " + entrypoint + ")"
+			if r := e.sendRaw(body, h); r.Status != 200 {
+				t.Fatalf("status %d, want 200", r.Status)
+			}
+			first := e.binding(fixtureSession).Account
+			e.upstream.script(string(first), reply{Status: http.StatusTooManyRequests, Header: exhaustedHeaders(time.Now().Add(2 * time.Hour))})
+			if r := e.sendRaw(body, h); r.Status != 200 {
+				t.Fatalf("status %d after %s was exhausted, want 200 from the other account", r.Status, first)
+			}
+			if moved := e.binding(fixtureSession).Account; moved == first {
+				t.Fatalf("conversation stayed on %s after its exhaustion", first)
+			}
+
+			seen := e.upstream.inference()
+			if len(seen) != 3 {
+				t.Fatalf("%d upstream attempts, want 3: served, exhausted, served after the move", len(seen))
+			}
+			in := rawFields(t, body)
+			for i, s := range seen {
+				if got := s.Header.Get("User-Agent"); got != h["User-Agent"] {
+					t.Errorf("attempt %d: upstream User-Agent %q, client sent %q", i, got, h["User-Agent"])
+				}
+				out := rawFields(t, s.Body)
+				for k := range in {
+					switch k {
+					case "metadata":
+					case "system":
+						if !bytes.Equal(billingCCH.ReplaceAll(in[k], []byte("cch=00000;")), billingCCH.ReplaceAll(out[k], []byte("cch=00000;"))) {
+							t.Errorf("attempt %d: system changed beyond the billing attestation:\nclient:   %s\nupstream: %s", i, in[k], out[k])
+						}
+					default:
+						if !bytes.Equal(in[k], out[k]) {
+							t.Errorf("attempt %d: %s changed", i, k)
+						}
+					}
+				}
+				if len(out) != len(in) {
+					t.Errorf("attempt %d: upstream body has %d fields, client sent %d", i, len(out), len(in))
+				}
+			}
+		})
 	}
 }

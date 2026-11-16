@@ -199,6 +199,7 @@ type callInfo struct {
 	account      router.AccountID
 	model        string
 	conversation string
+	userAgent    string
 	attempt      int
 	budget       *budget
 }
@@ -359,6 +360,9 @@ func (t *transport) roundTrip(account router.AccountID, req *http.Request) (*htt
 		out, trace, err := t.prepare(req, try)
 		if err != nil {
 			return nil, err
+		}
+		if info.userAgent != "" {
+			out.Header.Set("User-Agent", info.userAgent)
 		}
 		a := attempt{Account: account, Path: req.URL.Path, Start: t.clock.now()}
 		if a.Refused = t.refuse(info.id, account, info); a.Refused != nil {
