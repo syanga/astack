@@ -16,10 +16,18 @@ import (
 // ErrLocked reports that another process holds the assignment store.
 var ErrLocked = errors.New("assignment store is held by another process")
 
-// ErrFailed reports that an earlier journal write or sync failed. The store
-// acknowledges nothing more until it is closed and reopened, because the
-// failed record may or may not be on disk.
-var ErrFailed = errors.New("assignment journal write failed; reopen to recover")
+// ErrFailed reports that a journal write or sync, or a write of the account
+// state, failed and the store has not recovered yet. The store acknowledges
+// nothing until Router.Recover succeeds, because the failed record may or may
+// not be on disk. The error wraps the latest cause.
+var ErrFailed = errors.New("assignment journal unavailable")
+
+const recoverEvery = 5 * time.Second
+
+// ErrLockReplaced reports that the lock file in the state directory is no
+// longer the one the store locked, so the store cannot recover without
+// opening it again.
+var ErrLockReplaced = errors.New("the state directory's lock file was replaced; restart the router")
 
 // ErrIncomplete reports a record without a conversation, account, time, or
 // migration source. The store refuses it before writing.
@@ -43,10 +51,44 @@ type Binding struct {
 type Store struct {
 	mu       sync.RWMutex
 	dir      string
+	open     func(path string) (journalFile, error)
+	now      func() time.Time
+	notify   func(JournalEvent)
 	file     journalFile
 	lock     *os.File
 	bindings map[ConversationID]Binding
-	failed   error
+	failure  *JournalFailure
+	closed   bool
+}
+
+// JournalFailure describes a store that stopped after a failed write or
+// sync.
+type JournalFailure struct {
+	// Err is the latest error: the failed write or sync, or the latest
+	// failed recovery attempt.
+	Err error `json:"-"`
+	// Since is when the write or sync failed.
+	Since time.Time `json:"since"`
+	// Attempts counts the recovery attempts that failed since then.
+	Attempts int `json:"recovery_attempts"`
+	// RetryAfter is the earliest time of the next recovery attempt.
+	RetryAfter time.Time `json:"retry_after"`
+}
+
+// JournalEventKind names a change in the store's health.
+type JournalEventKind string
+
+const (
+	JournalFailed         JournalEventKind = "journal_failed"
+	JournalRecoveryFailed JournalEventKind = "journal_recovery_failed"
+	JournalRecovered      JournalEventKind = "journal_recovered"
+)
+
+// JournalEvent is a change in the store's health and the failure after it.
+// For JournalRecovered, it is the failure that recovery ended.
+type JournalEvent struct {
+	Kind JournalEventKind
+	JournalFailure
 }
 
 type journalFile interface {
@@ -73,7 +115,10 @@ type record struct {
 	At           time.Time      `json:"t"`
 }
 
-const journalName = "assignments.jsonl"
+const (
+	journalName = "assignments.jsonl"
+	lockName    = "lock"
+)
 
 // OpenStore locks dir against other processes and replays its journal. A torn
 // final record, left by a crash during append, is truncated. A corrupt
@@ -82,7 +127,7 @@ func OpenStore(dir string) (*Store, error) {
 	if err := makeDurableDir(dir); err != nil {
 		return nil, err
 	}
-	lock, err := os.OpenFile(filepath.Join(dir, "lock"), os.O_RDWR|os.O_CREATE, 0o600)
+	lock, err := os.OpenFile(filepath.Join(dir, lockName), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -93,25 +138,35 @@ func OpenStore(dir string) (*Store, error) {
 		}
 		return nil, err
 	}
-	path := filepath.Join(dir, journalName)
-	_, statErr := os.Stat(path)
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
-	if err != nil {
+	s := &Store{dir: dir, open: openFile, now: time.Now, lock: lock}
+	if s.file, s.bindings, _, err = s.load(); err != nil {
 		lock.Close()
 		return nil, err
 	}
-	s := &Store{dir: dir, file: file, lock: lock, bindings: map[ConversationID]Binding{}}
+	return s, nil
+}
+
+func openFile(path string) (journalFile, error) {
+	return os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+}
+
+func (s *Store) load() (file journalFile, bindings map[ConversationID]Binding, records []byte, err error) {
+	path := filepath.Join(s.dir, journalName)
+	_, statErr := os.Stat(path)
+	if file, err = s.open(path); err != nil {
+		return nil, nil, nil, err
+	}
 	if errors.Is(statErr, os.ErrNotExist) {
-		if err := syncDir(dir); err != nil {
-			s.Close()
-			return nil, err
+		if err := syncDir(s.dir); err != nil {
+			file.Close()
+			return nil, nil, nil, err
 		}
 	}
-	if err := s.replay(); err != nil {
-		s.Close()
-		return nil, err
+	if bindings, records, err = replay(file); err != nil {
+		file.Close()
+		return nil, nil, nil, err
 	}
-	return s, nil
+	return file, bindings, records, nil
 }
 
 func makeDurableDir(dir string) error {
@@ -137,25 +192,28 @@ func syncDir(dir string) error {
 	return d.Sync()
 }
 
-func (s *Store) replay() error {
-	data, err := io.ReadAll(s.file)
+func replay(file journalFile) (map[ConversationID]Binding, []byte, error) {
+	data, err := io.ReadAll(file)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
+	s := &Store{bindings: map[ConversationID]Binding{}}
 	good, err := s.applyAll(data)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if good < len(data) {
-		if err := s.file.Truncate(int64(good)); err != nil {
-			return err
+		if err := file.Truncate(int64(good)); err != nil {
+			return nil, nil, err
 		}
-		if err := s.file.Sync(); err != nil {
-			return err
+		if err := file.Sync(); err != nil {
+			return nil, nil, err
 		}
 	}
-	_, err = s.file.Seek(int64(good), io.SeekStart)
-	return err
+	if _, err := file.Seek(int64(good), io.SeekStart); err != nil {
+		return nil, nil, err
+	}
+	return s.bindings, data[:good], nil
 }
 
 func (s *Store) applyAll(data []byte) (int, error) {
@@ -230,18 +288,131 @@ func (s *Store) apply(rec record) error {
 }
 
 func (s *Store) err() error {
-	if s.failed != nil {
-		return fmt.Errorf("%w: %v", ErrFailed, s.failed)
+	if s.failure != nil {
+		return fmt.Errorf("%w: %w", ErrFailed, s.failure.Err)
 	}
 	return nil
 }
 
-// Err returns ErrFailed, wrapping the cause, once a journal write or sync has
-// failed, and nil before that.
+// Err returns ErrFailed, wrapping the latest cause, while the store is
+// failed, and nil otherwise.
 func (s *Store) Err() error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.err()
+}
+
+// JournalFailure returns the store's failure, or nil when it is healthy.
+func (s *Store) JournalFailure() *JournalFailure {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.failure == nil {
+		return nil
+	}
+	f := *s.failure
+	return &f
+}
+
+// Notify sets the function the store calls, with its lock held, when a write
+// or sync fails and when the store recovers. While the store stays failed, it
+// calls f for a failed recovery attempt only when the attempt's error differs
+// from the one before it or the attempt count is a power of two. Calls never
+// overlap.
+func (s *Store) Notify(f func(JournalEvent)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.notify = f
+}
+
+func (s *Store) emit(kind JournalEventKind) {
+	if s.notify != nil {
+		s.notify(JournalEvent{Kind: kind, JournalFailure: *s.failure})
+	}
+}
+
+func (s *Store) fail(err error) error {
+	now := s.now()
+	s.failure = &JournalFailure{Err: err, Since: now, RetryAfter: now.Add(recoverEvery)}
+	s.emit(JournalFailed)
+	return s.err()
+}
+
+func (s *Store) due(now time.Time) bool {
+	return s.failure != nil && !s.closed && !now.Before(s.failure.RetryAfter)
+}
+
+func (s *Store) recoveryDue() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.due(s.now())
+}
+
+func (s *Store) recover(save func() error) (recovered bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	if !s.due(now) {
+		return false, s.err()
+	}
+	f := s.failure
+	if err := s.reload(save); err != nil {
+		changed := err.Error() != f.Err.Error()
+		f.Err, f.Attempts, f.RetryAfter = err, f.Attempts+1, now.Add(recoverEvery)
+		if changed || f.Attempts&(f.Attempts-1) == 0 {
+			s.emit(JournalRecoveryFailed)
+		}
+		return false, s.err()
+	}
+	s.emit(JournalRecovered)
+	s.failure = nil
+	return true, nil
+}
+
+func (s *Store) reload(save func() error) error {
+	if s.file != nil {
+		_ = s.file.Close()
+		s.file = nil
+	}
+	held, err := s.lock.Stat()
+	if err != nil {
+		return err
+	}
+	current, err := os.Stat(filepath.Join(s.dir, lockName))
+	if errors.Is(err, os.ErrNotExist) || err == nil && !os.SameFile(held, current) {
+		return ErrLockReplaced
+	}
+	if err != nil {
+		return err
+	}
+	file, bindings, data, err := s.load()
+	if err != nil {
+		return err
+	}
+	if err := rewrite(file, data); err != nil {
+		file.Close()
+		return err
+	}
+	if save != nil {
+		if err := save(); err != nil {
+			file.Close()
+			return err
+		}
+	}
+	s.file, s.bindings = file, bindings
+	return nil
+}
+
+// After a failed fsync, Linux can keep a file's pages marked clean although
+// they never reached the disk, and a later fsync does not write them.
+// Writing the same bytes again marks them dirty, so the sync writes them.
+func rewrite(file journalFile, data []byte) error {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		return err
+	}
+	return file.Sync()
 }
 
 func (s *Store) append(rec record) error {
@@ -256,12 +427,10 @@ func (s *Store) append(rec record) error {
 		return err
 	}
 	if _, err := s.file.Write(append(line, '\n')); err != nil {
-		s.failed = err
-		return err
+		return s.fail(err)
 	}
 	if err := s.file.Sync(); err != nil {
-		s.failed = err
-		return err
+		return s.fail(err)
 	}
 	return nil
 }
@@ -373,7 +542,13 @@ func (s *Store) each(f func(ConversationID, Binding)) error {
 
 // Close releases the journal and the process lock.
 func (s *Store) Close() error {
-	err := s.file.Close()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	var err error
+	if s.file != nil {
+		err = s.file.Close()
+	}
 	if errLock := s.lock.Close(); err == nil {
 		err = errLock
 	}
