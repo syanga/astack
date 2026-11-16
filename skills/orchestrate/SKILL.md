@@ -138,7 +138,9 @@ Address mid-run discoveries that block the frontier. Record findings outside the
 
 ## Messages to the user
 
-In every message, name each unit and gate by what it is, with its ID in parentheses, such as "the checkout redesign (U2, PR #41)". Before a message reports a PR's state, read that state live with [`pr.py status`](../harden-pr/pr-work.md), not from a worker's report or the saved frontier. A merge is final, so skip the read for a PR that your own live read or the saved frontier showed merged.
+In every message, name each unit and gate by what it is, with its ID in parentheses, such as "the checkout redesign (U2, PR #41)".
+
+Before a message reports a PR's state, read that state live with [`pr.py status`](../harden-pr/pr-work.md), not from a worker's report or the saved frontier. A merge is final, so skip the read for a PR that your own live read or the saved frontier showed merged.
 
 **Decision request.** Write each open gate's request so it stands without earlier messages:
 
