@@ -54,23 +54,21 @@ def mentions(text, units):
 
 
 def dependency_edges(depends, stack_lines):
-    edges = {unit: [] for unit in depends}
+    edges = {unit: {} for unit in depends}
 
-    def add(unit, prerequisite):
-        if unit != prerequisite and prerequisite not in edges[unit]:
-            edges[unit].append(prerequisite)
+    def add(unit, prerequisite, relation):
+        if unit != prerequisite:
+            edges[unit].setdefault(prerequisite, relation)
 
     for unit, line in depends.items():
         if not line.text.startswith("None"):
             for match in mentions(line.text, depends):
-                add(unit, match[0])
-    named = {unit: set(prerequisites) for unit, prerequisites in edges.items()}
+                add(unit, match[0], "depends on")
     for text in stack_lines:
-        ids = mentions(text, depends)
-        for below, above in zip(ids, ids[1:]):
-            lower, upper = below[0], above[0]
-            if STACK_SEPARATOR.fullmatch(text, below.end(), above.start()) and upper not in named[lower]:
-                add(upper, lower)
+        matches = mentions(text, depends)
+        for below, above in zip(matches, matches[1:]):
+            if STACK_SEPARATOR.fullmatch(text, below.end(), above.start()):
+                add(above[0], below[0], "stacks on")
     return edges
 
 
@@ -296,8 +294,9 @@ def check(text):
                 elif not block.rest or not boxes or "operator" not in block.text().lower():
                     fail(block.number, f"{prefix} needs the gate, evidence boxes, and operator decision")
         report.append(f"{pr.title}  boxes={len(pr.boxes())}")
-    for cycle in cycles(dependency_edges(depends, stack_lines)):
-        steps = [f"{unit} depends on {prerequisite}" for unit, prerequisite in zip(cycle, cycle[1:])]
+    edges = dependency_edges(depends, stack_lines)
+    for cycle in cycles(edges):
+        steps = [f"{unit} {edges[unit][prerequisite]} {prerequisite}" for unit, prerequisite in zip(cycle, cycle[1:])]
         fail(depends[cycle[0]].number, f"dependency cycle. {', '.join(steps[:-1])}, and {steps[-1]}. Reorder or "
              "restack these PRs, or move a live lane to the PR that builds the lane's environment.")
     if close:
