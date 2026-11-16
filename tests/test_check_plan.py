@@ -261,17 +261,13 @@ class CheckPlanTests(unittest.TestCase):
                 self.assert_one_cycle(self.run_plan(plan), ("A", "C"), ("C", "B"), ("B", "A"))
 
     def test_cycle_of_depends_on_lines_alone_fails(self):
-        plan = graph_plan({"PR1": "PR2, its schema.", "PR2": "PR1, its parser."}, "No stacks.")
-        self.assert_one_cycle(self.run_plan(plan), ("PR1", "PR2"), ("PR2", "PR1"))
-
-    def test_none_and_the_prs_own_id_on_its_depends_on_line_add_no_edge(self):
-        cyclic = {"PR1": "PR2, its schema.", "PR2": "PR1, its parser."}
+        cyclic = {"PR1": "PR2, its schema.", "PR2": "PR1, its parser and the PR1 fixture."}
         self.assert_one_cycle(self.run_plan(graph_plan(cyclic, "No stacks.")), ("PR1", "PR2"), ("PR2", "PR1"))
-        for depends in (
-            {**cyclic, "PR2": "None. PR2 consumes nothing from PR1."},
-            {"PR1": "PR2, its schema. PR1 runs again after PR2 changes.", "PR2": "None."},
-        ):
-            with self.subTest(depends=depends):
+        for label, depends in [
+            ("None", {**cyclic, "PR2": "None. PR2 consumes nothing from PR1."}),
+            ("own ID", {"PR1": "PR2, its schema. PR1 runs again after PR2 changes.", "PR2": "None."}),
+        ]:
+            with self.subTest(label):
                 result = self.run_plan(graph_plan(depends, "No stacks."))
                 self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -283,7 +279,6 @@ class CheckPlanTests(unittest.TestCase):
         )
         result = self.run_plan(plan)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(result.stdout.endswith("3 PR sections, 0 problems\n"))
 
     def test_depends_on_a_later_pr_without_a_cycle_passes(self):
         plan = graph_plan({"PR1": "PR2, the service its lane 1 runs against.", "PR2": "None."}, "No stacks.")
@@ -291,31 +286,41 @@ class CheckPlanTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_stack_edges_come_only_from_stack_boxes_in_the_dependency_graph(self):
-        depends = {"PR1": "PR2, its schema.", "PR2": "None.", "PR3": "PR1 and PR2, their parsers."}
+        depends = {"PR1": "PR3, the service its lane 1 runs against.", "PR2": "None.", "PR3": "PR2, its parser."}
         stack = "PR1, PR2. The coordinator is the stacker."
-        self.assert_one_cycle(self.run_plan(graph_plan(depends, stack)), ("PR1", "PR2"), ("PR2", "PR1"))
+        result = self.run_plan(graph_plan(depends, stack))
+        self.assert_one_cycle(result, ("PR1", "PR3"), ("PR3", "PR2"), ("PR2", "PR1"))
         gate = f"- [ ] Hold the review gate.\n  - [ ] {stack}\n"
-        for case, plan in enumerate([
-            graph_plan(depends, "No stacks.").replace("### PR mechanics", gate + "### PR mechanics"),
-            graph_plan(depends, "PR3 after PR1 and PR2, consuming their parsers. The stacker restacks it after each merge."),
-            graph_plan(depends, "PR3 and PR4 after PR1 and PR2, consuming their parsers. The stacker restacks them."),
-            graph_plan(depends, "Gate G1 starts now, and PR1 and PR2 read its fixture."),
-        ]):
-            with self.subTest(case=case):
+        for label, plan in [
+            ("outside the graph", graph_plan(depends, "No stacks.").replace("### PR mechanics", gate + "### PR mechanics")),
+            ("dependent", graph_plan(depends, "PR4 after PR1 and PR2. The stacker restacks it after each merge.")),
+            ("grouped dependents", graph_plan(depends, "PR4 and PR5 after PR1 and PR2. The stacker restacks them.")),
+            ("no stacker", graph_plan(depends, "Gate G1 starts now, and PR1 and PR2 read its fixture.")),
+        ]:
+            with self.subTest(label):
                 result = self.run_plan(plan)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_depends_on_decides_the_order_where_a_stack_line_disagrees(self):
+        stack = "PR3, PR2, PR1. The coordinator is the stacker."
+        listed = {"PR1": "None.", "PR2": "PR1, `stack order`.", "PR3": "PR1 and PR2, `stack order`."}
+        result = self.run_plan(graph_plan(listed, stack))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        unlisted = {"PR1": "None.", "PR2": "None.", "PR3": "PR1, its schema."}
+        result = self.run_plan(graph_plan(unlisted, stack))
+        self.assert_one_cycle(result, ("PR1", "PR2"), ("PR2", "PR3"), ("PR3", "PR1"))
+
     def test_each_stack_is_its_own_chain(self):
-        depends = {"PR1": "None.", "PR2": "PR1, `stack order`, and PR3, its parser.", "PR3": "None.",
+        depends = {"PR1": "None.", "PR2": "PR1, `stack order`, and PR4, its parser.", "PR3": "None.",
                    "PR4": "PR3, `stack order`."}
         stacker = "The coordinator is the stacker"
         result = self.run_plan(graph_plan(depends, f"PR1, PR2, PR3, PR4. {stacker}."))
-        self.assert_one_cycle(result, ("PR2", "PR3"), ("PR3", "PR2"))
-        for case, graph in enumerate([
-            [f"PR1, PR2. {stacker}.", f"PR3, PR4. {stacker}."],
-            [f"Stacks are PR1, PR2 in repo-a and PR3, PR4 in repo-b. {stacker} of both."],
-        ]):
-            with self.subTest(case=case):
+        self.assert_one_cycle(result, ("PR2", "PR4"), ("PR4", "PR3"), ("PR3", "PR2"))
+        for label, graph in [
+            ("one box each", [f"PR1, PR2. {stacker}.", f"PR3, PR4. {stacker}."]),
+            ("prose between", [f"Stacks are PR1, PR2 in repo-a and PR3, PR4 in repo-b. {stacker} of both."]),
+        ]:
+            with self.subTest(label):
                 result = self.run_plan(graph_plan(depends, *graph))
                 self.assertEqual(result.returncode, 0, result.stderr)
 

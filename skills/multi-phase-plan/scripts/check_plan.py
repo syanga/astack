@@ -23,7 +23,9 @@ HOW_MARKERS = [
 PERF_ITEMS = ["Metric.", "Probe.", "Baseline.", "Rule."]
 BOX = re.compile(r"^\s*- \[[ x]\] (.*)$")
 PROBE_REF = re.compile(r"\bProbe\.? `([^`]+)`")
-PROBE_ID = r"[A-Za-z0-9_-]+\.(?:unit(?:\.[A-Za-z0-9_-]+)?|live\.[1-9][0-9]*|perf)"
+UNIT_ID = r"[A-Za-z0-9_-]+"
+PROBE_ID = rf"{UNIT_ID}\.(?:unit(?:\.{UNIT_ID})?|live\.[1-9][0-9]*|perf)"
+GRAPH_BOX = "Follow this dependency graph"
 STACK_SEPARATOR = re.compile(r",?\s*(?:(?:and|then)\s+)?")
 
 
@@ -48,7 +50,7 @@ class Section:
 
 
 def mentions(text, units):
-    return [match for match in re.finditer(r"[A-Za-z0-9_-]+", text) if match[0] in units]
+    return [match for match in re.finditer(UNIT_ID, text) if match[0] in units]
 
 
 def dependency_edges(depends, stack_lines):
@@ -59,37 +61,38 @@ def dependency_edges(depends, stack_lines):
             edges[unit].append(prerequisite)
 
     for unit, line in depends.items():
-        if not line.startswith("None"):
-            for match in mentions(line, edges):
+        if not line.text.startswith("None"):
+            for match in mentions(line.text, depends):
                 add(unit, match[0])
-    for line in stack_lines:
-        found = mentions(line, edges)
-        for below, above in zip(found, found[1:]):
-            if STACK_SEPARATOR.fullmatch(line, below.end(), above.start()):
-                add(above[0], below[0])
+    named = {unit: set(prerequisites) for unit, prerequisites in edges.items()}
+    for text in stack_lines:
+        ids = mentions(text, depends)
+        for below, above in zip(ids, ids[1:]):
+            lower, upper = below[0], above[0]
+            if STACK_SEPARATOR.fullmatch(text, below.end(), above.start()) and upper not in named[lower]:
+                add(upper, lower)
     return edges
 
 
 def cycles(edges):
-    found = []
-    state = {}
+    loops = []
     path = []
+    done = set()
 
     def visit(unit):
-        state[unit] = "open"
         path.append(unit)
         for prerequisite in edges[unit]:
-            if state.get(prerequisite) == "open":
-                found.append(path[path.index(prerequisite):] + [prerequisite])
-            elif prerequisite not in state:
+            if prerequisite in path:
+                loops.append(path[path.index(prerequisite):] + [prerequisite])
+            elif prerequisite not in done:
                 visit(prerequisite)
         path.pop()
-        state[unit] = "done"
+        done.add(unit)
 
     for unit in edges:
-        if unit not in state:
+        if unit not in done:
             visit(unit)
-    return found
+    return loops
 
 
 def check(text):
@@ -177,16 +180,16 @@ def check(text):
                 fail(how.number, f'How to read this lacks "{marker}"')
     stack_lines = []
     if program:
-        graph = None
+        graph_depth = None
         for line in program.lines:
             depth = len(line.text) - len(line.text.lstrip())
             box = BOX.match(line.text)
-            if graph is not None and line.text.strip() and depth <= graph:
-                graph = None
-            if graph is not None and box and re.search(r"\bstacker", box[1], re.I) and not re.search(r"\bafter\b", box[1]):
+            if graph_depth is not None and line.text.strip() and depth <= graph_depth:
+                graph_depth = None
+            if graph_depth is not None and box and re.search(r"\bstacker", box[1], re.I) and not re.search(r"\bafter\b", box[1]):
                 stack_lines.append(box[1])
-            elif box and box[1].startswith("Follow this dependency graph"):
-                graph = depth
+            elif box and box[1].startswith(GRAPH_BOX):
+                graph_depth = depth
         headings = [line.text[4:].strip() for line in program.lines if line.text.startswith("### ")]
         cursor = 0
         for name in PROGRAM_H3:
@@ -208,9 +211,8 @@ def check(text):
     referenced = set()
     units = set()
     depends = {}
-    depends_lines = {}
     for pr in prs:
-        unit = re.search(r"\(([A-Za-z0-9_-]+)\)$", pr.title)
+        unit = re.search(rf"\(({UNIT_ID})\)$", pr.title)
         if named_probes and not unit:
             fail(pr.number, "a plan with named probes needs a unit ID in parentheses after each PR title")
         if named_probes and unit:
@@ -232,8 +234,7 @@ def check(text):
             if block.title == "Depends on." and not block.rest:
                 fail(block.number, f"{prefix} names nothing")
             if block.title == "Depends on." and unit:
-                depends[unit[1]] = "\n".join([block.rest, block.text()])
-                depends_lines[unit[1]] = block.number
+                depends[unit[1]] = Line(block.number, "\n".join([block.rest, block.text()]))
             if block.title in ["Files.", "Build.", "You see.", "Verify, unit.", "Merge."] and not boxes:
                 fail(block.number, f"{prefix} has no box")
             for box in boxes:
@@ -297,8 +298,8 @@ def check(text):
         report.append(f"{pr.title}  boxes={len(pr.boxes())}")
     for cycle in cycles(dependency_edges(depends, stack_lines)):
         steps = [f"{unit} depends on {prerequisite}" for unit, prerequisite in zip(cycle, cycle[1:])]
-        fail(depends_lines[cycle[0]], f"dependency cycle. {', '.join(steps[:-1])}, and {steps[-1]}. Break it by "
-             "moving work between these PRs, restacking them, or moving a live lane to the PR that builds the lane's environment.")
+        fail(depends[cycle[0]].number, f"dependency cycle. {', '.join(steps[:-1])}, and {steps[-1]}. Reorder or "
+             "restack these PRs, or move a live lane to the PR that builds the lane's environment.")
     if close:
         tail = [section for section in sections if section.number > close.number]
         for section in tail:
