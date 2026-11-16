@@ -16,9 +16,9 @@ const resetsURL = usageURL + "?cedar_ember=1&skip_spend=1"
 
 const resetsEvery = 30 * time.Minute
 
-// resetsUserAgent is the Claude Code user agent that the pinned SDK sends on
-// inference requests. The usage endpoint offers resets only to a Claude Code
-// client and otherwise answers ineligible_reason "surface".
+// resetsUserAgent is the pinned SDK's baseline Claude Code user agent. The
+// usage endpoint offers resets only to a Claude Code client and otherwise
+// answers ineligible_reason "surface".
 const resetsUserAgent = "claude-cli/2.1.280 (external, cli)"
 
 // UsageWindow is one limit window as the usage endpoint reports it. Model

@@ -1,146 +1,218 @@
 {
- "head": "e912bea24543bab045a9b033f437fb8774dfc768",
- "code_sha256": "965715f3632102eb4404b45249ff4cd4e96787ca053bd6726ad1735fd5a1385e",
- "binary_sha256": "12383618463812b3ca84cdad3e44b4a9c01b6d60680fa0130c802c6d165a2450",
+ "head": "e91d66267f378fe37eaab5a72aafbbf0a844988d",
+ "code_sha256": "6a96538892da404aeb67a1143303107256ec39e54219411cff02ea5bded48a9d",
+ "binary_sha256": "aca88b28293b80f77c550bf2811b516105a690d7a924e2acb1296ef4e941e8a6",
  "helpers_sha256": "4bc4da547f346e0cf0ad12832eccfdcb972257e91876189234cab1e424400243",
  "sdk": "v8.0.11",
- "go": "go1.27.3",
- "platform": "darwin/arm64",
+ "go": "go1.27.4",
+ "platform": "linux/amd64",
  "clients": {
-  "claude_code": "2.1.323"
+  "claude_code": "2.1.325"
  },
  "result": "pass",
- "scope": "PR173 idle placement. A foreground lane router on port 18797 ran this code against the real accounts. It used copies of the dobby and severus logins, and every start set place_again_after to 3m (lane.py, lane-config.json). The second start favored dobby by capacity, and the third favored severus. Real-account checks covered a new conversation, a resume, a restart, an idle move, and an idle return. The run built the code at e912bea, and later rebases of the branch kept the same code digest. Offline tests alone cover the idle move off an account that needs a login, or whose paid-overflow reading is enabled or stale. An unknown reading takes the same branch, but no test sets it. A lane cannot keep a login requirement through its start reads, choose the result of a settings read, or turn paid overflow on. TestStatusLeavesIdleMovesOutOfItsLines covers the status filter offline, because the lane saved status -v output, which has no problem lines. record.py built the record, and its prose was edited afterwards. Unchanged historical scenarios are references and were not rerun.",
- "evidence_root": "/Users/alan/.local/state/astack/claude-router-lanes/pr173/evidence",
+ "scope": "Issue 176 client identity. A foreground lane router on port 18797 ran this code against the real accounts, with copies of the dobby and work logins (lane.py, lane-config.json), on Linux 7.0 x86_64. Its SDK config set upstream.claude.disable-claude-cloak-mode (sdk-config-upstream.txt). As a control, the daily router, installed at ec1ea5d before the fix, refused a t3-code request for claude-fable-5-2 with the 2.1.280 error. Through the lane, real claude -p requests for claude-fable-5-2 were answered as a t3-code client for a new conversation, a resume, and a resume after a manual move to the other account, as an sdk-ts client, and with Claude Code's default entrypoint. Each resume answered with the word from the first turn. The lane cannot show the User-Agent or body the provider received, so the provider's acceptance of claude-fable-5-2, which needs Claude Code 2.1.290 or newer, stands in for it. TestT3AndAgentSDKRequestsReachTheUpstreamWithTheClientsUserAgentAndBody covers the headers and body offline, including after an exhaustion move. record.py built the record. Unchanged historical scenarios are references and were not rerun.",
+ "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue176/evidence",
  "matrix": [
   {
    "scenario": "dobby token is outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 339
-   }
-  },
-  {
-   "scenario": "severus token is outside the four-hour refresh lead",
-   "status": "pass",
-   "detail": {
-    "expires_in_min": 307
-   }
-  },
-  {
-   "scenario": "Lane code and executable match the build at e912bea",
-   "status": "pass",
-   "detail": {
-    "code_sha256": "965715f3632102eb4404b45249ff4cd4e96787ca053bd6726ad1735fd5a1385e",
-    "binary_sha256": "12383618463812b3ca84cdad3e44b4a9c01b6d60680fa0130c802c6d165a2450",
-    "sdk": "v8.0.11"
-   }
-  },
-  {
-   "scenario": "The lane config sets place_again_after to 3m",
-   "status": "pass",
-   "detail": {
-    "place_again_after": "3m",
-    "evidence": "lane.py sets it at every start. lane-config.json is the third start's config."
-   }
-  },
-  {
-   "scenario": "new is placed and receives a routed 200",
-   "status": "pass",
-   "detail": {
-    "account": "severus",
-    "decision": "place",
-    "reason": "reset_preference",
-    "status": 200
-   }
-  },
-  {
-   "scenario": "resume within place_again_after stays on the account and keeps the conversation's content",
-   "status": "pass",
-   "detail": {
-    "account": "severus",
-    "decision": "dispatch",
-    "answer": "kumquat"
-   }
-  },
-  {
-   "scenario": "At the second start, which favors dobby, a request right after the start stays on severus, because idle time counts from the start",
-   "status": "pass",
-   "detail": {
-    "capacity": {
-     "severus": 0.1,
-     "dobby": 1
-    },
-    "account": "severus",
-    "decision": "dispatch",
-    "reason": "assigned",
-    "answer": "kumquat"
-   }
-  },
-  {
-   "scenario": "After more than place_again_after without a request, the conversation moves to dobby for idle and keeps its content",
-   "status": "pass",
-   "detail": {
-    "from": "severus",
-    "to": "dobby",
-    "decision": "migrate",
-    "reason": "idle",
-    "seconds_since_previous_request": 212,
-    "answer": "kumquat",
-    "seconds_between_request_starts": 211
-   }
-  },
-  {
-   "scenario": "After the third start, which favors severus, the conversation returns to severus for idle once place_again_after has passed since that start",
-   "status": "pass",
-   "detail": {
-    "capacity": {
-     "severus": 1,
-     "dobby": 0.1
-    },
-    "from": "dobby",
-    "to": "severus",
-    "decision": "migrate",
-    "reason": "idle",
-    "seconds_since_previous_request": 328,
-    "answer": "kumquat",
-    "seconds_between_request_starts": 329,
-    "seconds_after_third_start": 210
-   }
-  },
-  {
-   "scenario": "status -v lists both moves with reason idle",
-   "status": "pass",
-   "detail": {
-    "migrated_events": [
-     [
-      "severus",
-      "dobby",
-      "idle"
-     ],
-     [
-      "dobby",
-      "severus",
-      "idle"
-     ]
-    ],
-    "status_v_migration_rows": [
-     "18:45         fdfb12cf6597  dobby    severus  idle",
-     "18:40         fdfb12cf6597  severus  dobby    idle"
+    "expires_in_min": 453,
+    "evidence": [
+     "lane-run.log",
+     "results.json",
+     "lane.py"
     ]
    }
   },
   {
-   "scenario": "cache counts both idle moves at their cache writes, because each started within an hour of the previous request",
+   "scenario": "work token is outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "moves": [
-     "moves     2  cost 9k  of 18k writes  share 49.4%",
-     "reasons   idle 2"
+    "expires_in_min": 452,
+    "evidence": [
+     "lane-run.log",
+     "results.json",
+     "lane.py"
+    ]
+   }
+  },
+  {
+   "scenario": "Lane code and executable match the build at e91d662",
+   "status": "pass",
+   "detail": {
+    "code_sha256": "6a96538892da404aeb67a1143303107256ec39e54219411cff02ea5bded48a9d",
+    "binary_sha256": "aca88b28293b80f77c550bf2811b516105a690d7a924e2acb1296ef4e941e8a6",
+    "sdk": "v8.0.11",
+    "evidence": [
+     "status-start.json"
+    ]
+   }
+  },
+  {
+   "scenario": "Both lane accounts are signed in with paid overflow disabled at start",
+   "status": "pass",
+   "detail": {
+    "overage": {
+     "dobby": "disabled",
+     "work": "disabled"
+    },
+    "evidence": [
+     "status-start.json"
+    ]
+   }
+  },
+  {
+   "scenario": "Control: through the daily router at the code before the fix, a t3-code request for claude-fable-5-2 fails with the 2.1.280 refusal",
+   "status": "pass",
+   "detail": {
+    "exit": 1,
+    "router": "daily 127.0.0.1:18787",
+    "message": "API Error: 400 Claude Code 2.1.280 does not support this model; version 2.1.290 or newer is required. Run 'claude update', or update the Claude desktop app, then try again.",
+    "requests": [
+     {
+      "account": "dobby",
+      "decision": "fail",
+      "reason": "request_scoped",
+      "status": 400
+     },
+     {
+      "account": "dobby",
+      "decision": "fail",
+      "reason": "request_scoped",
+      "status": 400
+     },
+     {
+      "account": "dobby",
+      "decision": "fail",
+      "reason": "request_scoped",
+      "status": 400
+     }
     ],
-    "move_writes": [
-     4311,
-     4339
+    "evidence": [
+     "s0-daily-control.out.txt",
+     "s0-daily-control.events.json",
+     "daily-install.json"
+    ]
+   }
+  },
+  {
+   "scenario": "A new t3-code conversation for claude-fable-5-2 is placed and answered through the lane",
+   "status": "pass",
+   "detail": {
+    "exit": 0,
+    "account": "work",
+    "answer": "ok",
+    "seconds": 2.2,
+    "requests": [
+     {
+      "account": "work",
+      "decision": "place",
+      "reason": "reset_preference",
+      "status": 200
+     },
+     {
+      "account": "work",
+      "decision": "dispatch",
+      "reason": "assigned",
+      "status": 200
+     }
+    ],
+    "evidence": [
+     "s1-t3-new.out.txt",
+     "s1-t3-new.events.json"
+    ]
+   }
+  },
+  {
+   "scenario": "Resuming the t3-code conversation stays on its account and keeps its content",
+   "status": "pass",
+   "detail": {
+    "exit": 0,
+    "accounts": [
+     "work"
+    ],
+    "answer": "kumquat",
+    "requests": [
+     {
+      "account": "work",
+      "decision": "dispatch",
+      "reason": "assigned",
+      "status": 200
+     }
+    ],
+    "evidence": [
+     "s2-t3-resume.out.txt",
+     "s2-t3-resume.events.json"
+    ]
+   }
+  },
+  {
+   "scenario": "After a move to dobby, the t3-code conversation is answered on dobby and keeps its content",
+   "status": "pass",
+   "detail": {
+    "move_exit": 0,
+    "move": "moved   3db889eeb66b  work to dobby, manual; next request writes 5k cache",
+    "exit": 0,
+    "answer": "kumquat",
+    "requests": [
+     {
+      "account": "dobby",
+      "decision": "dispatch",
+      "reason": "assigned",
+      "status": 200
+     }
+    ],
+    "evidence": [
+     "s3-move.out.txt",
+     "s3-t3-after-move.out.txt",
+     "s3-t3-after-move.events.json"
+    ]
+   }
+  },
+  {
+   "scenario": "An sdk-ts request for claude-fable-5-2 is answered through the lane",
+   "status": "pass",
+   "detail": {
+    "exit": 0,
+    "answer": "ok",
+    "requests": [
+     {
+      "account": "work",
+      "decision": "dispatch",
+      "reason": "assigned",
+      "status": 200
+     },
+     {
+      "account": "work",
+      "decision": "place",
+      "reason": "capacity",
+      "status": 200
+     }
+    ],
+    "evidence": [
+     "s4-sdk-ts.out.txt",
+     "s4-sdk-ts.events.json"
+    ]
+   }
+  },
+  {
+   "scenario": "A request with Claude Code's default entrypoint for claude-fable-5-2 is still answered through the lane",
+   "status": "pass",
+   "detail": {
+    "exit": 0,
+    "answer": "ok",
+    "requests": [
+     {
+      "account": "work",
+      "decision": "place",
+      "reason": "reset_preference",
+      "status": 200
+     }
+    ],
+    "evidence": [
+     "s5-default.out.txt",
+     "s5-default.events.json"
     ]
    }
   },
@@ -148,9 +220,13 @@
    "scenario": "Identity is the same at the start and the end",
    "status": "pass",
    "detail": {
-    "code_sha256": "965715f3632102eb4404b45249ff4cd4e96787ca053bd6726ad1735fd5a1385e",
-    "binary_sha256": "12383618463812b3ca84cdad3e44b4a9c01b6d60680fa0130c802c6d165a2450",
-    "sdk": "v8.0.11"
+    "code_sha256": "6a96538892da404aeb67a1143303107256ec39e54219411cff02ea5bded48a9d",
+    "binary_sha256": "aca88b28293b80f77c550bf2811b516105a690d7a924e2acb1296ef4e941e8a6",
+    "sdk": "v8.0.11",
+    "evidence": [
+     "status-start.json",
+     "status-end.json"
+    ]
    }
   },
   {
@@ -158,8 +234,10 @@
    "status": "pass",
    "detail": {
     "dobby": "disabled",
-    "severus": "disabled",
-    "evidence": "s3-after-status.json"
+    "work": "disabled",
+    "evidence": [
+     "status-end.json"
+    ]
    }
   },
   {
@@ -167,39 +245,61 @@
    "status": "pass",
    "detail": {
     "credential_refresh_events": 0,
-    "refresh_unchanged": true
+    "refresh_unchanged": true,
+    "evidence": [
+     "events.jsonl",
+     "lane-run.log",
+     "results.json",
+     "lane.py"
+    ],
+    "method": "lane.py hashed each refresh token when it copied the daily login, and again in the lane's copy after the stop. It then deleted the copies. events.jsonl holds no credential_refresh event."
    }
   },
   {
    "scenario": "The lane's requests and tokens",
    "status": "pass",
    "detail": {
-    "requests": 5,
-    "attempts": 5,
-    "input": 21436,
-    "output": 28
+    "requests": 7,
+    "attempts": 7,
+    "input": 29687,
+    "output": 56,
+    "evidence": [
+     "events.jsonl"
+    ]
    }
   },
   {
    "scenario": "Evidence contains no copied access token",
    "status": "pass",
    "detail": {
-    "files_scanned": 35,
+    "files_scanned": 22,
     "hits": [],
-    "method": "The record builder scanned for the exact client token and the exact tokens in the lane's login copies, before the run deleted the copies. A later scan for the sk-ant-, JWT, and Bearer token patterns and the client token covered lane-config.json, lane.py, and record.py."
+    "method": "Exact client token and the tokens in the lane's login copies, plus sk-ant-, JWT, and Bearer patterns, before the copies were deleted.",
+    "evidence": [
+     "lane-run.log",
+     "results.json",
+     "lane.py",
+     "rescan.json"
+    ],
+    "rescan": "A second scan covered every evidence file and accepted.json. rescan.json lists its files, method, and hits."
    }
   }
  ],
  "open": [],
  "incidents": [],
  "prior_acceptance": {
-  "record": "components/claude-router/accepted.json from PR #169, code_sha256 03bab19c\u2026",
+  "record": "components/claude-router/accepted.json from PR #173, code_sha256 965715f3\u2026",
   "status": "historical reference, not rerun at this code"
  },
  "offline_verification": {
-  "head": "e912bea24543bab045a9b033f437fb8774dfc768",
+  "head": "e91d66267f378fe37eaab5a72aafbbf0a844988d",
   "go_test_race": "pass",
-  "evidence": "/Users/alan/.local/state/astack/claude-router-lanes/pr173/evidence/go-test.txt"
+  "go_vet": "pass",
+  "evidence": [
+   "/home/alany/.local/state/astack/claude-router-lanes/issue176/evidence/go-command.txt",
+   "/home/alany/.local/state/astack/claude-router-lanes/issue176/evidence/go-test.txt",
+   "/home/alany/.local/state/astack/claude-router-lanes/issue176/evidence/vet.txt"
+  ]
  },
- "written": "2026-11-14T02:46:35.686894+00:00"
+ "written": "2026-11-16T08:32:07.051116+00:00"
 }

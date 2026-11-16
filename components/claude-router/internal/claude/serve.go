@@ -232,7 +232,7 @@ func (s *Service) messages(c *gin.Context) {
 		}
 		tried = account
 		authID := s.authIDs[account]
-		info := callInfo{id: fmt.Sprintf("%s-%d", call, step), account: account, model: id.Model, conversation: conv, attempt: req.Attempt, budget: spend}
+		info := callInfo{id: fmt.Sprintf("%s-%d", call, step), account: account, model: id.Model, conversation: conv, userAgent: c.GetHeader("User-Agent"), attempt: req.Attempt, budget: spend}
 		out := s.dispatch(c, info, authID, id, body)
 		upstream += out.Attempts
 		switch {

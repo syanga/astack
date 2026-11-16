@@ -139,6 +139,7 @@ SDK allows, and owns every retry and migration decision.
 | `routing.strategy` | any | A pin overrides every strategy tested. |
 | `routing.retry.max-retry-credentials` | any | `0` means unlimited, but the scheduler filters candidates to the pinned ID. |
 | `requests.passthrough-headers` | `false` | It does not affect error values. The router reads headers at its transport. |
+| `upstream.claude.disable-claude-cloak-mode` | `true` | With cloaking on, the SDK rewrites every request it does not confirm as native Claude Code into its Claude Code 2.1.280 baseline. Every T3 and Agent SDK request is such a request. See [Client identity](#client-identity). |
 | Proxy settings | none at any level | No global `requests.proxy-url`, no credential `proxy_url`, and no request-level proxy in execution options. Any of them bypasses the router's transport, so RP-17 attempt evidence and IO-6 paid-use detection would fail open. PR3 refuses to start or enroll when one is set. |
 
 Limits of this posture:
@@ -1716,8 +1717,8 @@ The service also reads each account's limit resets that Claude Code offers,
 from `cedar_ember.grants` in
 `GET /api/oauth/usage?cedar_ember=1&skip_spend=1`. It reads them at start and
 every 30 minutes after, on a timer apart from the settings reads, with the
-user agent `claude-cli/2.1.280 (external, cli)` that the pinned SDK, v8.0.11,
-sends on inference requests. Without a Claude Code user agent, the endpoint answers
+user agent `claude-cli/2.1.280 (external, cli)`, the baseline of the pinned SDK,
+v8.0.11. Without a Claude Code user agent, the endpoint answers
 `"eligible": false, "ineligible_reason": "surface"` and no grants. Status
 counts the resets left in grants whose `ends_at` has not passed when status
 runs, by `type`: `session`, `weekly`, or `full`
@@ -1827,6 +1828,66 @@ outside review of the SDK source found these paths
 
 Whether these paths keep a conversation's prefix stable across turns is not
 tested offline. PR1 lane 4 (CC-1) measures cache reads with real requests.
+
+### Client identity
+
+The SDK confirms a request as native Claude Code only when its User-Agent names
+the `cli`, `sdk-cli`, or `claude-vscode` entrypoint and the request carries
+Claude Code's other signals
+(`internal/runtime/executor/helps/claude_client_detection.go:66-70`, `:157-160`).
+T3 threads send `t3-code`, and the Agent SDK sends `sdk-ts` or `sdk-py`, so the
+SDK never confirms their requests.
+
+With cloaking on, the SDK's default, the SDK cloaks every request it does not
+confirm (`internal/runtime/executor/claude_executor_cloaking.go:1355-1366`).
+Cloaking rebuilds `system`. The first block is the SDK's own billing header,
+which carries `cc_version=2.1.280.<hash>`. The second is the CLI identity line
+(`claude_executor_cloaking.go:352-371`). Cloaking also changes `messages`,
+`tools`, and the set of top-level fields: with cloaking on, the test below
+fails on each of them.
+
+The router turns cloaking off with
+`upstream.claude.disable-claude-cloak-mode`. Whatever the cloak setting, the
+SDK replaces the User-Agent of every unconfirmed request with
+`claude-cli/2.1.280 (external, cli)`
+(`internal/runtime/executor/helps/claude_device_profile.go:634-638`). So the
+router's transport sets each attempt's User-Agent to the one the client sent. The
+provider refuses a model that needs a newer client. On 2026-11-13, through the
+daily router with Claude Code 2.1.323, `claude -p --model claude-fable-5-2`
+succeeded with the default `sdk-cli` entrypoint. With
+`CLAUDE_CODE_ENTRYPOINT=t3-code`, it failed with `400 Claude Code 2.1.280 does
+not support this model; version 2.1.290 or newer is required`.
+
+`TestT3AndAgentSDKRequestsReachTheUpstreamWithTheClientsUserAgentAndBody`
+sends the tool-turn fixture as `cli`, `t3-code`, and `sdk-ts` clients. It
+exhausts the first account and checks all three attempts, including the one on
+the second account. Each attempt carries the client's User-Agent. Every
+top-level field except `metadata` arrives unchanged, and `system` differs only
+in `cch=`.
+
+The SDK makes other changes to unconfirmed requests whatever the cloak setting.
+This partial list comes from reading `internal/runtime/executor/`:
+
+- It replaces `metadata.user_id.session_id` and `X-Claude-Code-Session-Id`
+  with an ID it computes without them
+  (`helps/claude_credential_identity.go:28-39`).
+- It drops the `X-Claude-Code-Request-Class`, `X-Claude-Code-Agent-Type`,
+  `X-Claude-Code-Prev-Tool-Durations`, `X-Claude-Code-Compaction`, and
+  `X-Claude-Code-Context-Compacted` headers
+  (`claude_executor_request.go:1391-1405`).
+- It sets `X-Stainless-Os` and `X-Stainless-Arch` to its baseline, `MacOS` and
+  `arm64` (`helps/claude_device_profile.go:636-637`).
+- It deletes `temperature` and `top_p`, and `top_k` when thinking is on
+  (`claude_executor_request.go:828-834`).
+- It adds cache breakpoints to a request that has none
+  (`claude_executor_cloaking.go:1673-1675`).
+- It sends `X-Stainless-Retry-Count: 0` (`claude_executor_request.go:1341`).
+  To the Anthropic base URL, it also sends a new `x-client-request-id`
+  (`:1413-1414`).
+
+For every client, the SDK sets `X-Stainless-Package-Version` and
+`X-Stainless-Runtime-Version` to its baseline, `0.112.1` and `v26.3.0`
+(`helps/claude_device_profile.go:622-623`, `:634-635`).
 
 ### Events and status
 

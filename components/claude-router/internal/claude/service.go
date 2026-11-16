@@ -594,6 +594,9 @@ access:
   api-keys: []
 oauth:
   auth-dir: %q
+upstream:
+  claude:
+    disable-claude-cloak-mode: true
 routing:
   strategy: "fill-first"
   session-affinity: false
