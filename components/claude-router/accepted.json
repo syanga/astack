@@ -19,6 +19,8 @@
    "detail": {
     "expires_in_min": 453,
     "evidence": [
+     "lane-run.log",
+     "results.json",
      "lane.py"
     ]
    }
@@ -29,6 +31,8 @@
    "detail": {
     "expires_in_min": 452,
     "evidence": [
+     "lane-run.log",
+     "results.json",
      "lane.py"
     ]
    }
@@ -244,9 +248,11 @@
     "refresh_unchanged": true,
     "evidence": [
      "events.jsonl",
+     "lane-run.log",
+     "results.json",
      "lane.py"
     ],
-    "method": "lane.py hashed each login copy's refresh token before the start and after the stop, then deleted the copies; events.jsonl holds no credential_refresh event."
+    "method": "lane.py hashed each refresh token when it copied the daily login, and again in the lane's copy after the stop. It then deleted the copies. events.jsonl holds no credential_refresh event."
    }
   },
   {
@@ -270,9 +276,12 @@
     "hits": [],
     "method": "Exact client token and the tokens in the lane's login copies, plus sk-ant-, JWT, and Bearer patterns, before the copies were deleted.",
     "evidence": [
-     "lane.py"
+     "lane-run.log",
+     "results.json",
+     "lane.py",
+     "rescan.json"
     ],
-    "rescan": "A second scan after the record was rebuilt covered all evidence files and accepted.json, with the daily router's client token and every daily login's tokens, and found none."
+    "rescan": "A second scan covered every evidence file and accepted.json. rescan.json lists its files, method, and hits."
    }
   }
  ],
@@ -286,12 +295,11 @@
   "head": "e91d66267f378fe37eaab5a72aafbbf0a844988d",
   "go_test_race": "pass",
   "go_vet": "pass",
-  "command": "cd components/claude-router && export GOPROXY=off GOSUMDB=off && go vet ./... && go test -race ./...",
   "evidence": [
+   "/home/alany/.local/state/astack/claude-router-lanes/issue176/evidence/go-command.txt",
    "/home/alany/.local/state/astack/claude-router-lanes/issue176/evidence/go-test.txt",
-   "/home/alany/.local/state/astack/claude-router-lanes/issue176/evidence/vet.txt",
-   "https://github.com/syanga/astack/pull/178#issuecomment-6909977119"
+   "/home/alany/.local/state/astack/claude-router-lanes/issue176/evidence/vet.txt"
   ]
  },
- "written": "2026-11-16T08:10:36.920154+00:00"
+ "written": "2026-11-16T08:32:07.051116+00:00"
 }
