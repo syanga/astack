@@ -296,7 +296,7 @@
     ],
     "commit": "ab1f702ce8e8b6557edb56b09f52cde8bfb83f17",
     "license": "MIT, kept in skills/orchestrate/LICENSE-pstack",
-    "note": "Retains the original Bun runtime and lockfile as an exception to astack's Python convention. Keeps Graphite, which upstream ce649c0 removed, and adds a GitHub adapter beside it. Shared ownership, retained drain batches, and verifier precedence support recovery across sessions without losing evidence. The CLI records claims. The coordinator still judges them.",
+    "note": "Retains the original Bun runtime and lockfile as an exception to astack's Python convention. Keeps Graphite, which upstream ce649c0 removed, and adds a GitHub adapter beside it. Shared ownership, retained drain batches, and verifier precedence support recovery across sessions without losing evidence. The CLI records claims. The coordinator still judges them. Keeps the CLI, which upstream c742dd6 deleted when it rewrote the playbook, because the Graphite and GitHub adapters, retained drain batches, and verifier precedence live in it. Carries ahead of this pin the rewrite's rule to read a PR's state live before reporting it. Skips the rewrite's rule to read the diff or the artifact, not only the worker's summary, because that rule contradicts \"Never deep-review inline.\" Keeps agent status as a liveness signal, which c742dd6 dropped, because a worker that is investigating shows no pushes or PR activity. Later syncs diff from c742dd6.",
     "files": {
       "pstack/skills/poteto-mode/playbooks/orchestrate.md": "skills/orchestrate/SKILL.md",
       "pstack/skills/poteto-mode/scripts/orch/orch.ts": "skills/orchestrate/scripts/orch/orch.ts",
