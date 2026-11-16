@@ -36,7 +36,7 @@ func (s *Service) handler() http.Handler {
 	e.Use(gin.CustomRecoveryWithWriter(io.Discard, func(c *gin.Context, _ any) {
 		writeError(c, http.StatusInternalServerError, "api_error", "claude-router: internal error")
 	}))
-	e.Use(preconnect, s.authenticate)
+	e.Use(preconnect, s.authenticate, s.recoverStore)
 	e.POST("/v1/messages", s.messages)
 	e.GET("/claude-router/status", s.status)
 	e.POST("/claude-router/move", s.move)
@@ -77,8 +77,20 @@ func (s *Service) authenticate(c *gin.Context) {
 	c.Next()
 }
 
+func (s *Service) recoverStore(c *gin.Context) {
+	_ = s.router.Recover()
+	c.Next()
+}
+
 func writeError(c *gin.Context, status int, kind, message string) {
 	writeErrorRetry(c, status, kind, message, false)
+}
+
+func storeMessage(err error) string {
+	if errors.Is(err, router.ErrFailed) && !errors.Is(err, router.ErrLockReplaced) {
+		return "claude-router: " + err.Error() + "; the router retries it on a later request"
+	}
+	return "claude-router: " + err.Error()
 }
 
 // Claude Code 2.1.300 and Agent SDK 0.3.300 retry a 503 with their own
@@ -184,7 +196,7 @@ func (s *Service) messages(c *gin.Context) {
 		d, err := s.router.Route(at, req)
 		if err != nil {
 			finish("request", "", router.Decision{}, http.StatusServiceUnavailable, nil)
-			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: assignment journal unavailable; restart the router")
+			writeError(c, http.StatusServiceUnavailable, "api_error", storeMessage(err))
 			return
 		}
 		if d.RecheckOverage && s.recheckOverage(c.Request.Context(), d.Account, rechecked) {
@@ -249,7 +261,7 @@ func (s *Service) messages(c *gin.Context) {
 			return
 		case out.ServedFailed:
 			finish("request", account, d, http.StatusServiceUnavailable, &out)
-			writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: assignment journal unavailable; restart the router")
+			writeError(c, http.StatusServiceUnavailable, "api_error", storeMessage(out.Err))
 			return
 		}
 		if r, ok := out.Refused.(ineligible); ok {
@@ -506,8 +518,8 @@ func (s *Service) relayMessage(c *gin.Context, ctx context.Context, call string,
 	if v := s.attemptsObserved(call, account); v != "" {
 		return outcome{Violation: v, Result: "pin_violation"}
 	}
-	if s.markServed(id.Conversation, account) != nil {
-		return outcome{ServedFailed: true, Result: "served_mark_failed"}
+	if err := s.markServed(id.Conversation, account); err != nil {
+		return outcome{ServedFailed: true, Err: err, Result: "served_mark_failed"}
 	}
 	out := outcome{Delivered: true, Result: "completed"}
 	if u, ok := usageFrom("message", resp); ok {
@@ -602,13 +614,13 @@ func (s *Service) relayStream(c *gin.Context, ctx context.Context, call string, 
 				if v := s.attemptsObserved(call, account); v != "" {
 					return outcome{Violation: v, Result: "pin_violation"}
 				}
-				if handle(events) != nil {
-					return outcome{ServedFailed: true, Result: "served_mark_failed"}
+				if err := handle(events); err != nil {
+					return outcome{ServedFailed: true, Err: err, Result: "served_mark_failed"}
 				}
 				commit()
 			} else {
-				if handle(events) != nil {
-					streamError("api_error", "claude-router: assignment journal unavailable; restart the router")
+				if err := handle(events); err != nil {
+					streamError("api_error", storeMessage(err))
 					out.Result = "served_mark_failed"
 					return out
 				}
@@ -676,7 +688,8 @@ type BindingStatus struct {
 }
 
 // Status is the status output. It holds no token, prompt, or header value.
-// Journal is "ok", or the error that stopped the assignment journal.
+// Journal is "ok", or the error that stopped the assignment journal, which
+// names its latest cause. JournalFailure is set while the journal is failed.
 type Status struct {
 	Listen          string          `json:"listen"`
 	Accounts        []AccountStatus `json:"accounts"`
@@ -693,6 +706,8 @@ type Status struct {
 	QuotaFreshFor   Duration        `json:"quota_fresh_for"`
 	OverageFreshFor Duration        `json:"overage_fresh_for"`
 	ActiveFor       Duration        `json:"active_for"`
+
+	JournalFailure *router.JournalFailure `json:"journal_failure,omitempty"`
 }
 
 // Status returns the service status.
@@ -707,6 +722,7 @@ func (s *Service) Status() Status {
 	bindings, err := s.store.Bindings()
 	if err != nil {
 		st.Journal = err.Error()
+		st.JournalFailure = s.store.JournalFailure()
 	}
 	st.Conversations = len(bindings)
 	horizon := now.Add(-cfg.ActiveFor)
@@ -752,7 +768,7 @@ func (s *Service) move(c *gin.Context) {
 	conv, matches, err := s.resolveConversation(m.Conversation)
 	switch {
 	case errors.Is(err, router.ErrFailed):
-		writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: assignment journal unavailable; restart the router")
+		writeError(c, http.StatusServiceUnavailable, "api_error", storeMessage(err))
 		return
 	case matches > 1:
 		writeError(c, http.StatusConflict, "invalid_request_error", fmt.Sprintf("claude-router: %s matches %d conversations; give more of the hash", m.Conversation, matches))
@@ -765,7 +781,7 @@ func (s *Service) move(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "not_found_error", "claude-router: the conversation has no assignment")
 		return
 	case errors.Is(err, router.ErrFailed):
-		writeError(c, http.StatusServiceUnavailable, "api_error", "claude-router: assignment journal unavailable; restart the router")
+		writeError(c, http.StatusServiceUnavailable, "api_error", storeMessage(err))
 		return
 	case err != nil:
 		writeError(c, http.StatusBadRequest, "invalid_request_error", "claude-router: "+err.Error())

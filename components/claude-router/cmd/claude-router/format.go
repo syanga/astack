@@ -84,7 +84,11 @@ func writeStatus(w io.Writer, r report, verbose bool) {
 		fmt.Fprintf(w, "        pid %d, %d restarts, binary %s, sdk %s, %s\n", st.PID, restarts, st.Binary, st.SDK, r.StateShown)
 	}
 	if st.Journal != "ok" {
-		fmt.Fprintf(w, "        journal error: %s\n", st.Journal)
+		label := "journal error"
+		if f := st.JournalFailure; f != nil {
+			label = fmt.Sprintf("journal error since %s, %d failed recovery attempts", when(r.Now, f.Since), f.Attempts)
+		}
+		fmt.Fprintf(w, "        %s: %s\n", label, st.Journal)
 	}
 	width := 8
 	for _, a := range st.Accounts {
@@ -406,8 +410,11 @@ func nextStep(r report, cacheWarned bool) string {
 
 func problemStep(r report) string {
 	st := r.Status
-	if st.Journal != "ok" {
+	switch {
+	case strings.Contains(st.Journal, router.ErrLockReplaced.Error()):
 		return "claude-router stop; claude-router start"
+	case st.Journal != "ok":
+		return "fix the journal error; the router recovers on a later request"
 	}
 	for _, a := range st.Accounts {
 		if a.NeedsLogin {
