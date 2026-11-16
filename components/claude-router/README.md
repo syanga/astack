@@ -476,8 +476,13 @@ the state directory, as the service does. For each request, call
   setting.
 
 If `Route` returns an error wrapping `router.ErrFailed`, a journal write, or
-a write of the account state of a router made by `Open`, failed. Every call that could name an account fails the same way until you
-close the store and open it again.
+a write of the account state of a router made by `Open`, failed. Every call
+that could name an account fails the same way until `Recover` succeeds.
+Call `Recover` before each request. It reopens and replays the journal as a
+restart would, at most once every 5 seconds, and returns `ErrFailed` with
+the latest cause until the cause is gone. If the lock file in the state
+directory was removed or replaced, the error also wraps `ErrLockReplaced`,
+and only a new `OpenStore` recovers.
 
 Feed the router what it cannot see:
 
