@@ -177,6 +177,7 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	if s.store, err = router.OpenStore(filepath.Join(cfg.StateDir, "assignments")); err != nil {
 		return nil, err
 	}
+	s.store.Notify(s.journalEvent)
 	policy := router.DefaultConfig()
 	policy.OverageFreshFor = time.Duration(cfg.OverageFreshFor)
 	policy.PlaceAgainAfter = time.Duration(cfg.PlaceAgainAfter)
@@ -264,6 +265,23 @@ func (s *Service) guardRegistered() bool {
 		s.events.emit(Event{Kind: "refresh_guard_replaced"})
 	}
 	return false
+}
+
+func (s *Service) journalEvent(e router.JournalEvent) {
+	var detail, line string
+	switch e.Kind {
+	case router.JournalFailed:
+		detail = e.Err.Error()
+		line = "assignment journal failed: " + detail + "; requests get 503 until it recovers"
+	case router.JournalRecoveryFailed:
+		detail = fmt.Sprintf("attempt %d: %s", e.Attempts, e.Err)
+		line = fmt.Sprintf("assignment journal recovery attempt %d failed: %s", e.Attempts, e.Err)
+	case router.JournalRecovered:
+		detail = fmt.Sprintf("after %d failed attempts since %s", e.Attempts, e.Since.Format(time.RFC3339))
+		line = "assignment journal recovered " + detail
+	}
+	s.events.emit(Event{Kind: string(e.Kind), Detail: detail})
+	fmt.Fprintln(os.Stderr, "claude-router: "+line)
 }
 
 // Addr is the client-facing address.

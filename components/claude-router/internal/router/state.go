@@ -129,15 +129,12 @@ func (r *Router) persist() {
 	if r.saved == nil {
 		return
 	}
-	states := make([]AccountState, len(r.accounts))
+	states, unenrolled := r.durableStates()
 	dirty := false
 	for i, a := range r.accounts {
-		states[i] = a.state(r.expiry)
 		dirty = dirty || needsWrite(r.saved[a.ID], states[i])
 	}
-	unenrolled := make([]AccountState, len(r.unenrolled))
 	for i, st := range r.unenrolled {
-		unenrolled[i] = st.withoutExpiredCheck(r.expiry)
 		dirty = dirty || needsWrite(st, unenrolled[i])
 	}
 	if !dirty {
@@ -146,6 +143,22 @@ func (r *Router) persist() {
 	if r.store.saveAccounts(slices.Concat(states, unenrolled)) != nil {
 		return
 	}
+	r.markSaved(states, unenrolled)
+}
+
+func (r *Router) durableStates() (states, unenrolled []AccountState) {
+	states = make([]AccountState, len(r.accounts))
+	for i, a := range r.accounts {
+		states[i] = a.state(r.expiry)
+	}
+	unenrolled = make([]AccountState, len(r.unenrolled))
+	for i, st := range r.unenrolled {
+		unenrolled[i] = st.withoutExpiredCheck(r.expiry)
+	}
+	return states, unenrolled
+}
+
+func (r *Router) markSaved(states, unenrolled []AccountState) {
 	for _, st := range states {
 		r.saved[st.ID] = st
 	}
@@ -183,9 +196,6 @@ func (s *Store) loadAccounts() ([]AccountState, error) {
 	return states, nil
 }
 
-// saveAccounts replaces the saved account state durably: it writes a
-// temporary file, syncs it, renames it over the old one, and syncs the
-// directory. A failure stops the store until it is reopened.
 func (s *Store) saveAccounts(states []AccountState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -193,8 +203,7 @@ func (s *Store) saveAccounts(states []AccountState) error {
 		return err
 	}
 	if err := s.writeAccounts(states); err != nil {
-		s.failed = err
-		return err
+		return s.fail(err)
 	}
 	return nil
 }

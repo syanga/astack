@@ -373,8 +373,10 @@ implements exhaustion waiting and migration (see "Recovery (PR4)").
   sends a bounded `retry-after` (`waiting.json#rows[5]`).
 - The watchdog also raises client retries for other transient failures to about
   300. The router's cap on its own upstream attempts covers that, except for
-  the 503 that ends a request whose last failure was a network failure,
-  which clients retry ([Network failures](#network-failures)).
+  two 503s that clients retry: the one that ends a request whose last
+  failure was a network failure ([Network failures](#network-failures)),
+  and the journal 503 while recovery can still succeed
+  ([Routing loop](#routing-loop)).
 
 ### Included-only: the documented limit is accepted
 
@@ -940,12 +942,42 @@ The store is the single-writer JSON-lines journal from PR1,
   `assign` per conversation, a `migrate` only when the conversation is on its
   source, and a `served` only when the conversation is on that account.
 - **Fail stop.** As in the PR1 assignment storage rules above, after a failed
-  write or sync the store returns `ErrFailed` until it is closed and reopened.
-  That covers every path that could answer with an account: `Lookup`,
+  write or sync the store returns `ErrFailed` until `Router.Recover`
+  succeeds. That covers every path that could answer with an account: `Lookup`,
   `Decide`, `Commit` for every decision kind, `Route`, `Served`, `Relogin`,
   `Move`, and the shortcuts that return an existing binding without writing. The failed
   record may or may not be on disk, and replay decides which. No caller is
-  told an account that replay can contradict.
+  told an account that replay can contradict. `ErrFailed` wraps the latest
+  cause: the failed write or sync, or the latest failed recovery attempt.
+- **Recovery in place.** `Router.Recover` brings a failed store back as a
+  restart would, without releasing the directory lock. It closes the journal,
+  reopens it, and replays it with the code `OpenStore` uses, which truncates a
+  torn final record. It then writes the replayed records over themselves and
+  syncs the file, because after a failed sync Linux may hold pages that it
+  marked clean and never wrote. A router made by `Open` then writes its
+  in-memory account state to `accounts.json`. Only then does the store swap in
+  the replayed bindings and acknowledge writes again. If any step fails, the
+  store stays failed. A call to `Recover` attempts recovery only when at least
+  5 seconds have passed since the failure and since the last attempt. A
+  request that arrives during an attempt waits for it. A closed store does not
+  recover, and neither does a store whose lock file in the state directory was
+  removed or replaced, because another process could then lock the directory.
+  A restart is the remedy there. After recovery the bindings equal what a
+  restart would replay, and `accounts.json` holds the in-memory account state.
+  A record whose
+  write reported failure may therefore be bound after recovery, as after a
+  restart. Its caller got an error. Recovery keeps the state that lives only
+  in memory, such as quota observations and the time of each conversation's
+  last request, which a restart would lose
+  (`TestAFailedWriteRecoversInPlaceAndTrimsItsTornRecord`,
+  `TestAFailedSyncRecoversToTheBindingsARestartLoads`,
+  `TestRecoveryThatKeepsFailingRetriesUntilTheJournalIsWritable`,
+  `TestRecoveryIsAttemptedAtMostOnceEveryFiveSeconds`,
+  `TestRequestsDuringRecoveryWaitForItAndAgreeWithReplay`,
+  `TestAStoreThatStaysFailedReportsRecoveryAttemptsSparingly`,
+  `TestAClosedStoreDoesNotRecover`,
+  `TestRecoveryRefusesAStateDirectoryWhoseLockFileWasReplaced`,
+  `TestFailedAccountStateWriteStopsTheRouterUntilItRecovers`).
 - **Validation.** A commit with an empty conversation or account, or a
   migration without a source, fails with `ErrIncomplete` before anything is
   written. Replay refuses to open on an interior record that is not JSON, has
@@ -1077,7 +1109,23 @@ the catalog gains while the router runs is served after the next start.
 ### Routing loop
 
 For each routing step the service calls `Route`, which decides and commits
-a placement or migration before it returns. A journal error answers 503. The service pins the SDK call with
+a placement or migration before it returns. A journal error answers 503
+`api_error` with `claude-router: assignment journal unavailable: <cause>;
+the router retries it on a later request`. The answer carries
+`x-should-retry: true` and `retry-after: 5`, which is
+`router.RecoverEvery`, so the client sends the request again after the
+next recovery attempt is due. Every authenticated client request, status
+and `move` included, first calls `Router.Recover`, so a later request
+recovers the journal once its cause is gone, without a restart
+(`TestAJournalFailureAnswers503NamingItsCauseInStatusAndOneEvent`,
+`TestALaterRequestRecoversTheJournalWithoutARestart`). The exception is a
+replaced lock file, which recovery refuses. Its 503 ends with `the state
+directory's lock file was replaced; restart the router` and carries
+`x-should-retry: false` and no `retry-after`
+(`TestAReplacedLockFileAnswers503AskingForARestart`). The service does not
+exit to have the service manager restart it. Apart from a replaced lock
+file, a restart recovers nothing more, and a disk that stays full would use
+up systemd's `StartLimitBurst`. The service pins the SDK call with
 `handlers.WithPinnedAuthID` and tags the context with a call ID that the
 router's transport records. One routing step is one SDK call. With the
 executor posture, one SDK call is one upstream attempt, except the SDK's
@@ -1185,9 +1233,10 @@ reaches no upstream
 (`TestRefreshRedispatchAfterABackwardClockStepIsRefusedAsStale`).
 
 The cap is per client HTTP request. Every router-made HTTP failure answer
-carries `x-should-retry: false`, which a client honors, except the 503 that
+carries `x-should-retry: false`, which a client honors, except two 503s. One
 ends a request whose last failure was a network failure
-([Network failures](#network-failures)).
+([Network failures](#network-failures)). The other is the journal 503 while
+recovery can still succeed ([Routing loop](#routing-loop)).
 Two other answers do not
 stop client retries: an SSE `error` event after the response committed,
 which Claude Code retries for `overloaded_error`, and the local 429, which
@@ -1431,8 +1480,10 @@ block on the client with an unmarked assignment.
 `TestServedMarkIsOnDiskBeforeTheClientSeesTheCompletedBlock` reads the
 journal at the moment the client sees the block. If `Served` fails, the
 client gets an SSE `error` event in place of the completing chunk, or a 503
-for a non-streaming request, and the journal stops answering until restart
-(`TestServedMarkFailureStopsTheCompletedBlock`).
+for a non-streaming request, and the journal stops answering until it
+recovers (`TestServedMarkFailureStopsTheCompletedBlock`). The 503 is the
+journal 503 of the routing loop. While recovery can still succeed it asks
+the client to retry, so the provider may run the request a second time.
 
 ### Paid-overflow reading
 
@@ -1897,13 +1948,30 @@ For every client, the SDK sets `X-Stainless-Package-Version` and
 `stamp_bounded`, `credential_refresh`, `client_auth_rejected`,
 `request_rejected`, `started`, `stopped`, `test_upstream_in_use`,
 `refresh_guard_replaced`, `model_catalog`, and, since PR4,
-`login_confirmed`. Events carry
-account IDs, the first 12 hex digits of the SHA-256 of the conversation key,
+`login_confirmed`. The journal adds three events:
+
+- `journal_failed`: `detail` holds the error of the failed write or sync.
+- `journal_recovery_failed`: `detail` holds `attempt <n>: <error>`.
+- `journal_recovered`: `detail` holds `after <n> failed attempts since <t>`,
+  where `<t>` is the time of the failure.
+
+For each of them the service also writes a line to stderr that names the
+event and its detail. `journal_failed` is logged once per failure. While the
+journal stays failed, a failed recovery attempt is logged when its error
+differs from the attempt before it or its count is a power of two
+(`TestAStoreThatStaysFailedReportsRecoveryAttemptsSparingly`).
+
+Events carry account IDs, the first 12 hex digits of the SHA-256 of the conversation key,
 statuses, classes, decisions, durations, and, on `request`, the usage
 counters the upstream
 reported. An `attempt_failed` event for a network failure carries its `phase`
 and the error text in `detail`. A counter the upstream did not report is
-`null`, not 0.
+`null`, not 0. While the service runs, a failed write to `events.jsonl`,
+such as on a full disk, loses only that event. Writing resumes with the next
+event, on a line of its own even after a partial write
+(`TestAnEventAfterAFailedWriteIsStillLogged`). After a partial write and a
+restart, the first event that the new process logs joins the partial line,
+and readers skip that line.
 `TestNoSecretInStatusEventsOrLogs` and lane 2 search events, status, logs,
 the journal, and the SDK configuration for every token.
 
@@ -2195,7 +2263,8 @@ a temporary file is synced and renamed, and the directory is synced. A
 disabled check that only advanced by less than a minute, and a rejection
 with a known reset that was observed again, are not rewritten; the saved
 copy is older and therefore more conservative. A failed write stops the
-store, like a failed journal write. The file holds no `disabled` check
+store, like a failed journal write, and recovery writes the in-memory
+account state to the file (see "Assignment journal" under PR2). The file holds no `disabled` check
 that a backward clock step made stale (see "Wall time across sleep").
 
 On load, a stamp later than the clock is clamped as live readings are:
@@ -2438,7 +2507,22 @@ memory only), `bound` and `active` counts, `needs_login_at`, a `bindings`
 list (hash, account, reason, since, served, last request, active), and `now`,
 `started`, `pid`, `journal`, `binary`, `binary_sha256` (PR6), `code_sha256`, `sdk`, `quota_fresh_for`,
 `overage_fresh_for`, and `active_for` (`TestStatusReportsCapacityQuotaAndEachBinding`,
-`TestStatusCountsAnIdleConversationAsBoundButNotActive`). A `request` event
+`TestStatusCountsAnIdleConversationAsBoundButNotActive`). `journal` is `ok`,
+or the error that stopped the journal, which names its latest cause. While
+the journal is failed, `journal_failure` holds three fields:
+
+- `since`: when the write or sync failed.
+- `recovery_attempts`: how many recovery attempts failed since then.
+- `retry_after`: the earliest time of the next attempt.
+
+`claude-router status` shows the first two on its `journal error` line. Its
+last line reads
+`next    fix the journal error; the router recovers on a later request`, or
+`next    claude-router stop; claude-router start` for a replaced lock file
+(`TestStatusMatchesTheSelectedLayout` cases `journal-failed` and
+`journal-lock-replaced`).
+
+A `request` event
 with decision `wait` carries `until`, the reset it waits for
 (`TestAWaitEventCarriesTheResetItWaitsFor`). Status derives cache read
 share, waits, refusals, holds, moves, and context size from `events.jsonl`.

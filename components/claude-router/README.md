@@ -161,8 +161,10 @@ Max 5x:
 reads it. `max_upstream_attempts` (1 to 4, default 4) caps the upstream
 attempts of one client request. With 1 the router never resends a request
 that may have reached the provider. A request that ends on a network
-failure gets a 503 that asks the client to retry, so the client may resend
-a request that the provider already ran. The router still retries a
+failure gets a 503 that asks the client to retry. So does a non-streaming
+request whose response arrived but whose journal write then failed, while
+the router can still recover the journal. In both cases the client may
+resend a request that the provider already ran. The router still retries a
 connection that failed before the request was written, for up to 25 s.
 `move_cache_warn_percent` (0 to 100, default 10) sets the share of the
 last 24 hours' cache writes that account moves may cause before `status`
@@ -476,8 +478,13 @@ the state directory, as the service does. For each request, call
   setting.
 
 If `Route` returns an error wrapping `router.ErrFailed`, a journal write, or
-a write of the account state of a router made by `Open`, failed. Every call that could name an account fails the same way until you
-close the store and open it again.
+a write of the account state of a router made by `Open`, failed. Every call
+that could name an account fails the same way until `Recover` succeeds.
+Call `Recover` before each request. It reopens and replays the journal as a
+restart would, at most once every 5 seconds, and returns `ErrFailed` with
+the latest cause until the cause is gone. If the lock file in the state
+directory was removed or replaced, the error also wraps `ErrLockReplaced`,
+and only a new `OpenStore` recovers.
 
 Feed the router what it cannot see:
 

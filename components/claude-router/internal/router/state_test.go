@@ -1,9 +1,9 @@
 package router
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -205,8 +205,9 @@ func TestSavedStampsLaterThanTheClockAreClampedOnLoad(t *testing.T) {
 	}
 }
 
-func TestFailedAccountStateWriteStopsTheRouterUntilReopen(t *testing.T) {
+func TestFailedAccountStateWriteStopsTheRouterUntilItRecovers(t *testing.T) {
 	h := newDurable(t, accts(a, 1.0)...)
+	clock := h.stopClock()
 	h.r.ObserveOverage(a, OverageDisabled, t0)
 	if err := os.Chmod(h.dir, 0o500); err != nil {
 		t.Fatal(err)
@@ -214,9 +215,22 @@ func TestFailedAccountStateWriteStopsTheRouterUntilReopen(t *testing.T) {
 	t.Cleanup(func() { os.Chmod(h.dir, 0o700) })
 
 	h.report(t0, a, "claude-sonnet-4-5", ClassAuth)
+	_, errDecide := h.r.Decide(At(t0), req("conv"))
+	clock.at = t0.Add(RecoverEvery)
+	errReadOnly := h.r.Recover()
+	if err := os.Chmod(h.dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	clock.at = t0.Add(2 * RecoverEvery)
+	errRecover := h.r.Recover()
+	h.restartDurable(t0)
+	states := h.r.AccountStates()
 
-	if _, err := h.r.Decide(At(t0), req("conv")); err == nil || !strings.Contains(err.Error(), "reopen") {
-		t.Fatalf("decide after a failed account state write: %v, want the store's fail-stop error", err)
+	if !errors.Is(errDecide, ErrFailed) || !errors.Is(errReadOnly, ErrFailed) {
+		t.Fatalf("decide after a failed account state write: %v, recovery in a read-only directory: %v; want ErrFailed for both", errDecide, errReadOnly)
+	}
+	if errRecover != nil || len(states) != 1 || !states[0].NeedsLogin {
+		t.Fatalf("recovery returned %v, and after a restart the account state is %+v; want the login requirement recorded before the failure", errRecover, states)
 	}
 }
 

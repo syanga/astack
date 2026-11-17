@@ -24,7 +24,7 @@ const maxRouteAttempts = 3
 //
 // After any journal write or sync failure, or a failed write of the account
 // state of a router made by Open, every method that answers with an account
-// or changes routing state returns ErrFailed until the store is reopened.
+// or changes routing state returns ErrFailed until Recover succeeds.
 type Router struct {
 	cfg   Config
 	store *Store
@@ -251,6 +251,36 @@ func (r *Router) Served(now time.Time, conv ConversationID, account AccountID) e
 	r.commitMu.Lock()
 	defer r.commitMu.Unlock()
 	_, err := r.store.MarkServed(conv, account, now)
+	return err
+}
+
+// Recover brings a failed store back to the state a restart would load. It
+// returns nil when the store is healthy or recovers, and ErrFailed with the
+// latest cause otherwise. It attempts recovery at most once every five
+// seconds. It reopens and replays the journal while it keeps the directory
+// lock, and for a router made by Open it writes the in-memory account state
+// to the state directory. Bindings come from the replay, so a record whose
+// write reported failure may be present, as after a restart. A request that
+// arrives during an attempt waits for it.
+func (r *Router) Recover() error {
+	if !r.store.recoveryDue() {
+		return r.store.Err()
+	}
+	r.commitMu.Lock()
+	defer r.commitMu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.saved == nil {
+		_, err := r.store.recover(nil)
+		return err
+	}
+	states, unenrolled := r.durableStates()
+	recovered, err := r.store.recover(func() error {
+		return r.store.writeAccounts(slices.Concat(states, unenrolled))
+	})
+	if recovered {
+		r.markSaved(states, unenrolled)
+	}
 	return err
 }
 

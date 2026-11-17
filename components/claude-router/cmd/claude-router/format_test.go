@@ -182,6 +182,19 @@ func withMoveShare(r report, warnPercent int) report {
 	return r
 }
 
+func journalFailedReport() report {
+	r := healthyReport()
+	r.Status.Journal = "assignment journal unavailable: write /home/u/.local/state/astack/claude-router/assignments/assignments.jsonl: no space left on device"
+	r.Status.JournalFailure = &router.JournalFailure{Since: at(0, 14, 12), Attempts: 3, RetryAfter: at(0, 14, 20).Add(4 * time.Second)}
+	return r
+}
+
+func journalLockReplacedReport() report {
+	r := journalFailedReport()
+	r.Status.Journal = "assignment journal unavailable: " + router.ErrLockReplaced.Error()
+	return r
+}
+
 func cacheWarningReport(warnPercent int) report {
 	return withMoveShare(healthyReport(), warnPercent)
 }
@@ -201,6 +214,8 @@ func TestStatusMatchesTheSelectedLayout(t *testing.T) {
 		{"waiting-verbose", waitingReport(), true},
 		{"overflow-stale", overflowStaleReport(), false},
 		{"needs-login", needsLoginReport(), false},
+		{"journal-failed", journalFailedReport(), false},
+		{"journal-lock-replaced", journalLockReplacedReport(), false},
 		{"unreachable", unreachableReport(), false},
 		{"unreachable-verbose", unreachableReport(), true},
 		{"stopped", stopped, false},
