@@ -161,8 +161,10 @@ Max 5x:
 reads it. `max_upstream_attempts` (1 to 4, default 4) caps the upstream
 attempts of one client request. With 1 the router never resends a request
 that may have reached the provider. A request that ends on a network
-failure gets a 503 that asks the client to retry, so the client may resend
-a request that the provider already ran. The router still retries a
+failure gets a 503 that asks the client to retry, and so does a request
+whose journal write failed while the router can still recover the journal.
+In both cases the client may resend a request that the provider already
+ran. The router still retries a
 connection that failed before the request was written, for up to 25 s.
 `move_cache_warn_percent` (0 to 100, default 10) sets the share of the
 last 24 hours' cache writes that account moves may cause before `status`

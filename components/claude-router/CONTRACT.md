@@ -373,8 +373,10 @@ implements exhaustion waiting and migration (see "Recovery (PR4)").
   sends a bounded `retry-after` (`waiting.json#rows[5]`).
 - The watchdog also raises client retries for other transient failures to about
   300. The router's cap on its own upstream attempts covers that, except for
-  the 503 that ends a request whose last failure was a network failure,
-  which clients retry ([Network failures](#network-failures)).
+  two 503s that clients retry: the one that ends a request whose last
+  failure was a network failure ([Network failures](#network-failures)),
+  and the journal 503 while recovery can still succeed
+  ([Routing loop](#routing-loop)).
 
 ### Included-only: the documented limit is accepted
 
@@ -1109,9 +1111,10 @@ the catalog gains while the router runs is served after the next start.
 For each routing step the service calls `Route`, which decides and commits
 a placement or migration before it returns. A journal error answers 503
 `api_error` with `claude-router: assignment journal unavailable: <cause>;
-the router retries it on a later request`, `x-should-retry: true`, and
-`retry-after: 5`, the recovery interval, so the client sends the request
-again. Every authenticated client request, status and `move` included,
+the router retries it on a later request`. The answer carries
+`x-should-retry: true` and `retry-after: 5`, which is
+`router.RecoverEvery`, so the client sends the request again after the
+next recovery attempt is due. Every authenticated client request, status and `move` included,
 first calls `Router.Recover`, so a later request recovers the journal once
 its cause is gone, without a restart
 (`TestAJournalFailureAnswers503NamingItsCauseInStatusAndOneEvent`,
@@ -1230,10 +1233,10 @@ reaches no upstream
 (`TestRefreshRedispatchAfterABackwardClockStepIsRefusedAsStale`).
 
 The cap is per client HTTP request. Every router-made HTTP failure answer
-carries `x-should-retry: false`, which a client honors, except the 503 that
+carries `x-should-retry: false`, which a client honors, except two 503s. One
 ends a request whose last failure was a network failure
-([Network failures](#network-failures)) and the journal 503 while recovery
-can still succeed ([Routing loop](#routing-loop)).
+([Network failures](#network-failures)). The other is the journal 503 while
+recovery can still succeed ([Routing loop](#routing-loop)).
 Two other answers do not
 stop client retries: an SSE `error` event after the response committed,
 which Claude Code retries for `overloaded_error`, and the local 429, which
@@ -1478,7 +1481,9 @@ block on the client with an unmarked assignment.
 journal at the moment the client sees the block. If `Served` fails, the
 client gets an SSE `error` event in place of the completing chunk, or a 503
 for a non-streaming request, and the journal stops answering until it
-recovers (`TestServedMarkFailureStopsTheCompletedBlock`).
+recovers (`TestServedMarkFailureStopsTheCompletedBlock`). The 503 is the
+journal 503 of the routing loop. While recovery can still succeed it asks
+the client to retry, so the provider runs the request a second time.
 
 ### Paid-overflow reading
 

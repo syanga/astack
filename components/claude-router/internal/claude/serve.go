@@ -86,7 +86,7 @@ func writeError(c *gin.Context, status int, kind, message string) {
 	writeErrorRetry(c, status, kind, message, false)
 }
 
-func storeError(err error) (message string, recoverable bool) {
+func describeStoreError(err error) (message string, recoverable bool) {
 	message = "claude-router: " + err.Error()
 	if errors.Is(err, router.ErrFailed) && !errors.Is(err, router.ErrLockReplaced) {
 		return message + "; the router retries it on a later request", true
@@ -95,7 +95,7 @@ func storeError(err error) (message string, recoverable bool) {
 }
 
 func writeStoreError(c *gin.Context, err error) {
-	message, recoverable := storeError(err)
+	message, recoverable := describeStoreError(err)
 	if recoverable {
 		c.Header("Retry-After", journalRetryAfterSeconds)
 	}
@@ -631,7 +631,7 @@ func (s *Service) relayStream(c *gin.Context, ctx context.Context, call string, 
 				commit()
 			} else {
 				if err := handle(events); err != nil {
-					message, _ := storeError(err)
+					message, _ := describeStoreError(err)
 					streamError("api_error", message)
 					out.Result = "served_mark_failed"
 					return out
