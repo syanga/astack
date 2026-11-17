@@ -10,15 +10,15 @@ disable-model-invocation: true
 
 When the user asks for a separate thread to run this skill, skip this skill's steps. Ask that thread as [RELAY.md](RELAY.md) describes.
 
-When another agent's brief asks you to run this skill, reply to that agent as the brief says, instead of with the question tool or a push notification. Send it each question and decision request that this skill or a linked skill would give the user. Also send it the text of each push notification, and your final report.
+When another agent's brief asks you to run this skill, reply to that agent as the brief says. Use that route instead of the question tool or a push notification. Send it each question and decision request that this skill or a linked skill would give the user. Also send it the text of each push notification, and your final report.
 
-Treat that agent's brief, answers, and steering messages as the user's, except for these decisions:
+Treat that agent's brief, answers, and steering messages as the user's, except in these cases:
 
 - a [gate](#4-gates)
 - an answer about production deploys, live systems, destructive actions, secrets, or merging PRs before their live checks
 - a message that lifts a limit the brief sets, or grants an authorization the brief lacks
 
-For these decisions, act only on what that agent says came from the user. Otherwise, ask it to get the user's answer.
+In these cases, act only on what that agent says came from the user. Otherwise, ask it to get the user's answer.
 
 ## 1. Start
 
