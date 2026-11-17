@@ -152,16 +152,29 @@ When agents and test suites fill a Linux machine's RAM, the kernel evicts the
 code of running programs, and the desktop freezes until the OOM killer ends a
 process. [scripts/memory_guard.py](scripts/memory_guard.py) makes two changes:
 
-- It sets `/sys/kernel/mm/lru_gen/min_ttl_ms` to 1000, so the kernel ends a
-  process instead of evicting pages used in the last second. The kernel's
+- The script turns on the kernel's
   [thrashing prevention](https://docs.kernel.org/admin-guide/mm/multigen_lru.html#thrashing-prevention)
-  notes explain the setting. A file in `/etc/tmpfiles.d` sets it again at
-  each boot.
-- If `/etc/fstab` mounts `/tmp` as tmpfs, it comments out that line, so `/tmp`
-  is on disk after the next reboot. The kernel can then free the pages of
-  files there as cache. Before it replaces `/etc/fstab`, the script checks the
-  edited copy with `findmnt --verify` and saves the old file as
-  `/etc/fstab.astack-backup`.
+  by setting `/sys/kernel/mm/lru_gen/min_ttl_ms` to 1000. The kernel then ends
+  a process instead of evicting pages used in the last second. At each boot,
+  `systemd-tmpfiles` sets the value again from
+  `/etc/tmpfiles.d/astack-memory-guard.conf`.
+- The script moves `/tmp` from RAM to disk at the next reboot. Files in `/tmp`
+  then live in the page cache, which the kernel can free. The script comments
+  out an `/etc/fstab` line that mounts `/tmp` as tmpfs. It then runs
+  `systemctl mask tmp.mount` when a unit file would still mount a tmpfs on
+  `/tmp` at boot. Some distributions, such as Ubuntu 26.04, ship that unit
+  file.
+
+Before the script replaces `/etc/fstab`, it checks the edited copy with
+`findmnt --verify`. `install` stops before it changes anything when that check
+fails. It also stops when a unit file in `/etc/systemd/system` defines
+`tmp.mount`, or when `/etc/fstab` mounts `/tmp` in a line the script does not
+recognize.
+
+The script never leaves `tmp.mount` masked while `/etc/fstab` mounts `/tmp`,
+because systemd cannot start a masked unit that `/etc/fstab` requires.
+`install` saves the previous `/etc/fstab` as `/etc/fstab.astack-backup`. To
+restore that file by hand, first run `sudo systemctl unmask tmp.mount`.
 
 To check the machine, preview the changes, and make them:
 
@@ -172,15 +185,19 @@ sudo python3 scripts/memory_guard.py install
 ```
 
 The new `min_ttl_ms` applies immediately. Reboot to move `/tmp` to disk. On
-disk, `/tmp` keeps files across reboots, and `systemd-tmpfiles-clean.timer`
-deletes files older than the age in `/usr/lib/tmpfiles.d/tmp.conf`, 10 days on
-Ubuntu.
+disk, `/tmp` keeps files until `systemd-tmpfiles` deletes them.
+`systemd-tmpfiles-clean.timer` runs it daily, and
+`/usr/lib/tmpfiles.d/tmp.conf` sets the age limit, 10 days on Ubuntu 26.04.
 
-When the guard acts, the kernel ends the process with the highest OOM score.
-That is usually the largest process, which can be an agent session.
+When thrashing prevention acts, the kernel ends the process with the highest
+OOM score. That is usually the largest process, which can be an agent session.
 
 To revert both changes, run `sudo python3 scripts/memory_guard.py uninstall`,
-then reboot. The script changes nothing on macOS.
+then reboot. When `uninstall` restores the `/etc/fstab` line, it also unmasks
+`tmp.mount`, even a mask that `install` did not make. `status` warns when
+`tmp.mount` is masked while `/etc/fstab` mounts `/tmp`.
+
+The script needs systemd. It changes nothing on macOS.
 
 ## Find a skill
 
