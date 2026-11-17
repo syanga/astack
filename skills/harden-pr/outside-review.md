@@ -2,7 +2,7 @@
 
 Follow [provider execution](../arena/PROVIDERS.md) for provider selection, CLI invocation, timeouts, captured output, and unavailable coverage. Run from the reviewed repository. Supply each assignment's complete prompt, diff, and relevant source context from the fixed review snapshot.
 
-Use its read-only prompted invocations for every assignment, including structured reviews. Review-specific completion criteria remain in [adversarial.md](sections/adversarial.md).
+Use its read-only prompted invocations for every assignment, including structured reviews. In T3 Code, start each assignment with `delegate_task` and `isolation: "worktree"` instead of the provider's CLI. Review-specific completion criteria remain in [adversarial.md](sections/adversarial.md).
 
 ## Size assignments before dispatch
 
