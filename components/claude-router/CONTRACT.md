@@ -1114,9 +1114,9 @@ a placement or migration before it returns. A journal error answers 503
 the router retries it on a later request`. The answer carries
 `x-should-retry: true` and `retry-after: 5`, which is
 `router.RecoverEvery`, so the client sends the request again after the
-next recovery attempt is due. Every authenticated client request, status and `move` included,
-first calls `Router.Recover`, so a later request recovers the journal once
-its cause is gone, without a restart
+next recovery attempt is due. Every authenticated client request, status
+and `move` included, first calls `Router.Recover`, so a later request
+recovers the journal once its cause is gone, without a restart
 (`TestAJournalFailureAnswers503NamingItsCauseInStatusAndOneEvent`,
 `TestALaterRequestRecoversTheJournalWithoutARestart`). The exception is a
 replaced lock file, which recovery refuses. Its 503 ends with `the state
@@ -1483,7 +1483,7 @@ client gets an SSE `error` event in place of the completing chunk, or a 503
 for a non-streaming request, and the journal stops answering until it
 recovers (`TestServedMarkFailureStopsTheCompletedBlock`). The 503 is the
 journal 503 of the routing loop. While recovery can still succeed it asks
-the client to retry, so the provider runs the request a second time.
+the client to retry, so the provider may run the request a second time.
 
 ### Paid-overflow reading
 
