@@ -1966,7 +1966,9 @@ statuses, classes, decisions, durations, and, on `request`, the usage
 counters the upstream
 reported. An `attempt_failed` event for a network failure carries its `phase`
 and the error text in `detail`. A counter the upstream did not report is
-`null`, not 0.
+`null`, not 0. A failed write to `events.jsonl`, such as on a full disk,
+loses only that event. The next event is written again
+(`TestAnEventAfterAFailedWriteIsStillLogged`).
 `TestNoSecretInStatusEventsOrLogs` and lane 2 search events, status, logs,
 the journal, and the SDK configuration for every token.
 

@@ -1,10 +1,13 @@
 package claude
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -112,5 +115,40 @@ func TestAReplacedLockFileAnswers503AskingForARestart(t *testing.T) {
 	}
 	if retry, after := r.Header.Get("X-Should-Retry"), r.Header.Get("Retry-After"); retry != "false" || after != "" {
 		t.Fatalf("the 503 that asks for a restart carried x-should-retry %q and retry-after %q, want false and none", retry, after)
+	}
+}
+
+type failOnceWriter struct {
+	bytes.Buffer
+	failed bool
+}
+
+func (w *failOnceWriter) Write(p []byte) (int, error) {
+	if !w.failed {
+		w.failed = true
+		return 0, syscall.EFBIG
+	}
+	return w.Buffer.Write(p)
+}
+
+func (w *failOnceWriter) Close() error { return nil }
+
+func TestAnEventAfterAFailedWriteIsStillLogged(t *testing.T) {
+	w := &failOnceWriter{}
+	l := &eventLog{out: w}
+
+	l.emit(Event{Kind: "journal_failed", Detail: "lost"})
+	l.emit(Event{Kind: "journal_recovered", Detail: "after 1 failed attempts"})
+
+	var got []Event
+	for _, line := range bytes.Split(bytes.TrimSpace(w.Bytes()), []byte("\n")) {
+		var e Event
+		if err := json.Unmarshal(line, &e); err != nil {
+			t.Fatalf("event line %q: %v", line, err)
+		}
+		got = append(got, e)
+	}
+	if len(got) != 1 || got[0].Kind != "journal_recovered" {
+		t.Fatalf("events after a failed write %+v, want the later journal_recovered event", got)
 	}
 }

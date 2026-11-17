@@ -78,7 +78,6 @@ func ConversationHash(c router.ConversationID) string {
 type eventLog struct {
 	mu  sync.Mutex
 	out io.WriteCloser
-	enc *json.Encoder
 }
 
 func openEventLog(path string) (*eventLog, error) {
@@ -86,16 +85,20 @@ func openEventLog(path string) (*eventLog, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &eventLog{out: f, enc: json.NewEncoder(f)}, nil
+	return &eventLog{out: f}, nil
 }
 
 func (l *eventLog) emit(e Event) {
 	if e.At.IsZero() {
 		e.At = time.Now()
 	}
+	line, err := json.Marshal(e)
+	if err != nil {
+		return
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	_ = l.enc.Encode(e)
+	_, _ = l.out.Write(append(line, '\n'))
 }
 
 func (l *eventLog) close() error {
