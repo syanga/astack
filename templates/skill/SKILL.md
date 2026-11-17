@@ -2,7 +2,7 @@
 name: replace-with-skill-name
 # A trigger, not a summary: one clause naming the skill, then when to reach it. At most 200 characters.
 description: Replace with when this skill should be reached.
-# Uncomment for a skill only the human fires. The installer writes the matching Codex policy file.
+# Uncomment for a user-invoked skill, which the model cannot load on its own. The installer writes the matching Codex policy file.
 # disable-model-invocation: true
 ---
 
