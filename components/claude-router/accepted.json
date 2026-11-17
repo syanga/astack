@@ -10,7 +10,7 @@
   "claude_code": "2.1.325"
  },
  "result": "pass",
- "scope": "Issue 131 in-place journal recovery. A foreground lane router on port 18797 ran this code against the real accounts, with copies of the dobby and work logins (lane.py, lane-config.json), on Linux 7.0 x86_64. It ran beside the daily router and did not change it. To cause real write failures, lane.py set RLIMIT_FSIZE on the lane process with prlimit. With a 64-byte limit, below the journal's 258 bytes, a new conversation got a 503 that named file too large. The 503 carried x-should-retry: true and retry-after: 5, and status showed the failure. A request 5 s later still got the 503, and the failed recovery attempts rose. lane.py then started a real claude -p request for claude-haiku-5-5 and lifted the limit 9 s later. The same lane process answered that request without a restart. A limit 10 bytes above the journal left a torn record, which the next recovery trimmed. A resume of the first conversation after recovery stayed on its account and kept its content, and a lane restart loaded the same bindings. The router answered each probe request with a 503 from Route, before dispatch, so the probes sent nothing to the provider. The size limit also blocked writes to events.jsonl, so the 503 request events are missing from it. record.py built the record. Unchanged historical scenarios are references and were not rerun.",
+ "scope": "Issue 131 in-place journal recovery. A foreground lane router on port 18797 ran this code on Linux 7.0 x86_64. It used the real accounts through copies of the dobby and work logins (lane.py, lane-config.json). The daily router kept running beside the lane, unchanged. To cause real write failures, lane.py set RLIMIT_FSIZE on the lane process with prlimit. With a 64-byte limit, below the journal's 258 bytes, a new conversation got a 503 that named \"file too large\". The 503 carried x-should-retry: true and retry-after: 5, and status showed the failure. A request 5 s later still got the 503, and the failed recovery attempts rose. lane.py then started a real claude -p request for claude-haiku-5-5 and lifted the limit 9 s later. The same lane process answered that request without a restart. A limit 10 bytes above the journal left a torn record, which the next recovery trimmed. A resume of the first conversation after recovery stayed on its account and kept its content, and a lane restart loaded the same bindings. The router answered each probe request with a 503 from Route, before dispatch, so the probes sent nothing to the provider. The size limit also blocked writes to events.jsonl, so the 503 request events are missing from it. record.py built the record. Unchanged historical scenarios are references and were not rerun.",
  "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue131/evidence",
  "matrix": [
   {
@@ -190,7 +190,7 @@
      "status-recovered.json",
      "serve.log"
     ],
-    "support": "Claude Code printed no retry line. The request took 12.5 s, against under 2 s for s1-new. Recovery attempt 2 failed while only this claude -p was sending, and the router answered the request after lane.py lifted the limit. The file size limit also blocked writes to events.jsonl, so its 503 request events are missing."
+    "support": "Claude Code printed no retry line. The request took 12.5 s, against under 2 s for s1-new. Recovery attempt 2 failed while only this claude -p was sending requests. The router answered the request after lane.py lifted the limit. Any 503 that Claude Code got while the limit held is missing from events.jsonl, because the limit also blocked writes to events.jsonl."
    }
   },
   {
@@ -319,7 +319,7 @@
     "evidence": [
      "events.jsonl"
     ],
-    "note": "The counts cover the request events that reached events.jsonl. The file size limit blocked writes to events.jsonl while it held, so the 503 request events of s2, s3, s5, and Claude Code's attempts during the failure are missing."
+    "note": "The counts cover the request events that reached events.jsonl. While the file size limit held, it also blocked writes to events.jsonl. The 503 request events of s2, s3, s5, and any Claude Code attempt in that window are missing."
    }
   },
   {
@@ -344,7 +344,7 @@
    "run": "first lane run at 50e0ff3",
    "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue131-run1/evidence",
    "result": "fail: 17 of 19 rows passed",
-   "finding": "The journal recovered and Claude Code's requests were answered, but events.jsonl held no event from the lane process after its first failed write, because json.Encoder keeps the first write error. The two rows that read request events failed for lack of evidence.",
+   "finding": "The journal recovered, and the router answered Claude Code's requests. events.jsonl held no event from the lane process after its first failed write, because json.Encoder keeps the first write error. The client-retry and resume rows failed because their request events were missing.",
    "fixed_in": "668a59c (write each event on its own) and ee6f7e8 (start a new line after a partial write)"
   }
  ],
@@ -363,5 +363,5 @@
    "/home/alany/.local/state/astack/claude-router-lanes/issue131/evidence/offline/go-race.log"
   ]
  },
- "written": "2026-11-17T07:49:06.816506+00:00"
+ "written": "2026-11-17T08:42:44.946633+00:00"
 }
