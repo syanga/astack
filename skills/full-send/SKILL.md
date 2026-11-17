@@ -10,20 +10,20 @@ disable-model-invocation: true
 
 When the user asks for a separate thread to run this skill, skip this skill's steps. Ask that thread as [RELAY.md](RELAY.md) describes.
 
-When another agent's brief asks you to run this skill, reply to that agent as the brief says. Send it each question and decision request that this skill or a linked skill would give the user. Also send it the text of each push notification, and your final report. Do not use the question tool or a push notification.
+When another agent's brief asks you to run this skill, reply to that agent as the brief says, instead of with the question tool or a push notification. Send it each question and decision request that this skill or a linked skill would give the user. Also send it the text of each push notification, and your final report.
 
 Treat that agent's brief, answers, and steering messages as the user's, except for these decisions:
 
 - a [gate](#4-gates)
-- production deploys, live systems, destructive actions, secrets, or merging PRs before their live checks
-- lifting a limit that the brief sets, or granting an authorization that the brief lacks
+- an answer about production deploys, live systems, destructive actions, secrets, or merging PRs before their live checks
+- a message that lifts a limit the brief sets, or grants an authorization the brief lacks
 
 For these decisions, act only on what that agent says came from the user. Otherwise, ask it to get the user's answer.
 
 ## 1. Start
 
 1. For a simple task, or one already settled, for example by [grilling](../grilling/SKILL.md), skip the questions. Otherwise ask one round of questions, each with a recommended answer. Cover open questions that block the work. Also cover production deploys, live systems, destructive actions, and secrets, when the task touches one and the request leaves it open. When a plan's live checks need an environment that a later unit builds, ask whether the plan's PRs may merge before those checks run. After this step, reach the user only through gates.
-2. If the task's store, `.scratch/<task>/` per [Locate the store](../orchestrate/STATE.md#locate-the-store), has no `assumed-decisions.md`, create one and start it with the request and whether merging is authorized. Otherwise, add the new request at its top and replace the merge authorization there. After each invocation for this task, post the file's absolute path in the thread, so claude-full-send-guard finds the store.
+2. Create `assumed-decisions.md` in the task's store, `.scratch/<task>/` per [Locate the store](../orchestrate/STATE.md#locate-the-store). Start it with the request and whether merging is authorized. After each invocation for this task, post its absolute path in the thread, so claude-full-send-guard finds the store.
 
 ## 2. Route
 
