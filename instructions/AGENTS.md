@@ -51,4 +51,4 @@ A thread you launched is one whose first message names your thread as the sender
   4. report to your thread
 * After a stopped thread reports, launch its branch's new owner in its worktree with `existing_worktree`.
 * Before you ask another thread to run full-send, read `full-send/RELAY.md` from the installed skills.
-* In a message to another thread, write skill names without `$` or `/`, because either prefix can start the skill. The one exception is the mention that opens a full-send relay.
+* In a message to another thread, write each skill name bare, as in `full-send`. A `/` or currency-symbol prefix, such as `$` or `€`, can start the skill. The one exception is the `$full-send` that opens a full-send brief.
