@@ -42,7 +42,7 @@ func TestAFailedWriteRecoversInPlaceAndTrimsItsTornRecord(t *testing.T) {
 	h.store.file = &faultyFile{journalFile: h.store.file, shortWrite: true}
 
 	_, errWrite := h.r.Route(At(t0), req("c2"))
-	clock.at = t0.Add(recoverEvery)
+	clock.at = t0.Add(RecoverEvery)
 	errRecover := h.r.Recover()
 	_, c2, _ := h.r.Lookup("c2")
 	third := h.route(t0, req("c3"))
@@ -70,7 +70,7 @@ func TestAFailedSyncRecoversToTheBindingsARestartLoads(t *testing.T) {
 	h.store.file = &faultyFile{journalFile: h.store.file, failSync: true}
 
 	_, errSync := h.r.Route(At(t0), req("c2"))
-	clock.at = t0.Add(recoverEvery)
+	clock.at = t0.Add(RecoverEvery)
 	errRecover := h.r.Recover()
 	recovered := h.bindings()
 	third := h.route(t0, req("c3"))
@@ -173,7 +173,7 @@ func TestACrashAfterRecoveryLoadsWhatTheRecoveredStoreAcknowledged(t *testing.T)
 
 	_, errSync := h.r.Route(At(t0), req("c2"))
 	pc.failSync = false
-	clock.at = t0.Add(recoverEvery)
+	clock.at = t0.Add(RecoverEvery)
 	errRecover := h.r.Recover()
 	recovered := h.bindings()
 	third := h.route(t0, req("c3"))
@@ -223,12 +223,12 @@ func TestRecoveryThatKeepsFailingRetriesUntilTheJournalIsWritable(t *testing.T) 
 	}
 
 	_, errFirst := h.r.Route(At(t0), req("c2"))
-	clock.at = t0.Add(recoverEvery)
+	clock.at = t0.Add(RecoverEvery)
 	errOpen := h.r.Recover()
-	clock.at = t0.Add(2 * recoverEvery)
+	clock.at = t0.Add(2 * RecoverEvery)
 	errSync := h.r.Recover()
 	_, errRoute := h.r.Route(At(t0), req("c3"))
-	clock.at = t0.Add(3 * recoverEvery)
+	clock.at = t0.Add(3 * RecoverEvery)
 	errRecovered := h.r.Recover()
 	placed := h.route(t0, req("c3"))
 
@@ -311,7 +311,7 @@ func TestAStoreThatStaysFailedReportsRecoveryAttemptsSparingly(t *testing.T) {
 	}
 
 	for i := 1; i <= 10; i++ {
-		clock.at = t0.Add(time.Duration(i) * recoverEvery)
+		clock.at = t0.Add(time.Duration(i) * RecoverEvery)
 		_ = h.r.Recover()
 	}
 
@@ -343,7 +343,7 @@ func TestRequestsDuringRecoveryWaitForItAndAgreeWithReplay(t *testing.T) {
 	if _, err := h.r.Route(At(t0), req("lost")); err == nil {
 		t.Fatal("the failed sync returned no error")
 	}
-	clock.at = t0.Add(recoverEvery)
+	clock.at = t0.Add(RecoverEvery)
 	entered, release := make(chan struct{}), make(chan struct{})
 	open := h.store.open
 	h.store.open = func(path string) (journalFile, error) {
@@ -400,7 +400,7 @@ func TestAClosedStoreDoesNotRecover(t *testing.T) {
 	h.store.Close()
 
 	_, errWrite := h.r.Route(At(t0), req("c2"))
-	clock.at = t0.Add(recoverEvery)
+	clock.at = t0.Add(RecoverEvery)
 	errRecover := h.r.Recover()
 
 	if !errors.Is(errWrite, ErrFailed) || !errors.Is(errRecover, ErrFailed) {
@@ -420,10 +420,10 @@ func TestRecoveryRefusesAStateDirectoryWhoseLockFileWasReplaced(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	clock.at = t0.Add(recoverEvery)
+	clock.at = t0.Add(RecoverEvery)
 	errRemoved := h.r.Recover()
 	other, errOther := OpenStore(h.dir)
-	clock.at = t0.Add(2 * recoverEvery)
+	clock.at = t0.Add(2 * RecoverEvery)
 	errReplaced := h.r.Recover()
 	if errOther == nil {
 		other.Close()

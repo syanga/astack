@@ -86,12 +86,23 @@ func writeError(c *gin.Context, status int, kind, message string) {
 	writeErrorRetry(c, status, kind, message, false)
 }
 
-func storeMessage(err error) string {
+func storeError(err error) (message string, recoverable bool) {
+	message = "claude-router: " + err.Error()
 	if errors.Is(err, router.ErrFailed) && !errors.Is(err, router.ErrLockReplaced) {
-		return "claude-router: " + err.Error() + "; the router retries it on a later request"
+		return message + "; the router retries it on a later request", true
 	}
-	return "claude-router: " + err.Error()
+	return message, false
 }
+
+func writeStoreError(c *gin.Context, err error) {
+	message, recoverable := storeError(err)
+	if recoverable {
+		c.Header("Retry-After", journalRetryAfterSeconds)
+	}
+	writeErrorRetry(c, http.StatusServiceUnavailable, "api_error", message, recoverable)
+}
+
+var journalRetryAfterSeconds = strconv.Itoa(int(router.RecoverEvery / time.Second))
 
 // Claude Code 2.1.300 and Agent SDK 0.3.300 retry a 503 with their own
 // backoff unless x-should-retry is false, and honor retry-after.
@@ -196,7 +207,7 @@ func (s *Service) messages(c *gin.Context) {
 		d, err := s.router.Route(at, req)
 		if err != nil {
 			finish("request", "", router.Decision{}, http.StatusServiceUnavailable, nil)
-			writeError(c, http.StatusServiceUnavailable, "api_error", storeMessage(err))
+			writeStoreError(c, err)
 			return
 		}
 		if d.RecheckOverage && s.recheckOverage(c.Request.Context(), d.Account, rechecked) {
@@ -261,7 +272,7 @@ func (s *Service) messages(c *gin.Context) {
 			return
 		case out.ServedFailed:
 			finish("request", account, d, http.StatusServiceUnavailable, &out)
-			writeError(c, http.StatusServiceUnavailable, "api_error", storeMessage(out.Err))
+			writeStoreError(c, out.Err)
 			return
 		}
 		if r, ok := out.Refused.(ineligible); ok {
@@ -620,7 +631,8 @@ func (s *Service) relayStream(c *gin.Context, ctx context.Context, call string, 
 				commit()
 			} else {
 				if err := handle(events); err != nil {
-					streamError("api_error", storeMessage(err))
+					message, _ := storeError(err)
+					streamError("api_error", message)
 					out.Result = "served_mark_failed"
 					return out
 				}
@@ -768,7 +780,7 @@ func (s *Service) move(c *gin.Context) {
 	conv, matches, err := s.resolveConversation(m.Conversation)
 	switch {
 	case errors.Is(err, router.ErrFailed):
-		writeError(c, http.StatusServiceUnavailable, "api_error", storeMessage(err))
+		writeStoreError(c, err)
 		return
 	case matches > 1:
 		writeError(c, http.StatusConflict, "invalid_request_error", fmt.Sprintf("claude-router: %s matches %d conversations; give more of the hash", m.Conversation, matches))
@@ -781,7 +793,7 @@ func (s *Service) move(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "not_found_error", "claude-router: the conversation has no assignment")
 		return
 	case errors.Is(err, router.ErrFailed):
-		writeError(c, http.StatusServiceUnavailable, "api_error", storeMessage(err))
+		writeStoreError(c, err)
 		return
 	case err != nil:
 		writeError(c, http.StatusBadRequest, "invalid_request_error", "claude-router: "+err.Error())

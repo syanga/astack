@@ -1108,14 +1108,17 @@ the catalog gains while the router runs is served after the next start.
 
 For each routing step the service calls `Route`, which decides and commits
 a placement or migration before it returns. A journal error answers 503
-with `claude-router: assignment journal unavailable: <cause>; the router
-retries it on a later request`. Every authenticated client request, status
-and `move` included, first calls `Router.Recover`, so a later request
-recovers the journal once its cause is gone, without a restart
+`api_error` with `claude-router: assignment journal unavailable: <cause>;
+the router retries it on a later request`, `x-should-retry: true`, and
+`retry-after: 5`, the recovery interval, so the client sends the request
+again. Every authenticated client request, status and `move` included,
+first calls `Router.Recover`, so a later request recovers the journal once
+its cause is gone, without a restart
 (`TestAJournalFailureAnswers503NamingItsCauseInStatusAndOneEvent`,
 `TestALaterRequestRecoversTheJournalWithoutARestart`). The exception is a
 replaced lock file, which recovery refuses. Its 503 ends with `the state
-directory's lock file was replaced; restart the router`
+directory's lock file was replaced; restart the router` and carries
+`x-should-retry: false` and no `retry-after`
 (`TestAReplacedLockFileAnswers503AskingForARestart`). The service does not
 exit to have the service manager restart it. Apart from a replaced lock
 file, a restart recovers nothing more, and a disk that stays full would use
@@ -1229,7 +1232,8 @@ reaches no upstream
 The cap is per client HTTP request. Every router-made HTTP failure answer
 carries `x-should-retry: false`, which a client honors, except the 503 that
 ends a request whose last failure was a network failure
-([Network failures](#network-failures)).
+([Network failures](#network-failures)) and the journal 503 while recovery
+can still succeed ([Routing loop](#routing-loop)).
 Two other answers do not
 stop client retries: an SSE `error` event after the response committed,
 which Claude Code retries for `overloaded_error`, and the local 429, which

@@ -216,12 +216,12 @@ func TestFailedAccountStateWriteStopsTheRouterUntilItRecovers(t *testing.T) {
 
 	h.report(t0, a, "claude-sonnet-4-5", ClassAuth)
 	_, errDecide := h.r.Decide(At(t0), req("conv"))
-	clock.at = t0.Add(recoverEvery)
+	clock.at = t0.Add(RecoverEvery)
 	errReadOnly := h.r.Recover()
 	if err := os.Chmod(h.dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	clock.at = t0.Add(2 * recoverEvery)
+	clock.at = t0.Add(2 * RecoverEvery)
 	errRecover := h.r.Recover()
 	h.restartDurable(t0)
 	states := h.r.AccountStates()

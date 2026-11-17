@@ -22,7 +22,9 @@ var ErrLocked = errors.New("assignment store is held by another process")
 // not be on disk. The error wraps the latest cause.
 var ErrFailed = errors.New("assignment journal unavailable")
 
-const recoverEvery = 5 * time.Second
+// RecoverEvery is the least time between a failed write or sync and the
+// first recovery attempt, and between recovery attempts.
+const RecoverEvery = 5 * time.Second
 
 // ErrLockReplaced reports that the lock file in the state directory is no
 // longer the one the store locked, so the store cannot recover without
@@ -332,7 +334,7 @@ func (s *Store) emit(kind JournalEventKind) {
 
 func (s *Store) fail(err error) error {
 	now := s.now()
-	s.failure = &JournalFailure{Err: err, Since: now, RetryAfter: now.Add(recoverEvery)}
+	s.failure = &JournalFailure{Err: err, Since: now, RetryAfter: now.Add(RecoverEvery)}
 	s.emit(JournalFailed)
 	return s.err()
 }
@@ -357,7 +359,7 @@ func (s *Store) recover(save func() error) (recovered bool, err error) {
 	f := s.failure
 	if err := s.reload(save); err != nil {
 		changed := err.Error() != f.Err.Error()
-		f.Err, f.Attempts, f.RetryAfter = err, f.Attempts+1, now.Add(recoverEvery)
+		f.Err, f.Attempts, f.RetryAfter = err, f.Attempts+1, now.Add(RecoverEvery)
 		if changed || f.Attempts&(f.Attempts-1) == 0 {
 			s.emit(JournalRecoveryFailed)
 		}

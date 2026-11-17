@@ -80,6 +80,9 @@ func TestALaterRequestRecoversTheJournalWithoutARestart(t *testing.T) {
 	if failed.Status != http.StatusServiceUnavailable || !strings.Contains(failed.ErrMsg, "assignment journal unavailable") || !strings.Contains(failed.ErrMsg, "permission denied") {
 		t.Fatalf("request whose account state write failed answered %d %q, want a 503 naming permission denied", failed.Status, failed.ErrMsg)
 	}
+	if retry, after := failed.Header.Get("X-Should-Retry"), failed.Header.Get("Retry-After"); retry != "true" || after != "5" {
+		t.Fatalf("the 503 while recovery can succeed carried x-should-retry %q and retry-after %q, want true and 5", retry, after)
+	}
 	if moved.Status != http.StatusOK || moved.Text == served(home) || placed.Status != http.StatusOK {
 		t.Fatalf("after the directory became writable the exhausted conversation got %d %q and a new one %d; want both served, the first off %s", moved.Status, moved.Text, placed.Status, home)
 	}
@@ -106,5 +109,8 @@ func TestAReplacedLockFileAnswers503AskingForARestart(t *testing.T) {
 
 	if r.Status != http.StatusServiceUnavailable || !strings.HasSuffix(r.ErrMsg, "lock file was replaced; restart the router") {
 		t.Fatalf("request after the lock file was removed answered %d %q, want a 503 that ends asking for a restart", r.Status, r.ErrMsg)
+	}
+	if retry, after := r.Header.Get("X-Should-Retry"), r.Header.Get("Retry-After"); retry != "false" || after != "" {
+		t.Fatalf("the 503 that asks for a restart carried x-should-retry %q and retry-after %q, want false and none", retry, after)
 	}
 }
