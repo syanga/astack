@@ -146,6 +146,42 @@ new Claude Code session. If `direct` prints
 `./uninstall.sh --component claude-router` removes it. `direct` and uninstall
 keep logins and assignments.
 
+## Keep a Linux machine responsive when memory runs out
+
+When agents and test suites fill a Linux machine's RAM, the kernel evicts the
+code of running programs, and the desktop freezes until the OOM killer ends a
+process. [scripts/memory_guard.py](scripts/memory_guard.py) makes two changes:
+
+- It sets `/sys/kernel/mm/lru_gen/min_ttl_ms` to 1000, so the kernel ends a
+  process instead of evicting pages used in the last second. The kernel's
+  [thrashing prevention](https://docs.kernel.org/admin-guide/mm/multigen_lru.html#thrashing-prevention)
+  notes explain the setting. A file in `/etc/tmpfiles.d` sets it again at
+  each boot.
+- If `/etc/fstab` mounts `/tmp` as tmpfs, it comments out that line, so `/tmp`
+  is on disk after the next reboot. The kernel can then free the pages of
+  files there as cache. Before it replaces `/etc/fstab`, the script checks the
+  edited copy with `findmnt --verify` and saves the old file as
+  `/etc/fstab.astack-backup`.
+
+To check the machine, preview the changes, and make them:
+
+```sh
+python3 scripts/memory_guard.py status
+python3 scripts/memory_guard.py install --dry-run
+sudo python3 scripts/memory_guard.py install
+```
+
+The new `min_ttl_ms` applies immediately. Reboot to move `/tmp` to disk. On
+disk, `/tmp` keeps files across reboots, and `systemd-tmpfiles-clean.timer`
+deletes files older than the age in `/usr/lib/tmpfiles.d/tmp.conf`, 10 days on
+Ubuntu.
+
+When the guard acts, the kernel ends the process with the highest OOM score.
+That is usually the largest process, which can be an agent session.
+
+To revert both changes, run `sudo python3 scripts/memory_guard.py uninstall`,
+then reboot. The script changes nothing on macOS.
+
 ## Find a skill
 
 Ask [astack-help](skills/astack-help/SKILL.md) which skills fit the current task.
