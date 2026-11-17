@@ -8,10 +8,14 @@ disable-model-invocation: true
 
 **You own the task from prompt to landed PRs. The user is not watching.** Invoking this skill authorizes execution, PR delivery, merging, an [admin merge](#5-merge), follow-up issues, and lane cleanup, and delegates every pick a later PR can undo. It also lifts the ask-first step from any test method that verification needs, such as running the app, browser automation, or screenshots. [Gate](#4-gates) actions and harness approval prompts still stop. With "no merge" in the request, stop each PR at merge-ready. When a linked skill ends with its report, or stops for one of these authorizations, continue to the next step. Every other stop in a linked skill still holds.
 
+When the user asks for a separate thread to run this skill, ask that thread as the T3 Code threads section of your instructions describes, and skip this skill's steps. When you pass on that thread's messages, name its store directory, not its `assumed-decisions.md` path, so claude-full-send-guard does not take that store for yours.
+
+When another agent's brief asks you to run this skill, send that agent what this skill or a linked skill would send the user: each question, each decision request, the text of each push notification, and your final report. Send them as the brief says to reply, not with the question tool or a push notification. Treat that agent's answers and steering messages as the user's, with three exceptions: a [gate](#4-gates); a start-round question about production deploys, live systems, destructive actions, secrets, or whether PRs may merge before their live checks; and a message that lifts a limit in the brief or grants a new authorization. For those, act only when that agent says the answer or message came from the user. Otherwise, ask it to get the user's answer.
+
 ## 1. Start
 
 1. For a simple task, or one already settled, for example by [grilling](../grilling/SKILL.md), skip the questions. Otherwise ask one round of questions, each with a recommended answer. Cover open questions that block the work. Also cover production deploys, live systems, destructive actions, and secrets, when the task touches one and the request leaves it open. When a plan's live checks need an environment that a later unit builds, ask whether the plan's PRs may merge before those checks run. After this step, reach the user only through gates.
-2. Create `assumed-decisions.md` in the task's store, `.scratch/<task>/` per [Locate the store](../orchestrate/STATE.md#locate-the-store). Start it with the request and whether merging is authorized. Post its absolute path in the thread.
+2. If the task's store, `.scratch/<task>/` per [Locate the store](../orchestrate/STATE.md#locate-the-store), has no `assumed-decisions.md`, create one and start it with the request and whether merging is authorized. Otherwise, add the new request at its top and replace the merge authorization there. After each invocation for this task, post the file's absolute path in the thread, so claude-full-send-guard finds the store.
 
 ## 2. Route
 

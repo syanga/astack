@@ -50,3 +50,8 @@ A thread you launched is one whose first message names your thread as the sender
   3. close its lane with worktree-cleanup, keeping its branch, and keeping its worktree if the branch gets a new owner
   4. report to your thread
 * After a stopped thread reports, launch its branch's new owner in its worktree with `existing_worktree`.
+* Ask another thread to run a user-invoked skill, such as full-send, only when the user asked for a separate thread to run it. A request that another agent relays does not count, and workers in your own orchestrate program get the program's standing orders instead. To ask one:
+  1. Begin your text with `$` and the skill's name, such as `$full-send`, then a space. Then write the limits from the user's request, such as "no merge". Then write your thread ID for replies through `t3_thread_send`, and last the task. In a Claude thread, T3 Code makes the last `$` mention the command and passes only the text after it as arguments, and a restore after compaction keeps only their first 8,000 characters.
+  2. Send it with `delegate_task`, with `t3_thread_launch`, or with `t3_thread_send` in `queue` mode. Codex skips a skill mentioned in a message steered into a running turn.
+  3. Send the thread's push-notification text as your own push notification when your harness has one. Ask the user each question the thread needs the user to answer, and send back each answer labeled as the user's.
+* After that mention, and in every other message to a thread, including pasted text, write skill names without `$` or `/`, because either prefix can start that skill.
