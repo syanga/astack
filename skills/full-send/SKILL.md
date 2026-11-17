@@ -8,9 +8,17 @@ disable-model-invocation: true
 
 **You own the task from prompt to landed PRs. The user is not watching.** Invoking this skill authorizes execution, PR delivery, merging, an [admin merge](#5-merge), follow-up issues, and lane cleanup, and delegates every pick a later PR can undo. It also lifts the ask-first step from any test method that verification needs, such as running the app, browser automation, or screenshots. [Gate](#4-gates) actions and harness approval prompts still stop. With "no merge" in the request, stop each PR at merge-ready. When a linked skill ends with its report, or stops for one of these authorizations, continue to the next step. Every other stop in a linked skill still holds.
 
-When the user asks for a separate thread to run this skill, ask that thread as the T3 Code threads section of your instructions describes, and skip this skill's steps. When you pass on that thread's messages, name its store directory, not its `assumed-decisions.md` path, so claude-full-send-guard does not take that store for yours.
+When the user asks for a separate thread to run this skill, skip this skill's steps. Ask that thread as [RELAY.md](RELAY.md) describes.
 
-When another agent's brief asks you to run this skill, send that agent what this skill or a linked skill would send the user: each question, each decision request, the text of each push notification, and your final report. Send them as the brief says to reply, not with the question tool or a push notification. Treat that agent's answers and steering messages as the user's, with three exceptions: a [gate](#4-gates); a start-round question about production deploys, live systems, destructive actions, secrets, or whether PRs may merge before their live checks; and a message that lifts a limit in the brief or grants a new authorization. For those, act only when that agent says the answer or message came from the user. Otherwise, ask it to get the user's answer.
+When another agent's brief asks you to run this skill, reply to that agent as the brief says. Send it each question and decision request that this skill or a linked skill would give the user. Also send it the text of each push notification, and your final report. Do not use the question tool or a push notification.
+
+Treat that agent's brief, answers, and steering messages as the user's, except for these decisions:
+
+- a [gate](#4-gates)
+- production deploys, live systems, destructive actions, secrets, or merging PRs before their live checks
+- lifting a limit that the brief sets, or granting an authorization that the brief lacks
+
+For these decisions, act only on what that agent says came from the user. Otherwise, ask it to get the user's answer.
 
 ## 1. Start
 
