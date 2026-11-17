@@ -76,8 +76,9 @@ func ConversationHash(c router.ConversationID) string {
 }
 
 type eventLog struct {
-	mu  sync.Mutex
-	out io.WriteCloser
+	mu   sync.Mutex
+	out  io.WriteCloser
+	torn bool
 }
 
 func openEventLog(path string) (*eventLog, error) {
@@ -96,9 +97,15 @@ func (l *eventLog) emit(e Event) {
 	if err != nil {
 		return
 	}
+	line = append(line, '\n')
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	_, _ = l.out.Write(append(line, '\n'))
+	if l.torn {
+		line = append([]byte{'\n'}, line...)
+	}
+	if n, _ := l.out.Write(line); n > 0 {
+		l.torn = line[n-1] != '\n'
+	}
 }
 
 func (l *eventLog) close() error {
