@@ -1968,8 +1968,8 @@ reported. An `attempt_failed` event for a network failure carries its `phase`
 and the error text in `detail`. A counter the upstream did not report is
 `null`, not 0. A failed write to `events.jsonl`, such as on a full disk,
 loses only that event. Writing resumes with the next event, on a line of its
-own even after a partial write. A service that starts on an `events.jsonl`
-whose last line is partial also starts its first event on a new line
+own even after a partial write. A service whose `events.jsonl` ends in a
+partial line writes its first event on a line of its own
 (`TestAnEventAfterAFailedWriteIsStillLogged`).
 `TestNoSecretInStatusEventsOrLogs` and lane 2 search events, status, logs,
 the journal, and the SDK configuration for every token.

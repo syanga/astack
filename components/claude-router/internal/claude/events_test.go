@@ -27,9 +27,9 @@ func (w *failOnceWriter) Write(p []byte) (int, error) {
 
 func (w *failOnceWriter) Close() error { return nil }
 
-func parsedKinds(log []byte) []string {
+func parsedKinds(data []byte) []string {
 	var kinds []string
-	for _, line := range bytes.Split(log, []byte("\n")) {
+	for _, line := range bytes.Split(data, []byte("\n")) {
 		var e Event
 		if json.Unmarshal(line, &e) == nil {
 			kinds = append(kinds, e.Kind)
