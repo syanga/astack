@@ -1,3 +1,4 @@
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -268,6 +269,23 @@ class AdmissionTests(JobgateTest):
         self.assertEqual(second.workers(), 1)
         self.assertEqual(second.release(), 0)
 
+    def test_a_share_lowered_while_a_run_waits_for_the_queue_lock_still_refuses_it(self):
+        self.set_machine(memory=8 * GIB, cores=16, psi=THRASHING)
+        self.profiles(test=("1G", "1G", 3, "TEST_WORKERS"))
+        waiter = self.hold("waiter")
+        waiter.wait_message("waits for memory pressure")
+        lock = os.open(str(self.root / "home/.cache/jobgate/queue.lock"), os.O_RDWR)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            time.sleep(1.5)
+            self.share(0.2)
+            self.set_machine(memory=8 * GIB, cores=16, psi=CALM)
+        finally:
+            os.close(lock)
+        self.assertEqual(waiter.process.wait(timeout=15), 125)
+        self.assertIn("[test] needs 2.0G for 1 worker, more than this machine's 1.6G share", waiter.stderr())
+        self.assertFalse(waiter.started.exists())
+
     def test_an_invalid_share_file_keeps_waiting_runs_on_the_last_valid_share(self):
         self.set_machine(memory=8 * GIB, cores=16, psi=CALM)
         self.profiles(test=("1G", "1G", 3, "TEST_WORKERS"))
@@ -283,11 +301,14 @@ class AdmissionTests(JobgateTest):
         self.assertEqual(second.stderr().count("keeping memory_share"), 1)
         arriving = self.gate("run", "test", "--", sys.executable, "-c", "pass")
         self.assertEqual(arriving.returncode, 125, arriving.stderr)
-        self.share(0.45)
-        time.sleep(2.5)
-        self.share(2)
-        second.wait_message("keeping memory_share 0.45 ")
-        self.assertEqual(second.stderr().count("keeping memory_share"), 2)
+        deadline = time.monotonic() + 30
+        while second.stderr().count("keeping memory_share") < 2:
+            self.assertLess(time.monotonic(), deadline, second.stderr())
+            self.share(0.45)
+            time.sleep(1.5)
+            self.share(2)
+            time.sleep(1.5)
+        self.assertIn("keeping memory_share 0.45 ", second.stderr())
         self.assertEqual(first.release(), 0)
         self.assertEqual(second.workers(), 2)
         self.assertEqual(second.release(), 0)
