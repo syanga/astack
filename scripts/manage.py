@@ -200,7 +200,6 @@ def deploy(args, harnesses, selected, home, use_env, state_root, state_path, sta
     for target in selected:
         old = state["targets"].get(target, {})
         desired = target_files(target, harnesses, home, use_env, skills) if args.command == "install" else {}
-        # Changing an environment override should not silently migrate a previous install.
         if args.command == "install" and old:
             if destination_file(target, harnesses, home, use_env) not in old:
                 raise ValueError("{} destination changed; uninstall this target before reinstalling".format(target))

@@ -57,7 +57,8 @@ shell expands it before jobgate sets it.
 
 ## Fall back when jobgate is missing
 
-Copy this pattern into a Makefile. Recipe lines start with a tab:
+For a command in a Makefile, copy this pattern into the Makefile. Recipe lines
+start with a tab:
 
 ```make
 test:
@@ -69,8 +70,8 @@ test:
 	fi
 ```
 
-In `jobgate.toml`, set `workers_env = "TEST_WORKERS"` in the `[test]` profile.
-Then copy this pattern into `package.json`:
+For a command in an npm script, first set `workers_env = "TEST_WORKERS"` in the
+`[test]` profile of `jobgate.toml`. Then copy this pattern into `package.json`:
 
 ```json
 {

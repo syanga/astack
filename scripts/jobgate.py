@@ -380,8 +380,8 @@ class Queue:
                     RunFiles.of(self.runs, path.stem).remove()
             finally:
                 os.close(fd)
-        for path in self.runs.glob("*" + SCOPE_SUFFIX):
-            files = RunFiles.of(self.runs, path.stem)
+        for path in self.runs.iterdir():
+            files = RunFiles.of(self.runs, path.name.split(".", 1)[0])
             if not files.record.exists():
                 files.remove()
         return sorted(runs, key=lambda run: run.seq)
@@ -637,7 +637,7 @@ def systemd_version() -> int:
 
 
 def home_key() -> str:
-    return hashlib.sha256(str(Path.home().resolve()).encode()).hexdigest()[:12]
+    return hashlib.sha256(os.fsencode(Path.home().resolve())).hexdigest()[:12]
 
 
 def home_slice() -> str:

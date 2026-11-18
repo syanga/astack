@@ -275,18 +275,19 @@ files for other `PATH` lines. The startup files depend on `SHELL`:
 | other | None. The installer prints the line to add instead. |
 
 Before it writes a line, the installer records the line and the number of copies
-of it that the file already holds. It also records the directory that contains
-the script.
+of it that the file already contains. It also records the directory that
+contains the script.
 
 `./uninstall.sh` removes the installed files and the marked lines. In each
 startup file, it removes the last marked line, the one the installer wrote, and
-leaves any earlier copy. When the file holds no more copies than before the
-install, it removes none. When it cannot rewrite a startup file, it keeps the
-record of the line in that file. The next `./uninstall.sh` then removes the
-line. `./uninstall.sh` also removes the recorded directory and its parent, when
-they are empty. A reinstall that moves the script, such as to another
-`XDG_DATA_HOME`, removes the old directory the same way. `./uninstall.sh` leaves
-`~/.cache/jobgate/`, `~/.config/jobgate.toml`, and the runtime slice settings.
-The empty slice of each `HOME` under which jobgate ran also stays, with its
-`MemoryMax` setting. The slice lasts until the machine reboots or the user's
-last login session ends.
+leaves any earlier copy. When the file contains no more copies than before the
+install, it removes none. So when the user deletes an earlier copy after the
+install, jobgate's marked line stays in the file. When `./uninstall.sh` cannot
+rewrite a startup file, it keeps the record of the line in that file. The next
+`./uninstall.sh` then removes the line. `./uninstall.sh` also removes the
+recorded directory and its parent, when they are empty. A reinstall that moves
+the script, such as to another `XDG_DATA_HOME`, removes the old directory the
+same way. `./uninstall.sh` leaves `~/.cache/jobgate/`, `~/.config/jobgate.toml`,
+and the runtime slice settings. The empty slice of each `HOME` under which
+jobgate ran also stays, with its `MemoryMax` setting. The slice lasts until the
+machine reboots or the user's last login session ends.

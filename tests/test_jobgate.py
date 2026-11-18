@@ -277,10 +277,11 @@ class AdmissionTests(JobgateTest):
         self.assertEqual(second.workers(), 4)
         self.assertEqual(second.release(), 0)
 
-    def test_the_next_run_removes_a_scope_file_that_a_killed_run_left(self):
+    def test_the_next_run_removes_scope_files_that_a_killed_run_left(self):
         runs = self.root / "home/.cache/jobgate/runs"
         runs.mkdir(parents=True)
         (runs / "7-0a1b2c3d.scope").write_text('{"cgroup": "/gone", "peak": 1}')
+        (runs / "8-0a1b2c3e.scope.tmp").write_text('{"cgroup": "/gone"')
         result = self.gate("run", "test", "--", sys.executable, "-c", "pass")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(list(runs.iterdir()), [])
@@ -512,6 +513,22 @@ class ExitCodeTests(JobgateTest):
         self.assertNotIn("MemoryMax", units["jobgate.slice"])
 
     @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
+    @unittest.skipUnless(sys.platform == "linux", "systemd slices exist only on Linux")
+    def test_a_home_that_is_not_utf8_gets_a_slice_and_a_status(self):
+        home = self.root / os.fsdecode(b"home\xff")
+        try:
+            home.mkdir()
+        except OSError:
+            self.skipTest("this file system rejects names that are not UTF-8")
+        env = self.systemd_session("recording systemd", RECORDING_SYSTEMCTL, RECORDING_RUN.format(python=sys.executable))
+        env.update(HOME=str(home), SYSTEMD_LOG=str(self.root / "systemd.log"))
+        run = self.gate("run", "test", "--", sys.executable, "-c", "pass", env=env)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+        status = self.gate("status", env=env)
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assertRegex(status.stdout, r"cap +jobgate-[0-9a-f]{12}\.slice ")
+
     def test_ctrl_c_while_the_scope_starts_skips_the_command(self):
         starting = self.root / "scope starting"
         env = self.systemd_session("session bin", "exit 0\n",
