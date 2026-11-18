@@ -157,8 +157,7 @@ by setting `/sys/kernel/mm/lru_gen/min_ttl_ms` to 1000. The kernel then ends a
 process instead of evicting pages used in the last second. At each boot,
 `systemd-tmpfiles` sets the value again from
 `/etc/tmpfiles.d/astack-memory-guard.conf`. The script needs the kernel's
-multi-gen LRU, and the setting at boot needs `systemd-tmpfiles`. The script
-changes nothing on macOS.
+multi-gen LRU. On macOS, the script changes nothing.
 
 When thrashing prevention acts, the kernel ends the process with the highest
 OOM score. That is usually the largest process, which can be an agent session.
@@ -194,12 +193,14 @@ then stop in emergency mode.
 To move `/tmp` to disk at the next reboot:
 
 1. Run `findmnt --fstab --types tmpfs /tmp`. If it prints a `/tmp` line,
-   comment out that line of `/etc/fstab` with `sudoedit /etc/fstab`, and repeat
-   this step. If it prints nothing, go to step 2.
+   comment out that line with `sudoedit /etc/fstab`. Then repeat this step. If
+   it prints nothing, go to step 2.
 2. Run `sudo systemctl daemon-reload`.
 3. Run `systemctl cat tmp.mount`. If its output has a `Type=tmpfs` line, run
    `sudo systemctl mask tmp.mount`. Ubuntu 26.04 ships a `tmp.mount` with that
-   line.
+   line. If `systemctl mask` reports that `/etc/systemd/system/tmp.mount`
+   already exists, move that file to your home directory with `sudo mv`. Then
+   go back to step 2.
 4. Reboot. `findmnt /tmp` then prints nothing, or shows an `FSTYPE` other than
    `tmpfs`.
 
@@ -212,7 +213,9 @@ To move `/tmp` back to RAM:
 
 1. Run `sudo systemctl unmask tmp.mount`.
 2. Restore any `/etc/fstab` line that you commented out.
-3. Reboot.
+3. If you moved a `tmp.mount` file to your home directory, move it back to
+   `/etc/systemd/system`.
+4. Reboot.
 
 ## Find a skill
 

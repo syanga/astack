@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Keep a Linux machine responsive when its memory runs out.
 
-install turns on the kernel's thrashing prevention now and at each boot.
-uninstall restores the setting from before the first install.
-status reports the setting and needs no root.
-The setting at boot needs systemd-tmpfiles.
+install sets min_ttl_ms to 1000 to turn on the kernel's thrashing prevention.
+systemd-tmpfiles sets the same value again at each boot.
+uninstall restores min_ttl_ms to its value from before the first install.
+status reports min_ttl_ms and needs no root.
 """
 
 import argparse
@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import astack_files as files
 
 MIN_TTL_MS = 1000
-PREVIOUS_VALUE_PREFIX = "# min_ttl_ms before install: "
+BEFORE_INSTALL_PREFIX = "# min_ttl_ms before install: "
 UNAVAILABLE_REASON = "the kernel's multi-gen LRU is missing or off"
 
 
@@ -64,9 +64,9 @@ def _min_ttl_ms_before_install(host: Host) -> int | None:
     text = _read(host.boot_file)
     if text is None:
         return None
-    match = re.search("^{}(\\d+)$".format(re.escape(PREVIOUS_VALUE_PREFIX)), text, re.MULTILINE)
+    match = re.search("^{}(\\d+)$".format(re.escape(BEFORE_INSTALL_PREFIX)), text, re.MULTILINE)
     if match is None:
-        raise GuardError("{} has no line that starts with '{}'".format(host.boot_file, PREVIOUS_VALUE_PREFIX))
+        raise GuardError("{} has no line that starts with '{}'".format(host.boot_file, BEFORE_INSTALL_PREFIX))
     return int(match.group(1))
 
 
@@ -97,7 +97,7 @@ def install(host: Host, *, dry_run: bool) -> None:
             "# Written by astack scripts/memory_guard.py. Its uninstall restores min_ttl_ms and deletes this file.\n"
             "{}{}\n"
             "w {} - - - - {}\n"
-        ).format(PREVIOUS_VALUE_PREFIX, before, host.min_ttl_ms_file, MIN_TTL_MS).encode())
+        ).format(BEFORE_INSTALL_PREFIX, before, host.min_ttl_ms_file, MIN_TTL_MS).encode())
     _set_min_ttl_ms(host, MIN_TTL_MS, dry_run=dry_run)
 
 
