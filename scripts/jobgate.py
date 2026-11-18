@@ -635,14 +635,13 @@ def home_key() -> str:
 
 def home_slice() -> str:
     """systemd nests a slice named jobgate-<key>.slice inside jobgate.slice."""
-    return "jobgate-{}.slice".format(home_key())
+    return "{}-{}.slice".format(SLICE[:-len(".slice")], home_key())
 
 
 def set_slice_cap(share: int) -> str | None:
     if shutil.which("systemd-run") is None:
         return "systemd-run is not installed"
-    for unit, properties in ((SLICE, ["CPUWeight={}".format(CPU_WEIGHT), "MemoryMax=infinity"]),
-                             (home_slice(), ["MemoryMax={}".format(share)])):
+    for unit, properties in ((SLICE, ["CPUWeight={}".format(CPU_WEIGHT)]), (home_slice(), ["MemoryMax={}".format(share)])):
         result = run_captured(["systemctl", "--user", "set-property", "--runtime", unit, *properties], 15)
         if result.returncode != 0:
             return "no systemd user session: {}".format(last_error(result))

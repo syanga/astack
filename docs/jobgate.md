@@ -72,7 +72,7 @@ A run is admitted when all of these hold:
 - At least one worker fits. The stated memory of all running runs, plus this
   run's `base_mem + 1 × worker_mem`, is at most the share. The workers of all
   running runs, plus one, are at most the core count.
-- The OS reports no memory pressure, under the thresholds below. Runs that
+- The pressure reading is below its threshold in the table below. Runs that
   already started keep going under pressure.
 
 An admitted run takes as many workers as fit, up to `max_workers` or
@@ -81,8 +81,9 @@ workers are its reservation until then. The core count is the process's CPU
 affinity on Linux and the logical CPU count on macOS.
 
 Each `HOME` has its own queue and share, and counts its own workers against the
-cores. Runs with two `HOME` values do not see each other, so together they can
-state two shares of memory and use the cores twice.
+cores. Admission under one `HOME` ignores runs under any other `HOME`. Runs
+under two `HOME` values can therefore state two shares of memory and use the
+cores twice.
 
 When a run's `base_mem + 1 × worker_mem` exceeds the share, jobgate exits with
 code 125 instead of waiting.
@@ -115,10 +116,10 @@ call goes through admission like any other run.
 | macOS | `sysctl kern.memorystatus_vm_pressure_level` | the level is 4, critical |
 
 jobgate ignores the Linux `some` line and the macOS warn level, 2. When the
-reading is unavailable, such as on a kernel without PSI, no run waits for
-pressure. `jobgate status` then shows the reading as unknown.
-[Why jobgate holds at these pressure levels](jobgate-thresholds.md) gives the
-evidence for both thresholds.
+reading is unavailable, such as on a kernel without pressure stall information
+(PSI), no run waits for pressure. `jobgate status` then shows the reading as
+unknown. [Why jobgate holds at these pressure levels](jobgate-thresholds.md)
+gives the evidence for both thresholds.
 
 ## Enforcement and priority
 
@@ -128,9 +129,9 @@ SHA-256 of the resolved `HOME`. systemd places that slice inside
 `jobgate.slice`. Through `systemctl --user set-property --runtime`, each run
 sets the `HOME` slice's `MemoryMax` to the share. That `MemoryMax` is the kernel
 memory cap. Each run also sets `jobgate.slice` to `CPUWeight=30`, the weight
-systemd gives its own `background.slice`, and to `MemoryMax=infinity`, so the
-parent adds no cap of its own. Weight competes only among sibling slices, so the
-weight on `jobgate.slice` lowers all gated runs against `app.slice`.
+systemd gives its own `background.slice`. `CPUWeight` competes only among
+sibling slices. Set on `jobgate.slice`, it lowers all gated runs against
+`app.slice`.
 
 Each run is a scope, `jobgate-<key>-<run id>.scope`, inside its `HOME` slice.
 There is no per-run cap. One run can exceed its stated memory and keep running
@@ -149,10 +150,11 @@ scope has no memory controller, as on hosts that still use cgroup v1.
 
 macOS has no cgroups, so it has no kernel memory cap. A run can use more memory
 than it states, and only the pressure hold responds, by delaying new runs.
-jobgate starts the command under `taskpolicy -c utility`. The clamp holds the
-command and every process it starts in the utility QoS class for the whole run.
-A running process cannot leave the clamp. When `/usr/sbin/taskpolicy` is
-missing, jobgate prints one line and runs the command without the clamp.
+jobgate starts the command under `taskpolicy -c utility`, which sets a QoS
+clamp. The clamp holds the command and every process it starts in the utility
+QoS class for the whole run. A running process cannot leave the clamp. When
+`/usr/sbin/taskpolicy` is missing, jobgate prints one line and runs the command
+without the clamp.
 [Why jobgate runs macOS commands at utility QoS](jobgate-macos-priority.md)
 gives the measurements.
 
@@ -269,15 +271,15 @@ files for other `PATH` lines. The startup files depend on `SHELL`:
 | other | None. The installer prints the line to add instead. |
 
 The installer records each line before it writes the line, and it records the
-folder that holds the script.
+directory that holds the script.
 
 `./uninstall.sh` removes the installed files and the marked lines. In each
 startup file, it removes the last marked line, the one the installer wrote, and
 leaves any earlier copy. When it cannot rewrite a startup file, it keeps the
 record of the line in that file. The next `./uninstall.sh` then removes the
-line. `./uninstall.sh` also removes the recorded folder and its parent, when
+line. `./uninstall.sh` also removes the recorded directory and its parent, when
 they are empty. A reinstall that moves the script, such as to another
-`XDG_DATA_HOME`, removes the old folder the same way. It leaves
+`XDG_DATA_HOME`, removes the old directory the same way. `./uninstall.sh` leaves
 `~/.cache/jobgate/`, `~/.config/jobgate.toml`, and the runtime slice settings.
 Those settings last until the machine reboots or the user's last login session
 ends.

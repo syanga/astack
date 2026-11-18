@@ -10,11 +10,11 @@ the thresholds. This page gives the evidence for each.
 
 `/proc/pressure/memory` has two lines. `some` is the fraction of time in which
 at least one task waits on memory. `full` is the fraction in which all non-idle
-tasks wait at once. The
-[kernel's PSI documentation](https://docs.kernel.org/accounting/psi.html) says
-that a workload staying in the `full` state is thrashing. Ordinary page cache
-reclaim on a busy machine raises `some`. jobgate therefore reads only `full`,
-averaged over 10 seconds.
+tasks wait at once. The kernel's
+[pressure stall information (PSI) documentation](https://docs.kernel.org/accounting/psi.html)
+says that a workload staying in the `full` state is thrashing. Ordinary page
+cache reclaim on a busy machine raises `some`. jobgate therefore reads only
+`full`, averaged over 10 seconds.
 
 The tools that kill processes under memory pressure set their limits far above
 10%. By default, systemd-oomd kills a cgroup after the cgroup's `full avg10`

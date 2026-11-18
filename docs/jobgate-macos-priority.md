@@ -1,8 +1,8 @@
 # Why jobgate runs macOS commands at utility QoS
 
-On macOS, jobgate starts each command under `taskpolicy -c utility`. The clamp
-puts the command and every process it starts in the utility quality-of-service
-(QoS) class for the whole run. The
+On macOS, jobgate starts each command under `taskpolicy -c utility`, which sets
+a QoS clamp. The clamp puts the command and every process it starts in the
+utility quality-of-service (QoS) class for the whole run. The
 [jobgate reference](jobgate.md#enforcement-and-priority) describes the behavior.
 This page gives the measurements behind the choice.
 
@@ -58,10 +58,10 @@ python3 burn.py 10 & taskpolicy -b python3 burn.py 14; wait
 Utility QoS costs nothing on an idle Mac. The test run took 0.88 s against 0.91
 s at normal priority. Next to the foreground load, a utility test run slowed
 that load by 0.11 s and still finished in 1.58 s. Background priority kept the
-foreground load at full speed, but it slowed the test run about 18 times even on
-an idle Mac. The `setpriority(2)` man page says that background priority also
-throttles disk I/O. It throttles network I/O too, on sockets that the process
-opens at background priority.
+foreground load at full speed, but it made the test run about 18 times slower,
+even on an idle Mac. The `setpriority(2)` man page says that background priority
+also throttles disk I/O. It throttles network I/O too, on sockets that the
+process opens at background priority.
 
 Switching a test run to background priority while the user works would make the
 foreground load 0.11 s faster, 0.71 s instead of 0.82 s. It would cost the test

@@ -69,8 +69,8 @@ test:
 	fi
 ```
 
-Copy this pattern into `package.json`. It reads `TEST_WORKERS`, so its profile
-needs `workers_env = "TEST_WORKERS"`:
+Copy this pattern into `package.json`, and set `workers_env = "TEST_WORKERS"` in
+the profile it runs:
 
 ```json
 {

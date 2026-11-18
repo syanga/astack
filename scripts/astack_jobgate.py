@@ -2,10 +2,8 @@ import os
 from pathlib import Path
 import re
 import shlex
-import stat
 import sys
 
-import astack_files as files
 import claude_router
 
 NAME = "jobgate"
@@ -32,6 +30,22 @@ def desired_files(scripts, home, use_env):
     return result
 
 
+class Record:
+    def __init__(self, state, save):
+        self.state, self.save = state, save
+        record = state.get(NAME, {})
+        self.lib = record.get("lib")
+        self.path_lines = list(record.get("path_lines", []))
+
+    def store(self):
+        record = {key: value for key, value in (("lib", self.lib), ("path_lines", self.path_lines)) if value}
+        if record:
+            self.state[NAME] = record
+        else:
+            self.state.pop(NAME, None)
+        self.save()
+
+
 def recorded_lib(state):
     if state.get(NAME, {}).get("lib"):
         return Path(state[NAME]["lib"])
@@ -39,13 +53,6 @@ def recorded_lib(state):
         if Path(filename).name == "jobgate.py":
             return Path(filename).parent
     return None
-
-
-def record_lib(state, lib):
-    if lib is None:
-        state.pop(NAME, None)
-    else:
-        state[NAME] = {"lib": str(lib)}
 
 
 def on_path(directory):
@@ -66,24 +73,6 @@ def startup_files(home, use_env):
     return []
 
 
-class PathRecords:
-    def __init__(self, state, save):
-        self.state, self.save = state, save
-        self.records = dict(state.get("shell_path", {}))
-        self.entries = list(self.records.get(NAME) or [])
-
-    def store(self):
-        if self.entries:
-            self.records[NAME] = self.entries
-        else:
-            self.records.pop(NAME, None)
-        if self.records:
-            self.state["shell_path"] = self.records
-        else:
-            self.state.pop("shell_path", None)
-        self.save()
-
-
 def needs_separator(path):
     try:
         data = path.read_bytes()
@@ -92,40 +81,20 @@ def needs_separator(path):
     return bool(data) and not data.endswith(b"\n")
 
 
-def remove_last_block(path, block, separator, created):
-    target = path.resolve() if path.is_symlink() else path
-    try:
-        data = target.read_bytes()
-    except FileNotFoundError:
-        return False
-    index = data.rfind(block)
-    if index < 0:
-        return False
-    end = index + len(block)
-    if separator and end == len(data) and data[index - 1:index] == b"\n":
-        index -= 1
-    rest = data[:index] + data[end:]
-    if created and not rest:
-        target.unlink()
-    else:
-        files.atomic_write(target, rest, stat.S_IMODE(target.stat().st_mode))
-    return True
-
-
 def remove_path_lines(state, dry_run, save):
-    owned = PathRecords(state, save)
-    for entry in list(owned.entries):
+    owned = Record(state, save)
+    for entry in list(owned.path_lines):
         print("REMOVE {} {}".format(entry["file"], entry["lines"][1]))
         if dry_run:
             continue
         try:
-            remove_last_block(Path(entry["file"]), ("\n".join(entry["lines"]) + "\n").encode(),
-                              entry["separator"], entry["created"])
+            claude_router.remove_block(Path(entry["file"]), ("\n".join(entry["lines"]) + "\n").encode(),
+                                       entry["separator"], entry["created"], last=True)
         except OSError as error:
             print("WARN {} ({}); uninstall again to remove: {}".format(
                 entry["file"], claude_router.reason(error), " / ".join(entry["lines"])))
         else:
-            owned.entries.remove(entry)
+            owned.path_lines.remove(entry)
             owned.store()
 
 
@@ -137,14 +106,14 @@ def add_path_lines(state, home, use_env, dry_run, save):
     if on_path(directory):
         print("KEEP PATH ({} is on PATH)".format(directory))
         return
-    files = startup_files(home, use_env)
-    if not files:
+    startup = startup_files(home, use_env)
+    if not startup:
         print("SKIP PATH (no shell file known for SHELL={}; to add it yourself: {})".format(
             os.environ.get("SHELL", ""), lines[1]))
         return
-    owned = PathRecords(state, save)
-    for path in files:
-        entry = next((entry for entry in owned.entries if entry["file"] == str(path)), None)
+    owned = Record(state, save)
+    for path in startup:
+        entry = next((entry for entry in owned.path_lines if entry["file"] == str(path)), None)
         try:
             present = block in path.read_bytes().decode(errors="replace")
         except OSError:
@@ -157,15 +126,34 @@ def add_path_lines(state, home, use_env, dry_run, save):
             continue
         if entry is None:
             entry = {"file": str(path), "lines": list(lines)}
-            owned.entries.append(entry)
+            owned.path_lines.append(entry)
         entry.update(created=not path.exists(), separator=needs_separator(path))
         owned.store()
         try:
             entry["created"], entry["separator"] = claude_router.append_block(path, block.encode())
         except OSError as error:
             print("WARN {} ({}); to add it yourself: {}".format(path, claude_router.reason(error), lines[1]))
-            owned.entries.remove(entry)
+            owned.path_lines.remove(entry)
         owned.store()
+
+
+def finish(command, state, home, use_env, recorded, dry_run, save):
+    if command == "install":
+        add_path_lines(state, home, use_env, dry_run, save)
+        current = lib_dir(home, use_env)
+        if recorded != current:
+            prune(recorded, dry_run)
+        if not dry_run:
+            record = Record(state, save)
+            record.lib = str(current)
+            record.store()
+        return
+    remove_path_lines(state, dry_run, save)
+    prune(recorded, dry_run)
+    if not dry_run and recorded is not None:
+        record = Record(state, save)
+        record.lib = None
+        record.store()
 
 
 def prune(lib, dry_run):

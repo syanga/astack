@@ -457,28 +457,28 @@ class ExitCodeTests(JobgateTest):
                 self.assertEqual(result.stdout.strip(), "['${HOME}', '$HOME']")
                 self.assertNotIn("kernel memory cap is off", result.stderr)
 
-    @unittest.skipUnless(sys.platform == "linux" and cgroup_has_memory_controller(),
-                         "needs Linux and a cgroup with the memory controller for the scope helper")
+    @unittest.skipUnless(sys.platform == "linux", "systemd slices exist only on Linux")
     def test_each_home_caps_its_own_slice(self):
         log = self.root / "systemd.log"
         env = self.systemd_session("recording systemd", RECORDING_SYSTEMCTL, RECORDING_RUN.format(python=sys.executable))
         env["SYSTEMD_LOG"] = str(log)
         self.set_machine(memory=8 * GIB, cores=8, psi=CALM)
-        homes = {"first home": 0.5, "second home": 0.25}
-        for name, memory_share in homes.items():
+        slices = []
+        for name, memory_share in (("first home", 0.5), ("second home", 0.25)):
             (self.root / name / ".config").mkdir(parents=True)
             (self.root / name / ".config/jobgate.toml").write_text("memory_share = {}\n".format(memory_share))
             result = self.gate("run", "test", "--", sys.executable, "-c", "pass", env=dict(env, HOME=str(self.root / name)))
             self.assertEqual(result.returncode, 0, result.stderr)
-        calls = log.read_text().splitlines()
-        caps = [line.split() for line in calls if line.startswith("--user set-property") and "MemoryMax=infinity" not in line]
-        runs = [line.split("--slice=")[1] for line in calls if line.startswith("run ")]
-        self.assertEqual([cap[3] for cap in caps], runs)
-        self.assertEqual(len(set(runs)), 2)
-        self.assertEqual([cap[4] for cap in caps], ["MemoryMax={}".format(4 * GIB), "MemoryMax={}".format(2 * GIB)])
-        self.assertTrue(all(run.startswith("jobgate-") and run.endswith(".slice") for run in runs))
-        parents = [set(line.split()[3:]) for line in calls if line.startswith("--user set-property --runtime jobgate.slice ")]
-        self.assertEqual(parents, [{"jobgate.slice", "CPUWeight=30", "MemoryMax=infinity"}] * 2)
+            slices.append([line.split("--slice=")[1] for line in log.read_text().splitlines() if line.startswith("run ")][-1])
+        units = {}
+        for line in log.read_text().splitlines():
+            words = line.split()
+            if words[:3] == ["--user", "set-property", "--runtime"]:
+                units.setdefault(words[3], {}).update(word.split("=", 1) for word in words[4:])
+        self.assertEqual(len(set(slices)), 2)
+        self.assertEqual([units[unit].get("MemoryMax") for unit in slices], [str(4 * GIB), str(2 * GIB)])
+        self.assertEqual(units["jobgate.slice"].get("CPUWeight"), "30")
+        self.assertNotIn("MemoryMax", units["jobgate.slice"])
 
     @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
     def test_ctrl_c_while_the_scope_starts_skips_the_command(self):
