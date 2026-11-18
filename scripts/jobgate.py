@@ -178,7 +178,8 @@ def read_toml(path: Path) -> dict:
 
 def run_captured(argv: list[str], timeout: float = 60) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        return subprocess.run(argv, capture_output=True, text=True, errors="surrogateescape", timeout=timeout,
+                              stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(argv, 124, "", "{} timed out after {:g}s".format(argv[0], timeout))
     except OSError as error:
@@ -379,6 +380,10 @@ class Queue:
                     RunFiles.of(self.runs, path.stem).remove()
             finally:
                 os.close(fd)
+        for path in self.runs.glob("*" + SCOPE_SUFFIX):
+            files = RunFiles.of(self.runs, path.stem)
+            if not files.record.exists():
+                files.remove()
         return sorted(runs, key=lambda run: run.seq)
 
     def enter(self, profile: str, repo: Path, command: list[str]) -> Ticket:
@@ -402,7 +407,7 @@ def locked_by_another(fd: int) -> bool:
     return False
 
 
-def held(run_file: str) -> bool:
+def run_is_live(run_file: str) -> bool:
     if not os.path.isabs(run_file):
         return False
     try:
@@ -456,7 +461,8 @@ class Ticket:
         os.close(self.fd)
 
 
-def admit(queue: Queue, ticket: Ticket, machine: Machine, profile: Profile, limit: int) -> tuple[Admission, float]:
+def wait_for_admission(queue: Queue, ticket: Ticket, machine: Machine, profile: Profile,
+                       limit: int) -> tuple[Admission, float]:
     arrived = time.monotonic()
     next_report = arrived
     while True:
@@ -670,9 +676,10 @@ def execute(command: list[str], env: dict, share: int, ticket: Ticket, profile: 
             options = ["-p", "OOMPolicy=continue"] if version >= OOM_POLICY_MIN_SYSTEMD else []
             if version >= EXPAND_ENVIRONMENT_MIN_SYSTEMD:
                 options.append("--expand-environment=no")
+            repo = os.fsencode(ticket.run.repo).decode(errors="backslashreplace")
             scope = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--slice=" + home_slice(),
                      "--unit={}-{}-{}".format(UNIT_PREFIX, home_key(), ticket.run.id),
-                     "--description=jobgate {} in {}".format(profile.name, ticket.run.repo), *options, "--",
+                     "--description=jobgate {} in {}".format(profile.name, repo), *options, "--",
                      sys.executable, str(Path(__file__).resolve()), "_scope", str(ticket.files.scope), "--", *command]
             outcome = supervise(scope, env)
             result = read_json(ticket.files.scope)
@@ -715,7 +722,8 @@ def scope_main(result: Path, command: list[str]) -> int:
         peak: int | None = int(peak_file.read_text())
     except (OSError, ValueError):
         peak = max(samples, default=None)
-    write_json(result, {"cgroup": str(cgroup), "peak": peak})
+    with contextlib.suppress(OSError):
+        write_json(result, {"cgroup": str(cgroup), "peak": peak})
     return outcome.code
 
 
@@ -736,7 +744,7 @@ def report(queue: Queue, entries: list[tuple[str, object]]) -> None:
     line = " ".join("{}={}".format(key, logfmt(value)) for key, value in entries)
     say(line)
     try:
-        with open(queue.results, "a") as stream:
+        with open(queue.results, "a", errors="backslashreplace") as stream:
             stream.write(line + "\n")
     except OSError as error:
         say("cannot append to {}: {}".format(queue.results, error.strerror or error))
@@ -765,7 +773,7 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
     limit = min(profile.max_workers, max_workers or profile.max_workers)
     outer = os.environ.get(RUN_ENV, "")
     outer_workers = os.environ.get(WORKERS_ENV, "")
-    if outer_workers.isdigit() and int(outer_workers) >= 1 and held(outer):
+    if outer_workers.isdigit() and int(outer_workers) >= 1 and run_is_live(outer):
         return nested(profile, min(limit, int(outer_workers)), command, outer)
     queue = Queue.open()
     host = machine()
@@ -775,7 +783,7 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
                           profile.name, size(profile.memory(1)), size(host.share), config, machine_config()))
     ticket = queue.enter(profile.name, config.parent, command)
     try:
-        admission, waited = admit(queue, ticket, host, profile, limit)
+        admission, waited = wait_for_admission(queue, ticket, host, profile, limit)
         workers, stated = admission.workers, admission.memory
         commit, dirty = git_state(config.parent)
         say("{} starts with {} ({}={}), {} stated{}".format(
@@ -838,6 +846,7 @@ def status() -> int:
         else:
             lines.append("waiting   {} pid {}, for {}, in {}: {}".format(
                 run.profile, run.pid, duration(now - run.arrived), run.repo, run.command))
+    sys.stdout.reconfigure(errors="backslashreplace")
     print("\n".join(lines))
     return 0
 

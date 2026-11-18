@@ -277,6 +277,14 @@ class AdmissionTests(JobgateTest):
         self.assertEqual(second.workers(), 4)
         self.assertEqual(second.release(), 0)
 
+    def test_the_next_run_removes_a_scope_file_that_a_killed_run_left(self):
+        runs = self.root / "home/.cache/jobgate/runs"
+        runs.mkdir(parents=True)
+        (runs / "7-0a1b2c3d.scope").write_text('{"cgroup": "/gone", "peak": 1}')
+        result = self.gate("run", "test", "--", sys.executable, "-c", "pass")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(list(runs.iterdir()), [])
+
     def test_memory_pressure_holds_new_runs_until_it_eases(self):
         self.set_machine(memory=64 * GIB, cores=8, psi=THRASHING)
         held = self.hold("first")
@@ -376,6 +384,29 @@ class ResultTests(JobgateTest):
                 self.assertEqual(result.returncode, 125, result.stderr)
                 self.assertNotIn("Traceback", result.stderr)
                 self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
+
+    def test_paths_that_are_not_utf8_still_run_and_report(self):
+        unspaced = tempfile.TemporaryDirectory(prefix="jobgate-")
+        self.addCleanup(unspaced.cleanup)
+        checkout = Path(unspaced.name) / os.fsdecode(b"checkout\xff")
+        try:
+            checkout.mkdir()
+            (checkout / os.fsdecode(b"notes\xfe")).write_text("x\n")
+        except OSError:
+            self.skipTest("this file system rejects names that are not UTF-8")
+        (checkout / "jobgate.toml").write_text((self.repo / "jobgate.toml").read_text())
+        subprocess.run(["git", "init", "-q", str(checkout)], check=True, env=self.env)
+        subprocess.run(["git", "-C", str(checkout), "config", "core.quotePath", "false"], check=True, env=self.env)
+        show_status = "import subprocess, sys; sys.exit(subprocess.run([sys.executable, {!r}, 'status']).returncode)".format(
+            str(SCRIPT))
+        result = subprocess.run([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", show_status],
+                                cwd=str(checkout), env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("running   test", result.stdout)
+        _, fields = self.result_line(result.stderr)
+        self.assertEqual(fields["dirty"], "yes")
+        self.assertEqual(len((self.root / "home/.cache/jobgate/results.log").read_text().splitlines()), 1)
 
     def test_a_git_root_whose_name_ends_in_a_space_loads_its_profile(self):
         spaced = self.root / "checkout "

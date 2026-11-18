@@ -216,8 +216,10 @@ time=2026-11-17T18:00:00Z profile=test where=local repo=/src/app commit=4f0c2d9e
 | `exit` | The exit code jobgate returns |
 
 Values that are empty or contain whitespace, a double quote, or `=` are JSON
-strings. All runs append to the same log in the order they end. jobgate runs
-dirty worktrees like clean ones.
+strings. A byte that is not valid UTF-8, such as in a directory name, appears as
+`\udcXX`, where `XX` is the byte in hex. Runs with the same `HOME` append their
+lines to one log in the order they end. jobgate runs dirty worktrees like clean
+ones.
 
 ## Exit codes
 
@@ -249,7 +251,7 @@ code of `taskpolicy`.
 | --- | --- |
 | `~/.cache/jobgate/queue.lock` | The lock that runs take while they read or change the queue |
 | `~/.cache/jobgate/runs/<run id>.json` | One file per waiting or running run, which the run locks with `flock`. The OS releases the lock when the run's process dies. The next run that reads the queue then deletes the file. |
-| `~/.cache/jobgate/runs/<run id>.scope` | Written by jobgate's helper inside the scope: the scope's cgroup and peak memory, or why the kernel memory cap is off |
+| `~/.cache/jobgate/runs/<run id>.scope` | Written by jobgate's helper inside the scope: the scope's cgroup and peak memory, or why the kernel memory cap is off. The next run that reads the queue deletes it after the run's `.json` file is gone. |
 | `~/.cache/jobgate/results.log` | Result lines |
 
 ## Install and remove
@@ -272,16 +274,19 @@ files for other `PATH` lines. The startup files depend on `SHELL`:
 | bash | `~/.bashrc` and the bash login file. Interactive non-login shells read `~/.bashrc`. Login shells read only the first of `~/.bash_profile`, `~/.bash_login`, and `~/.profile` that exists, so the installer writes that file. When none of the three exists, it creates `~/.profile`. |
 | other | None. The installer prints the line to add instead. |
 
-The installer records each line before it writes the line, and it records the
-directory that contains the script.
+Before it writes a line, the installer records the line and the number of copies
+of it that the file already holds. It also records the directory that contains
+the script.
 
 `./uninstall.sh` removes the installed files and the marked lines. In each
 startup file, it removes the last marked line, the one the installer wrote, and
-leaves any earlier copy. When it cannot rewrite a startup file, it keeps the
+leaves any earlier copy. When the file holds no more copies than before the
+install, it removes none. When it cannot rewrite a startup file, it keeps the
 record of the line in that file. The next `./uninstall.sh` then removes the
 line. `./uninstall.sh` also removes the recorded directory and its parent, when
 they are empty. A reinstall that moves the script, such as to another
 `XDG_DATA_HOME`, removes the old directory the same way. `./uninstall.sh` leaves
 `~/.cache/jobgate/`, `~/.config/jobgate.toml`, and the runtime slice settings.
-Each `HOME` that ran jobgate leaves its empty slice and its `MemoryMax` setting.
-Those last until the machine reboots or the user's last login session ends.
+The empty slice of each `HOME` under which jobgate ran also stays, with its
+`MemoryMax` setting. The slice lasts until the machine reboots or the user's
+last login session ends.

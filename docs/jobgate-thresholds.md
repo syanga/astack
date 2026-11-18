@@ -47,12 +47,13 @@ done
 critical. XNU sets the levels from uncompressed available memory, the sum of
 active, inactive, free, and speculative pages, as its
 [memorystatus_notify.md](https://github.com/apple-oss-distributions/xnu/blob/main/doc/vm/memorystatus_notify.md)
-describes. The level turns to warn when that sum falls below half of all
+describes. The level changes to warn when that sum falls below 50% of all
 available memory, compressed pages included. A Mac that compresses memory
 reaches warn routinely, and XNU's advice at warn is only to relax caching. The
-level turns critical below 29%, where the compressor starts swapping and XNU
-warns of latency. Holding at warn would stop a busy but healthy Mac from
-starting runs for hours, so jobgate holds only at critical.
+level changes to critical when the sum falls below 29% of all available memory.
+At that point, the compressor starts swapping, and XNU warns of latency. Holding
+at warn would stop a busy but healthy Mac from starting runs for hours, so
+jobgate holds only at critical.
 
 On macOS, the share limits the memory that gated runs state. Runs can use more
 than they state, and other programs use memory too. Nothing on macOS responds to

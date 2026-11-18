@@ -40,6 +40,7 @@ class PathLine:
     export: str
     created: bool = False
     separator: bool = False
+    existing: int = 0
 
     @property
     def block(self):
@@ -90,6 +91,13 @@ def startup_files(home, use_env):
     return []
 
 
+def copies(path, block):
+    try:
+        return path.read_bytes().count(block)
+    except OSError:
+        return 0
+
+
 def needs_separator(path):
     try:
         data = path.read_bytes()
@@ -98,16 +106,16 @@ def needs_separator(path):
     return bool(data) and not data.endswith(b"\n")
 
 
-def remove_last_block(path, block, separator, created):
+def remove_last_block(path, block, separator, created, existing):
     target = path.resolve() if path.is_symlink() else path
     for _ in range(3):
         try:
             data = target.read_bytes()
         except FileNotFoundError:
             return False
-        index = data.rfind(block)
-        if index < 0:
+        if data.count(block) <= existing:
             return False
+        index = data.rfind(block)
         end = index + len(block)
         if separator and end == len(data) and data[index - 1:index] == b"\n":
             index -= 1
@@ -138,7 +146,7 @@ def remove_path_lines(state, dry_run, save):
         if dry_run:
             continue
         try:
-            remove_last_block(Path(line.file), line.block, line.separator, line.created)
+            remove_last_block(Path(line.file), line.block, line.separator, line.created, line.existing)
         except OSError as error:
             print("WARN {} ({}); uninstall again to remove: {} / {}".format(
                 line.file, claude_router.reason(error), line.marker, line.export))
@@ -162,11 +170,7 @@ def add_path_lines(state, home, use_env, dry_run, save):
     owned = Record(state, save)
     for path in startup:
         line = next((line for line in owned.path_lines if line.file == str(path)), None)
-        try:
-            present = line is not None and line.block in path.read_bytes()
-        except OSError:
-            present = False
-        if present:
+        if line is not None and copies(path, line.block) > line.existing:
             print("KEEP {}".format(path))
             continue
         print("APPEND {} {}".format(path, export))
@@ -175,7 +179,7 @@ def add_path_lines(state, home, use_env, dry_run, save):
         if line is None:
             line = PathLine(str(path), MARKER, export)
             owned.path_lines.append(line)
-        line.created, line.separator = not path.exists(), needs_separator(path)
+        line.created, line.separator, line.existing = not path.exists(), needs_separator(path), copies(path, line.block)
         owned.store()
         try:
             line.created, line.separator = claude_router.append_block(path, line.block)

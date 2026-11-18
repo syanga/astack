@@ -1,10 +1,10 @@
 # Gate a repository's commands with jobgate
 
-jobgate keeps a repository's test suite or build from overloading a machine that
-runs many of them at once. To gate a command, give the repository a
-`jobgate.toml`. Then call `jobgate run` from the repository's commands. With the
-fallback patterns below, the command runs directly with 2 workers on a machine
-without jobgate. For every option, see the [jobgate reference](jobgate.md).
+jobgate keeps many concurrent test suites and builds from overloading one
+machine. To gate a repository's command, give the repository a `jobgate.toml`.
+Then call `jobgate run` from the repository's commands. With the fallback
+patterns below, the command runs directly with 2 workers on a machine without
+jobgate. For every option, see the [jobgate reference](jobgate.md).
 
 ## Add a profile
 
