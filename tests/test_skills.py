@@ -20,8 +20,8 @@ class RepositorySkillsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_review_pr_copies_provider_execution_invocations(self):
-        def invocations(relative):
-            text = (SOURCE / "skills" / relative).read_text(encoding="utf-8")
+        def invocations(skill_path):
+            text = (SOURCE / "skills" / skill_path).read_text(encoding="utf-8")
             blocks = re.findall(r"^```bash\n(.*?)^```", text, re.DOTALL | re.MULTILINE)
             return {block for block in blocks if block.startswith(("codex ", "claude "))}
 
