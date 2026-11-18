@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -59,7 +60,7 @@ class InstallerTests(InstallerFixture):
                              (self.skill / "SKILL.md").read_bytes())
             self.assertTrue(os.access(self.home / skills / "test-skill/scripts/helper.sh", os.X_OK))
         self.assertFalse(list(self.home.rglob("replace-with-skill-name")))
-        self.assertEqual(len(self.manifest()["targets"]), 2)
+        self.assertEqual(set(self.manifest()["targets"]), {"claude", "codex", "jobgate"})
 
     def test_dependency_cache_is_not_installed_or_validated_as_skill_source(self):
         cache = self.skill / "scripts/node_modules"
@@ -85,7 +86,7 @@ class InstallerTests(InstallerFixture):
         result = self.run_installer()
         self.assertNotIn("WRITE", result.stdout)
         self.assertEqual(installed.stat().st_mtime_ns, previous_mtime)
-        self.assertEqual(set(self.manifest()["targets"]), {"claude", "codex"})
+        self.assertEqual(set(self.manifest()["targets"]), {"claude", "codex", "jobgate"})
 
     def test_shared_and_specific_instruction_updates(self):
         self.run_installer()
@@ -218,6 +219,35 @@ class InstallerTests(InstallerFixture):
         self.run_installer("--target", "all", env=env)
         self.assertFalse(outside.exists())
         self.assertTrue((self.home / ".codex/AGENTS.md").exists())
+
+    def test_jobgate_goes_on_path_and_uninstall_removes_what_it_added(self):
+        fake_bin = self.root / "fake bin"
+        fake_bin.mkdir()
+        (fake_bin / "systemctl").write_text("#!/bin/sh\nexit 1\n")
+        (fake_bin / "systemctl").chmod(0o755)
+        path = os.pathsep.join([str(fake_bin), str(Path(sys.executable).parent), "/usr/bin", "/bin"])
+        env = dict(os.environ, SHELL="/bin/zsh", PATH=path)
+        self.run_installer("--target", "jobgate", env=env)
+        jobgate = self.home / ".local/bin/jobgate"
+        startup = self.home / ".zshrc"
+        self.assertIn('export PATH="{}:$PATH"'.format(jobgate.parent), startup.read_text())
+        login = "{}; command -v jobgate; jobgate status".format(startup.read_text().splitlines()[-1])
+        machine = self.root / "machine.json"
+        machine.write_text('{"memory": 8589934592, "cores": 4, "psi": "full avg10=0.00"}')
+        result = subprocess.run(["sh", "-c", login], capture_output=True, text=True, cwd=str(self.root),
+                                env=dict(env, XDG_CACHE_HOME=str(self.root / "cache"), JOBGATE_MACHINE_FILE=str(machine)))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[0], str(jobgate))
+        self.assertIn("share     4.0G (50% of 8.0G; default)", result.stdout)
+
+        self.run_installer("--target", "jobgate", command="uninstall", env=env)
+        self.assertFalse(jobgate.exists())
+        self.assertFalse((self.home / ".local/share/astack").exists())
+        self.assertFalse(startup.exists())
+
+        self.run_installer("--target", "jobgate", env=dict(env, PATH=os.pathsep.join([str(jobgate.parent), path])))
+        self.assertTrue(jobgate.exists())
+        self.assertFalse(startup.exists())
 
     def test_destination_directory_is_not_replaced(self):
         blocker = self.home / ".codex/AGENTS.md"

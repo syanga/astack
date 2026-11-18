@@ -19,6 +19,8 @@ astack provides:
   restoration of managed settings to their original values.
 - An optional [Gitleaks pre-push hook](skills/open-pr/scripts/git_hooks.py)
   to scan commits for secrets. Install and remove it separately from agent configuration.
+- [jobgate](docs/jobgate.md), a command that makes concurrent test suites,
+  builds, and renders wait until they fit the machine's memory and cores.
 
 ## Install
 
@@ -33,8 +35,9 @@ cd astack
 ./install.sh
 ```
 
-Use `--help` to see supported targets and defaults. To choose agents, pass
-`--target <name>` for each one, or `--target all` for every supported agent.
+Use `--help` to see supported targets and defaults. The targets are the agents
+and `jobgate`. To choose targets, pass `--target <name>` for each one, or
+`--target all` for all of them.
 Use the same targets for the preview and installation.
 Installation needs network access to install and refresh the plugins listed in
 [settings/plugins.json](settings/plugins.json) through each agent's plugin CLI.
@@ -145,6 +148,14 @@ new Claude Code session. If `direct` prints
 `claude-router setup` activates the router again.
 `./uninstall.sh --component claude-router` removes it. `direct` and uninstall
 keep logins and assignments.
+
+## Gate heavy commands with jobgate
+
+The default install puts `jobgate` on `PATH`. To make a repository's test suite
+or build wait for room on the machine, follow
+[Gate a repository's commands with jobgate](docs/jobgate-setup.md). The
+[jobgate reference](docs/jobgate.md) covers admission, the Linux memory cap,
+macOS priority, and the result log.
 
 ## Find a skill
 

@@ -16,6 +16,7 @@ import uuid
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 import astack_files as files
+import astack_jobgate
 import astack_plugins
 import astack_settings
 import claude_router
@@ -120,6 +121,18 @@ def desired_files(harness, home, use_env, skills):
     return result
 
 
+def target_files(target, harnesses, home, use_env, skills):
+    if target == astack_jobgate.NAME:
+        return astack_jobgate.desired_files(REPO / "scripts", home, use_env)
+    return desired_files(harnesses[target], home, use_env, skills)
+
+
+def destination_file(target, harnesses, home, use_env):
+    if target == astack_jobgate.NAME:
+        return str(astack_jobgate.bin_path(home))
+    return str(destination(harnesses[target]["instructions"], home, use_env))
+
+
 def settings_operations(harnesses, selected, state, home, use_env, args):
     operations = []
     for target in selected:
@@ -145,16 +158,16 @@ def main():
     harnesses = json.loads((REPO / "harnesses.json").read_text(encoding="utf-8"))
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("install", "uninstall"))
-    parser.add_argument("--target", action="append", choices=list(harnesses) + ["all"],
-                        help="repeat for multiple harnesses; default: claude and codex, unless --component is given")
+    parser.add_argument("--target", action="append", choices=list(harnesses) + [astack_jobgate.NAME, "all"],
+                        help="repeat for multiple targets; default: claude, codex, and jobgate, unless --component is given")
     parser.add_argument("--component", action="append", choices=[claude_router.NAME],
                         help="optional component; never selected by default or by --target all")
     parser.add_argument("--home", type=Path, help="alternate home; ignores configuration environment overrides")
     parser.add_argument("--dry-run", action="store_true", help="show changes without writing anything")
     parser.add_argument("--force", action="store_true", help="back up conflicting files before replacing/removing them")
     args = parser.parse_args()
-    selected = args.target or ([] if args.component else ["claude", "codex"])
-    selected = list(harnesses) if "all" in selected else list(dict.fromkeys(selected))
+    selected = args.target or ([] if args.component else ["claude", "codex", astack_jobgate.NAME])
+    selected = list(harnesses) + [astack_jobgate.NAME] if "all" in selected else list(dict.fromkeys(selected))
     home = (args.home or Path.home()).expanduser().resolve()
     use_env = args.home is None
     state_root = destination({"default": ".local/state", "env": "XDG_STATE_HOME", "suffix": "astack"}, home, use_env)
@@ -171,9 +184,10 @@ def deploy(args, harnesses, selected, home, use_env, state_root, state_path, sta
 
     skills = skill_files() if args.command == "install" else []
     plugins = astack_plugins.load(REPO / "settings/plugins.json") if args.command == "install" else astack_plugins.Source()
-    settings = settings_operations(harnesses, selected, state, home, use_env, args)
+    agents = [target for target in selected if target in harnesses]
+    settings = settings_operations(harnesses, agents, state, home, use_env, args)
     plugin_configs = {}
-    for target in selected:
+    for target in agents:
         spec = harnesses[target]["settings"]
         plugin_configs[target] = astack_plugins.ConfigDir(destination(spec, home, use_env).parent, spec["env"], home, use_env)
         astack_plugins.check_config(target, state, plugin_configs[target])
@@ -184,11 +198,10 @@ def deploy(args, harnesses, selected, home, use_env, state_root, state_path, sta
     conflicts = []
     for target in selected:
         old = state["targets"].get(target, {})
-        desired = desired_files(harnesses[target], home, use_env, skills) if args.command == "install" else {}
+        desired = target_files(target, harnesses, home, use_env, skills) if args.command == "install" else {}
         # Changing an environment override should not silently migrate a previous install.
         if args.command == "install" and old:
-            instruction_path = str(destination(harnesses[target]["instructions"], home, use_env))
-            if instruction_path not in old:
+            if destination_file(target, harnesses, home, use_env) not in old:
                 raise ValueError("{} destination changed; uninstall this target before reinstalling".format(target))
         for filename in sorted(set(old) | set(desired)):
             path = Path(filename)
@@ -280,9 +293,14 @@ def deploy(args, harnesses, selected, home, use_env, state_root, state_path, sta
         # interruption between a payload change and this write needs reconciliation.
         files.save_manifest(state_path, state)
 
+    if astack_jobgate.NAME in selected:
+        astack_jobgate.update_path(args.command, state, home, use_env, args.dry_run,
+                                   lambda: files.save_manifest(state_path, state))
+        if args.command == "uninstall":
+            astack_jobgate.prune(home, use_env, args.dry_run)
     for change in settings:
         change.apply(state, state_path, backup_root, dry_run=args.dry_run)
-    for target in selected:
+    for target in agents:
         astack_plugins.sync(target, plugins, state, state_path, plugin_configs[target], args.dry_run)
     if component:
         claude_router.apply(component, state, state_path, backup_root, dry_run=args.dry_run)
