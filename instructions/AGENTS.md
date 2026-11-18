@@ -31,6 +31,7 @@ A status question about work you are already doing is not a new request. Answer 
 * For standalone work without an existing design, use an information-dense layout with minimal copy, no decorative cards or pills, and no light-gray subtitle lines above sections. No em dashes.
 * Apply the frontend-design skill within these rules. Prototypes come first, and an existing product's conventions win over the skill's aesthetic advice.
 * Avoid continuously repainting CSS animations (pulse, shimmer, blur, spinners); they peg the GPU on high-refresh displays.
+* In T3 Code, before you give the user a URL served from your machine, such as `localhost` or `127.0.0.1`, follow the t3-preview skill's server previews. The user may be on another device.
 
 ## Live systems
 
