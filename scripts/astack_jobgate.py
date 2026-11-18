@@ -2,7 +2,9 @@ import os
 from pathlib import Path
 import re
 import shlex
+import stat
 import sys
+import tempfile
 
 import claude_router
 
@@ -81,6 +83,39 @@ def needs_separator(path):
     return bool(data) and not data.endswith(b"\n")
 
 
+def remove_last_block(path, block, separator, created):
+    target = path.resolve() if path.is_symlink() else path
+    for _ in range(3):
+        try:
+            data = target.read_bytes()
+        except FileNotFoundError:
+            return False
+        index = data.rfind(block)
+        if index < 0:
+            return False
+        end = index + len(block)
+        if separator and end == len(data) and data[index - 1:index] == b"\n":
+            index -= 1
+        rest = data[:index] + data[end:]
+        mode = stat.S_IMODE(target.stat().st_mode)
+        fd, temporary = tempfile.mkstemp(prefix=".astack-", dir=str(target.parent))
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(rest)
+                os.fchmod(stream.fileno(), mode)
+            if target.read_bytes() != data:
+                continue
+            if created and not rest:
+                target.unlink()
+            else:
+                os.replace(temporary, target)
+            return True
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    raise OSError("the file kept changing during removal")
+
+
 def remove_path_lines(state, dry_run, save):
     owned = Record(state, save)
     for entry in list(owned.path_lines):
@@ -88,8 +123,8 @@ def remove_path_lines(state, dry_run, save):
         if dry_run:
             continue
         try:
-            claude_router.remove_block(Path(entry["file"]), ("\n".join(entry["lines"]) + "\n").encode(),
-                                       entry["separator"], entry["created"], last=True)
+            remove_last_block(Path(entry["file"]), ("\n".join(entry["lines"]) + "\n").encode(),
+                              entry["separator"], entry["created"])
         except OSError as error:
             print("WARN {} ({}); uninstall again to remove: {}".format(
                 entry["file"], claude_router.reason(error), " / ".join(entry["lines"])))

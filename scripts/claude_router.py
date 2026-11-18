@@ -582,7 +582,7 @@ def append_block(path, block):
     return not existed, separator
 
 
-def remove_block(path, block, separator, created, last=False):
+def remove_block(path, block, separator, created):
     target = path.resolve() if path.is_symlink() else path
     for _ in range(3):
         try:
@@ -594,8 +594,7 @@ def remove_block(path, block, separator, created, last=False):
         if separator and data.endswith(b"\n" + block):
             rest = data[:-len(block) - 1]
         else:
-            index = data.rfind(block) if last else data.find(block)
-            rest = data[:index] + data[index + len(block):]
+            rest = data.replace(block, b"", 1)
         mode = stat.S_IMODE(target.stat().st_mode)
         fd, temporary = tempfile.mkstemp(prefix=".astack-", dir=str(target.parent))
         try:
