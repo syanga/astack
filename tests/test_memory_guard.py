@@ -51,6 +51,10 @@ class MemoryGuardTests(unittest.TestCase):
                 return line.split()[-1]
         return None
 
+    def has_preview(self, output, verb, path, value=None):
+        return any(line.startswith(verb + " ") and str(path) in line and value in (None, line.split()[-1])
+                   for line in output.splitlines())
+
     def test_install_sets_min_ttl_ms_now_and_at_boot(self):
         self.assertEqual(self.run_main("install")[0], 0)
 
@@ -87,6 +91,11 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertEqual(self.run_main("install")[0], 1)
         self.assertFalse(self.boot_file.exists())
 
+        self.enabled.write_text("0x0007\n")
+        self.ttl.write_text("0\n")
+        self.assertEqual(self.run_main("install")[0], 0)
+        self.assertEqual(self.ttl_now(), "1000")
+
     def test_uninstall_after_the_kernel_lost_multi_gen_lru_removes_the_boot_setting(self):
         self.run_main("install")
         self.ttl.unlink()
@@ -103,6 +112,12 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertEqual(self.ttl_now(), "250")
         self.assertFalse(self.boot_file.exists())
 
+        self.run_main("install")
+        self.ttl.write_text("500\n")
+        self.assertEqual(self.run_main("uninstall")[0], 0)
+        self.assertEqual(self.ttl_now(), "250")
+        self.assertFalse(self.boot_file.exists())
+
     @unittest.skipIf(os.geteuid() == 0, "root can write a read-only file")
     def test_uninstall_reverts_an_install_that_failed_partway(self):
         self.ttl.write_text("250\n")
@@ -115,23 +130,19 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertEqual(self.ttl_now(), "250")
         self.assertFalse(self.boot_file.exists())
 
-    def previews(self, output, verb, path, value=None):
-        return any(line.startswith(verb + " ") and str(path) in line and value in (None, line.split()[-1])
-                   for line in output.splitlines())
-
     def test_dry_runs_name_the_changes_and_make_none(self):
         code, output, _ = self.run_main("install", "--dry-run", uid=1000)
         self.assertEqual(code, 0)
-        self.assertTrue(self.previews(output, "SET", self.ttl, "1000"), output)
-        self.assertTrue(self.previews(output, "WRITE", self.boot_file), output)
+        self.assertTrue(self.has_preview(output, "SET", self.ttl, "1000"), output)
+        self.assertTrue(self.has_preview(output, "WRITE", self.boot_file), output)
         self.assertEqual(self.ttl_now(), "0")
         self.assertFalse(self.boot_file.exists())
 
         self.run_main("install")
         code, output, _ = self.run_main("uninstall", "--dry-run", uid=1000)
         self.assertEqual(code, 0)
-        self.assertTrue(self.previews(output, "SET", self.ttl, "0"), output)
-        self.assertTrue(self.previews(output, "REMOVE", self.boot_file), output)
+        self.assertTrue(self.has_preview(output, "SET", self.ttl, "0"), output)
+        self.assertTrue(self.has_preview(output, "REMOVE", self.boot_file), output)
         self.assertEqual(self.ttl_now(), "1000")
         self.assertEqual(self.ttl_at_boot(), "1000")
 

@@ -184,8 +184,12 @@ sudo python3 scripts/memory_guard.py uninstall
 
 A tmpfs `/tmp` keeps its files in RAM, and the kernel can free that memory only
 by writing the files to swap. A `/tmp` on disk keeps its files on disk. The
-kernel caches them in RAM, and it can write that cache back and free it when
-memory runs short. `findmnt /tmp` shows `tmpfs` in the `FSTYPE` column when `/tmp` is in RAM.
+kernel caches those files in RAM. When memory runs short, the kernel can write
+the cache back to disk and free it. `findmnt /tmp` shows `tmpfs` in the
+`FSTYPE` column when `/tmp` is in RAM.
+
+Never leave `tmp.mount` masked while `/etc/fstab` mounts `/tmp`. The boot can
+then stop in emergency mode.
 
 To move `/tmp` to disk at the next reboot:
 
@@ -194,9 +198,8 @@ To move `/tmp` to disk at the next reboot:
 2. Run `sudo systemctl daemon-reload`.
 3. Run `systemctl cat tmp.mount`.
    - If the first line of the output names
-     `/run/systemd/generator/tmp.mount`, `/etc/fstab` still mounts `/tmp`. Do
-     not mask `tmp.mount` in this state, because the boot can then stop in
-     emergency mode. Go back to step 1.
+     `/run/systemd/generator/tmp.mount`, `/etc/fstab` still mounts `/tmp`. Go
+     back to step 1 without masking `tmp.mount`.
    - If the first line names another unit file, and that file has
      `Type=tmpfs`, run `sudo systemctl mask tmp.mount`. Ubuntu 26.04 ships
      such a unit file.

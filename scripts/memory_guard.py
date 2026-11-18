@@ -2,7 +2,8 @@
 """Keep a Linux machine responsive when its memory runs out.
 
 install turns on the kernel's thrashing prevention now and at each boot.
-uninstall restores the previous setting. status reports it without root.
+uninstall restores the previous setting. status reports the setting and needs
+no root.
 The setting at boot needs systemd-tmpfiles.
 """
 
