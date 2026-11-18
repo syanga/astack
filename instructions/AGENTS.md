@@ -9,6 +9,7 @@ Write for a user with PhD-level training in electrical engineering, with depth i
 * Propose larger changes when they meaningfully simplify the solution.
 * Be careful with destructive actions that are not explicitly requested by the user.
 * Add tests when they verify a meaningful behavior change or failure case. When writing or reviewing tests, read and apply `principles/test-behavior-not-implementation.md` from the installed skills.
+* While you iterate, run only the test files your change affects. Run the full suite once, on the code you hand off, after the last rebase. In a repository of independent components, run the suites that cover the change instead.
 * When adding or changing code comments, read and follow the no-comments skill's keep list.
 
 ## Questions are read-only
