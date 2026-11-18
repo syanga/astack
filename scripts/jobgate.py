@@ -266,8 +266,28 @@ def machine() -> Machine:
     return Machine(int(memory), int(cores), load_memory_share())
 
 
-def with_current_share(host: Machine) -> Machine:
-    return replace(host, memory_share=load_memory_share())
+class LiveShare:
+    def __init__(self, host: Machine) -> None:
+        self.host = host
+        self.warned = False
+
+    def read(self) -> Machine:
+        try:
+            self.host = replace(self.host, memory_share=load_memory_share())
+        except Refusal as refusal:
+            if not self.warned:
+                say("{}; keeping memory_share {:g} until the file is valid".format(refusal, self.host.memory_share))
+            self.warned = True
+        else:
+            self.warned = False
+        return self.host
+
+
+def refuse_if_never_fits(profile: Profile, host: Machine, config: Path) -> None:
+    if profile.memory(1) > host.share:
+        raise Refusal("[{}] needs {} for 1 worker, more than this machine's {} share; lower its base_mem or "
+                      "worker_mem in {}, or raise memory_share in {}".format(
+                          profile.name, size(profile.memory(1)), size(host.share), config, machine_config()))
 
 
 def psi_pressure(text: str) -> Pressure:
@@ -351,17 +371,23 @@ class Queue:
         self.directory = directory
         self.runs = directory / "runs"
         self.results = directory / "results.log"
+        self.lock_file = directory / "queue.lock"
 
     @classmethod
     def open(cls) -> Queue:
         queue = cls(Path.home() / ".cache/jobgate")
-        queue.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        queue.runs.mkdir(mode=0o700, exist_ok=True)
+        try:
+            queue.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            queue.runs.mkdir(mode=0o700, exist_ok=True)
+            os.close(os.open(str(queue.lock_file), os.O_RDWR | os.O_CREAT, 0o600))
+        except OSError as error:
+            raise Refusal("cannot create {}: {}; jobgate keeps its queue in $HOME/.cache/jobgate".format(
+                error.filename or queue.directory, error.strerror or error)) from None
         return queue
 
     @contextlib.contextmanager
     def lock(self):
-        fd = os.open(str(self.directory / "queue.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        fd = os.open(str(self.lock_file), os.O_RDWR | os.O_CREAT, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
             yield
@@ -465,8 +491,8 @@ class Ticket:
         os.close(self.fd)
 
 
-def wait_for_admission(queue: Queue, ticket: Ticket, machine: Machine, profile: Profile,
-                       limit: int) -> tuple[Admission, float]:
+def wait_for_admission(queue: Queue, ticket: Ticket, share: LiveShare, profile: Profile, limit: int,
+                       config: Path) -> tuple[Admission, float]:
     arrived = time.monotonic()
     next_report = arrived
     while True:
@@ -478,7 +504,8 @@ def wait_for_admission(queue: Queue, ticket: Ticket, machine: Machine, profile: 
                 reason = "behind {}".format(plural(len(ahead), "earlier run"))
             else:
                 level = pressure()
-                machine = with_current_share(machine)
+                machine = share.read()
+                refuse_if_never_fits(profile, machine, config)
                 workers = fit(machine, running, profile, limit)
                 if level.holding:
                     reason = "for memory pressure to ease: " + level.reading
@@ -498,6 +525,12 @@ def wait_for_admission(queue: Queue, ticket: Ticket, machine: Machine, profile: 
 class Exit:
     code: int
     signal: int | None = None
+
+
+class Measured(NamedTuple):
+    exit: Exit
+    peak: int | None = None
+    oom_kills: int | None = None
 
 
 def exit_code(returncode: int) -> int:
@@ -673,9 +706,9 @@ def write_json(path: Path, data: dict) -> None:
     os.replace(str(staged), str(path))
 
 
-def execute(command: list[str], env: dict, host: Machine, ticket: Ticket, profile: Profile) -> tuple[Exit, int | None]:
+def execute(command: list[str], env: dict, share: LiveShare, ticket: Ticket, profile: Profile) -> Measured:
     if sys.platform == "linux":
-        failure = set_slice_cap(with_current_share(host).share)
+        failure = set_slice_cap(share.read().share)
         if failure is None:
             version = systemd_version()
             options = ["-p", "OOMPolicy=continue"] if version >= OOM_POLICY_MIN_SYSTEMD else []
@@ -689,29 +722,29 @@ def execute(command: list[str], env: dict, host: Machine, ticket: Ticket, profil
             outcome = supervise(scope, env)
             result = read_json(ticket.files.scope)
             if "cgroup" in result:
-                return outcome, result.get("peak")
+                return Measured(outcome, result.get("peak"), result.get("oom_kills"))
             if outcome.signal is not None:
-                return Exit(128 + outcome.signal, outcome.signal), None
+                return Measured(Exit(128 + outcome.signal, outcome.signal))
             failure = result.get("failure") or "systemd-run could not start a scope"
         say("the kernel memory cap is off ({}); admission and the pressure hold still apply".format(failure))
     elif sys.platform == "darwin":
         code = exec_failure(command, env)
         if code is not None:
-            return Exit(code), None
+            return Measured(Exit(code))
         if os.access(TASKPOLICY, os.X_OK):
             command = [TASKPOLICY, "-c", "utility", *command]
         else:
             say("{} is missing, so the command runs without the utility QoS clamp".format(TASKPOLICY))
     sampler = PeakSampler()
     outcome = supervise(command, env, sampler.sample)
-    return outcome, sampler.peak or None
+    return Measured(outcome, sampler.peak or None)
 
 
 def scope_main(result: Path, command: list[str]) -> int:
     """systemd removes a scope's cgroup when its last process exits, so the scope reads its own peak from inside."""
     with open("/proc/self/cgroup") as stream:
         path = next((line[3:].strip() for line in stream if line.startswith("0::")), "")
-    cgroup = Path("/sys/fs/cgroup" + path)
+    cgroup = Path(test_readings().get("cgroup") or "/sys/fs/cgroup" + path)
     if not (cgroup / "memory.max").exists():
         write_json(result, {"failure": "the scope {} has no memory controller".format(cgroup)})
         return NO_MEMORY_CONTROLLER
@@ -728,8 +761,16 @@ def scope_main(result: Path, command: list[str]) -> int:
     except (OSError, ValueError):
         peak = max(samples, default=None)
     with contextlib.suppress(OSError):
-        write_json(result, {"cgroup": str(cgroup), "peak": peak})
+        write_json(result, {"cgroup": str(cgroup), "peak": peak, "oom_kills": oom_kills(cgroup)})
     return outcome.code
+
+
+def oom_kills(cgroup: Path) -> int | None:
+    try:
+        match = re.search(r"^oom_kill (\d+)$", (cgroup / "memory.events").read_text(), re.MULTILINE)
+    except OSError:
+        return None
+    return int(match.group(1)) if match else None
 
 
 def git_state(repo: Path) -> tuple[str, Dirty]:
@@ -782,20 +823,18 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
         return nested(profile, min(limit, int(outer_workers)), command, outer)
     queue = Queue.open()
     host = machine()
-    if profile.memory(1) > host.share:
-        raise Refusal("[{}] needs {} for 1 worker, more than this machine's {} share; lower its base_mem or "
-                      "worker_mem in {}, or raise memory_share in {}".format(
-                          profile.name, size(profile.memory(1)), size(host.share), config, machine_config()))
+    refuse_if_never_fits(profile, host, config)
+    share = LiveShare(host)
     ticket = queue.enter(profile.name, config.parent, command)
     try:
-        admission, waited = wait_for_admission(queue, ticket, host, profile, limit)
+        admission, waited = wait_for_admission(queue, ticket, share, profile, limit, config)
         workers, stated = admission.workers, admission.memory
         commit, dirty = git_state(config.parent)
         say("{} starts with {} ({}={}), {} stated{}".format(
             profile.name, plural(workers, "worker"), profile.workers_env, workers, size(stated),
             ", after waiting {}".format(duration(waited)) if waited >= 1 else ""))
         env = dict(os.environ, **{profile.workers_env: str(workers), RUN_ENV: str(ticket.files.record), WORKERS_ENV: str(workers)})
-        outcome, peak = execute(command, env, host, ticket, profile)
+        outcome, peak, killed = execute(command, env, share, ticket, profile)
     finally:
         ticket.leave()
     if peak is not None and peak > stated:
@@ -807,7 +846,7 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
         ("profile", profile.name), ("where", "local"), ("repo", config.parent), ("commit", commit),
         ("dirty", dirty), ("workers", workers), ("wait", "{}s".format(round(waited))),
         ("peak", mebibytes(peak) if peak is not None else "unknown"), ("stated", mebibytes(stated)),
-        ("exit", outcome.code),
+        *([("oom_kills", killed)] if killed else []), ("exit", outcome.code),
     ])
     return outcome.code
 

@@ -60,10 +60,12 @@ memory_share = 0.6
 ```
 
 `memory_share` is a number above 0 and at most 1. Without the file, it is 0.5.
-jobgate reads `memory_share` again before each admission attempt and before it
-sets the kernel memory cap. A change therefore also applies to runs that already
-wait. Inside a container, jobgate reads the host's physical memory, not the
-container's memory limit.
+jobgate reads `memory_share` when a run arrives, before each admission attempt,
+and before it sets the kernel memory cap. A change therefore also applies to
+runs that already wait. jobgate exits with code 125 when the file is invalid at
+arrival. When the file turns invalid while a run waits, jobgate prints one
+warning and keeps the last valid value. Inside a container, jobgate reads the
+host's physical memory, not the container's memory limit.
 
 ## Admission
 
@@ -89,7 +91,8 @@ under two `HOME` values can therefore state two shares of memory and use the
 cores twice.
 
 When a run's `base_mem + 1 × worker_mem` exceeds the share, jobgate exits with
-code 125 instead of waiting.
+code 125 instead of waiting. This applies at arrival and at each admission
+attempt, so a run that waits also exits when the share drops below its need.
 
 A waiting run has no time limit. The caller's own timeout ends the wait, and so
 do SIGINT from Ctrl-C, SIGTERM, and SIGHUP. A waiting run prints its reason when
@@ -139,10 +142,14 @@ than `app.slice`.
 
 Each run is a scope, `jobgate-<key>-<run id>.scope`, inside its `HOME` slice.
 There is no per-run cap. One run can exceed its stated memory and keep running
-while all runs with its `HOME` together fit the cap. On systemd 253 or newer,
-each scope has `OOMPolicy=continue`. A kernel OOM kill inside the `HOME` slice
-then ends one process instead of the whole run. On systemd 254 or newer, jobgate
-passes `--expand-environment=no`, so the command receives `$` in its arguments
+while all runs with its `HOME` together fit the cap. When they reach the cap on
+a machine without swap, the kernel reclaims page cache and then OOM-kills a
+process in the `HOME` slice. Its victim can belong to any run under that `HOME`,
+not only to the run that went over. With swap, the slice can swap first, because
+jobgate does not set `MemorySwapMax`. On systemd 253 or newer, each scope has
+`OOMPolicy=continue`. A kernel OOM kill inside the `HOME` slice then ends one
+process instead of the whole run. On systemd 254 or newer, jobgate passes
+`--expand-environment=no`, so the command receives `$` in its arguments
 unchanged. Earlier versions never expand a scope's arguments. `jobgate status`
 prints the `HOME` slice's `MemoryMax` and `MemoryCurrent`, and the `CPUWeight`
 of `jobgate.slice`.
@@ -171,7 +178,10 @@ its command keeps running. Later runs are admitted as if that command had ended.
 On Linux with the kernel memory cap on, the command stays in its `HOME` slice.
 That slice's `MemoryMax` still caps the command together with later runs under
 its `HOME`. On macOS, or on Linux with the kernel memory cap off, only the
-pressure hold protects new runs from that command's memory.
+pressure hold protects new runs from that command's memory. `jobgate status` no
+longer lists the command. On Linux with the kernel memory cap on,
+`systemctl --user list-units 'jobgate-*.scope'` lists the scope that still holds
+it. Otherwise, find it by its command line, for example with `pgrep -fl`.
 
 ## Results
 
@@ -179,11 +189,19 @@ jobgate measures each run's peak memory:
 
 - On Linux in a scope, it reads the scope's `memory.peak`. On kernels before
   5.19, which lack `memory.peak`, it samples `memory.current` every 2 seconds.
+  Both include the page cache and the tmpfs files that the run writes. A run
+  that writes many files can therefore show a high peak and a `worker_mem`
+  warning.
 - On macOS, it adds up the `phys_footprint` of each process in the command's
   tree every 2 seconds, read through `proc_pid_rusage`. `phys_footprint` is the
   memory Activity Monitor shows, and it includes compressed memory.
 - On Linux without a scope, it adds up the resident memory of the command's
   process tree every 2 seconds.
+
+After a run, its page cache stays charged to the `HOME` slice and counts toward
+the cap, but the kernel can reclaim it. Files that the run leaves in a tmpfs,
+such as a `/tmp` mounted as tmpfs, stay charged and cannot be reclaimed without
+swap.
 
 When several processes map one page, the macOS and Linux sums count that page
 once per process. The sums skip a process they cannot read, and they miss
@@ -215,6 +233,7 @@ time=2026-11-17T18:00:00Z profile=test where=local repo=/src/app commit=4f0c2d9e
 | `wait` | Seconds from arrival to start |
 | `peak` | Peak memory in MiB, or `unknown` when jobgate could not measure it, such as for a command that ended before the first sample |
 | `stated` | `base_mem + workers × worker_mem` in MiB |
+| `oom_kills` | On Linux in a scope, the number of the run's processes that the kernel OOM-killed, from the scope's `memory.events`. jobgate writes this field only when the number is above 0. |
 | `exit` | The exit code jobgate returns |
 
 Values that are empty or contain whitespace, a double quote, or `=` are JSON
@@ -228,7 +247,7 @@ ones.
 | Code | Meaning |
 | --- | --- |
 | The command's code | The command exited. A command killed by signal N gives 128+N. |
-| 125 | jobgate refused the run: a usage error, a configuration error, or a run that can never fit. |
+| 125 | jobgate refused the run: a usage error, a configuration error, a run that can never fit, or a `HOME` in which jobgate cannot create `.cache/jobgate/`. |
 | 126 | The command is not executable. |
 | 127 | The command was not found. |
 | 128+N | jobgate received signal N, such as SIGTERM, SIGHUP, or SIGINT from Ctrl-C, before the command started. |
@@ -245,7 +264,7 @@ code of `taskpolicy`.
 | `JOBGATE_WORKERS` | jobgate sets it to the worker count. |
 | `JOBGATE_RUN` | jobgate sets it to the path of the run's file. A nested call reads it to find the outer run. |
 | `HOME` | Contains `.cache/jobgate/` and `.config/jobgate.toml`, and names the `HOME` slice. jobgate ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. Processes with the same `HOME` use one queue, share, and slice. |
-| `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with `memory`, `cores`, and either `psi` or `darwin_level` readings that replace the OS readings. jobgate reads `memory` and `cores` once per run. It reads the pressure reading before each admission attempt. |
+| `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with `memory`, `cores`, and either `psi` or `darwin_level` readings that replace the OS readings. jobgate reads `memory` and `cores` once per run. It reads the pressure reading before each admission attempt. A `cgroup` value names a directory that stands in for the scope's cgroup. |
 
 ## Files
 
@@ -292,4 +311,5 @@ the script, such as to another `XDG_DATA_HOME`, removes the old directory the
 same way. `./uninstall.sh` leaves `~/.cache/jobgate/`, `~/.config/jobgate.toml`,
 and the runtime slice settings. The empty slice of each `HOME` under which
 jobgate ran also stays, with its `MemoryMax` setting. The slice lasts until the
-machine reboots or the user's last login session ends.
+user's systemd manager stops: at reboot, or at the user's last logout when
+lingering is off. With `Linger=yes`, it lasts until reboot.

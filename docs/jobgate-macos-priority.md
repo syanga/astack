@@ -13,8 +13,10 @@ priority, the utility QoS class, and background priority. Background priority is
 `PRIO_DARWIN_BG`, the state that `taskpolicy -b` sets.
 
 The measurements below come from an M4 Pro Mac with 14 cores, 10 performance and
-4 efficiency. A test run used 14 CPU-bound Python workers. A foreground load of
-10 workers at normal priority represented the user's own work.
+4 efficiency. A test run used 14 CPU-bound Python workers, each running a busy
+loop of 20 million iterations. A foreground load of 10 workers at normal
+priority, the default QoS, represented the user's own work. The last two rows
+show a busy Mac.
 
 | Run | Time |
 | --- | --- |
@@ -56,12 +58,14 @@ python3 burn.py 10 & taskpolicy -b python3 burn.py 14; wait
 ```
 
 Utility QoS costs nothing on an idle Mac. The test run took 0.88 s against 0.91
-s at normal priority. Next to the foreground load, a utility test run slowed
-that load by 0.11 s and still finished in 1.58 s. Background priority kept the
-foreground load at full speed, but it made the test run about 18 times slower,
-even on an idle Mac. The `setpriority(2)` man page says that background priority
-also throttles disk I/O. It throttles network I/O too, on sockets that the
-process opens at background priority.
+s at normal priority. On a busy Mac, a utility test run yields but keeps going.
+Next to the foreground load, it took 1.58 s, and the foreground load took 0.82 s
+against 0.71 s alone. Under `taskpolicy -b`, background priority kept the
+foreground load at full speed. But the test run took 16.65 s alone, about 18
+times slower even on an idle Mac, and 17.24 s next to the load. The
+`setpriority(2)` man page says that background priority also throttles disk I/O.
+It throttles network I/O too, on sockets that the process opens at background
+priority.
 
 Switching a test run to background priority while the user works would make the
 foreground load 0.11 s faster, 0.71 s instead of 0.82 s. It would cost the test

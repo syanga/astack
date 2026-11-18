@@ -236,6 +236,38 @@ class AdmissionTests(JobgateTest):
         self.assertEqual(third.workers(), 1)
         self.assertEqual(third.release(), 0)
 
+    def test_a_waiting_run_exits_125_when_the_share_drops_below_its_need(self):
+        self.set_machine(memory=8 * GIB, cores=16, psi=CALM)
+        self.profiles(test=("1G", "1G", 3, "TEST_WORKERS"))
+        first = self.hold("first")
+        self.assertEqual(first.workers(), 3)
+        second = self.hold("second")
+        second.wait_message("waits for memory")
+        self.share(0.2)
+        self.assertEqual(second.process.wait(timeout=30), 125)
+        self.assertIn("[test] needs 2.0G for 1 worker, more than this machine's 1.6G share", second.stderr())
+        self.assertFalse(second.started.exists())
+        self.assertEqual(first.release(), 0)
+
+    def test_an_invalid_share_file_keeps_waiting_runs_on_the_last_valid_share(self):
+        self.set_machine(memory=8 * GIB, cores=16, psi=CALM)
+        self.profiles(test=("1G", "1G", 3, "TEST_WORKERS"))
+        self.share(0.5)
+        first = self.hold("first")
+        self.assertEqual(first.workers(), 3)
+        second = self.hold("second")
+        second.wait_message("waits for memory")
+        self.share(2)
+        second.wait_message("keeping memory_share 0.5")
+        time.sleep(2.5)
+        self.assertIsNone(second.process.poll())
+        self.assertEqual(second.stderr().count("keeping memory_share"), 1)
+        arriving = self.gate("run", "test", "--", sys.executable, "-c", "pass")
+        self.assertEqual(arriving.returncode, 125, arriving.stderr)
+        self.assertEqual(first.release(), 0)
+        self.assertEqual(second.workers(), 3)
+        self.assertEqual(second.release(), 0)
+
     def test_max_workers_flag_only_lowers_the_profile(self):
         self.assertEqual(self.workers_of("--max-workers", "3"), 3)
         self.assertEqual(self.workers_of("--max-workers", "20"), 4)
@@ -435,6 +467,24 @@ class ResultTests(JobgateTest):
                                 cwd=str(subdirectory), env=self.env, capture_output=True, text=True, timeout=60)
         self.assertEqual((result.returncode, result.stdout.strip()), (0, "4"), result.stderr)
 
+    @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
+    def test_result_line_counts_oom_kills_in_the_scope(self):
+        env = self.systemd_session("systemd 259", '[ "$1" = --version ] && echo "systemd 259"\nexit 0\n',
+                                   SYSTEMD_RUN.format(python=sys.executable, version=259))
+        cgroup = self.root / "scope cgroup"
+        cgroup.mkdir()
+        (cgroup / "memory.max").write_text("max\n")
+        (cgroup / "memory.peak").write_text(str(100 * 2**20))
+        for killed in (0, 2):
+            with self.subTest(oom_kill=killed):
+                (cgroup / "memory.events").write_text("low 0\nhigh 0\nmax 3\noom 1\noom_kill {}\n".format(killed))
+                self.set_machine(memory=64 * GIB, cores=8, psi=CALM, cgroup=str(cgroup))
+                result = self.gate("run", "test", "--", sys.executable, "-c", "raise SystemExit(137)", env=env)
+                self.assertEqual(result.returncode, 137, result.stderr)
+                _, fields = self.result_line(result.stderr)
+                self.assertEqual(fields["peak"], "100M")
+                self.assertEqual(fields.get("oom_kills"), str(killed) if killed else None)
+
     def test_peak_above_the_stated_memory_names_the_number_to_raise(self):
         self.profiles(test=("1M", "1M", 1, "TEST_WORKERS"))
         allocate = "import time; block = bytearray(96 << 20); block[::4096] = b'x' * len(block[::4096]); time.sleep(3)"
@@ -605,6 +655,20 @@ class ExitCodeTests(JobgateTest):
         result = self.gate("run", "test", "--", sys.executable, "-c", "raise SystemExit(9)")
         self.assertEqual(result.returncode, 125)
         self.assertIn("no jobgate.toml", result.stderr)
+
+    def test_a_home_that_jobgate_cannot_write_exits_125_with_one_line(self):
+        if os.geteuid() == 0:
+            self.skipTest("root can write a read-only directory")
+        home = self.root / "read-only home"
+        home.mkdir(mode=0o555)
+        self.addCleanup(home.chmod, 0o755)
+        env = dict(self.env, HOME=str(home))
+        for arguments in (("run", "test", "--", sys.executable, "-c", "pass"), ("status",)):
+            with self.subTest(command=arguments[0]):
+                result = self.gate(*arguments, env=env)
+                self.assertEqual(result.returncode, 125, result.stderr)
+                self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
+                self.assertIn("cannot create {}".format(home / ".cache"), result.stderr)
 
     def test_sigterm_or_sighup_while_waiting_exits_128_plus_n(self):
         self.set_machine(memory=64 * GIB, cores=4, psi=CALM)
