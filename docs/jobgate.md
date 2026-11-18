@@ -52,7 +52,7 @@ learns these numbers from past runs.
 
 The share is the memory that all of one user's gated runs may state together.
 It is `memory_share` times the machine's physical memory. `memory_share` comes
-from `~/.config/jobgate.toml`, or `$XDG_CONFIG_HOME/jobgate.toml`:
+from `~/.config/jobgate.toml`:
 
 ```toml
 memory_share = 0.6
@@ -79,8 +79,8 @@ An admitted run takes as many workers as fit, up to `max_workers` or
 process's CPU affinity on Linux and the logical CPU count on macOS. Each user
 has their own queue, so the share and the core limit apply per user.
 
-jobgate refuses a run whose single worker exceeds the share with exit code 125,
-because that run could never start.
+When a run's `base_mem + 1 × worker_mem` exceeds the share, jobgate exits with
+code 125 instead of waiting.
 
 A waiting run has no time limit, so only the caller's own timeout ends it. It
 prints its reason when it starts waiting and once a minute after that:
@@ -131,8 +131,8 @@ On Linux without a systemd user session, such as in containers and some WSL
 setups, jobgate prints one line saying the kernel memory cap is off, then
 applies admission and the pressure hold without it.
 
-macOS has no cgroups, so it has no kernel memory cap, and the pressure hold is
-the backstop. A run's processes get background priority, `PRIO_DARWIN_BG`,
+macOS has no cgroups, so it has no kernel memory cap, and only the pressure
+hold limits memory beyond what runs state. A run's processes get background priority, `PRIO_DARWIN_BG`,
 while someone uses the Mac. After 2 minutes without keyboard or mouse input,
 read from `ioreg`'s `HIDIdleTime`, they get normal priority. jobgate checks
 every 2 seconds and prints a line when the priority changes.
@@ -161,7 +161,7 @@ jobgate: peak 5.2G is above the 4.0G that [test] states for 4 workers; raise wor
 ```
 
 At the end of each run, jobgate prints one result line and appends it to
-`~/.cache/jobgate/results.log`, or `$XDG_CACHE_HOME/jobgate/results.log`:
+`~/.cache/jobgate/results.log`:
 
 ```text
 time=2026-11-17T18:00:00Z profile=test where=local repo=/src/app commit=4f0c2d9e1b7a5c3e8d6f4a2b0c9e7d5f3a1b8c6e dirty=yes workers=4 wait=12s peak=3172M stated=4096M exit=0
@@ -201,8 +201,7 @@ worktrees like clean ones.
 | The profile's `workers_env` | jobgate sets it to the worker count. |
 | `JOBGATE_WORKERS` | jobgate sets it to the worker count. |
 | `JOBGATE_RUN` | jobgate sets it to the path of the run's file, which marks nested calls. |
-| `XDG_CACHE_HOME` | Holds `jobgate/`, when set to an absolute path. |
-| `XDG_CONFIG_HOME` | Holds the machine file, when set to an absolute path. |
+| `HOME` | Holds `.cache/jobgate/` and `.config/jobgate.toml`. jobgate ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`, so all of a user's processes share one queue. |
 | `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with `memory`, `cores`, and `psi` or `darwin_level` readings that replace the OS readings. jobgate rereads it on every check. |
 
 ## Files
@@ -210,7 +209,7 @@ worktrees like clean ones.
 | Path | Content |
 | --- | --- |
 | `~/.cache/jobgate/queue.lock` | The lock that runs hold while they read or change the queue |
-| `~/.cache/jobgate/runs/<run id>.json` | One file per waiting or running run. The run holds a `flock` on it, so the OS releases it when the run's process dies, and the next reader deletes it. |
+| `~/.cache/jobgate/runs/<run id>.json` | One file per waiting or running run, which the run holds a `flock` on. The OS releases the lock when the run's process dies. The next run that reads the queue then deletes the file. |
 | `~/.cache/jobgate/runs/<run id>.scope` | The scope's cgroup and peak memory, which the scope writes before it ends |
 | `~/.cache/jobgate/results.log` | Result lines |
 

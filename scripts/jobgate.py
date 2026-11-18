@@ -75,12 +75,12 @@ def say(text: str) -> None:
         pass
 
 
-def size(count: int) -> str:
-    return "{:.1f}G".format(count / 2**30) if count >= 2**30 else "{}M".format(math.ceil(count / 2**20))
-
-
 def mebibytes(count: int) -> str:
     return "{}M".format(math.ceil(count / 2**20))
+
+
+def size(count: int) -> str:
+    return "{:.1f}G".format(count / 2**30) if count >= 2**30 else mebibytes(count)
 
 
 def duration(seconds: float) -> str:
@@ -112,11 +112,11 @@ class Profile:
 class Machine:
     memory: int
     cores: int
-    share: float
+    memory_share: float
 
     @property
-    def budget(self) -> int:
-        return int(self.memory * self.share)
+    def share(self) -> int:
+        return int(self.memory * self.memory_share)
 
 
 @dataclass(frozen=True)
@@ -195,13 +195,8 @@ def load_profile(path: Path, name: str) -> Profile:
                    parse_size(table["worker_mem"], where.format("worker_mem")), max_workers, workers_env)
 
 
-def xdg_dir(variable: str, default: str) -> Path:
-    value = os.environ.get(variable, "")
-    return Path(value) if os.path.isabs(value) else Path.home() / default
-
-
 def machine_config() -> Path:
-    return xdg_dir("XDG_CONFIG_HOME", ".config") / "jobgate.toml"
+    return Path.home() / ".config/jobgate.toml"
 
 
 def load_share() -> float:
@@ -275,7 +270,7 @@ def pressure() -> Pressure:
 
 
 def free(machine: Machine, running: list[Admission]) -> tuple[int, int]:
-    return (machine.budget - sum(admission.memory for admission in running),
+    return (machine.share - sum(admission.memory for admission in running),
             machine.cores - sum(admission.workers for admission in running))
 
 
@@ -293,11 +288,25 @@ def shortage(machine: Machine, running: list[Admission], profile: Profile) -> st
     if free_cores < 1:
         return "for a core: gated workers use all {} cores".format(machine.cores)
     return "for memory: 1 worker needs {}, and {} of the {} share is free".format(
-        size(profile.memory(1)), size(max(0, free_memory)), size(machine.budget))
+        size(profile.memory(1)), size(max(0, free_memory)), size(machine.share))
 
 
-def run_files(runs: Path, run_id: str) -> list[Path]:
-    return [runs / (run_id + suffix) for suffix in (".json", ".scope", ".scope.tmp")]
+def temporary(path: Path) -> Path:
+    return path.with_name(path.name + ".tmp")
+
+
+class RunFiles(NamedTuple):
+    record: Path
+    scope: Path
+
+    @classmethod
+    def of(cls, runs: Path, run_id: str) -> RunFiles:
+        return cls(runs / (run_id + ".json"), runs / (run_id + ".scope"))
+
+    def remove(self) -> None:
+        for path in (self.record, self.scope, temporary(self.scope)):
+            with contextlib.suppress(FileNotFoundError):
+                path.unlink()
 
 
 class Queue:
@@ -307,7 +316,7 @@ class Queue:
 
     @classmethod
     def open(cls) -> Queue:
-        directory = xdg_dir("XDG_CACHE_HOME", ".cache") / "jobgate"
+        directory = Path.home() / ".cache/jobgate"
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         (directory / "runs").mkdir(mode=0o700, exist_ok=True)
         return cls(directory)
@@ -336,9 +345,7 @@ class Queue:
                     if run is not None:
                         runs.append(run)
                     continue
-                for leftover in run_files(self.runs, path.stem):
-                    with contextlib.suppress(FileNotFoundError):
-                        leftover.unlink()
+                RunFiles.of(self.runs, path.stem).remove()
             finally:
                 os.close(fd)
         return sorted(runs, key=lambda run: run.seq)
@@ -349,7 +356,7 @@ class Queue:
             text = shlex.join(command)
             run = Run(id="{}-{}".format(seq, secrets.token_hex(4)), seq=seq, pid=os.getpid(), profile=profile,
                       repo=str(repo), command=text if len(text) <= 160 else text[:157] + "...", arrived=time.time())
-            fd = os.open(str(self.runs / (run.id + ".json")), os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+            fd = os.open(str(RunFiles.of(self.runs, run.id).record), os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
             fcntl.flock(fd, fcntl.LOCK_EX)
             ticket = Ticket(self, run, fd)
             ticket.save()
@@ -396,12 +403,8 @@ class Ticket:
         self.fd = fd
 
     @property
-    def path(self) -> Path:
-        return self.queue.runs / (self.run.id + ".json")
-
-    @property
-    def scope_result(self) -> Path:
-        return self.queue.runs / (self.run.id + ".scope")
+    def files(self) -> RunFiles:
+        return RunFiles.of(self.queue.runs, self.run.id)
 
     def save(self) -> None:
         os.ftruncate(self.fd, 0)
@@ -409,9 +412,7 @@ class Ticket:
 
     def leave(self) -> None:
         with self.queue.lock():
-            for path in run_files(self.queue.runs, self.run.id):
-                with contextlib.suppress(FileNotFoundError):
-                    path.unlink()
+            self.files.remove()
         os.close(self.fd)
 
 
@@ -552,7 +553,7 @@ class TreeMonitor:
         self.darwin = darwin
         self.peak = 0
         self.background: bool | None = None
-        self.levels: dict[int, bool] = {}
+        self.backgrounded: dict[int, bool] = {}
 
     def sample(self, root: int) -> None:
         table = process_table()
@@ -568,13 +569,13 @@ class TreeMonitor:
                 "normal priority: no keyboard or mouse input for {}".format(duration(IDLE_SECONDS)))
         self.background = background
         for pid in tree:
-            if self.levels.get(pid) == background:
+            if self.backgrounded.get(pid) == background:
                 continue
             try:
                 os.setpriority(PRIO_DARWIN_PROCESS, pid, PRIO_DARWIN_BG if background else 0)
             except (ProcessLookupError, PermissionError):
                 continue
-            self.levels[pid] = background
+            self.backgrounded[pid] = background
 
 
 def systemd_version() -> int:
@@ -587,12 +588,12 @@ def systemd_version() -> int:
     return int(match.group(1)) if match else 0
 
 
-def set_slice_cap(budget: int) -> str | None:
+def set_slice_cap(share: int) -> str | None:
     if shutil.which("systemd-run") is None:
         return "systemd-run is not installed"
     try:
         result = subprocess.run(["systemctl", "--user", "set-property", "--runtime", SLICE,
-                                 "MemoryMax={}".format(budget), "CPUWeight={}".format(CPU_WEIGHT)],
+                                 "MemoryMax={}".format(share), "CPUWeight={}".format(CPU_WEIGHT)],
                                 capture_output=True, text=True, timeout=15, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired) as error:
         return "no systemd user session: {}".format(error)
@@ -609,22 +610,22 @@ def read_json(path: Path) -> dict:
 
 
 def write_json(path: Path, data: dict) -> None:
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(json.dumps(data))
-    os.replace(str(temporary), str(path))
+    staged = temporary(path)
+    staged.write_text(json.dumps(data))
+    os.replace(str(staged), str(path))
 
 
-def execute(command: list[str], env: dict, budget: int, ticket: Ticket, profile: Profile) -> tuple[Exit, int | None]:
+def execute(command: list[str], env: dict, share: int, ticket: Ticket, profile: Profile) -> tuple[Exit, int | None]:
     if sys.platform == "linux":
-        failure = set_slice_cap(budget)
+        failure = set_slice_cap(share)
         if failure is None:
             policy = ["-p", "OOMPolicy=continue"] if systemd_version() >= SCOPE_OOM_POLICY_SYSTEMD else []
             scope = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--slice=" + SLICE,
                      "--unit=jobgate-{}".format(ticket.run.id),
                      "--description=jobgate {} in {}".format(profile.name, ticket.run.repo), *policy, "--",
-                     sys.executable, str(Path(__file__).resolve()), "_scope", str(ticket.scope_result), "--", *command]
+                     sys.executable, str(Path(__file__).resolve()), "_scope", str(ticket.files.scope), "--", *command]
             outcome = supervise(scope, env)
-            result = read_json(ticket.scope_result)
+            result = read_json(ticket.files.scope)
             if "cgroup" in result or outcome.signal is not None:
                 return outcome, result.get("peak")
             say("systemd-run could not start a scope, so this run has no kernel memory cap")
@@ -717,10 +718,10 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
     if outer_workers.isdigit() and int(outer_workers) >= 1 and held(outer):
         return nested(profile, min(limit, int(outer_workers)), command, outer)
     found = machine()
-    if profile.memory(1) > found.budget:
+    if profile.memory(1) > found.share:
         raise Refusal("[{}] needs {} for 1 worker, more than this machine's {} share; lower its base_mem or "
                       "worker_mem in {}, or raise memory_share in {}".format(
-                          profile.name, size(profile.memory(1)), size(found.budget), config, machine_config()))
+                          profile.name, size(profile.memory(1)), size(found.share), config, machine_config()))
     ticket = queue.enter(profile.name, config.parent, command)
     try:
         admission, waited = admit(queue, ticket, found, profile, limit)
@@ -729,8 +730,8 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
         say("{} starts with {} ({}={}), {} stated{}".format(
             profile.name, plural(workers, "worker"), profile.workers_env, workers, size(stated),
             ", after waiting {}".format(duration(waited)) if waited >= 1 else ""))
-        env = dict(os.environ, **{profile.workers_env: str(workers), RUN_ENV: str(ticket.path), WORKERS_ENV: str(workers)})
-        outcome, peak = execute(command, env, found.budget, ticket, profile)
+        env = dict(os.environ, **{profile.workers_env: str(workers), RUN_ENV: str(ticket.files.record), WORKERS_ENV: str(workers)})
+        outcome, peak = execute(command, env, found.share, ticket, profile)
     finally:
         ticket.leave()
     if peak is not None and peak > stated:
@@ -749,7 +750,7 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
 
 def cap_text() -> str:
     if sys.platform == "darwin":
-        return "none on macOS; the pressure hold is the backstop"
+        return "none on macOS, where only the pressure hold limits memory"
     try:
         result = subprocess.run(["systemctl", "--user", "show", SLICE, "-p", "MemoryMax", "-p", "CPUWeight",
                                  "-p", "MemoryCurrent"], capture_output=True, text=True, timeout=15,
@@ -774,8 +775,8 @@ def status() -> int:
     now = time.time()
     source = machine_config() if machine_config().is_file() else "default"
     lines = [
-        "share     {} ({:.0%} of {}; {})".format(size(found.budget), found.share, size(found.memory), source),
-        "memory    {} of {} stated by running runs".format(size(found.budget - free(found, running)[0]), size(found.budget)),
+        "share     {} ({:.0%} of {}; {})".format(size(found.share), found.memory_share, size(found.memory), source),
+        "memory    {} of {} stated by running runs".format(size(found.share - free(found, running)[0]), size(found.share)),
         "cores     {} of {} used by gated workers".format(found.cores - free(found, running)[1], found.cores),
         "pressure  {}{}".format(level.reading, "; new runs wait" if level.holding else ""),
         "cap       {}".format(cap_text()),

@@ -92,8 +92,8 @@ class JobgateTest(unittest.TestCase):
         self.env = {key: value for key, value in os.environ.items()
                     if not key.startswith(("JOBGATE_", "XDG_", "DBUS_"))}
         self.env.update(
-            HOME=str(self.root / "home"), XDG_CACHE_HOME=str(self.root / "cache"),
-            XDG_CONFIG_HOME=str(self.root / "config"), XDG_RUNTIME_DIR=str(self.root / "runtime"),
+            HOME=str(self.root / "home"), XDG_CACHE_HOME=str(self.root / "xdg cache"),
+            XDG_CONFIG_HOME=str(self.root / "xdg config"), XDG_RUNTIME_DIR=str(self.root / "runtime"),
             PATH=str(fake_bin) + os.pathsep + os.environ.get("PATH", ""), JOBGATE_MACHINE_FILE=str(self.machine_file))
         self.held = []
         self.addCleanup(self.stop_held)
@@ -121,8 +121,8 @@ class JobgateTest(unittest.TestCase):
         (self.repo / "jobgate.toml").write_text(text)
 
     def share(self, value):
-        config = self.root / "config"
-        config.mkdir(exist_ok=True)
+        config = self.root / "home/.config"
+        config.mkdir(parents=True, exist_ok=True)
         (config / "jobgate.toml").write_text("memory_share = {}\n".format(value))
 
     def gate(self, *arguments, env=None, timeout=60):
@@ -197,16 +197,16 @@ class AdmissionTests(JobgateTest):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), ["test 4", "lint 2"])
 
-    def test_nested_call_with_its_own_cache_folder_stays_inside(self):
-        other_cache = self.root / "other cache"
+    def test_nested_call_with_its_own_home_stays_inside(self):
+        other_home = self.root / "other home"
         inner = ("import os, subprocess, sys\n"
-                 "env = dict(os.environ, XDG_CACHE_HOME=sys.argv[2])\n"
+                 "env = dict(os.environ, HOME=sys.argv[2])\n"
                  "subprocess.run([sys.executable, sys.argv[1], 'run', 'test', '--', sys.executable, '-c', 'pass'],"
                  " env=env, check=True, timeout=30)\n")
-        result = self.gate("run", "test", "--", sys.executable, "-c", inner, str(SCRIPT), str(other_cache))
+        result = self.gate("run", "test", "--", sys.executable, "-c", inner, str(SCRIPT), str(other_home))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len((self.root / "cache/jobgate/results.log").read_text().splitlines()), 1)
-        self.assertFalse((other_cache / "jobgate/results.log").exists())
+        self.assertEqual(len((self.root / "home/.cache/jobgate/results.log").read_text().splitlines()), 1)
+        self.assertFalse((other_home / ".cache/jobgate/results.log").exists())
 
     def test_marker_of_an_ended_run_does_not_count_as_nesting(self):
         ended = self.gate("run", "test", "--", sys.executable, "-c", "import os; print(os.environ['JOBGATE_RUN'])")
@@ -297,7 +297,7 @@ class ResultTests(JobgateTest):
         self.git("add", ".")
         self.git("commit", "-q", "-m", "initial")
         commit = self.git("rev-parse", "HEAD").strip()
-        log = self.root / "cache/jobgate/results.log"
+        log = self.root / "home/.cache/jobgate/results.log"
 
         clean = self.gate("run", "test", "--", sys.executable, "-c", PRINT_WORKERS)
         line, fields = self.result_line(clean.stderr)
@@ -329,8 +329,9 @@ class ResultTests(JobgateTest):
         result = self.gate("run", "test", "--", sys.executable, "-c", allocate)
         self.assertEqual(result.returncode, 0, result.stderr)
         _, fields = self.result_line(result.stderr)
-        self.assertGreaterEqual(int(fields["peak"].rstrip("M")), 96)
-        self.assertRegex(result.stderr, r'raise worker_mem to "\d+M" in .*jobgate\.toml')
+        peak = int(fields["peak"].rstrip("M"))
+        self.assertGreaterEqual(peak, 96)
+        self.assertIn('raise worker_mem to "{}M" in {}'.format(peak - 1, self.repo / "jobgate.toml"), result.stderr)
 
 
 class ExitCodeTests(JobgateTest):

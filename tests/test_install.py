@@ -232,8 +232,7 @@ class InstallerTests(InstallerFixture):
         startup = self.home / ".zshrc"
         machine = self.root / "machine.json"
         machine.write_text('{"memory": 8589934592, "cores": 4, "psi": "full avg10=0.00"}')
-        shell_env = dict(env, HOME=str(self.home), XDG_CACHE_HOME=str(self.root / "cache"),
-                         XDG_CONFIG_HOME=str(self.root / "config"), JOBGATE_MACHINE_FILE=str(machine))
+        shell_env = dict(env, HOME=str(self.home), JOBGATE_MACHINE_FILE=str(machine))
         result = subprocess.run(["sh", "-c", '. "$1"; command -v jobgate; jobgate status', "sh", str(startup)],
                                 capture_output=True, text=True, cwd=str(self.root), env=shell_env)
         self.assertEqual(result.returncode, 0, result.stderr)
