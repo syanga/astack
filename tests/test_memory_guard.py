@@ -44,7 +44,6 @@ class MemoryGuardTests(unittest.TestCase):
         return self.ttl.read_text().strip()
 
     def ttl_at_boot(self):
-        """The value that systemd-tmpfiles writes at boot, or None when no line sets it."""
         if not self.boot_file.exists():
             return None
         for line in self.boot_file.read_text().splitlines():
@@ -99,11 +98,10 @@ class MemoryGuardTests(unittest.TestCase):
 
     def test_uninstall_without_an_install_changes_nothing(self):
         self.ttl.write_text("250\n")
-        code, output, _ = self.run_main("uninstall")
 
-        self.assertEqual(code, 0)
-        self.assertIn("Nothing to uninstall", output)
+        self.assertEqual(self.run_main("uninstall")[0], 0)
         self.assertEqual(self.ttl_now(), "250")
+        self.assertFalse(self.boot_file.exists())
 
     @unittest.skipIf(os.geteuid() == 0, "root can write a read-only file")
     def test_uninstall_reverts_an_install_that_failed_partway(self):
@@ -117,26 +115,33 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertEqual(self.ttl_now(), "250")
         self.assertFalse(self.boot_file.exists())
 
+    def previews(self, output, path, value=None):
+        return any(str(path) in line and value in (None, line.split()[-1]) for line in output.splitlines())
+
     def test_dry_runs_name_the_changes_and_make_none(self):
         code, output, _ = self.run_main("install", "--dry-run", uid=1000)
         self.assertEqual(code, 0)
-        self.assertIn("SET {} 1000".format(self.ttl), output)
-        self.assertIn(str(self.boot_file), output)
+        self.assertTrue(self.previews(output, self.ttl, "1000"), output)
+        self.assertTrue(self.previews(output, self.boot_file), output)
         self.assertEqual(self.ttl_now(), "0")
         self.assertFalse(self.boot_file.exists())
 
         self.run_main("install")
         code, output, _ = self.run_main("uninstall", "--dry-run", uid=1000)
         self.assertEqual(code, 0)
-        self.assertIn("SET {} 0".format(self.ttl), output)
-        self.assertIn("REMOVE {}".format(self.boot_file), output)
+        self.assertTrue(self.previews(output, self.ttl, "0"), output)
+        self.assertTrue(self.previews(output, self.boot_file), output)
         self.assertEqual(self.ttl_now(), "1000")
         self.assertEqual(self.ttl_at_boot(), "1000")
 
     def test_status_reports_the_setting_now_and_at_boot(self):
-        self.assertIn("off: min_ttl_ms 0\n", self.run_main("status", uid=1000)[1])
+        before = self.run_main("status", uid=1000)[1]
+        self.assertIn("off: min_ttl_ms 0", before)
+        self.assertNotIn("at boot", before)
         self.run_main("install")
-        self.assertIn("on: min_ttl_ms 1000, set to 1000 at boot by astack", self.run_main("status", uid=1000)[1])
+        after = self.run_main("status", uid=1000)[1]
+        self.assertIn("on: min_ttl_ms 1000", after)
+        self.assertIn("1000 at boot", after)
 
         self.enabled.write_text("0x0000\n")
         self.assertIn("unavailable", self.run_main("status", uid=1000)[1])

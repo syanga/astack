@@ -18,7 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import astack_files as files
 
 MIN_TTL_MS = 1000
-RECORD = "# min_ttl_ms before install: "
+PREVIOUS_VALUE_PREFIX = "# min_ttl_ms before install: "
+UNAVAILABLE = "the kernel's multi-gen LRU is missing or off"
 
 Say = Callable[[str], None]
 
@@ -64,9 +65,9 @@ def _min_ttl_ms_before_install(host: Host) -> int | None:
     text = _read(host.boot_file)
     if text is None:
         return None
-    match = re.search("^{}(\\d+)$".format(re.escape(RECORD)), text, re.MULTILINE)
+    match = re.search("^{}(\\d+)$".format(re.escape(PREVIOUS_VALUE_PREFIX)), text, re.MULTILINE)
     if match is None:
-        raise GuardError("{} has no line that starts with '{}'".format(host.boot_file, RECORD))
+        raise GuardError("{} has no line that starts with '{}'".format(host.boot_file, PREVIOUS_VALUE_PREFIX))
     return int(match.group(1))
 
 
@@ -89,7 +90,7 @@ def _set_min_ttl_ms(host: Host, value: int, *, dry_run: bool, say: Say) -> None:
 def install(host: Host, *, dry_run: bool, say: Say) -> None:
     current = status(host)
     if not current.available:
-        raise GuardError("the kernel's multi-gen LRU is missing or off, so install changed nothing")
+        raise GuardError(UNAVAILABLE + ", so install changed nothing")
     before = current.min_ttl_ms if current.min_ttl_ms_before_install is None else current.min_ttl_ms_before_install
     say("WRITE {}".format(host.boot_file))
     if not dry_run:
@@ -97,7 +98,7 @@ def install(host: Host, *, dry_run: bool, say: Say) -> None:
             "# Written by astack scripts/memory_guard.py. Its uninstall restores min_ttl_ms and deletes this file.\n"
             "{}{}\n"
             "w {} - - - - {}\n"
-        ).format(RECORD, before, host.min_ttl_ms_file, MIN_TTL_MS).encode())
+        ).format(PREVIOUS_VALUE_PREFIX, before, host.min_ttl_ms_file, MIN_TTL_MS).encode())
     _set_min_ttl_ms(host, MIN_TTL_MS, dry_run=dry_run, say=say)
 
 
@@ -117,7 +118,7 @@ def describe(current: Status) -> str:
     if current.available:
         text = "{}: min_ttl_ms {}".format("on" if current.min_ttl_ms else "off", current.min_ttl_ms)
     else:
-        text = "unavailable: the kernel's multi-gen LRU is missing or off"
+        text = "unavailable: " + UNAVAILABLE
     if current.min_ttl_ms_before_install is not None:
         text += ", set to {} at boot by astack".format(MIN_TTL_MS)
     return "thrashing prevention  " + text

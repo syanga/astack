@@ -149,7 +149,7 @@ keep logins and assignments.
 ## Keep a Linux machine responsive when memory runs out
 
 When agents and test suites fill a Linux machine's RAM, the kernel evicts the
-code of running programs, and the desktop freezes until the OOM killer ends a
+code of running programs. The desktop then freezes until the OOM killer ends a
 process. [scripts/memory_guard.py](scripts/memory_guard.py) turns on the
 kernel's
 [thrashing prevention](https://docs.kernel.org/admin-guide/mm/multigen_lru.html#thrashing-prevention)
@@ -159,6 +159,9 @@ process instead of evicting pages used in the last second. At each boot,
 `/etc/tmpfiles.d/astack-memory-guard.conf`. The script needs the kernel's
 multi-gen LRU, and it changes nothing on macOS.
 
+When thrashing prevention acts, the kernel ends the process with the highest
+OOM score. That is usually the largest process, which can be an agent session.
+
 To check the machine, preview the change, and make it:
 
 ```sh
@@ -166,9 +169,6 @@ python3 scripts/memory_guard.py status
 python3 scripts/memory_guard.py install --dry-run
 sudo python3 scripts/memory_guard.py install
 ```
-
-When thrashing prevention acts, the kernel ends the process with the highest
-OOM score. That is usually the largest process, which can be an agent session.
 
 To preview and revert the change:
 
@@ -181,8 +181,9 @@ sudo python3 scripts/memory_guard.py uninstall
 
 ### Move /tmp from RAM to disk
 
-A tmpfs `/tmp` keeps its files in RAM, where the kernel cannot free them. On
-disk, files in `/tmp` live in the page cache, which the kernel can free.
+A tmpfs `/tmp` keeps its files in RAM, and the kernel can free that memory only
+by writing the files to swap. On disk, files in `/tmp` live in the page cache,
+which the kernel can free.
 `findmnt /tmp` shows `tmpfs` in the `FSTYPE` column when `/tmp` is in RAM.
 
 To move `/tmp` to disk at the next reboot:
@@ -190,19 +191,20 @@ To move `/tmp` to disk at the next reboot:
 1. If `/etc/fstab` has a line that mounts a tmpfs on `/tmp`, comment out that
    line with `sudoedit /etc/fstab`.
 2. Run `sudo systemctl daemon-reload`.
-3. Run `systemctl cat tmp.mount`. If it prints a unit file with `Type=tmpfs`,
-   run `sudo systemctl mask tmp.mount`. Ubuntu 26.04 ships such a unit file.
+3. Run `systemctl cat tmp.mount`, and act on the file that it names first:
+   - If the file is `/run/systemd/generator/tmp.mount`, `/etc/fstab` still
+     mounts `/tmp`. Go back to step 1. Do not mask `tmp.mount` in this state,
+     because the boot can then stop in emergency mode.
+   - If the file is another unit file with `Type=tmpfs`, run
+     `sudo systemctl mask tmp.mount`. Ubuntu 26.04 ships such a unit file.
 4. Reboot. `findmnt /tmp` then prints nothing.
-
-Do step 1 before step 3. If `/etc/fstab` mounts `/tmp` while `tmp.mount` is
-masked, the boot can stop in emergency mode.
 
 On disk, `/tmp` keeps files until `systemd-tmpfiles` deletes them.
 `systemd-tmpfiles-clean.timer` starts `systemd-tmpfiles` once a day, and
 `/usr/lib/tmpfiles.d/tmp.conf` sets the age limit, 10 days on Ubuntu 26.04.
 
 To move `/tmp` back to RAM, first run `sudo systemctl unmask tmp.mount`. Then
-restore the `/etc/fstab` line and reboot.
+restore any `/etc/fstab` line that you commented out, and reboot.
 
 ## Find a skill
 
