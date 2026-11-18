@@ -34,7 +34,9 @@ try:
 except ModuleNotFoundError:
     from _vendor import tomllib
 
-DEFAULT_SHARE = 0.5
+DEFAULT_MEMORY_SHARE = 0.5
+RECORD = ".json"
+SCOPE = ".scope"
 PSI_HOLD_PERCENT = 10.0
 DARWIN_LEVELS = {1: "normal", 2: "warn", 4: "critical"}
 DARWIN_HOLD_LEVEL = 4
@@ -199,18 +201,18 @@ def machine_config() -> Path:
     return Path.home() / ".config/jobgate.toml"
 
 
-def load_share() -> float:
+def load_memory_share() -> float:
     path = machine_config()
     if not path.is_file():
-        return DEFAULT_SHARE
+        return DEFAULT_MEMORY_SHARE
     data = read_toml(path)
     unknown = sorted(set(data) - set(MACHINE_KEYS))
     if unknown:
         raise Refusal("{} has unknown keys: {}".format(path, ", ".join(unknown)))
-    share = data.get("memory_share", DEFAULT_SHARE)
-    if isinstance(share, bool) or not isinstance(share, (int, float)) or not 0 < share <= 1:
-        raise Refusal("memory_share in {} must be a number above 0 and at most 1, not {!r}".format(path, share))
-    return float(share)
+    memory_share = data.get("memory_share", DEFAULT_MEMORY_SHARE)
+    if isinstance(memory_share, bool) or not isinstance(memory_share, (int, float)) or not 0 < memory_share <= 1:
+        raise Refusal("memory_share in {} must be a number above 0 and at most 1, not {!r}".format(path, memory_share))
+    return float(memory_share)
 
 
 def injected() -> dict:
@@ -232,7 +234,7 @@ def machine() -> Machine:
         cores = len(os.sched_getaffinity(0))
     else:
         cores = os.cpu_count() or 1
-    return Machine(int(memory), int(cores), load_share())
+    return Machine(int(memory), int(cores), load_memory_share())
 
 
 def psi_pressure(text: str) -> Pressure:
@@ -269,26 +271,30 @@ def pressure() -> Pressure:
         return Pressure("unknown ({})".format(error.strerror or error), False)
 
 
-def free(machine: Machine, running: list[Admission]) -> tuple[int, int]:
-    return (machine.share - sum(admission.memory for admission in running),
-            machine.cores - sum(admission.workers for admission in running))
+class Used(NamedTuple):
+    memory: int
+    workers: int
+
+
+def used(running: list[Admission]) -> Used:
+    return Used(sum(admission.memory for admission in running), sum(admission.workers for admission in running))
 
 
 def fit(machine: Machine, running: list[Admission], profile: Profile, limit: int) -> int:
-    free_memory, free_cores = free(machine, running)
-    beyond_base = free_memory - profile.base_mem
+    taken = used(running)
+    beyond_base = machine.share - taken.memory - profile.base_mem
     if beyond_base < 0:
         return 0
     by_memory = limit if profile.worker_mem == 0 else beyond_base // profile.worker_mem
-    return max(0, min(limit, free_cores, by_memory))
+    return max(0, min(limit, machine.cores - taken.workers, by_memory))
 
 
 def shortage(machine: Machine, running: list[Admission], profile: Profile) -> str:
-    free_memory, free_cores = free(machine, running)
-    if free_cores < 1:
+    taken = used(running)
+    if taken.workers >= machine.cores:
         return "for a core: gated workers use all {} cores".format(machine.cores)
     return "for memory: 1 worker needs {}, and {} of the {} share is free".format(
-        size(profile.memory(1)), size(max(0, free_memory)), size(machine.share))
+        size(profile.memory(1)), size(max(0, machine.share - taken.memory)), size(machine.share))
 
 
 def temporary(path: Path) -> Path:
@@ -301,7 +307,7 @@ class RunFiles(NamedTuple):
 
     @classmethod
     def of(cls, runs: Path, run_id: str) -> RunFiles:
-        return cls(runs / (run_id + ".json"), runs / (run_id + ".scope"))
+        return cls(runs / (run_id + RECORD), runs / (run_id + SCOPE))
 
     def remove(self) -> None:
         for path in (self.record, self.scope, temporary(self.scope)):
@@ -313,6 +319,7 @@ class Queue:
     def __init__(self, directory: Path) -> None:
         self.directory = directory
         self.runs = directory / "runs"
+        self.results = directory / "results.log"
 
     @classmethod
     def open(cls) -> Queue:
@@ -332,7 +339,7 @@ class Queue:
 
     def live(self) -> list[Run]:
         runs = []
-        for path in self.runs.glob("*.json"):
+        for path in self.runs.glob("*" + RECORD):
             try:
                 fd = os.open(str(path), os.O_RDONLY)
             except FileNotFoundError:
@@ -681,10 +688,10 @@ def report(queue: Queue, entries: list[tuple[str, object]]) -> None:
     line = " ".join("{}={}".format(key, logfmt(value)) for key, value in entries)
     say(line)
     try:
-        with open(queue.directory / "results.log", "a") as stream:
+        with open(queue.results, "a") as stream:
             stream.write(line + "\n")
     except OSError as error:
-        say("cannot append to {}: {}".format(queue.directory / "results.log", error.strerror or error))
+        say("cannot append to {}: {}".format(queue.results, error.strerror or error))
 
 
 def launch_failure(command: list[str], error: OSError) -> int:
@@ -750,7 +757,7 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
 
 def cap_text() -> str:
     if sys.platform == "darwin":
-        return "none on macOS, where only the pressure hold limits memory"
+        return "none on macOS; the pressure hold delays new runs instead"
     try:
         result = subprocess.run(["systemctl", "--user", "show", SLICE, "-p", "MemoryMax", "-p", "CPUWeight",
                                  "-p", "MemoryCurrent"], capture_output=True, text=True, timeout=15,
@@ -776,8 +783,8 @@ def status() -> int:
     source = machine_config() if machine_config().is_file() else "default"
     lines = [
         "share     {} ({:.0%} of {}; {})".format(size(found.share), found.memory_share, size(found.memory), source),
-        "memory    {} of {} stated by running runs".format(size(found.share - free(found, running)[0]), size(found.share)),
-        "cores     {} of {} used by gated workers".format(found.cores - free(found, running)[1], found.cores),
+        "memory    {} of {} stated by running runs".format(size(used(running).memory), size(found.share)),
+        "cores     {} of {} used by gated workers".format(used(running).workers, found.cores),
         "pressure  {}{}".format(level.reading, "; new runs wait" if level.holding else ""),
         "cap       {}".format(cap_text()),
     ]

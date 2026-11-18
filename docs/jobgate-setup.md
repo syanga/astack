@@ -39,7 +39,8 @@ the [jobgate reference](jobgate.md).
 ## Pass the worker count to the tool
 
 jobgate passes the count only through the variable that `workers_env` names.
-Point it at a variable the tool reads, or expand it in `sh -c`:
+Set `workers_env` to a variable the tool reads, or expand the variable in
+`sh -c`:
 
 | Tool | `workers_env` | Command |
 | --- | --- | --- |
@@ -81,7 +82,7 @@ rejects them, so add a separate script for each filtered run.
 In both patterns, the shell exits with the command's exit code, with or without
 jobgate. make reports a nonzero code as `Error N`.
 
-## Check a run
+## Follow a run
 
 While a run waits or runs, `jobgate status` lists it with its worker count and
 stated memory. After it ends, its result line is the last line of

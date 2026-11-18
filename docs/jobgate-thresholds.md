@@ -16,9 +16,10 @@ cache reclaim on a busy machine raises `some`. jobgate therefore reads only
 `full`, averaged over 10 seconds.
 
 The tools that kill processes under memory pressure set their limits far above
-10%. systemd-oomd kills a cgroup after its `full avg10` stays above 60% for 30
-seconds, its defaults in
-[oomd.conf](https://www.freedesktop.org/software/systemd/man/latest/oomd.conf.html).
+10%. By default, systemd-oomd kills a cgroup after the cgroup's `full avg10`
+stays above 60% for 30 seconds, as
+[oomd.conf](https://www.freedesktop.org/software/systemd/man/latest/oomd.conf.html)
+documents.
 Android's [lmkd](https://source.android.com/docs/core/perf/lmkd) kills at 700 ms
 of full stall per second. A hold at 10% stops new runs well before either.
 
@@ -51,6 +52,6 @@ that compresses memory reaches warn routinely, and XNU's advice at warn is only
 to relax caching. The level turns critical below 29%, where the compressor
 starts swapping and XNU warns of latency. Holding at warn would stop a busy but
 healthy Mac from starting runs for hours, so jobgate holds only at critical.
-On macOS, the share limits the memory that gated runs state. The critical hold
-is the only check on memory that they use beyond it, and on memory that other
-programs use.
+On macOS, the share limits the memory that gated runs state. Runs can use more
+than they state, and other programs use memory too. Nothing on macOS responds
+to either except the critical hold, which delays new runs.

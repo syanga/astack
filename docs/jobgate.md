@@ -116,7 +116,7 @@ evidence for both thresholds.
 
 ## Enforcement and priority
 
-On Linux with a systemd user session, all gated runs share `jobgate.slice`.
+On Linux with a systemd user session, all gated runs run in `jobgate.slice`.
 Each run sets the slice's `MemoryMax` to the share and its `CPUWeight` to 30,
 the weight systemd gives its own `background.slice`, through
 `systemctl --user set-property --runtime`. Each run is a scope,
@@ -131,11 +131,12 @@ On Linux without a systemd user session, such as in containers and some WSL
 setups, jobgate prints one line saying the kernel memory cap is off, then
 applies admission and the pressure hold without it.
 
-macOS has no cgroups, so it has no kernel memory cap, and only the pressure
-hold limits memory beyond what runs state. A run's processes get background priority, `PRIO_DARWIN_BG`,
-while someone uses the Mac. After 2 minutes without keyboard or mouse input,
-read from `ioreg`'s `HIDIdleTime`, they get normal priority. jobgate checks
-every 2 seconds and prints a line when the priority changes.
+macOS has no cgroups, so it has no kernel memory cap. A run can use more memory
+than it states, and only the pressure hold responds, by delaying new runs. A
+run's processes get background priority, `PRIO_DARWIN_BG`, while someone uses
+the Mac. After 2 minutes without keyboard or mouse input, read from `ioreg`'s
+`HIDIdleTime`, they get normal priority. jobgate reads the idle time every 2
+seconds and prints a line when the priority changes.
 
 jobgate passes SIGTERM and SIGHUP on to the command and waits for it. Ctrl-C
 reaches the command from the terminal, and jobgate waits for the command to
@@ -200,9 +201,9 @@ worktrees like clean ones.
 | --- | --- |
 | The profile's `workers_env` | jobgate sets it to the worker count. |
 | `JOBGATE_WORKERS` | jobgate sets it to the worker count. |
-| `JOBGATE_RUN` | jobgate sets it to the path of the run's file, which marks nested calls. |
-| `HOME` | Holds `.cache/jobgate/` and `.config/jobgate.toml`. jobgate ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`, so all of a user's processes share one queue. |
-| `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with `memory`, `cores`, and `psi` or `darwin_level` readings that replace the OS readings. jobgate rereads it on every check. |
+| `JOBGATE_RUN` | jobgate sets it to the path of the run's file. A nested call reads it to find the outer run. |
+| `HOME` | Holds `.cache/jobgate/` and `.config/jobgate.toml`. jobgate ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. Processes with the same `HOME` use one queue, and a process with another `HOME` uses a separate queue. |
+| `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with `memory`, `cores`, and `psi` or `darwin_level` readings that replace the OS readings. jobgate reads `memory` and `cores` once per run, and the pressure reading before each admission attempt. |
 
 ## Files
 

@@ -44,7 +44,6 @@ def shell_mentions(path, directory):
 
 
 def update_path(command, state, home, use_env, dry_run, save):
-    before = state.get("shell_path", {}).get(NAME)
     records = state.setdefault("shell_path", {})
     owned = records.get(NAME)
     if command == "uninstall":
@@ -89,7 +88,7 @@ def update_path(command, state, home, use_env, dry_run, save):
                 print("APPEND {} {}".format(shell_file, lines[1]))
     if not records:
         state.pop("shell_path", None)
-    if state.get("shell_path", {}).get(NAME) != before and not dry_run:
+    if state.get("shell_path", {}).get(NAME) != owned and not dry_run:
         save()
 
 
