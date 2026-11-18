@@ -55,9 +55,9 @@ on Linux. It never changes client settings. From the repository root:
 ./install.sh --component claude-router
 ```
 
-The systemd service is tested on a real kernel in a Debian 13 arm64 container
-with systemd 257 and fake accounts, not yet with real accounts on a Linux
-machine.
+The systemd service's lifecycle is tested on a real kernel in a Debian 13
+arm64 container with systemd 257 and fake accounts. The test covers install,
+restart, linger, stop and start, the crash-loop limit, and uninstall.
 
 | Path | Contents |
 | --- | --- |

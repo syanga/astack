@@ -2610,10 +2610,10 @@ follows these rules:
 - The router's `code_sha256`, `binary_sha256`, and `sdk` in
   `GET /claude-router/status` are the same at the end of the run as at its
   start.
-- The router reads paid overflow `disabled` on each of its accounts at the
-  start and at the end of the run.
+- The paid-overflow reading of each of the run's accounts is `disabled` at
+  the start and at the end of the run.
 - The run reruns every scenario that the change can affect. Other scenarios
-  keep the results of earlier runs, and `prior_acceptance` names the
+  keep the results of earlier runs. The record's `prior_acceptance` names the
   previous record.
 
 ### Check
