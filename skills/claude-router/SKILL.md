@@ -198,10 +198,9 @@ Give the user these steps. Put the checkout's absolute path in place of
    claude-router setup -account work -account alumni
    ```
 
-   It ends with `activated Claude Code routes through the router`. The
-   `code matches` line names the accepted record's platform. When the record
-   was accepted on another platform, a `note` line names both platforms.
-   Neither line is a failure.
+   It ends with `activated Claude Code routes through the router`. When the
+   accepted record comes from another platform, a `note` line names both
+   platforms. The note is not a failure.
 
 If `setup` refuses because an account has paid overflow on, ask the user to
 turn it off on claude.ai, then give `claude-router stop` and

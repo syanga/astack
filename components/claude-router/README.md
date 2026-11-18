@@ -55,8 +55,9 @@ on Linux. It never changes client settings. From the repository root:
 ./install.sh --component claude-router
 ```
 
-Linux is tested on a real kernel in a Debian 13 arm64 container with systemd
-257 and fake accounts, not yet with real accounts on a Linux machine.
+The systemd service is tested on a real kernel in a Debian 13 arm64 container
+with systemd 257 and fake accounts, not yet with real accounts on a Linux
+machine.
 
 | Path | Contents |
 | --- | --- |
@@ -281,10 +282,10 @@ check     passed
 ```
 
 On Linux, the first line ends with `(systemd)`. The fifth line names the
-platform of the record's acceptance run. When that platform differs from this
-machine's, activation and `setup` also print a `note` line that names both.
-On Linux, the note ends with `not yet tested on real Linux`. That text
-predates the acceptance runs on Linux.
+record's platform. When the record's platform differs from this machine's,
+activation and `setup` also print a `note` line that names both platforms. On
+Linux, the note ends with `not yet tested on real Linux`. That text predates
+the acceptance runs on Linux.
 
 When a check fails, `check` skips the test message, exits 1, and prints the
 next step. With the router stopped, it marks the checks that need the router

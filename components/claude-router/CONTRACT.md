@@ -2602,17 +2602,19 @@ install and activation would refuse that code.
 
 The record's `scope` field describes the run that produced it, and its
 `platform` and `clients` fields name that run's platform and client versions.
-A new record therefore changes no text in this contract. Every acceptance run
+Describe each run in its record, not in this contract. Every acceptance run
 follows these rules:
 
 - A foreground router runs the record's code against real accounts, on its
   own port and state directory, beside the daily router.
-- The identity at the end of the run equals the identity at its start.
-- Every account's paid-overflow reading is `disabled` at the start and at the
-  end of the run.
-- The run reruns only the scenarios that the change can affect. For the
-  others, the record's `prior_acceptance` names the previous record as a
-  reference.
+- The router's `code_sha256`, `binary_sha256`, and `sdk` in
+  `GET /claude-router/status` are the same at the end of the run as at its
+  start.
+- The router reads paid overflow `disabled` on each of its accounts at the
+  start and at the end of the run.
+- The run reruns every scenario that the change can affect. Other scenarios
+  keep the results of earlier runs, and `prior_acceptance` names the
+  previous record.
 
 ### Check
 
