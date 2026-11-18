@@ -68,7 +68,7 @@ class MemoryGuardTests(unittest.TestCase):
     def test_a_second_install_keeps_the_value_uninstall_restores(self):
         self.ttl.write_text("250\n")
         self.run_main("install")
-        self.run_main("install")
+        self.assertEqual(self.run_main("install")[0], 0)
         self.assertEqual(self.ttl_now(), "1000")
         self.run_main("uninstall")
 

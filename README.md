@@ -157,7 +157,8 @@ by setting `/sys/kernel/mm/lru_gen/min_ttl_ms` to 1000. The kernel then ends a
 process instead of evicting pages used in the last second. At each boot,
 `systemd-tmpfiles` sets the value again from
 `/etc/tmpfiles.d/astack-memory-guard.conf`. The script needs the kernel's
-multi-gen LRU and `systemd-tmpfiles`. It changes nothing on macOS.
+multi-gen LRU, and the setting at boot needs `systemd-tmpfiles`. The script
+changes nothing on macOS.
 
 When thrashing prevention acts, the kernel ends the process with the highest
 OOM score. That is usually the largest process, which can be an agent session.
@@ -182,27 +183,31 @@ sudo python3 scripts/memory_guard.py uninstall
 ### Move /tmp from RAM to disk
 
 A tmpfs `/tmp` keeps its files in RAM, and the kernel can free that memory only
-by writing the files to swap. On disk, files in `/tmp` live in the page cache,
-which the kernel can free.
-`findmnt /tmp` shows `tmpfs` in the `FSTYPE` column when `/tmp` is in RAM.
+by writing the files to swap. A `/tmp` on disk keeps its files on disk. The
+kernel caches them in RAM, and it can write that cache back and free it when
+memory runs short. `findmnt /tmp` shows `tmpfs` in the `FSTYPE` column when `/tmp` is in RAM.
 
 To move `/tmp` to disk at the next reboot:
 
 1. If `/etc/fstab` has a line that mounts a tmpfs on `/tmp`, comment out that
    line with `sudoedit /etc/fstab`.
 2. Run `sudo systemctl daemon-reload`.
-3. Run `systemctl cat tmp.mount`. Its first line names a unit file.
-   - If the unit file is `/run/systemd/generator/tmp.mount`, `/etc/fstab`
-     still mounts `/tmp`. Do not mask `tmp.mount` in this state, because the
-     boot can then stop in emergency mode. Go back to step 1.
-   - If the unit file is another file with `Type=tmpfs`, run
-     `sudo systemctl mask tmp.mount`. Ubuntu 26.04 ships such a unit file.
-   - If the command prints `No files found for tmp.mount`, go to step 4.
+3. Run `systemctl cat tmp.mount`.
+   - If the first line of the output names
+     `/run/systemd/generator/tmp.mount`, `/etc/fstab` still mounts `/tmp`. Do
+     not mask `tmp.mount` in this state, because the boot can then stop in
+     emergency mode. Go back to step 1.
+   - If the first line names another unit file, and that file has
+     `Type=tmpfs`, run `sudo systemctl mask tmp.mount`. Ubuntu 26.04 ships
+     such a unit file.
+   - In any other case, go to step 4. For example, the output can say that
+     `tmp.mount` is masked, or that no files were found for it.
 4. Reboot. `findmnt /tmp` then prints nothing.
 
 On disk, `/tmp` keeps files until `systemd-tmpfiles` deletes them.
-`systemd-tmpfiles-clean.timer` starts `systemd-tmpfiles` once a day, and
-`/usr/lib/tmpfiles.d/tmp.conf` sets the age limit, 10 days on Ubuntu 26.04.
+`systemd-tmpfiles-clean.timer` starts `systemd-tmpfiles` once a day.
+`/usr/lib/tmpfiles.d/tmp.conf` sets the age limit, which is 10 days on Ubuntu
+26.04.
 
 To move `/tmp` back to RAM:
 
