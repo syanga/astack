@@ -157,7 +157,7 @@ by setting `/sys/kernel/mm/lru_gen/min_ttl_ms` to 1000. The kernel then ends a
 process instead of evicting pages used in the last second. At each boot,
 `systemd-tmpfiles` sets the value again from
 `/etc/tmpfiles.d/astack-memory-guard.conf`. The script needs the kernel's
-multi-gen LRU, and it changes nothing on macOS.
+multi-gen LRU and `systemd-tmpfiles`. It changes nothing on macOS.
 
 When thrashing prevention acts, the kernel ends the process with the highest
 OOM score. That is usually the largest process, which can be an agent session.
@@ -191,20 +191,24 @@ To move `/tmp` to disk at the next reboot:
 1. If `/etc/fstab` has a line that mounts a tmpfs on `/tmp`, comment out that
    line with `sudoedit /etc/fstab`.
 2. Run `sudo systemctl daemon-reload`.
-3. Run `systemctl cat tmp.mount`, and act on the file that it names first:
-   - If the file is `/run/systemd/generator/tmp.mount`, `/etc/fstab` still
-     mounts `/tmp`. Go back to step 1. Do not mask `tmp.mount` in this state,
-     because the boot can then stop in emergency mode.
-   - If the file is another unit file with `Type=tmpfs`, run
+3. Run `systemctl cat tmp.mount`. Its first line names a unit file.
+   - If the unit file is `/run/systemd/generator/tmp.mount`, `/etc/fstab`
+     still mounts `/tmp`. Do not mask `tmp.mount` in this state, because the
+     boot can then stop in emergency mode. Go back to step 1.
+   - If the unit file is another file with `Type=tmpfs`, run
      `sudo systemctl mask tmp.mount`. Ubuntu 26.04 ships such a unit file.
+   - If the command prints `No files found for tmp.mount`, go to step 4.
 4. Reboot. `findmnt /tmp` then prints nothing.
 
 On disk, `/tmp` keeps files until `systemd-tmpfiles` deletes them.
 `systemd-tmpfiles-clean.timer` starts `systemd-tmpfiles` once a day, and
 `/usr/lib/tmpfiles.d/tmp.conf` sets the age limit, 10 days on Ubuntu 26.04.
 
-To move `/tmp` back to RAM, first run `sudo systemctl unmask tmp.mount`. Then
-restore any `/etc/fstab` line that you commented out, and reboot.
+To move `/tmp` back to RAM:
+
+1. Run `sudo systemctl unmask tmp.mount`.
+2. Restore any `/etc/fstab` line that you commented out.
+3. Reboot.
 
 ## Find a skill
 

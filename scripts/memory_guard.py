@@ -12,16 +12,14 @@ import os
 from pathlib import Path
 import re
 import sys
-from typing import Callable, Sequence
+from typing import Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import astack_files as files
 
 MIN_TTL_MS = 1000
 PREVIOUS_VALUE_PREFIX = "# min_ttl_ms before install: "
-UNAVAILABLE = "the kernel's multi-gen LRU is missing or off"
-
-Say = Callable[[str], None]
+UNAVAILABLE_REASON = "the kernel's multi-gen LRU is missing or off"
 
 
 class GuardError(Exception):
@@ -81,35 +79,35 @@ def status(host: Host) -> Status:
     )
 
 
-def _set_min_ttl_ms(host: Host, value: int, *, dry_run: bool, say: Say) -> None:
-    say("SET {} {}".format(host.min_ttl_ms_file, value))
+def _set_min_ttl_ms(host: Host, value: int, *, dry_run: bool) -> None:
+    print("SET {} {}".format(host.min_ttl_ms_file, value))
     if not dry_run:
         host.min_ttl_ms_file.write_text("{}\n".format(value))
 
 
-def install(host: Host, *, dry_run: bool, say: Say) -> None:
+def install(host: Host, *, dry_run: bool) -> None:
     current = status(host)
     if not current.available:
-        raise GuardError(UNAVAILABLE + ", so install changed nothing")
+        raise GuardError(UNAVAILABLE_REASON + ", so install changed nothing")
     before = current.min_ttl_ms if current.min_ttl_ms_before_install is None else current.min_ttl_ms_before_install
-    say("WRITE {}".format(host.boot_file))
+    print("WRITE {}".format(host.boot_file))
     if not dry_run:
         files.atomic_write(host.boot_file, (
             "# Written by astack scripts/memory_guard.py. Its uninstall restores min_ttl_ms and deletes this file.\n"
             "{}{}\n"
             "w {} - - - - {}\n"
         ).format(PREVIOUS_VALUE_PREFIX, before, host.min_ttl_ms_file, MIN_TTL_MS).encode())
-    _set_min_ttl_ms(host, MIN_TTL_MS, dry_run=dry_run, say=say)
+    _set_min_ttl_ms(host, MIN_TTL_MS, dry_run=dry_run)
 
 
-def uninstall(host: Host, *, dry_run: bool, say: Say) -> None:
+def uninstall(host: Host, *, dry_run: bool) -> None:
     current = status(host)
     if current.min_ttl_ms_before_install is None:
-        say("Nothing to uninstall: {} does not exist".format(host.boot_file))
+        print("Nothing to uninstall: {} does not exist".format(host.boot_file))
         return
     if current.min_ttl_ms is not None:
-        _set_min_ttl_ms(host, current.min_ttl_ms_before_install, dry_run=dry_run, say=say)
-    say("REMOVE {}".format(host.boot_file))
+        _set_min_ttl_ms(host, current.min_ttl_ms_before_install, dry_run=dry_run)
+    print("REMOVE {}".format(host.boot_file))
     if not dry_run:
         host.boot_file.unlink()
 
@@ -118,7 +116,7 @@ def describe(current: Status) -> str:
     if current.available:
         text = "{}: min_ttl_ms {}".format("on" if current.min_ttl_ms else "off", current.min_ttl_ms)
     else:
-        text = "unavailable: " + UNAVAILABLE
+        text = "unavailable: " + UNAVAILABLE_REASON
     if current.min_ttl_ms_before_install is not None:
         text += ", set to {} at boot by astack".format(MIN_TTL_MS)
     return "thrashing prevention  " + text
@@ -140,7 +138,7 @@ def main(argv: Sequence[str] | None = None, host: Host | None = None) -> int:
         if args.command == "status":
             print(describe(status(host)))
         else:
-            (install if args.command == "install" else uninstall)(host, dry_run=args.dry_run, say=print)
+            (install if args.command == "install" else uninstall)(host, dry_run=args.dry_run)
     except (OSError, GuardError) as error:
         print("memory_guard: {}".format(error), file=sys.stderr)
         return 1

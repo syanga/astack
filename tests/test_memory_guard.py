@@ -115,22 +115,23 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertEqual(self.ttl_now(), "250")
         self.assertFalse(self.boot_file.exists())
 
-    def previews(self, output, path, value=None):
-        return any(str(path) in line and value in (None, line.split()[-1]) for line in output.splitlines())
+    def previews(self, output, verb, path, value=None):
+        return any(line.startswith(verb + " ") and str(path) in line and value in (None, line.split()[-1])
+                   for line in output.splitlines())
 
     def test_dry_runs_name_the_changes_and_make_none(self):
         code, output, _ = self.run_main("install", "--dry-run", uid=1000)
         self.assertEqual(code, 0)
-        self.assertTrue(self.previews(output, self.ttl, "1000"), output)
-        self.assertTrue(self.previews(output, self.boot_file), output)
+        self.assertTrue(self.previews(output, "SET", self.ttl, "1000"), output)
+        self.assertTrue(self.previews(output, "WRITE", self.boot_file), output)
         self.assertEqual(self.ttl_now(), "0")
         self.assertFalse(self.boot_file.exists())
 
         self.run_main("install")
         code, output, _ = self.run_main("uninstall", "--dry-run", uid=1000)
         self.assertEqual(code, 0)
-        self.assertTrue(self.previews(output, self.ttl, "0"), output)
-        self.assertTrue(self.previews(output, self.boot_file), output)
+        self.assertTrue(self.previews(output, "SET", self.ttl, "0"), output)
+        self.assertTrue(self.previews(output, "REMOVE", self.boot_file), output)
         self.assertEqual(self.ttl_now(), "1000")
         self.assertEqual(self.ttl_at_boot(), "1000")
 
@@ -146,7 +147,7 @@ class MemoryGuardTests(unittest.TestCase):
         self.enabled.write_text("0x0000\n")
         self.assertIn("unavailable", self.run_main("status", uid=1000)[1])
 
-    def test_status_reports_a_boot_file_without_a_record_as_an_error(self):
+    def test_status_reports_a_boot_file_without_the_previous_value_as_an_error(self):
         self.boot_file.parent.mkdir(parents=True)
         self.boot_file.write_text("w {} - - - - 1000\n".format(self.ttl))
 
