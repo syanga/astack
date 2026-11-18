@@ -43,11 +43,12 @@ def on_path(directory):
 
 
 def startup_files(home, use_env):
-    """Interactive non-login bash reads .bashrc. Login bash reads only the first of BASH_LOGIN_FILES that exists."""
+    """Interactive zsh reads .zshrc and login zsh .zprofile. Interactive non-login bash reads .bashrc, and login bash
+    reads only the first of BASH_LOGIN_FILES that exists."""
     shell = Path(os.environ.get("SHELL", "")).name or ("zsh" if sys.platform == "darwin" else "bash")
     if shell == "zsh":
-        zdotdir = os.environ.get("ZDOTDIR") if use_env else None
-        return [Path(zdotdir or home) / ".zshrc"]
+        zdotdir = Path((os.environ.get("ZDOTDIR") if use_env else None) or home)
+        return [zdotdir / ".zshrc", zdotdir / ".zprofile"]
     if shell == "bash":
         login = next((home / name for name in BASH_LOGIN_FILES if (home / name).is_file()), home / ".profile")
         return [home / ".bashrc", login]
@@ -55,8 +56,8 @@ def startup_files(home, use_env):
 
 
 class PathRecords:
-    def __init__(self, state, dry_run, save):
-        self.state, self.dry_run, self.save = state, dry_run, save
+    def __init__(self, state, save):
+        self.state, self.save = state, save
         self.records = dict(state.get("shell_path", {}))
         self.entries = list(self.records.get(NAME) or [])
 
@@ -69,8 +70,7 @@ class PathRecords:
             self.state["shell_path"] = self.records
         else:
             self.state.pop("shell_path", None)
-        if not self.dry_run:
-            self.save()
+        self.save()
 
 
 def needs_separator(path):
@@ -82,7 +82,7 @@ def needs_separator(path):
 
 
 def remove_path_lines(state, dry_run, save):
-    owned = PathRecords(state, dry_run, save)
+    owned = PathRecords(state, save)
     for entry in list(owned.entries):
         print("REMOVE {} {}".format(entry["file"], entry["lines"][1]))
         if dry_run:
@@ -111,7 +111,7 @@ def add_path_lines(state, home, use_env, dry_run, save):
         print("SKIP PATH (no shell file known for SHELL={}; to add it yourself: {})".format(
             os.environ.get("SHELL", ""), lines[1]))
         return
-    owned = PathRecords(state, dry_run, save)
+    owned = PathRecords(state, save)
     for path in files:
         entry = next((entry for entry in owned.entries if entry["file"] == str(path)), None)
         try:

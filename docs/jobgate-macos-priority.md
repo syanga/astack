@@ -2,14 +2,13 @@
 
 On macOS, jobgate starts each command under `taskpolicy -c utility`. The clamp
 puts the command and every process it starts in the utility quality-of-service
-class for the whole run. The [jobgate reference](jobgate.md#enforcement-and-priority)
+(QoS) class for the whole run. The [jobgate reference](jobgate.md#enforcement-and-priority)
 describes the behavior. This page gives the measurements behind the choice.
 
-A gated run on a Mac competes for the CPU with the person at the keyboard and
-with their agents. It should finish as fast as a normal run when the Mac is
-idle, and yield when someone needs the CPU. macOS offers three ways to set
-a run's CPU priority: normal priority, the utility QoS class, and background
-priority. Background priority is `PRIO_DARWIN_BG`, the state that
+A gated run on a Mac competes for the CPU with the user and with the user's
+agents. It should finish as fast as a normal run when the Mac is idle, and
+yield when the user needs the CPU. macOS offers three ways to set a run's CPU
+priority: normal priority, the utility QoS class, and background priority. Background priority is `PRIO_DARWIN_BG`, the state that
 `taskpolicy -b` sets.
 
 The measurements below come from an M4 Pro Mac with 14 cores, 10 performance
@@ -55,17 +54,17 @@ python3 burn.py 10 & taskpolicy -c utility python3 burn.py 14; wait
 python3 burn.py 10 & taskpolicy -b python3 burn.py 14; wait
 ```
 
-Utility costs nothing on an idle Mac. The test run took 0.88 s against 0.91 s at
+Utility QoS costs nothing on an idle Mac. The test run took 0.88 s against 0.91 s at
 normal priority. Next to the foreground load, a utility test run slowed that
 load by 0.11 s and still finished in 1.58 s. Background priority kept the
-foreground load at full speed, but it slowed the test run about 18 times even on an idle Mac.
-The `setpriority(2)` man page says that background state also throttles disk
-I/O. It throttles network I/O too, on sockets that the process opens while it
-is in that state.
+foreground load at full speed, but it slowed the test run about 18 times even
+on an idle Mac. The `setpriority(2)` man page says that background priority
+also throttles disk I/O. It throttles network I/O too, on sockets that the
+process opens at background priority.
 
-Switching a test run to background priority while someone works would make the
+Switching a test run to background priority while the user works would make the
 foreground load 0.11 s faster, 0.71 s instead of 0.82 s. It would cost the test
 run 15.7 s, 17.24 s instead of 1.58 s. jobgate uses utility QoS, which keeps
-both the foreground load and the test run fast. A clamp also cannot change on a running
-process, because `taskpolicy -p` accepts only its `-b`, `-B`, `-t`, and `-l`
-options.
+both the foreground load and the test run fast. A clamp also cannot change on a
+running process, because `taskpolicy -p` accepts only its `-b`, `-B`, `-t`, and
+`-l` options.

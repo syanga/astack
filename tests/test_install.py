@@ -242,21 +242,23 @@ class InstallerTests(InstallerFixture):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines()[0], str(jobgate.resolve()))
         self.assertIn("4.0G", result.stdout)
+        login = self.home / ".zprofile"
+        self.assertIn(str(jobgate.parent), login.read_text())
 
         self.run_installer("--target", "jobgate", command="uninstall", env=env)
         self.assertFalse(jobgate.exists())
         self.assertFalse((self.home / ".local/share/astack").exists())
         self.assertFalse(startup.exists())
+        self.assertFalse(login.exists())
 
     def test_jobgate_adds_a_path_line_only_when_the_directory_is_missing_from_path(self):
         jobgate = self.home / ".local/bin/jobgate"
-        path = JOBGATE_PATH
-        env = dict(os.environ, SHELL="/bin/zsh", PATH=os.pathsep.join([str(jobgate.parent), path]))
+        env = dict(os.environ, SHELL="/bin/zsh", PATH=os.pathsep.join([str(jobgate.parent), JOBGATE_PATH]))
         self.run_installer("--target", "jobgate", env=env)
         self.assertTrue(jobgate.exists())
         self.assertFalse((self.home / ".zshrc").exists())
         self.run_installer("--target", "jobgate", command="uninstall", env=env)
-        self.run_installer("--target", "jobgate", env=dict(env, PATH=path))
+        self.run_installer("--target", "jobgate", env=dict(env, PATH=JOBGATE_PATH))
         self.assertIn(str(jobgate.parent), (self.home / ".zshrc").read_text())
 
     def test_installed_jobgate_reads_toml_with_its_vendored_copy(self):
@@ -273,8 +275,7 @@ class InstallerTests(InstallerFixture):
         self.assertIn("2.0G (25% of 8.0G", result.stdout)
 
     def test_bash_login_shell_that_skips_bashrc_finds_jobgate(self):
-        path = JOBGATE_PATH
-        env = dict(os.environ, SHELL="/bin/bash", PATH=path)
+        env = dict(os.environ, SHELL="/bin/bash", PATH=JOBGATE_PATH)
         self.home.mkdir(parents=True)
         profile = self.home / ".bash_profile"
         profile.write_text("export EDITOR=vi\n")

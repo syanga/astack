@@ -49,7 +49,7 @@ workers_env = "PYTEST_XDIST_AUTO_NUM_WORKERS"
 A run's stated memory is `base_mem + workers × worker_mem`. jobgate never
 learns these numbers from past runs.
 
-## Machine file
+## Machine settings
 
 The share is the memory that all gated runs with the same `HOME` may state
 together. It is `memory_share` times the machine's physical memory.
@@ -230,7 +230,7 @@ code of `taskpolicy`.
 | `JOBGATE_WORKERS` | jobgate sets it to the worker count. |
 | `JOBGATE_RUN` | jobgate sets it to the path of the run's file. A nested call reads it to find the outer run. |
 | `HOME` | Holds `.cache/jobgate/` and `.config/jobgate.toml`. jobgate ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. Processes with the same `HOME` use one queue, and a process with another `HOME` uses a separate queue. |
-| `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with `memory`, `cores`, and `psi` or `darwin_level` readings that replace the OS readings. jobgate reads `memory` and `cores` once per run. It reads the pressure reading before each admission attempt. |
+| `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with `memory`, `cores`, and either `psi` or `darwin_level` readings that replace the OS readings. jobgate reads `memory` and `cores` once per run. It reads the pressure reading before each admission attempt. |
 
 ## Files
 
@@ -258,7 +258,7 @@ files for other `PATH` lines. The startup files depend on `SHELL`:
 
 | Shell | Startup files |
 | --- | --- |
-| zsh | `~/.zshrc`, or `$ZDOTDIR/.zshrc` when `ZDOTDIR` is set |
+| zsh | `~/.zshrc`, which interactive shells read, and `~/.zprofile`, which login shells read. With `ZDOTDIR` set, both files are in `$ZDOTDIR`. |
 | bash | `~/.bashrc` and the bash login file. Interactive non-login shells read `~/.bashrc`. Login shells read only the first of `~/.bash_profile`, `~/.bash_login`, and `~/.profile` that exists, so the installer writes that file. When none of the three exists, it creates `~/.profile`. |
 | other | None. The installer prints the line to add instead. |
 
@@ -266,7 +266,8 @@ The installer records each line before it writes the line.
 
 `./uninstall.sh` removes the installed files and the marked lines. When it
 cannot rewrite a startup file, it keeps the record of the line in that file.
-The next `./uninstall.sh` then removes the line. `./uninstall.sh` also removes the
-directories that held the recorded script, when they are empty. It leaves
-`~/.cache/jobgate/`, the machine file, and the runtime slice settings. Those
-settings last until the machine reboots or the user's last login session ends.
+The next `./uninstall.sh` then removes the line. `./uninstall.sh` also removes
+the directories that held the recorded script, when they are empty. It leaves
+`~/.cache/jobgate/`, `~/.config/jobgate.toml`, and the runtime slice settings.
+Those settings last until the machine reboots or the user's last login session
+ends.

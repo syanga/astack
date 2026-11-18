@@ -2,8 +2,8 @@
 
 jobgate makes new runs wait while the OS reports memory pressure. A threshold
 set too low holds runs on a machine that is busy but healthy, and those runs
-wait for hours. If the threshold is too high, a suite starts on a machine that
-is already thrashing. The [jobgate reference](jobgate.md#pressure-thresholds)
+wait for hours. If the threshold is too high, a run starts on a machine that is
+already thrashing. The [jobgate reference](jobgate.md#pressure-thresholds)
 lists the thresholds. This page gives the evidence for each.
 
 ## Linux holds at 10% full stall
