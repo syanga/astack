@@ -158,18 +158,18 @@ process. [scripts/memory_guard.py](scripts/memory_guard.py) makes two changes:
   a process instead of evicting pages used in the last second. At each boot,
   `systemd-tmpfiles` sets the value again from
   `/etc/tmpfiles.d/astack-memory-guard.conf`.
-- The script moves `/tmp` from RAM to disk at the next reboot. Files in `/tmp`
-  then live in the page cache, which the kernel can free. The script comments
-  out an `/etc/fstab` line that mounts `/tmp` as tmpfs. It then runs
-  `systemctl mask tmp.mount` when a unit file would still mount a tmpfs on
-  `/tmp` at boot. Some distributions, such as Ubuntu 26.04, ship that unit
-  file.
+- `/tmp` moves from RAM to disk at the next reboot, so files there live in the
+  page cache, which the kernel can free. The script comments out an
+  `/etc/fstab` line that mounts `/tmp` as tmpfs. When a unit file would still
+  mount a tmpfs on `/tmp` at boot, it also runs `systemctl mask tmp.mount`.
+  Some distributions, such as Ubuntu 26.04, ship that unit file.
 
 Before the script replaces `/etc/fstab`, it checks the edited copy with
 `findmnt --verify`. `install` stops before it changes anything when that check
-fails. It also stops when a unit file in `/etc/systemd/system` defines
-`tmp.mount`, or when `/etc/fstab` mounts `/tmp` in a line the script does not
-recognize.
+fails, or when a unit file in `/etc/systemd/system` defines `tmp.mount`. It
+also stops, without masking `tmp.mount`, when `/etc/fstab` mounts `/tmp` in a
+line the script does not recognize. `uninstall` reverts whatever `install`
+changed before it stopped.
 
 The script never leaves `tmp.mount` masked while `/etc/fstab` mounts `/tmp`,
 because systemd cannot start a masked unit that `/etc/fstab` requires.

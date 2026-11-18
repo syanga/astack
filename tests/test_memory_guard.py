@@ -258,6 +258,18 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertEqual(self.ttl.read_text().strip(), "0")
         self.assertFalse(self.record.exists())
 
+    def test_a_mask_made_after_install_failed_before_its_mask_step_survives_uninstall(self):
+        self.set_fstab(ROOT_AND_SWAP)
+        with patch.object(Path, "write_text", side_effect=OSError("min_ttl_ms is read-only")):
+            with self.assertRaisesRegex(OSError, "read-only"):
+                self.install()
+        self.assertFalse(self.systemd.masked)
+        self.systemd.masked = True
+        self.uninstall()
+
+        self.assertTrue(self.systemd.masked)
+        self.assertFalse(self.record.exists())
+
     def test_a_mask_step_that_finds_no_unit_file_records_no_mask(self):
         self.systemd.packaged_tmp_mount = False
         self.install()
@@ -291,10 +303,14 @@ class MemoryGuardTests(unittest.TestCase):
 
     def test_status_shows_where_tmp_will_be_after_a_reboot(self):
         self.set_fstab(ROOT_AND_SWAP)
-        self.assertNotIn("after the next reboot", self.run_main("status", uid=1000)[1])
+        before = self.run_main("status", uid=1000)[1]
+        self.assertNotIn("after the next reboot", before)
+        self.assertNotIn("set at boot by astack", before)
         self.install()
 
-        self.assertIn("disk after the next reboot", self.run_main("status", uid=1000)[1])
+        after = self.run_main("status", uid=1000)[1]
+        self.assertIn("disk after the next reboot", after)
+        self.assertIn("set at boot by astack", after)
 
     def test_status_reports_an_unreadable_record_as_an_error(self):
         self.assertEqual(self.run_main("status", uid=1000)[0], 0)
@@ -308,6 +324,11 @@ class MemoryGuardTests(unittest.TestCase):
     def test_install_and_uninstall_say_when_a_reboot_is_needed(self):
         self.install()
         self.assertTrue(any("Reboot" in line for line in self.said))
+        self.said = []
+        self.uninstall()
+        self.assertFalse(any("Reboot" in line for line in self.said), "/tmp is still in RAM, so it stays there")
+
+        self.install()
         self.mounts.write_text(TMP_ON_DISK)
         self.said = []
         self.uninstall()
@@ -315,6 +336,17 @@ class MemoryGuardTests(unittest.TestCase):
 
         self.said = []
         self.install()
+        self.assertFalse(any("Reboot" in line for line in self.said))
+
+    def test_uninstall_announces_no_reboot_when_it_leaves_tmp_where_it_is(self):
+        self.mounts.write_text(TMP_ON_DISK)
+        self.set_fstab(ROOT_AND_SWAP)
+        self.systemd.packaged_tmp_mount = False
+        self.install()
+        self.said = []
+        self.uninstall()
+
+        self.assertIn("REMOVE {}".format(self.record), self.said)
         self.assertFalse(any("Reboot" in line for line in self.said))
 
     def test_a_second_install_keeps_what_uninstall_restores(self):
@@ -386,6 +418,7 @@ class MemoryGuardTests(unittest.TestCase):
         self.install()
 
         self.assertEqual(self.ttl.read_text().strip(), "0")
+        self.assertFalse(any(line.startswith("w ") for line in self.record.read_text().splitlines()))
         self.assertFalse(self.systemd.boot_mounts_tmpfs())
 
     def test_only_install_and_uninstall_need_root(self):
@@ -393,8 +426,8 @@ class MemoryGuardTests(unittest.TestCase):
             code, _, error = self.run_main(command, uid=1000)
             self.assertEqual(code, 1, command)
             self.assertIn("sudo", error)
-        self.assertEqual(self.run_main("install", "--dry-run", uid=1000)[0], 0)
-        self.assertEqual(self.run_main("status", uid=1000)[0], 0)
+        for argv in (("install", "--dry-run"), ("uninstall", "--dry-run"), ("status",)):
+            self.assertEqual(self.run_main(*argv, uid=1000)[0], 0, argv)
         self.assert_untouched()
 
         self.assertEqual(self.run_main("install", uid=0)[0], 0)

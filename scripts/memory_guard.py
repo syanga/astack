@@ -63,6 +63,10 @@ class Status:
     tmp_mount: TmpMount
 
     @property
+    def recorded(self) -> Record:
+        return self.record or Record(None, False)
+
+    @property
     def tmp_at_boot(self) -> Place:
         boots_tmpfs = self.tmp_mount not in ("masked", "none")
         return "RAM" if self.fstab_mounts_tmpfs or boots_tmpfs else "disk"
@@ -194,7 +198,7 @@ def install(host: Host, *, dry_run: bool, say: Say) -> None:
     if current.tmp_mount == "from fstab" and fstab_text is None:
         raise GuardError("{} mounts /tmp in a line this script does not recognize. {}".format(
             host.fstab_file, COMMENT_OUT_YOURSELF))
-    before = current.record or Record(None, False)
+    before = current.recorded
     ttl_before = current.min_ttl_ms if before.min_ttl_ms_before is None else before.min_ttl_ms_before
     may_mask = (fstab_text is not None and current.tmp_mount != "masked") or current.tmp_mount == "unit file"
     backup = host.fstab_file.with_name(host.fstab_file.name + ".astack-backup")
@@ -207,19 +211,15 @@ def install(host: Host, *, dry_run: bool, say: Say) -> None:
         files.atomic_write(host.record_file, text.encode())
 
     def mask() -> None:
-        masked = False
-        try:
-            unit = _tmp_mount(host)
-            if unit == "unit file":
-                _systemctl(host, "mask", "tmp.mount")
-                masked = True
-            elif unit == "from fstab":
-                raise GuardError("{} still mounts /tmp after the edit, so tmp.mount stays unmasked. {}".format(
-                    host.fstab_file, COMMENT_OUT_YOURSELF))
-        finally:
-            write_record(masked)
+        unit = _tmp_mount(host)
+        if unit == "unit file":
+            _systemctl(host, "mask", "tmp.mount")
+            write_record(True)
+        elif unit == "from fstab":
+            raise GuardError("{} still mounts /tmp after the edit, so tmp.mount stays unmasked. {}".format(
+                host.fstab_file, COMMENT_OUT_YOURSELF))
 
-    steps: list[Step] = [("WRITE {}".format(host.record_file), lambda: write_record(may_mask))]
+    steps: list[Step] = [("WRITE {}".format(host.record_file), lambda: write_record(False))]
     if current.min_ttl_ms is None:
         say("SKIP thrashing prevention: the kernel's multi-gen LRU is missing or off")
     else:
@@ -236,7 +236,7 @@ def install(host: Host, *, dry_run: bool, say: Say) -> None:
 
 def uninstall(host: Host, *, dry_run: bool, say: Say) -> None:
     current = status(host)
-    record = current.record or Record(None, False)
+    record = current.recorded
     fstab_text = _checked_fstab(host, lambda line: line[len(FSTAB_MARKER):] if _disabled_by_us(line) else line)
     unmask = current.tmp_mount == "masked" and (fstab_text is not None or record.masked_tmp_mount)
     previous_ttl = record.min_ttl_ms_before
