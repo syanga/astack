@@ -164,7 +164,9 @@ class JobgateTest(unittest.TestCase):
     def share(self, value):
         config = self.root / "home/.config"
         config.mkdir(parents=True, exist_ok=True)
-        (config / "jobgate.toml").write_text("memory_share = {}\n".format(value))
+        temporary = config / "jobgate.toml.tmp"
+        temporary.write_text("memory_share = {}\n".format(value))
+        os.replace(str(temporary), str(config / "jobgate.toml"))
 
     def gate(self, *arguments, env=None, timeout=60):
         return subprocess.run([sys.executable, str(SCRIPT), *arguments], cwd=str(self.repo), env=env or self.env,

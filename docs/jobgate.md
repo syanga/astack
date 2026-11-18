@@ -249,7 +249,7 @@ ones.
 | Code | Meaning |
 | --- | --- |
 | The command's code | The command exited. A command killed by signal N gives 128+N. |
-| 125 | jobgate refused the run: a usage error, a configuration error, a run that can never fit, or a `HOME` in which jobgate cannot create `.cache/jobgate/`. |
+| 125 | jobgate refused the run: a usage error, a configuration error, a run that can never fit, or a `HOME` in which jobgate cannot create `.cache/jobgate/` or the files in it. |
 | 126 | The command is not executable. |
 | 127 | The command was not found. |
 | 128+N | jobgate received signal N, such as SIGTERM, SIGHUP, or SIGINT from Ctrl-C, before the command started. |
