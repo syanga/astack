@@ -166,19 +166,21 @@ process. [scripts/memory_guard.py](scripts/memory_guard.py) makes two changes:
   that unit file.
 
 Before the script replaces `/etc/fstab`, it checks the edited copy with
-`findmnt --verify`. `install` stops before it changes anything when that check
-fails. It also stops first when a unit file in `/etc/systemd/system` defines
-`tmp.mount`, or when `tmp.mount` has a runtime mask, which ends at the next
-reboot. When `/etc/fstab` mounts `/tmp` in a line the script does not
-recognize, `install` stops without masking `tmp.mount`, and `uninstall`
-reverts the changes that `install` made before it stopped. Only one `install`
-or `uninstall` runs at a time.
+`findmnt --verify`. `install` first reloads systemd, so that it reads current
+state. It then stops before any other change when that check fails. It also
+stops when a unit file in `/etc/systemd/system` defines `tmp.mount`, or when
+`tmp.mount` has a runtime mask, which ends at the next reboot.
+
+When `/etc/fstab` mounts `/tmp` in a line the script does not recognize,
+`install` stops without masking `tmp.mount`. Run `uninstall` to revert the
+changes that `install` made before stopping. While one `install` or
+`uninstall` runs, a second one stops with an error.
 
 The script never leaves `tmp.mount` masked while `/etc/fstab` mounts `/tmp`,
 because systemd cannot start a masked unit that `/etc/fstab` requires.
 `install` saves the previous `/etc/fstab` as `/etc/fstab.astack-backup`, and
-`uninstall` leaves that file in place. To restore it by hand, first run
-`sudo systemctl unmask tmp.mount`.
+`uninstall` leaves that file in place. To restore `/etc/fstab.astack-backup` by
+hand, first run `sudo systemctl unmask tmp.mount`.
 
 To check the machine, preview the changes, and make them:
 

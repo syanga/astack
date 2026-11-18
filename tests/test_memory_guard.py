@@ -36,12 +36,14 @@ TMP_ON_DISK = "/dev/nvme0n1p2 / ext4 rw,relatime 0 0\n"
 class FakeSystemd:
     """Answers for tmp.mount as systemd does.
 
-    `masked` and `runtime_masked` are the masks on disk, which `is-enabled`
-    reads. `show` answers from the manager's view, which only a reload refreshes:
-    a mask, then a unit file in /etc/systemd/system, then the unit the fstab
-    generator wrote, then a packaged unit file. Without any of them, systemd still
-    shows a loaded tmpfs unit for a live mount, with no unit file. The generator
-    decodes octal escapes and collapses slashes in a mount point, as systemd does.
+    `masked` and `runtime_masked` are the unit-file masks that `is-enabled`
+    reports. `show` reads the manager's view, which a reload refreshes from the
+    unit files and /etc/fstab. In that view, a mask wins, then a unit file in
+    /etc/systemd/system, then the unit the fstab generator wrote, then a packaged
+    unit file. Without any of them, systemd still shows a loaded tmpfs unit for a
+    live mount, with no unit file. The generator decodes octal escapes and
+    collapses slashes in a mount point, as systemd does. `unlocked` lists the
+    changes made while nothing held `lock_path`.
     """
 
     def __init__(self, fstab, packaged_tmp_mount):
@@ -56,12 +58,24 @@ class FakeSystemd:
         self.checked = None
         self.changes = []
         self.unsafe = []
+        self.unlocked = []
+        self.lock_path = None
         self.was_safe = True
         self.reload()
 
     def reload(self):
         self.generated = self.fstab_mounts_tmpfs()
         self.manager_masked = self.masked
+        self.reloaded_fstab = self.fstab.read_text()
+
+    def lock_is_free(self):
+        with open(self.lock_path, "a") as probe:
+            try:
+                fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return False
+            fcntl.flock(probe, fcntl.LOCK_UN)
+            return True
 
     def mask_by_hand(self):
         self.masked = True
@@ -92,9 +106,14 @@ class FakeSystemd:
             return subprocess.CompletedProcess(argv, self.findmnt_status, "", "[E] bad line\n" * self.findmnt_status)
         command = argv[1]
         self.check_safety(command)
+        if command in self.fail_before_change:
+            return subprocess.CompletedProcess(argv, 1, "", "Failed to {}\n".format(command))
         if command == "is-enabled":
             state = "masked" if self.masked else "masked-runtime" if self.runtime_masked else "static"
             return subprocess.CompletedProcess(argv, 1 if state.startswith("masked") else 0, state + "\n", "")
+        if command == "show" and "--property=NeedDaemonReload" in argv:
+            pending = "yes" if self.fstab.read_text() != self.reloaded_fstab else "no"
+            return subprocess.CompletedProcess(argv, 0, "NeedDaemonReload={}\n".format(pending), "")
         if command == "show":
             if self.manager_masked or self.runtime_masked:
                 unit = ("masked", "", "/etc/systemd/system/tmp.mount", "")
@@ -108,8 +127,8 @@ class FakeSystemd:
                 unit = ("loaded", "tmpfs", "", "")
             output = "LoadState={}\nType={}\nFragmentPath={}\nSourcePath={}\n".format(*unit)
             return subprocess.CompletedProcess(argv, 0, output, "")
-        if command in self.fail_before_change:
-            return subprocess.CompletedProcess(argv, 1, "", "Failed to {}\n".format(command))
+        if self.lock_path is not None and self.lock_is_free():
+            self.unlocked.append(command)
         self.changes.append(command)
         self.masked = {"mask": True, "unmask": False}.get(command, self.masked)
         if command not in self.fail_reload_after:
@@ -141,6 +160,7 @@ class MemoryGuardTests(unittest.TestCase):
         self.mounts.write_text(TMP_IN_RAM)
         self.lock = root / "memory-guard.lock"
         self.systemd = FakeSystemd(self.fstab, packaged_tmp_mount=True)
+        self.systemd.lock_path = self.lock
         self.host = memory_guard.Host(lru_gen_enabled_file=self.enabled, min_ttl_ms_file=self.ttl,
                                       record_file=self.record, fstab_file=self.fstab, mounts_file=self.mounts,
                                       lock_file=self.lock, run=self.systemd)
@@ -179,6 +199,7 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertIn("w {} - - - - 1000\n".format(self.ttl), self.record.read_text())
         self.assertFalse(self.systemd.boot_mounts_tmpfs())
         self.assertEqual(self.systemd.unsafe, [])
+        self.assertEqual(self.systemd.unlocked, [])
         lines = self.fstab.read_text().splitlines(keepends=True)
         self.assertEqual("".join(lines[:3]), ROOT_AND_SWAP)
         self.assertTrue(lines[3].startswith("#"), lines[3])
@@ -244,7 +265,7 @@ class MemoryGuardTests(unittest.TestCase):
 
         self.assert_untouched(ROOT_AND_SWAP)
 
-    def test_install_refuses_while_another_install_or_uninstall_runs(self):
+    def test_install_and_uninstall_refuse_while_another_one_runs(self):
         with open(self.lock, "a") as held:
             fcntl.flock(held, fcntl.LOCK_EX)
             with self.assertRaisesRegex(memory_guard.GuardError, "another install or uninstall"):
@@ -252,10 +273,32 @@ class MemoryGuardTests(unittest.TestCase):
             self.assert_untouched()
 
         self.install()
-        self.assertFalse(self.systemd.boot_mounts_tmpfs())
+        installed = self.fstab.read_text()
+        with open(self.lock, "a") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            with self.assertRaisesRegex(memory_guard.GuardError, "another install or uninstall"):
+                self.uninstall()
+        self.assertEqual(self.fstab.read_text(), installed)
+        self.assertTrue(self.systemd.masked)
+
+        self.uninstall()
+        self.assertFalse(self.systemd.masked)
+
+    def test_uninstall_changes_nothing_when_systemd_cannot_report_the_mask(self):
+        self.install()
+        installed = self.fstab.read_text()
+        self.systemd.fail_before_change = {"is-enabled"}
+        with self.assertRaisesRegex(memory_guard.GuardError, "is-enabled"):
+            self.uninstall()
+
+        self.assertEqual(self.fstab.read_text(), installed)
+        self.assertTrue(self.systemd.masked)
+        self.assertEqual(self.systemd.unsafe, [])
 
     def test_install_after_an_interrupted_install_reloads_systemd_and_finishes(self):
         self.fstab.write_text(ROOT_AND_SWAP + memory_guard.FSTAB_MARKER + TMPFS_LINE)
+        with self.assertRaisesRegex(memory_guard.GuardError, "has not reloaded"):
+            self.install(dry_run=True)
         self.install()
 
         self.assertTrue(self.systemd.masked)
@@ -279,6 +322,7 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertFalse(self.systemd.masked)
         self.assertTrue(self.systemd.boot_mounts_tmpfs())
         self.assertEqual(self.systemd.unsafe, [])
+        self.assertEqual(self.systemd.unlocked, [])
         self.assertEqual(self.backup.read_text(), FSTAB, "uninstall keeps the pre-install backup")
 
     def test_uninstall_removes_a_mask_that_install_made_without_an_fstab_line(self):

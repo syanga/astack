@@ -28,6 +28,10 @@ MIN_TTL_MS = 1000
 FSTAB_MARKER = "# astack memory-guard: "
 RECORD_MARKER = "# astack memory-guard record: "
 COMMENT_OUT_YOURSELF = "Comment out that line yourself, then run install again."
+UNIT_FILE_STATES = frozenset({
+    "enabled", "enabled-runtime", "linked", "linked-runtime", "alias", "masked", "masked-runtime",
+    "static", "indirect", "disabled", "generated", "transient", "bad", "not-found",
+})
 
 Place = Literal["RAM", "disk"]
 TmpMount = Literal["masked", "runtime masked", "from fstab", "admin unit file", "unit file", "none"]
@@ -82,7 +86,7 @@ def real_host() -> Host:
         record_file=Path("/etc/tmpfiles.d/astack-memory-guard.conf"),
         fstab_file=Path("/etc/fstab"),
         mounts_file=Path("/proc/self/mounts"),
-        lock_file=Path("/run/lock/astack-memory-guard.lock"),
+        lock_file=Path("/run/astack-memory-guard.lock"),
         run=lambda argv: subprocess.run(argv, capture_output=True, text=True),
     )
 
@@ -113,14 +117,22 @@ def _systemctl(host: Host, *arguments: str) -> str:
 
 
 def _unit_file_state(host: Host) -> str:
-    return host.run(["systemctl", "is-enabled", "tmp.mount"]).stdout.strip()
+    result = host.run(["systemctl", "is-enabled", "tmp.mount"])
+    state = result.stdout.strip()
+    if state not in UNIT_FILE_STATES:
+        raise GuardError("systemctl is-enabled tmp.mount failed: {}".format(result.stderr.strip() or "no state"))
+    return state
+
+
+def _reload_pending(host: Host) -> bool:
+    return _systemctl(host, "show", "tmp.mount", "--property=NeedDaemonReload").strip() == "NeedDaemonReload=yes"
 
 
 def _tmp_mount(host: Host) -> TmpMount:
-    on_disk = _unit_file_state(host)
-    if on_disk == "masked":
+    state = _unit_file_state(host)
+    if state == "masked":
         return "masked"
-    if on_disk == "masked-runtime":
+    if state == "masked-runtime":
         return "runtime masked"
     shown = _systemctl(host, "show", "tmp.mount", "--property=LoadState,Type,FragmentPath,SourcePath")
     unit = dict(line.split("=", 1) for line in shown.splitlines() if "=" in line)
@@ -202,9 +214,9 @@ def _ttl_step(host: Host, value: int) -> Step:
 
 
 @contextmanager
-def _exclusive(host: Host, *, dry_run: bool) -> Iterator[None]:
+def _fresh_status(host: Host, *, dry_run: bool) -> Iterator[Status]:
     if dry_run:
-        yield
+        yield status(host)
         return
     with open(host.lock_file, "a") as lock:
         try:
@@ -212,7 +224,7 @@ def _exclusive(host: Host, *, dry_run: bool) -> Iterator[None]:
         except BlockingIOError:
             raise GuardError("another install or uninstall is running. Run this one again after it ends.") from None
         _systemctl(host, "daemon-reload")
-        yield
+        yield status(host)
 
 
 def _run_steps(steps: list[Step], *, dry_run: bool, say: Say) -> None:
@@ -223,8 +235,7 @@ def _run_steps(steps: list[Step], *, dry_run: bool, say: Say) -> None:
 
 
 def install(host: Host, *, dry_run: bool, say: Say) -> None:
-    with _exclusive(host, dry_run=dry_run):
-        current = status(host)
+    with _fresh_status(host, dry_run=dry_run) as current:
         if current.tmp_mount == "admin unit file":
             raise GuardError("a unit file in /etc/systemd/system defines tmp.mount, so systemctl cannot mask it. "
                              "Remove that file or mask tmp.mount yourself, then run install again.")
@@ -233,6 +244,9 @@ def install(host: Host, *, dry_run: bool, say: Say) -> None:
                              "Run sudo systemctl unmask --runtime tmp.mount, then run install again.")
         fstab_text = _checked_fstab(host, lambda line: FSTAB_MARKER + line if _mounts_tmpfs_on_tmp(line) else line)
         if current.tmp_mount == "from fstab" and fstab_text is None:
+            if _reload_pending(host):
+                raise GuardError("systemd has not reloaded {} since it changed. Run install with sudo, "
+                                 "which reloads systemd first.".format(host.fstab_file))
             raise GuardError("{} mounts /tmp in a line this script does not recognize. {}".format(
                 host.fstab_file, COMMENT_OUT_YOURSELF))
         before = current.record_or_default
@@ -272,8 +286,7 @@ def install(host: Host, *, dry_run: bool, say: Say) -> None:
 
 
 def uninstall(host: Host, *, dry_run: bool, say: Say) -> None:
-    with _exclusive(host, dry_run=dry_run):
-        current = status(host)
+    with _fresh_status(host, dry_run=dry_run) as current:
         record = current.record_or_default
         fstab_text = _checked_fstab(host, lambda line: line[len(FSTAB_MARKER):] if _disabled_by_us(line) else line)
         unmask = current.tmp_mount == "masked" and (fstab_text is not None or record.masked_tmp_mount)
