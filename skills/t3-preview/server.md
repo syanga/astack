@@ -1,13 +1,18 @@
 # Server previews
 
-T3's preview browser runs on the viewing device, so `localhost` there may not reach the agent's server.
+In T3 Code, `preview_open` opens a URL in a preview tab. The tab's browser runs on the agent machine, so it loads `localhost` URLs, and T3 streams the tab to the user's device. By default, a `localhost` link in chat opens in the user's own browser. That browser can't reach the server when the user is on another device.
 
-1. Serve only the preview directory or a prototype's scratch app. Use task-specific logs and record each process in the [cleanup record](cleanup.md). For static files on macOS, use the firewall-approved `/usr/bin/python3`.
-2. Use an already reachable URL. Otherwise follow [Cloudflare fallback](#cloudflare-fallback).
-3. With T3 preview tools, verify loading and interactions in the viewing browser. Without those tools, report browser reachability as unverified. Hand off the URL and leave the preview processes running while the user inspects.
+1. Serve only the preview directory, a prototype's scratch app, or the task's dev server. Use task-specific logs and record each process in the [cleanup record](cleanup.md). For static files on macOS, use the firewall-approved `/usr/bin/python3`.
+2. Hand off the page:
+   - In T3 Code with the `preview_*` tools, open the page with `preview_open` and verify loading and interactions in that tab. Reset any size or appearance override, then point the user to the tab. T3 closes an agent's tab after a period without a viewer, so also give the URL in code font so the user can reopen it in T3's browser panel.
+   - In T3 Code without them, give the URL in code font for T3's browser panel and report loading as unverified.
+   - Outside T3 Code, give the `localhost` URL.
 
-## Cloudflare fallback
+   If the user asks for a public link, follow [Public link](#public-link).
+3. Leave the preview processes running, and any preview tab open, while the user inspects.
 
-For content suitable for public access, with no secrets in the served app and never for a prototype's scratch app, run `cloudflared tunnel --url http://localhost:<port>` and use the HTTPS URL from its log. DNS may take several minutes to resolve. Verify HTTPS and the viewing-browser checks above before reporting the preview as ready.
+## Public link
 
-If `cloudflared` is unavailable or the content cannot be public, use direct HTML only if it meets the task. Otherwise report the missing preview route.
+For content suitable for public access, with no secrets in the served app and never for a prototype's scratch app, run `cloudflared tunnel --url http://localhost:<port>` and use the HTTPS URL from its log. DNS may take several minutes to resolve. Verify that the HTTPS URL loads before reporting the preview as ready.
+
+If `cloudflared` is unavailable or the content cannot be public, tell the user why no public link is available.
