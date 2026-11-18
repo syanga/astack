@@ -4,9 +4,11 @@ In T3 Code, `preview_open` opens a URL in a preview tab. The tab's browser runs 
 
 1. Serve only the preview directory, a prototype's scratch app, or the task's dev server. Use task-specific logs and record each process in the [cleanup record](cleanup.md). For static files on macOS, use the firewall-approved `/usr/bin/python3`.
 2. Hand off the page:
-   - In T3 Code with the `preview_*` tools, open the page with `preview_open`. Verify loading and interactions in that tab. Reset any `preview_resize` or `preview_set_appearance` override, then point the user to the tab. T3 closes an agent's tab after a period without a viewer. Also give the URL in code font so the user can reopen it in T3's browser panel.
+   - In T3 Code with the `preview_*` tools, open the page with `preview_open`. Verify loading and interactions in that tab. Reset any `preview_resize` or `preview_set_appearance` override, then point the user to the tab. T3 can close an agent's tab that nobody views. Also give the URL in code font so the user can reopen it in T3's browser panel.
    - In T3 Code without the `preview_*` tools, give the URL in code font for T3's browser panel.
    - Outside T3 Code, give the `localhost` URL.
+
+   On the web and mobile clients, T3's browser panel loads the URL on the agent machine. The desktop app connected to another machine loads it on the user's computer unless the user picks "Open in <environment>'s browser", so name that action with the URL.
 
    If the user asks for a public link, follow [Create a public link](#create-a-public-link).
 3. Leave the preview processes running, and any preview tab open, while the user inspects.
