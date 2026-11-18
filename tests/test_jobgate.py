@@ -332,7 +332,7 @@ class ResultTests(JobgateTest):
         _, fields = self.result_line(result.stderr)
         peak = int(fields["peak"].rstrip("M"))
         self.assertGreaterEqual(peak, 96)
-        self.assertIn('raise worker_mem to "{}M" in {}'.format(peak - 1, self.repo / "jobgate.toml"), result.stderr)
+        self.assertIn('raise worker_mem to "{}M" in {}'.format(peak - 1, self.repo.resolve() / "jobgate.toml"), result.stderr)
 
 
 class ExitCodeTests(JobgateTest):
@@ -372,6 +372,8 @@ class ExitCodeTests(JobgateTest):
             (("1G", "lots", 4, "TEST_WORKERS"), "worker_mem"),
             (("2G", "1G", 4, "TEST_WORKERS"), "memory_share"),
             (("1M", "1M", 0, "TEST_WORKERS"), "max_workers"),
+            (("1M", "1M", 1, "JOBGATE_RUN"), "workers_env"),
+            (("1M", "1M", 1, "JOBGATE_WORKERS"), "workers_env"),
         ]
         for profile, named in cases:
             with self.subTest(profile=profile):

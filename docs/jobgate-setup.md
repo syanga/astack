@@ -38,9 +38,9 @@ the [jobgate reference](jobgate.md).
 
 ## Pass the worker count to the tool
 
-jobgate passes the count only through the variable that `workers_env` names.
-Set `workers_env` to a variable the tool reads, or expand the variable in
-`sh -c`:
+jobgate passes the count to the command through the environment, never as an
+argument. Set `workers_env` to a variable the tool reads, or expand the variable
+in `sh -c`:
 
 | Tool | `workers_env` | Command |
 | --- | --- | --- |
@@ -84,6 +84,6 @@ jobgate. make reports a nonzero code as `Error N`.
 
 ## Follow a run
 
-While a run waits or runs, `jobgate status` lists it with its worker count and
-stated memory. After it ends, its result line is the last line of
-`~/.cache/jobgate/results.log`.
+While a run waits, `jobgate status` lists it with how long it has waited. Once
+the run starts, the list also shows its worker count and stated memory. After
+it ends, its result line is the last line of `~/.cache/jobgate/results.log`.

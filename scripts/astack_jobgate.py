@@ -33,14 +33,26 @@ def on_path(directory):
     return any(entry and os.path.realpath(entry) == target for entry in os.environ.get("PATH", "").split(os.pathsep))
 
 
-def shell_mentions(path, directory):
+PATH_ASSIGNMENT = re.compile(r"""(?:^|[\s;])(?:export\s+)?PATH=("[^"]*"|'[^']*'|[^\s;]+)""")
+
+
+def shell_puts_on_path(path, directory, home):
     try:
         text = path.read_bytes().decode(errors="replace")
     except OSError:
         return False
-    spellings = (str(directory), "$HOME/.local/bin", "${HOME}/.local/bin", "~/.local/bin")
-    return any(spelling in line for line in text.splitlines() if not line.lstrip().startswith("#")
-               for spelling in spellings)
+    target = os.path.normpath(str(directory))
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        for value in PATH_ASSIGNMENT.findall(line):
+            for entry in value.strip("\"'").split(":"):
+                entry = entry.replace("${HOME}", str(home)).replace("$HOME", str(home))
+                if entry == "~" or entry.startswith("~/"):
+                    entry = str(home) + entry[1:]
+                if entry and os.path.normpath(entry) == target:
+                    return True
+    return False
 
 
 def update_path(command, state, home, use_env, dry_run, save):
@@ -55,9 +67,10 @@ def update_path(command, state, home, use_env, dry_run, save):
                     claude_router.remove_block(Path(owned["file"]), ("\n".join(owned["lines"]) + "\n").encode(),
                                                owned["separator"], owned["created"])
                 except OSError as error:
-                    print("WARN {} ({}); remove these lines yourself: {}".format(
+                    print("WARN {} ({}); uninstall again to remove: {}".format(
                         owned["file"], claude_router.reason(error), " / ".join(owned["lines"])))
-                records.pop(NAME)
+                else:
+                    records.pop(NAME)
     else:
         directory = bin_path(home).parent
         escaped = re.sub(r'([\\"$`])', r"\\\1", str(directory))
@@ -73,7 +86,7 @@ def update_path(command, state, home, use_env, dry_run, save):
         elif shell_file is None:
             print("SKIP PATH (no shell file known for SHELL={}; to add it yourself: {})".format(
                 os.environ.get("SHELL", ""), lines[1]))
-        elif shell_mentions(shell_file, directory):
+        elif shell_puts_on_path(shell_file, directory, home):
             print("KEEP {} (already puts {} on PATH)".format(shell_file, directory))
         elif dry_run:
             print("APPEND {} {}".format(shell_file, lines[1]))

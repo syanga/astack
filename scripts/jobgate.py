@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import ctypes
 from dataclasses import asdict, dataclass, fields
 import datetime
 import fcntl
@@ -43,13 +44,13 @@ DARWIN_HOLD_LEVEL = 4
 SLICE = "jobgate.slice"
 CPU_WEIGHT = 30
 SCOPE_OOM_POLICY_SYSTEMD = 253
-IDLE_SECONDS = 120.0
 POLL_SECONDS = 1.0
 SAMPLE_SECONDS = 2.0
 REPORT_SECONDS = 60.0
 RUN_ENV = "JOBGATE_RUN"
 WORKERS_ENV = "JOBGATE_WORKERS"
 MACHINE_ENV = "JOBGATE_MACHINE_FILE"
+NO_MEMORY_CONTROLLER = 3
 REFUSED = 125
 CANNOT_EXECUTE = 126
 NOT_FOUND = 127
@@ -58,10 +59,8 @@ MACHINE_KEYS = ("memory_share",)
 SIZE = re.compile(r"(\d+(?:\.\d+)?)\s*([KMGT])(?:i?B)?", re.IGNORECASE)
 UNITS = {"K": 2**10, "M": 2**20, "G": 2**30, "T": 2**40}
 ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-# Python defines os.PRIO_DARWIN_* only from 3.12; these are the <sys/resource.h> values.
-PRIO_DARWIN_PROCESS = 4
-PRIO_DARWIN_BG = 0x1000
-HID_IDLE = re.compile(rb'"HIDIdleTime" = (\d+)')
+TASKPOLICY = "/usr/sbin/taskpolicy"
+RUSAGE_INFO_V0 = 0
 
 Dirty = Literal["yes", "no", "unknown"]
 
@@ -193,6 +192,8 @@ def load_profile(path: Path, name: str) -> Profile:
     workers_env = table["workers_env"]
     if not isinstance(workers_env, str) or not ENV_NAME.fullmatch(workers_env):
         raise Refusal("{} must be an environment variable name, not {!r}".format(where.format("workers_env"), workers_env))
+    if workers_env in (RUN_ENV, WORKERS_ENV):
+        raise Refusal("{} cannot be {}, which jobgate sets itself".format(where.format("workers_env"), workers_env))
     return Profile(name, parse_size(table["base_mem"], where.format("base_mem")),
                    parse_size(table["worker_mem"], where.format("worker_mem")), max_workers, workers_env)
 
@@ -499,40 +500,31 @@ def supervise(command: list[str], env: dict | None, sample: Callable[[int], None
             signal.signal(number, handler)
 
 
-class Process(NamedTuple):
-    parent: int
-    resident_bytes: int
-
-
-def process_table() -> dict[int, Process]:
+def parents() -> dict[int, int]:
     table = {}
     if sys.platform == "linux":
-        page = os.sysconf("SC_PAGE_SIZE")
         for entry in os.scandir("/proc"):
             if not entry.name.isdigit():
                 continue
             try:
                 with open("/proc/{}/stat".format(entry.name), "rb") as stream:
-                    parent = int(stream.read().rpartition(b")")[2].split()[1])
-                with open("/proc/{}/statm".format(entry.name), "rb") as stream:
-                    resident = int(stream.read().split()[1]) * page
+                    table[int(entry.name)] = int(stream.read().rpartition(b")")[2].split()[1])
             except (OSError, ValueError, IndexError):
                 continue
-            table[int(entry.name)] = Process(parent, resident)
         return table
-    output = subprocess.run(["ps", "-axo", "pid=,ppid=,rss="], capture_output=True, text=True, timeout=10,
+    output = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True, timeout=10,
                             stdin=subprocess.DEVNULL).stdout
     for line in output.splitlines():
         columns = line.split()
-        if len(columns) == 3 and all(column.isdigit() for column in columns):
-            table[int(columns[0])] = Process(int(columns[1]), int(columns[2]) * 1024)
+        if len(columns) == 2 and all(column.isdigit() for column in columns):
+            table[int(columns[0])] = int(columns[1])
     return table
 
 
-def process_tree(root: int, table: dict[int, Process]) -> list[int]:
+def process_tree(root: int, table: dict[int, int]) -> list[int]:
     children: dict[int, list[int]] = {}
-    for pid, process in table.items():
-        children.setdefault(process.parent, []).append(pid)
+    for pid, parent in table.items():
+        children.setdefault(parent, []).append(pid)
     tree: list[int] = []
     seen: set[int] = set()
     pending = [root]
@@ -545,44 +537,55 @@ def process_tree(root: int, table: dict[int, Process]) -> list[int]:
     return tree
 
 
-def idle_seconds() -> float:
+def resident_bytes(pid: int) -> int | None:
     try:
-        output = subprocess.run(["/usr/sbin/ioreg", "-c", "IOHIDSystem", "-d", "4", "-r", "-k", "HIDIdleTime"],
-                                capture_output=True, timeout=5, stdin=subprocess.DEVNULL).stdout
-    except (OSError, subprocess.SubprocessError):
-        return 0.0
-    match = HID_IDLE.search(output)
-    return int(match.group(1)) / 1e9 if match else 0.0
+        with open("/proc/{}/statm".format(pid), "rb") as stream:
+            return int(stream.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+    except (OSError, ValueError, IndexError):
+        return None
 
 
-class TreeMonitor:
-    def __init__(self, darwin: bool) -> None:
-        self.darwin = darwin
+class RUsageInfoV0(ctypes.Structure):
+    """struct rusage_info_v0 from macOS <sys/resource.h>."""
+
+    _fields_ = [("ri_uuid", ctypes.c_uint8 * 16)] + [(name, ctypes.c_uint64) for name in (
+        "ri_user_time", "ri_system_time", "ri_pkg_idle_wkups", "ri_interrupt_wkups", "ri_pageins",
+        "ri_wired_size", "ri_resident_size", "ri_phys_footprint", "ri_proc_start_abstime", "ri_proc_exit_abstime")]
+
+
+class Libproc:
+    library: ctypes.CDLL | None = None
+
+    @classmethod
+    def phys_footprint(cls, pid: int) -> int | None:
+        if cls.library is None:
+            cls.library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+            cls.library.proc_pid_rusage.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+            cls.library.proc_pid_rusage.restype = ctypes.c_int
+        info = RUsageInfoV0()
+        if cls.library.proc_pid_rusage(pid, RUSAGE_INFO_V0, ctypes.byref(info)) != 0:
+            return None
+        return info.ri_phys_footprint
+
+
+class PeakSampler:
+    def __init__(self) -> None:
         self.peak = 0
-        self.background: bool | None = None
-        self.backgrounded: dict[int, bool] = {}
+        self.measure = resident_bytes if sys.platform == "linux" else Libproc.phys_footprint
 
     def sample(self, root: int) -> None:
-        table = process_table()
-        tree = process_tree(root, table)
-        self.peak = max(self.peak, sum(table[pid].resident_bytes for pid in tree))
-        if self.darwin:
-            self.prioritize(tree)
+        sizes = (self.measure(pid) for pid in process_tree(root, parents()))
+        self.peak = max(self.peak, sum(size for size in sizes if size is not None))
 
-    def prioritize(self, tree: list[int]) -> None:
-        background = idle_seconds() < IDLE_SECONDS
-        if self.background is not None and background != self.background:
-            say("background priority: the Mac is in use" if background else
-                "normal priority: no keyboard or mouse input for {}".format(duration(IDLE_SECONDS)))
-        self.background = background
-        for pid in tree:
-            if self.backgrounded.get(pid) == background:
-                continue
-            try:
-                os.setpriority(PRIO_DARWIN_PROCESS, pid, PRIO_DARWIN_BG if background else 0)
-            except (ProcessLookupError, PermissionError):
-                continue
-            self.backgrounded[pid] = background
+
+def unrunnable(command: list[str], env: dict) -> int | None:
+    name = command[0]
+    if "/" not in name:
+        found = shutil.which(name, path=env.get("PATH", os.defpath))
+        return None if found else launch_failure(command, FileNotFoundError())
+    if not os.path.exists(name):
+        return launch_failure(command, FileNotFoundError())
+    return None if os.access(name, os.X_OK) else launch_failure(command, PermissionError(13, "Permission denied"))
 
 
 def systemd_version() -> int:
@@ -633,13 +636,23 @@ def execute(command: list[str], env: dict, share: int, ticket: Ticket, profile: 
                      sys.executable, str(Path(__file__).resolve()), "_scope", str(ticket.files.scope), "--", *command]
             outcome = supervise(scope, env)
             result = read_json(ticket.files.scope)
-            if "cgroup" in result or outcome.signal is not None:
+            if "cgroup" in result:
                 return outcome, result.get("peak")
+            if outcome.signal is not None:
+                return Exit(128 + outcome.signal, outcome.signal), None
             failure = result.get("failure") or "systemd-run could not start a scope"
         say("the kernel memory cap is off ({}); admission and the pressure hold still apply".format(failure))
-    monitor = TreeMonitor(darwin=sys.platform == "darwin")
-    outcome = supervise(command, env, monitor.sample)
-    return outcome, monitor.peak or None
+    elif sys.platform == "darwin":
+        code = unrunnable(command, env)
+        if code is not None:
+            return Exit(code), None
+        if os.access(TASKPOLICY, os.X_OK):
+            command = [TASKPOLICY, "-c", "utility", *command]
+        else:
+            say("{} is missing, so the command runs without the utility QoS clamp".format(TASKPOLICY))
+    sampler = PeakSampler()
+    outcome = supervise(command, env, sampler.sample)
+    return outcome, sampler.peak or None
 
 
 def scope_main(result: Path, command: list[str]) -> int:
@@ -649,7 +662,7 @@ def scope_main(result: Path, command: list[str]) -> int:
     cgroup = Path("/sys/fs/cgroup" + path)
     if not (cgroup / "memory.max").exists():
         write_json(result, {"failure": "the scope {} has no memory controller".format(cgroup)})
-        return REFUSED
+        return NO_MEMORY_CONTROLLER
     write_json(result, {"cgroup": str(cgroup)})
     peak_file = cgroup / "memory.peak"
     samples: list[int] = []

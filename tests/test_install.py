@@ -236,7 +236,7 @@ class InstallerTests(InstallerFixture):
         result = subprocess.run(["sh", "-c", '. "$1"; command -v jobgate; jobgate status', "sh", str(startup)],
                                 capture_output=True, text=True, cwd=str(self.root), env=shell_env)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[0], str(jobgate))
+        self.assertEqual(result.stdout.splitlines()[0], str(jobgate.resolve()))
         self.assertIn("4.0G", result.stdout)
 
         self.run_installer("--target", "jobgate", command="uninstall", env=env)
@@ -247,6 +247,27 @@ class InstallerTests(InstallerFixture):
         self.run_installer("--target", "jobgate", env=dict(env, PATH=os.pathsep.join([str(jobgate.parent), path])))
         self.assertTrue(jobgate.exists())
         self.assertFalse(startup.exists())
+
+    def test_jobgate_path_line_ignores_a_similar_directory_and_survives_a_failed_removal(self):
+        path = os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"])
+        env = dict(os.environ, SHELL="/bin/zsh", PATH=path)
+        startup = self.home / ".zshrc"
+        self.home.mkdir(parents=True)
+        startup.write_text('export PATH="$HOME/.local/bin-extra:$PATH"\n')
+        self.run_installer("--target", "jobgate", env=env)
+        found = subprocess.run(["sh", "-c", '. "$1"; command -v jobgate', "sh", str(startup)], capture_output=True,
+                               text=True, env=dict(env, HOME=str(self.home)))
+        self.assertEqual(found.stdout.strip(), str((self.home / ".local/bin/jobgate").resolve()), found.stderr)
+        if os.geteuid() == 0:
+            return
+        self.home.chmod(0o555)
+        try:
+            self.run_installer("--target", "jobgate", command="uninstall", env=env)
+        finally:
+            self.home.chmod(0o755)
+        self.assertIn(".local/bin:$PATH", startup.read_text())
+        self.run_installer("--target", "jobgate", command="uninstall", env=env)
+        self.assertEqual(startup.read_text(), 'export PATH="$HOME/.local/bin-extra:$PATH"\n')
 
     def test_destination_directory_is_not_replaced(self):
         blocker = self.home / ".codex/AGENTS.md"

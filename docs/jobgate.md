@@ -51,8 +51,8 @@ learns these numbers from past runs.
 
 ## Machine file
 
-The share is the memory that all of one user's gated runs may state together.
-It is `memory_share` times the machine's physical memory. `memory_share` comes
+The share is the memory that all gated runs with the same `HOME` may state
+together. It is `memory_share` times the machine's physical memory. `memory_share` comes
 from `~/.config/jobgate.toml`:
 
 ```toml
@@ -135,17 +135,26 @@ applies admission and the pressure hold without it. It does the same when the
 run's scope has no memory controller, as on hosts that still use cgroup v1.
 
 macOS has no cgroups, so it has no kernel memory cap. A run can use more memory
-than it states, and only the pressure hold responds, by delaying new runs. A
-run's processes get background priority, `PRIO_DARWIN_BG`, while someone uses
-the Mac. After 2 minutes without keyboard or mouse input, read from `ioreg`'s
-`HIDIdleTime`, they get normal priority. jobgate reads the idle time every 2
-seconds and prints a line when the priority changes.
+than it states, and only the pressure hold responds, by delaying new runs.
+jobgate starts the command under `taskpolicy -c utility`, which clamps the
+command and every process it starts to the utility QoS class for the whole run.
+On a free Mac, a utility run is as fast as a normal one. Next to the user's own
+work, it yields CPU time to that work. A running process cannot leave the clamp.
+When `/usr/sbin/taskpolicy` is missing, jobgate prints one line and runs the
+command without the clamp.
+[Why jobgate runs macOS commands at utility QoS](jobgate-macos-priority.md)
+gives the measurements.
 
 jobgate passes SIGTERM and SIGHUP on to the command and waits for it. Ctrl-C
 reaches the command from the terminal, and jobgate waits for the command to
-exit. When jobgate itself dies, the OS releases its reservation, and its command
-keeps running. On Linux, that command stays in `jobgate.slice` under its
-`MemoryMax`.
+exit.
+
+When jobgate alone is killed with SIGKILL, the OS releases its reservation, and
+its command keeps running. Later runs are admitted as if that command had
+ended. On Linux with a systemd user session, the command stays in
+`jobgate.slice`, so `MemoryMax` still caps all gated runs together. On macOS, or
+on Linux without a systemd user session, only the pressure hold protects new
+runs from the memory that command still uses.
 
 ## Results
 
@@ -153,9 +162,14 @@ jobgate measures each run's peak memory:
 
 - On Linux in a scope, it reads the scope's `memory.peak`. On kernels before
   5.19, which lack `memory.peak`, it samples `memory.current` every 2 seconds.
-- Elsewhere, it adds up the resident memory of the command's process tree every
-  2 seconds. The sum counts shared pages once per process, and it misses
-  processes that leave the tree.
+- On macOS, it adds up the `phys_footprint` of each process in the command's
+  tree every 2 seconds, read through `proc_pid_rusage`. That is the memory
+  Activity Monitor shows, and it includes compressed memory.
+- On Linux without a scope, it adds up the resident memory of the command's
+  process tree every 2 seconds.
+
+The macOS and Linux sums count shared pages once per process. They skip a
+process they cannot read, and they miss processes that leave the tree.
 
 When the peak exceeds the stated memory, jobgate prints a warning with the
 `worker_mem` value that would have covered the peak:
@@ -219,9 +233,15 @@ worktrees like clean ones.
 
 ## Install and remove
 
-`./install.sh` installs jobgate by default, as the `jobgate` target. It writes
-`~/.local/bin/jobgate`, a shell wrapper that runs `python3` on the script in
-`~/.local/share/astack/jobgate/`. When `~/.local/bin` is not on `PATH`, it adds
-a `PATH` line to the shell startup file. `./uninstall.sh` removes those files
-and that line. It leaves `~/.cache/jobgate/`, the machine file, and the
-runtime slice settings, which last until reboot.
+`./install.sh` installs jobgate by default, as the `jobgate` target. The
+installer needs Python 3.10 or newer as `python3`, while jobgate itself runs on
+Python 3.9. A stock Mac's `python3` is 3.9, which cannot run the installer.
+The installer writes `~/.local/bin/jobgate`, a shell wrapper that runs `python3`
+on the script in `~/.local/share/astack/jobgate/`, or in
+`$XDG_DATA_HOME/astack/jobgate/` when `XDG_DATA_HOME` is set. When
+`~/.local/bin` is not on `PATH` and no `PATH` assignment in the shell startup
+file names it, the installer appends a `PATH` line to that file.
+`./uninstall.sh` removes those files and that line. If it cannot rewrite the
+startup file, it keeps the line in its record and removes it on the next
+uninstall. It leaves `~/.cache/jobgate/`, the machine file, and the runtime
+slice settings, which last until reboot.
