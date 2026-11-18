@@ -187,15 +187,16 @@ kernel caches those files in RAM. When memory runs short, the kernel can write
 the cache back to disk and free it. `findmnt /tmp` shows `tmpfs` in the
 `FSTYPE` column when `/tmp` is in RAM.
 
-Never leave `tmp.mount` masked while `/etc/fstab` mounts `/tmp`. The boot can
-then stop in emergency mode.
+Never leave `tmp.mount` masked while `/etc/fstab` mounts `/tmp`. The next boot
+then skips `local-fs.target`, so the other file systems in `/etc/fstab` can
+stay unmounted and the root file system can stay read-only.
 
-To move `/tmp` to disk at the next reboot:
+These steps move `/tmp` to disk:
 
 1. Run `findmnt --fstab --types tmpfs --mountpoint /tmp`. If it prints a
    `/tmp` line, use `sudoedit /etc/fstab` to comment out the line that mounts a
    tmpfs on `/tmp`. Then repeat this step. If it prints nothing, go to step 2.
-2. Run `findmnt --fstab --mountpoint /tmp`. If it prints a `/tmp` line, skip to
+2. Run `findmnt --fstab --mountpoint /tmp`. If it prints a `/tmp` line, go to
    step 4, because `/etc/fstab` mounts another file system on `/tmp`. If it
    prints nothing, go to step 3.
 3. Run `sudo systemctl mask tmp.mount`. The mask stops a packaged `tmp.mount`,
@@ -210,7 +211,7 @@ On disk, `/tmp` keeps files until `systemd-tmpfiles` deletes them.
 `/usr/lib/tmpfiles.d/tmp.conf` sets the age limit, which is 10 days on Ubuntu
 26.04.
 
-To move `/tmp` back to RAM:
+These steps move `/tmp` back to RAM:
 
 1. Run `sudo systemctl unmask tmp.mount`.
 2. Restore any `/etc/fstab` line that you commented out.
