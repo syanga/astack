@@ -7,8 +7,8 @@ describes the behavior. This page gives the measurements behind the choice.
 
 A gated run on a Mac shares the CPU with the person at the keyboard and with
 their agents. It should finish as fast as a normal run when the Mac is free,
-and it should yield when someone needs the CPU. macOS offers three
-candidates for that: normal priority, the utility QoS class, and background
+and it should yield when someone needs the CPU. macOS offers three ways to set
+a run's share of the CPU: normal priority, the utility QoS class, and background
 priority (`PRIO_DARWIN_BG`, the state that `taskpolicy -b` sets).
 
 The measurements below come from an M4 Pro Mac with 14 cores, 10 performance
@@ -53,7 +53,7 @@ python3 burn.py 10 & taskpolicy -c utility python3 burn.py 14; wait
 python3 burn.py 10 & taskpolicy -b python3 burn.py 14; wait
 ```
 
-Utility costs nothing on a free Mac: the test run took 0.88 s against 0.91 s at
+Utility costs nothing on a free Mac. The test run took 0.88 s against 0.91 s at
 normal priority. Under load, it slowed the foreground work by 0.11 s and still
 finished its own work in 1.58 s. Background priority kept the foreground work
 at full speed, but it slowed the test run about 18 times even on a free Mac.

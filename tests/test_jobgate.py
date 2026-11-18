@@ -374,9 +374,12 @@ class ExitCodeTests(JobgateTest):
         for tool in ("systemctl", "systemd-run"):
             (session_bin / tool).chmod(0o755)
         ran = self.root / "command ran"
+        touch = [sys.executable, "-c", "import pathlib, sys; pathlib.Path(sys.argv[1]).touch()", str(ran)]
+        self.assertEqual(self.gate("run", "test", "--", *touch).returncode, 0)
+        self.assertTrue(ran.exists())
+        ran.unlink()
         env = dict(self.env, PATH=str(session_bin) + os.pathsep + self.env["PATH"])
-        process = subprocess.Popen([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c",
-                                    "import pathlib, sys; pathlib.Path(sys.argv[1]).touch()", str(ran)],
+        process = subprocess.Popen([sys.executable, str(SCRIPT), "run", "test", "--", *touch],
                                    cwd=str(self.repo), env=env, stderr=subprocess.PIPE, text=True,
                                    start_new_session=True)
         wait_for(starting.exists)

@@ -232,7 +232,7 @@ code of `taskpolicy`.
 | --- | --- |
 | `~/.cache/jobgate/queue.lock` | The lock that runs hold while they read or change the queue |
 | `~/.cache/jobgate/runs/<run id>.json` | One file per waiting or running run, which the run holds a `flock` on. The OS releases the lock when the run's process dies. The next run that reads the queue then deletes the file. |
-| `~/.cache/jobgate/runs/<run id>.scope` | The scope's cgroup and peak memory, which the scope writes before it ends |
+| `~/.cache/jobgate/runs/<run id>.scope` | The scope's cgroup and peak memory, which the scope writes before it ends, or the reason the scope could not cap memory |
 | `~/.cache/jobgate/results.log` | Result lines |
 
 ## Install and remove

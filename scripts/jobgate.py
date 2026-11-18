@@ -474,7 +474,7 @@ def exit_code(returncode: int) -> int:
 
 
 def supervise(command: list[str], env: dict | None, sample: Callable[[int], None] | None = None) -> Exit:
-    """The terminal already sends Ctrl-C to the command's process group, so jobgate only waits through SIGINT.
+    """The terminal sends Ctrl-C to the whole foreground process group, so the command already gets SIGINT.
 
     exec resets a Python handler to the default but keeps SIG_IGN, so a signal that nohup ignores stays ignored.
     """
@@ -614,7 +614,7 @@ def set_slice_cap(share: int) -> str | None:
     if shutil.which("systemd-run") is None:
         return "systemd-run is not installed"
     result = run_captured(["systemctl", "--user", "set-property", "--runtime", SLICE,
-                    "MemoryMax={}".format(share), "CPUWeight={}".format(CPU_WEIGHT)], 15)
+                           "MemoryMax={}".format(share), "CPUWeight={}".format(CPU_WEIGHT)], 15)
     if result.returncode != 0:
         return "no systemd user session: {}".format(last_error(result))
     return None
@@ -770,8 +770,8 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
 def cap_text() -> str:
     if sys.platform == "darwin":
         return "none on macOS; the pressure hold delays new runs instead"
-    result = run_captured(["systemctl", "--user", "show", SLICE, "-p", "MemoryMax", "-p", "CPUWeight", "-p", "MemoryCurrent"],
-                   15)
+    result = run_captured(["systemctl", "--user", "show", SLICE, "-p", "MemoryMax", "-p", "CPUWeight",
+                           "-p", "MemoryCurrent"], 15)
     if result.returncode != 0:
         return "off: " + last_error(result)
     values = dict(line.partition("=")[::2] for line in result.stdout.splitlines() if "=" in line)
@@ -830,10 +830,11 @@ def main(argv: list[str]) -> int:
         argv, command = argv[:split], argv[split + 1:]
     parser = Parser(prog="jobgate", description="Admit heavy commands so that concurrent runs fit the machine.")
     actions = parser.add_subparsers(dest="action", required=True)
-    gate = actions.add_parser("run", usage="jobgate run [--max-workers N] PROFILE -- COMMAND [ARG...]",
-                              help="wait for room, then run the command with a worker count")
-    gate.add_argument("--max-workers", type=positive, metavar="N", help="use at most N workers, below the profile's max_workers")
-    gate.add_argument("profile", help="a [profile] table in the repository's jobgate.toml")
+    run_parser = actions.add_parser("run", usage="jobgate run [--max-workers N] PROFILE -- COMMAND [ARG...]",
+                                    help="wait for room, then run the command with a worker count")
+    run_parser.add_argument("--max-workers", type=positive, metavar="N",
+                            help="use at most N workers, below the profile's max_workers")
+    run_parser.add_argument("profile", help="a [profile] table in the repository's jobgate.toml")
     actions.add_parser("status", help="show the share, pressure, cap, and runs")
     args = parser.parse_args(argv)
     try:
