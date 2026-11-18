@@ -139,8 +139,7 @@ macOS has no cgroups, so it has no kernel memory cap. A run can use more memory
 than it states, and only the pressure hold responds, by delaying new runs.
 jobgate starts the command under `taskpolicy -c utility`, which clamps the
 command and every process it starts to the utility QoS class for the whole run.
-On a free Mac, a utility run is as fast as a normal one. Next to the user's own
-work, it yields CPU time to that work. A running process cannot leave the clamp.
+A running process cannot leave the clamp.
 When `/usr/sbin/taskpolicy` is missing, jobgate prints one line and runs the
 command without the clamp.
 [Why jobgate runs macOS commands at utility QoS](jobgate-macos-priority.md)
@@ -249,4 +248,5 @@ file names it, the installer appends a `PATH` line to that file.
 `./uninstall.sh` removes those files and that line. When `./uninstall.sh`
 cannot rewrite the startup file, it keeps a record of the line, and the next
 `./uninstall.sh` removes the line. `./uninstall.sh` leaves `~/.cache/jobgate/`,
-the machine file, and the runtime slice settings, which last until reboot.
+the machine file, and the runtime slice settings. Those settings last until the
+machine reboots or the user's last login session ends.

@@ -161,7 +161,7 @@ def read_toml(path: Path) -> dict:
         raise Refusal("cannot read {}: {}".format(path, error)) from None
 
 
-def quiet(argv: list[str], timeout: float = 60) -> subprocess.CompletedProcess:
+def run_captured(argv: list[str], timeout: float = 60) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
@@ -175,7 +175,7 @@ def last_error(result: subprocess.CompletedProcess) -> str:
 
 
 def find_config(start: Path) -> Path:
-    top = quiet(["git", "-C", str(start), "rev-parse", "--show-toplevel"])
+    top = run_captured(["git", "-C", str(start), "rev-parse", "--show-toplevel"])
     root = Path(top.stdout.strip()) if top.returncode == 0 else start
     candidate = root / "jobgate.toml"
     if not candidate.is_file():
@@ -226,7 +226,7 @@ def load_memory_share() -> float:
     return float(memory_share)
 
 
-def injected() -> dict:
+def test_readings() -> dict:
     path = os.environ.get(MACHINE_ENV)
     if not path:
         return {}
@@ -237,7 +237,7 @@ def injected() -> dict:
 
 
 def machine() -> Machine:
-    readings = injected()
+    readings = test_readings()
     memory = readings.get("memory") or os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
     if "cores" in readings:
         cores = readings["cores"]
@@ -264,13 +264,13 @@ def darwin_pressure(value: str) -> Pressure:
 
 
 def pressure() -> Pressure:
-    readings = injected()
+    readings = test_readings()
     if "psi" in readings:
         return psi_pressure(readings["psi"])
     if "darwin_level" in readings:
         return darwin_pressure(str(readings["darwin_level"]))
     if sys.platform == "darwin":
-        result = quiet(["sysctl", "-n", "kern.memorystatus_vm_pressure_level"], 10)
+        result = run_captured(["/usr/sbin/sysctl", "-n", "kern.memorystatus_vm_pressure_level"], 10)
         if result.returncode != 0:
             return Pressure("unknown ({})".format(last_error(result)), False)
         return darwin_pressure(result.stdout)
@@ -354,14 +354,12 @@ class Queue:
             except FileNotFoundError:
                 continue
             try:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
-                except BlockingIOError:
+                if locked_by_another(fd):
                     run = read_run(fd)
                     if run is not None:
                         runs.append(run)
-                    continue
-                RunFiles.of(self.runs, path.stem).remove()
+                else:
+                    RunFiles.of(self.runs, path.stem).remove()
             finally:
                 os.close(fd)
         return sorted(runs, key=lambda run: run.seq)
@@ -379,6 +377,14 @@ class Queue:
             return ticket
 
 
+def locked_by_another(fd: int) -> bool:
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    return False
+
+
 def held(run_file: str) -> bool:
     if not os.path.isabs(run_file):
         return False
@@ -387,12 +393,9 @@ def held(run_file: str) -> bool:
     except OSError:
         return False
     try:
-        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
-    except BlockingIOError:
-        return True
+        return locked_by_another(fd)
     finally:
         os.close(fd)
-    return False
 
 
 def read_run(fd: int) -> Run | None:
@@ -484,7 +487,10 @@ def supervise(command: list[str], env: dict | None, sample: Callable[[int], None
             with contextlib.suppress(ProcessLookupError):
                 child[0].send_signal(number)
 
-    handlers = {signal.SIGTERM: forward, signal.SIGHUP: forward, signal.SIGINT: lambda number, frame: None}
+    def record(number, frame):
+        received.append(number)
+
+    handlers = {signal.SIGTERM: forward, signal.SIGHUP: forward, signal.SIGINT: record}
     previous = {number: signal.signal(number, handler) for number, handler in handlers.items()
                 if signal.getsignal(number) is not signal.SIG_IGN}
     try:
@@ -520,7 +526,7 @@ def parents() -> dict[int, int]:
             except (OSError, ValueError, IndexError):
                 continue
         return table
-    for line in quiet(["ps", "-axo", "pid=,ppid="], 10).stdout.splitlines():
+    for line in run_captured(["ps", "-axo", "pid=,ppid="], 10).stdout.splitlines():
         columns = line.split()
         if len(columns) == 2 and all(column.isdigit() for column in columns):
             table[int(columns[0])] = int(columns[1])
@@ -584,7 +590,7 @@ class PeakSampler:
         self.peak = max(self.peak, sum(size for size in sizes if size is not None))
 
 
-def unrunnable(command: list[str], env: dict) -> int | None:
+def exec_failure(command: list[str], env: dict) -> int | None:
     name = command[0]
     if "/" in name:
         candidates = [name]
@@ -600,14 +606,14 @@ def unrunnable(command: list[str], env: dict) -> int | None:
 
 
 def systemd_version() -> int:
-    match = re.match(r"systemd (\d+)", quiet(["systemctl", "--version"], 10).stdout)
+    match = re.match(r"systemd (\d+)", run_captured(["systemctl", "--version"], 10).stdout)
     return int(match.group(1)) if match else 0
 
 
 def set_slice_cap(share: int) -> str | None:
     if shutil.which("systemd-run") is None:
         return "systemd-run is not installed"
-    result = quiet(["systemctl", "--user", "set-property", "--runtime", SLICE,
+    result = run_captured(["systemctl", "--user", "set-property", "--runtime", SLICE,
                     "MemoryMax={}".format(share), "CPUWeight={}".format(CPU_WEIGHT)], 15)
     if result.returncode != 0:
         return "no systemd user session: {}".format(last_error(result))
@@ -645,7 +651,7 @@ def execute(command: list[str], env: dict, share: int, ticket: Ticket, profile: 
             failure = result.get("failure") or "systemd-run could not start a scope"
         say("the kernel memory cap is off ({}); admission and the pressure hold still apply".format(failure))
     elif sys.platform == "darwin":
-        code = unrunnable(command, env)
+        code = exec_failure(command, env)
         if code is not None:
             return Exit(code), None
         if os.access(TASKPOLICY, os.X_OK):
@@ -682,8 +688,8 @@ def scope_main(result: Path, command: list[str]) -> int:
 
 
 def git_state(repo: Path) -> tuple[str, Dirty]:
-    head = quiet(["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", "HEAD"])
-    status = quiet(["git", "-C", str(repo), "status", "--porcelain"])
+    head = run_captured(["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", "HEAD"])
+    status = run_captured(["git", "-C", str(repo), "status", "--porcelain"])
     commit = head.stdout.strip() if head.returncode == 0 else "none"
     dirty: Dirty = "unknown" if status.returncode != 0 else ("yes" if status.stdout.strip() else "no")
     return commit, dirty
@@ -764,7 +770,7 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
 def cap_text() -> str:
     if sys.platform == "darwin":
         return "none on macOS; the pressure hold delays new runs instead"
-    result = quiet(["systemctl", "--user", "show", SLICE, "-p", "MemoryMax", "-p", "CPUWeight", "-p", "MemoryCurrent"],
+    result = run_captured(["systemctl", "--user", "show", SLICE, "-p", "MemoryMax", "-p", "CPUWeight", "-p", "MemoryCurrent"],
                    15)
     if result.returncode != 0:
         return "off: " + last_error(result)

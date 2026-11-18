@@ -263,6 +263,13 @@ class InstallerTests(InstallerFixture):
                                text=True, env=dict(env, HOME=str(self.home)))
         self.assertEqual(found.stdout.strip(), str((self.home / ".local/bin/jobgate").resolve()), found.stderr)
 
+    def test_jobgate_keeps_a_startup_file_that_already_names_the_directory(self):
+        text = 'export PATH="$HOME/.local/bin:$PATH"\n'
+        env, startup = self.jobgate_shell(text)
+        self.run_installer("--target", "jobgate", env=env)
+        self.assertTrue((self.home / ".local/bin/jobgate").exists())
+        self.assertEqual(startup.read_text(), text)
+
     def test_jobgate_uninstall_removes_the_path_line_after_a_failed_removal(self):
         if os.geteuid() == 0:
             self.skipTest("root can rewrite a read-only home")

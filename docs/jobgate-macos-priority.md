@@ -61,8 +61,9 @@ The `setpriority(2)` man page says that background state also throttles disk
 I/O, and network I/O on sockets that the process opens while it is in that
 state.
 
-Switching a run between background and normal priority by keyboard and mouse
-idle time would add nothing on top of utility. Utility already runs at full
-speed when the Mac is free and yields when the Mac is busy. A clamp also cannot
+Switching a run to background priority while someone uses the Mac would win
+back about 0.11 s of the foreground load's 0.82 s. It would cost the test run
+15.7 s, at 17.24 s instead of 1.58 s. jobgate takes utility's trade, which
+keeps both kinds of work fast. A clamp also cannot
 change on a running process, because `taskpolicy -p` accepts only its `-b`,
 `-B`, `-t`, and `-l` options.

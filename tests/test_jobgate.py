@@ -358,6 +358,33 @@ class ExitCodeTests(JobgateTest):
                 self.assertEqual(result.returncode, 126, result.stderr)
                 self.assertIn("exit=126", result.stderr)
 
+    @unittest.skipUnless(sys.platform == "linux", "the kernel memory cap exists only on Linux")
+    def test_linux_without_a_systemd_session_says_the_cap_is_off(self):
+        result = self.gate("run", "test", "--", sys.executable, "-c", PRINT_WORKERS)
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "4"), result.stderr)
+        self.assertEqual(result.stderr.count("the kernel memory cap is off"), 1, result.stderr)
+
+    @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
+    def test_ctrl_c_while_the_scope_starts_skips_the_command(self):
+        session_bin = self.root / "session bin"
+        session_bin.mkdir()
+        (session_bin / "systemctl").write_text("#!/bin/sh\nexit 0\n")
+        starting = self.root / "scope starting"
+        (session_bin / "systemd-run").write_text('#!/bin/sh\ntouch "{}"\nexec sleep 30\n'.format(starting))
+        for tool in ("systemctl", "systemd-run"):
+            (session_bin / tool).chmod(0o755)
+        ran = self.root / "command ran"
+        env = dict(self.env, PATH=str(session_bin) + os.pathsep + self.env["PATH"])
+        process = subprocess.Popen([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c",
+                                    "import pathlib, sys; pathlib.Path(sys.argv[1]).touch()", str(ran)],
+                                   cwd=str(self.repo), env=env, stderr=subprocess.PIPE, text=True,
+                                   start_new_session=True)
+        wait_for(starting.exists)
+        os.killpg(process.pid, signal.SIGINT)
+        _, stderr = process.communicate(timeout=30)
+        self.assertEqual(process.returncode, 128 + signal.SIGINT, stderr)
+        self.assertFalse(ran.exists())
+
     def test_sigterm_reaches_the_command(self):
         marker = self.root / "terminated"
         trap = ("import pathlib, signal, sys, time\n"
