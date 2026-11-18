@@ -63,7 +63,7 @@ class Status:
     tmp_mount: TmpMount
 
     @property
-    def recorded(self) -> Record:
+    def record_or_default(self) -> Record:
         return self.record or Record(None, False)
 
     @property
@@ -136,6 +136,14 @@ def _read_record(host: Host) -> Record | None:
     raise GuardError("{} has no astack memory-guard record".format(host.record_file))
 
 
+def _write_record(host: Host, record: Record, *, persist_ttl: bool) -> None:
+    text = "# Written by astack scripts/memory_guard.py. Its uninstall reverts what this file records.\n"
+    text += RECORD_MARKER + json.dumps(asdict(record)) + "\n"
+    if persist_ttl:
+        text += "w {} - - - - {}\n".format(host.min_ttl_ms_file, MIN_TTL_MS)
+    files.atomic_write(host.record_file, text.encode())
+
+
 def status(host: Host) -> Status:
     enabled = _read(host.lru_gen_enabled_file)
     ttl = _read(host.min_ttl_ms_file)
@@ -198,23 +206,23 @@ def install(host: Host, *, dry_run: bool, say: Say) -> None:
     if current.tmp_mount == "from fstab" and fstab_text is None:
         raise GuardError("{} mounts /tmp in a line this script does not recognize. {}".format(
             host.fstab_file, COMMENT_OUT_YOURSELF))
-    before = current.recorded
+    before = current.record_or_default
     ttl_before = current.min_ttl_ms if before.min_ttl_ms_before is None else before.min_ttl_ms_before
     may_mask = (fstab_text is not None and current.tmp_mount != "masked") or current.tmp_mount == "unit file"
     backup = host.fstab_file.with_name(host.fstab_file.name + ".astack-backup")
 
     def write_record(masked: bool) -> None:
-        text = "# Written by astack scripts/memory_guard.py. Its uninstall reverts what this file records.\n"
-        text += RECORD_MARKER + json.dumps(asdict(Record(ttl_before, before.masked_tmp_mount or masked))) + "\n"
-        if current.min_ttl_ms is not None:
-            text += "w {} - - - - {}\n".format(host.min_ttl_ms_file, MIN_TTL_MS)
-        files.atomic_write(host.record_file, text.encode())
+        record = Record(ttl_before, before.masked_tmp_mount or masked)
+        _write_record(host, record, persist_ttl=current.min_ttl_ms is not None)
 
     def mask() -> None:
         unit = _tmp_mount(host)
         if unit == "unit file":
-            _systemctl(host, "mask", "tmp.mount")
-            write_record(True)
+            try:
+                _systemctl(host, "mask", "tmp.mount")
+            finally:
+                if _tmp_mount(host) == "masked":
+                    write_record(True)
         elif unit == "from fstab":
             raise GuardError("{} still mounts /tmp after the edit, so tmp.mount stays unmasked. {}".format(
                 host.fstab_file, COMMENT_OUT_YOURSELF))
@@ -236,7 +244,7 @@ def install(host: Host, *, dry_run: bool, say: Say) -> None:
 
 def uninstall(host: Host, *, dry_run: bool, say: Say) -> None:
     current = status(host)
-    record = current.recorded
+    record = current.record_or_default
     fstab_text = _checked_fstab(host, lambda line: line[len(FSTAB_MARKER):] if _disabled_by_us(line) else line)
     unmask = current.tmp_mount == "masked" and (fstab_text is not None or record.masked_tmp_mount)
     previous_ttl = record.min_ttl_ms_before
@@ -260,7 +268,7 @@ def describe(current: Status) -> str:
         prevention = "unavailable: the kernel's multi-gen LRU is missing or off"
     else:
         prevention = "{}: min_ttl_ms {}".format("on" if current.min_ttl_ms else "off", current.min_ttl_ms)
-        if current.record is not None and current.record.min_ttl_ms_before is not None:
+        if current.record_or_default.min_ttl_ms_before is not None:
             prevention += ", set at boot by astack"
     tmp = current.tmp_now
     if current.tmp_at_boot != current.tmp_now:

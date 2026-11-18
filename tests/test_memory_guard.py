@@ -7,6 +7,7 @@ the real /etc, /sys, or /proc.
 from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import io
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -49,6 +50,7 @@ class FakeSystemd:
         self.generated = self.fstab_mounts_tmpfs()
         self.findmnt_status = 0
         self.failing = set()
+        self.fail_after_change = set()
         self.checked = None
         self.changes = []
         self.unsafe = []
@@ -91,6 +93,8 @@ class FakeSystemd:
             self.generated = self.fstab_mounts_tmpfs()
             if self.masked and self.fstab_mounts_tmpfs():
                 self.unsafe.append(command)
+            if command in self.fail_after_change:
+                return subprocess.CompletedProcess(argv, 1, "", "Failed to reload daemon\n")
         return subprocess.CompletedProcess(argv, 0, output, "")
 
 
@@ -134,6 +138,9 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertEqual(self.ttl.read_text().strip(), "0")
         self.assertEqual(sorted(path.name for path in self.etc.iterdir()), ["fstab"])
         self.assertEqual(self.systemd.changes, [])
+
+    def announced_reboot(self):
+        return any("Reboot" in line for line in self.said)
 
     def run_main(self, *argv, platform="linux", uid=0):
         output, error = io.StringIO(), io.StringIO()
@@ -258,17 +265,30 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertEqual(self.ttl.read_text().strip(), "0")
         self.assertFalse(self.record.exists())
 
+    @unittest.skipIf(os.geteuid() == 0, "root can write a read-only file")
     def test_a_mask_made_after_install_failed_before_its_mask_step_survives_uninstall(self):
         self.set_fstab(ROOT_AND_SWAP)
-        with patch.object(Path, "write_text", side_effect=OSError("min_ttl_ms is read-only")):
-            with self.assertRaisesRegex(OSError, "read-only"):
-                self.install()
+        self.ttl.chmod(0o444)
+        with self.assertRaises(PermissionError):
+            self.install()
+        self.ttl.chmod(0o644)
         self.assertFalse(self.systemd.masked)
         self.systemd.masked = True
         self.uninstall()
 
         self.assertTrue(self.systemd.masked)
         self.assertFalse(self.record.exists())
+
+    def test_uninstall_removes_a_mask_that_systemctl_made_before_it_failed(self):
+        self.set_fstab(ROOT_AND_SWAP)
+        self.systemd.fail_after_change = {"mask"}
+        with self.assertRaisesRegex(memory_guard.GuardError, "mask"):
+            self.install()
+        self.assertTrue(self.systemd.masked)
+        self.systemd.fail_after_change = set()
+        self.uninstall()
+
+        self.assertFalse(self.systemd.masked)
 
     def test_a_mask_step_that_finds_no_unit_file_records_no_mask(self):
         self.systemd.packaged_tmp_mount = False
@@ -323,20 +343,20 @@ class MemoryGuardTests(unittest.TestCase):
 
     def test_install_and_uninstall_say_when_a_reboot_is_needed(self):
         self.install()
-        self.assertTrue(any("Reboot" in line for line in self.said))
+        self.assertTrue(self.announced_reboot())
         self.said = []
         self.uninstall()
-        self.assertFalse(any("Reboot" in line for line in self.said), "/tmp is still in RAM, so it stays there")
+        self.assertFalse(self.announced_reboot(), "/tmp is still in RAM, so it stays there")
 
         self.install()
         self.mounts.write_text(TMP_ON_DISK)
         self.said = []
         self.uninstall()
-        self.assertTrue(any("Reboot" in line for line in self.said))
+        self.assertTrue(self.announced_reboot())
 
         self.said = []
         self.install()
-        self.assertFalse(any("Reboot" in line for line in self.said))
+        self.assertFalse(self.announced_reboot())
 
     def test_uninstall_announces_no_reboot_when_it_leaves_tmp_where_it_is(self):
         self.mounts.write_text(TMP_ON_DISK)
@@ -347,7 +367,7 @@ class MemoryGuardTests(unittest.TestCase):
         self.uninstall()
 
         self.assertIn("REMOVE {}".format(self.record), self.said)
-        self.assertFalse(any("Reboot" in line for line in self.said))
+        self.assertFalse(self.announced_reboot())
 
     def test_a_second_install_keeps_what_uninstall_restores(self):
         self.ttl.write_text("250\n")
