@@ -26,7 +26,9 @@ are exceptions to the Python script convention. The scripts in
 `skills/codex-background-jobs/`, `skills/claude-restore-skills/`,
 `skills/claude-full-send-guard/`, and `skills/claude-merge-gate/` also run on
 Python 3.9. Agents and Claude Code hooks run them with the system `python3`,
-which is 3.9 on stock macOS. Follow the
+which is 3.9 on stock macOS. `scripts/jobgate.py` and the vendored
+`scripts/_vendor/tomllib` also run on Python 3.9, because repositories' commands
+run jobgate with the `python3` on `PATH`. Follow the
 verification steps in [CLI.md](skills/orchestrate/CLI.md) to run the
 orchestration tests offline in a temporary copy. The Python suite also tests the
 imported decision-log helper.
