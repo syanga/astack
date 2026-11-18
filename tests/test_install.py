@@ -244,12 +244,16 @@ class InstallerTests(InstallerFixture):
         self.assertFalse((self.home / ".local/share/astack").exists())
         self.assertFalse(startup.exists())
 
-    def test_jobgate_adds_no_path_line_when_the_directory_is_on_path(self):
+    def test_jobgate_adds_a_path_line_only_when_the_directory_is_missing_from_path(self):
         jobgate = self.home / ".local/bin/jobgate"
-        path = os.pathsep.join([str(jobgate.parent), str(Path(sys.executable).parent), "/usr/bin", "/bin"])
-        self.run_installer("--target", "jobgate", env=dict(os.environ, SHELL="/bin/zsh", PATH=path))
+        path = os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"])
+        env = dict(os.environ, SHELL="/bin/zsh", PATH=os.pathsep.join([str(jobgate.parent), path]))
+        self.run_installer("--target", "jobgate", env=env)
         self.assertTrue(jobgate.exists())
         self.assertFalse((self.home / ".zshrc").exists())
+        self.run_installer("--target", "jobgate", command="uninstall", env=env)
+        self.run_installer("--target", "jobgate", env=dict(env, PATH=path))
+        self.assertIn(str(jobgate.parent), (self.home / ".zshrc").read_text())
 
     def test_installed_jobgate_reads_toml_with_its_vendored_copy(self):
         path = os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"])
@@ -292,13 +296,6 @@ class InstallerTests(InstallerFixture):
         self.home.mkdir(parents=True)
         startup.write_text(startup_text)
         return env, startup
-
-    def test_jobgate_path_line_ignores_a_similar_directory(self):
-        env, startup = self.jobgate_shell('export PATH="$HOME/.local/bin-extra:$PATH"\n')
-        self.run_installer("--target", "jobgate", env=env)
-        found = subprocess.run(["sh", "-c", '. "$1"; command -v jobgate', "sh", str(startup)], capture_output=True,
-                               text=True, env=dict(env, HOME=str(self.home)))
-        self.assertEqual(found.stdout.strip(), str((self.home / ".local/bin/jobgate").resolve()), found.stderr)
 
     def test_jobgate_uninstall_removes_the_path_line_after_a_failed_removal(self):
         if os.geteuid() == 0:

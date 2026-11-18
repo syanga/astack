@@ -35,16 +35,30 @@ for profile, variable in (("test", "TEST_WORKERS"), ("lint", "LINT_WORKERS")):
 '''
 
 
-SYSTEMD_258_RUN = r"""#!{python}
+SYSTEMD_RUN = r"""#!{python}
 import os, re, sys
+version = {version}
 arguments = sys.argv[1:]
 split = arguments.index("--")
 options, command = arguments[:split], arguments[split + 1:]
-if "--expand-environment=no" not in options:
+if version < 254 and any(option.startswith("--expand-environment") for option in options):
+    sys.exit("systemd-run: unrecognized option '--expand-environment=no'")
+if version < 253 and "OOMPolicy=continue" in options:
+    sys.exit("Unknown assignment: OOMPolicy=continue")
+if version >= 258 and "--expand-environment=no" not in options:
     command = [re.sub(r"\$\{{(\w+)\}}|\$(\w+)", lambda match: os.environ.get(match.group(1) or match.group(2), ""), argument)
                for argument in command]
 os.execvp(command[0], command)
 """
+
+
+def cgroup_has_memory_controller():
+    try:
+        with open("/proc/self/cgroup") as stream:
+            path = next((line[3:].strip() for line in stream if line.startswith("0::")), None)
+    except OSError:
+        return False
+    return path is not None and os.path.exists("/sys/fs/cgroup" + path + "/memory.max")
 
 
 def wait_for(predicate, timeout=30.0):
@@ -384,19 +398,24 @@ class ExitCodeTests(JobgateTest):
         self.assertEqual((result.returncode, result.stdout.strip()), (0, "4"), result.stderr)
         self.assertEqual(result.stderr.count("the kernel memory cap is off"), 1, result.stderr)
 
-    @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
-    def test_scope_passes_dollar_arguments_unchanged(self):
-        session_bin = self.root / "session bin"
-        session_bin.mkdir()
-        (session_bin / "systemctl").write_text('#!/bin/sh\n[ "$1" = --version ] && echo "systemd 259"\nexit 0\n')
-        (session_bin / "systemd-run").write_text(SYSTEMD_258_RUN.format(python=sys.executable))
-        for tool in ("systemctl", "systemd-run"):
-            (session_bin / tool).chmod(0o755)
-        env = dict(self.env, PATH=str(session_bin) + os.pathsep + self.env["PATH"])
-        result = self.gate("run", "test", "--", sys.executable, "-c", "import sys; print(sys.argv[1:])",
-                           "${HOME}", "$HOME", env=env)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "['${HOME}', '$HOME']")
+    @unittest.skipUnless(sys.platform == "linux" and cgroup_has_memory_controller(),
+                         "needs Linux and a cgroup with the memory controller for the scope helper")
+    def test_scope_passes_dollar_arguments_unchanged_on_each_systemd(self):
+        for version in (252, 259):
+            with self.subTest(systemd=version):
+                session_bin = self.root / "systemd {}".format(version)
+                session_bin.mkdir()
+                (session_bin / "systemctl").write_text(
+                    '#!/bin/sh\n[ "$1" = --version ] && echo "systemd {}"\nexit 0\n'.format(version))
+                (session_bin / "systemd-run").write_text(SYSTEMD_RUN.format(python=sys.executable, version=version))
+                for tool in ("systemctl", "systemd-run"):
+                    (session_bin / tool).chmod(0o755)
+                env = dict(self.env, PATH=str(session_bin) + os.pathsep + self.env["PATH"])
+                result = self.gate("run", "test", "--", sys.executable, "-c", "import sys; print(sys.argv[1:])",
+                                   "${HOME}", "$HOME", env=env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), "['${HOME}', '$HOME']")
+                self.assertNotIn("kernel memory cap is off", result.stderr)
 
     @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
     def test_ctrl_c_while_the_scope_starts_skips_the_command(self):

@@ -63,8 +63,8 @@ The `setpriority(2)` man page says that background state also throttles disk
 I/O. It throttles network I/O too, on sockets that the process opens while it
 is in that state.
 
-Background priority while someone uses the Mac would make the foreground load
-about 0.11 s faster, 0.71 s instead of 0.82 s. It would
+Switching a test run to background priority while someone works would make the
+foreground load 0.11 s faster, 0.71 s instead of 0.82 s. It would
 cost the test run 15.7 s, 17.24 s instead of 1.58 s. jobgate uses utility QoS,
 which keeps both kinds of work fast. A clamp also cannot change on a running
 process, because `taskpolicy -p` accepts only its `-b`, `-B`, `-t`, and `-l`

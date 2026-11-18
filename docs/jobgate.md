@@ -22,8 +22,8 @@ profile's `workers_env` variable to the worker count, and runs the command.
 Then it prints a result line. `--max-workers N` lowers the profile's
 `max_workers` for one run. A value above `max_workers` has no effect.
 
-`jobgate status` prints the share, the memory and workers that running runs
-state, and the pressure reading. It also prints the kernel memory cap and one
+`jobgate status` prints the share, the stated memory of running runs, the
+workers they use, and the pressure reading. It also prints the kernel memory cap and one
 line per running or waiting run.
 
 ## Repository file
@@ -89,7 +89,7 @@ Ctrl-C, ends the wait. A waiting run prints its reason when it starts waiting
 and once a minute after that:
 
 ```text
-jobgate: test waits for memory: 1 worker needs 2.0G, and 1.0G of the 8.0G share is free; waited 1m 00s
+jobgate: test waits for memory: 1 worker needs 1.6G, and 1.0G of the 8.0G share is free; waited 1m 00s
 jobgate: test waits for a core: gated workers use all 16 cores; waited 0s
 jobgate: test waits for memory pressure to ease: full avg10=23.40% (holds at 10%); waited 2m 00s
 jobgate: test waits behind 2 earlier runs; waited 0s
@@ -140,8 +140,8 @@ the run's scope has no memory controller, as on hosts that still use cgroup v1.
 
 macOS has no cgroups, so it has no kernel memory cap. A run can use more memory
 than it states, and only the pressure hold responds, by delaying new runs.
-jobgate starts the command under `taskpolicy -c utility`. That clamps the
-command and every process it starts to the utility QoS class for the whole run.
+jobgate starts the command under `taskpolicy -c utility`. The clamp holds the
+command and every process it starts in the utility QoS class for the whole run.
 A running process cannot leave the clamp. When `/usr/sbin/taskpolicy` is
 missing, jobgate prints one line and runs the command without the clamp.
 [Why jobgate runs macOS commands at utility QoS](jobgate-macos-priority.md)
@@ -165,8 +165,8 @@ jobgate measures each run's peak memory:
 - On Linux in a scope, it reads the scope's `memory.peak`. On kernels before
   5.19, which lack `memory.peak`, it samples `memory.current` every 2 seconds.
 - On macOS, it adds up the `phys_footprint` of each process in the command's
-  tree every 2 seconds, read through `proc_pid_rusage`. That is the memory
-  Activity Monitor shows, and it includes compressed memory.
+  tree every 2 seconds, read through `proc_pid_rusage`. `phys_footprint` is the
+  memory Activity Monitor shows, and it includes compressed memory.
 - On Linux without a scope, it adds up the resident memory of the command's
   process tree every 2 seconds.
 
@@ -177,14 +177,14 @@ When the peak exceeds the stated memory, jobgate prints a warning with the
 `worker_mem` value that would have covered the peak:
 
 ```text
-jobgate: peak 5.2G is above the 4.0G that [test] states for 4 workers; raise worker_mem to "1076M" in /src/app/jobgate.toml
+jobgate: peak 5.2G is above the 3.3G that [test] states for 4 workers; raise worker_mem to "1076M" in /src/app/jobgate.toml
 ```
 
 At the end of each run, jobgate prints one result line and appends it to
 `~/.cache/jobgate/results.log`:
 
 ```text
-time=2026-11-17T18:00:00Z profile=test where=local repo=/src/app commit=4f0c2d9e1b7a5c3e8d6f4a2b0c9e7d5f3a1b8c6e dirty=yes workers=4 wait=12s peak=3172M stated=4096M exit=0
+time=2026-11-17T18:00:00Z profile=test where=local repo=/src/app commit=4f0c2d9e1b7a5c3e8d6f4a2b0c9e7d5f3a1b8c6e dirty=yes workers=4 wait=12s peak=3172M stated=3424M exit=0
 ```
 
 | Field | Value |
@@ -256,14 +256,14 @@ files for other `PATH` lines. The startup files depend on `SHELL`:
 | Shell | Startup files |
 | --- | --- |
 | zsh | `~/.zshrc`, or `$ZDOTDIR/.zshrc` when `ZDOTDIR` is set |
-| bash | `~/.bashrc`, which interactive shells read, and the first of `~/.bash_profile`, `~/.bash_login`, and `~/.profile` that exists, which login shells read. When none of the three exists, the installer creates `~/.profile`. |
+| bash | `~/.bashrc` and the bash login file. Interactive non-login shells read `~/.bashrc`. Login shells read only the first of `~/.bash_profile`, `~/.bash_login`, and `~/.profile` that exists, so the installer writes that file. When none of the three exists, it creates `~/.profile`. |
 | other | None. The installer prints the line to add instead. |
 
 The installer records each line before it writes the line.
 
 `./uninstall.sh` removes the installed files and the marked lines. When it
 cannot rewrite a startup file, it keeps the record of that line. The next
-`./uninstall.sh` then removes the line. Uninstall also removes the folders that
-the recorded script lived in, when they are empty. It leaves
+`./uninstall.sh` then removes the line. `./uninstall.sh` also removes the
+directories that held the recorded script, when they are empty. It leaves
 `~/.cache/jobgate/`, the machine file, and the runtime slice settings. Those
 settings last until the machine reboots or the user's last login session ends.

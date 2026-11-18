@@ -658,7 +658,7 @@ def execute(command: list[str], env: dict, share: int, ticket: Ticket, profile: 
                 options.append("--expand-environment=no")
             scope = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--slice=" + SLICE,
                      "--unit=jobgate-{}".format(ticket.run.id),
-                     "--description=jobgate {} in {}".format(profile.name, ticket.run.repo).replace("%", "%%"), *options, "--",
+                     "--description=jobgate {} in {}".format(profile.name, ticket.run.repo), *options, "--",
                      sys.executable, str(Path(__file__).resolve()), "_scope", str(ticket.files.scope), "--", *command]
             outcome = supervise(scope, env)
             result = read_json(ticket.files.scope)

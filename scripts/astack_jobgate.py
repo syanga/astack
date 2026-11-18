@@ -43,7 +43,7 @@ def on_path(directory):
 
 
 def startup_files(home, use_env):
-    """Bash reads .bashrc in interactive shells and only the first of BASH_LOGIN_FILES in login shells."""
+    """Interactive non-login bash reads .bashrc. Login bash reads only the first of BASH_LOGIN_FILES that exists."""
     shell = Path(os.environ.get("SHELL", "")).name or ("zsh" if sys.platform == "darwin" else "bash")
     if shell == "zsh":
         zdotdir = os.environ.get("ZDOTDIR") if use_env else None
@@ -55,8 +55,7 @@ def startup_files(home, use_env):
 
 
 def owned_blocks(records):
-    owned = records.get(NAME) or []
-    return [owned] if isinstance(owned, dict) else list(owned)
+    return list(records.get(NAME) or [])
 
 
 def needs_separator(path):
