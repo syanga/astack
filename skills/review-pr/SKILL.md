@@ -94,7 +94,7 @@ If the spec is missing, skip the Spec sub-agent and note this in the final repor
 - The requirements or spec from step 2, when available.
 - The [shared adversarial brief](../harden-pr/sections/adversarial.md#shared-adversarial-brief), [the evidence requirements](../harden-pr/SKILL.md#verify-findings), and [the testing finding standard](../harden-pr/specialists/testing.md#finding-standard), pasted in full.
 
-Run it on an outside provider: Codex when hosted in Claude, and Claude when hosted in Codex. In T3 Code, start it with `delegate_task` on that provider. Elsewhere, check the CLI's help (`codex --help` or `claude --help`), save the prompt to a file, and run the CLI from the reviewed repository with a nine-minute timeout. On a host with shell sandboxing, request approval to run it outside the sandbox.
+Run it on an outside provider: Codex when hosted in Claude, and Claude when hosted in Codex. In T3 Code, start it with `delegate_task` on that provider. Elsewhere, run `codex exec --help` or `claude --help` as the help check. Save the prompt to a file. Run the matching command below from the reviewed repository with a nine-minute timeout. On a host with shell sandboxing, request approval to run it outside the sandbox.
 
 ```bash
 codex exec --sandbox read-only --ephemeral \
@@ -111,7 +111,7 @@ claude --print --safe-mode \
 
 Follow [outside-review.md](../harden-pr/outside-review.md) for sizing, clarification, and results. The review completes when it meets the outside adversarial criterion in [the completion criteria](../harden-pr/sections/adversarial.md#completion-criteria). Correctness uses only this brief and the outside adversarial criterion, at any diff size. Route requests for structured or full review to [harden-pr](../harden-pr/SKILL.md).
 
-Outside coverage is unavailable only when the help check, `delegate_task`, or the invocation fails. A linked file or directory listing that seems to be missing never makes it unavailable. When it is unavailable, run the same prompt in a fresh native sub-agent labelled `native fallback` and report the outside coverage as missing.
+Outside coverage is unavailable only when the user disabled that provider, or when the help check, `delegate_task`, or the invocation fails. The help check fails when the CLI is missing or its help exits nonzero. The invocation fails when approval is denied, when it errors or times out, or when its review stays incomplete under [results and limits](../harden-pr/outside-review.md#results-and-limits). A linked file or directory listing that seems to be missing never makes outside coverage unavailable. When it is unavailable, run the same prompt in a fresh native sub-agent labelled `native fallback` and report the outside coverage as missing.
 
 ### 5. Aggregate
 
