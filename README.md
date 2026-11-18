@@ -158,24 +158,27 @@ process. [scripts/memory_guard.py](scripts/memory_guard.py) makes two changes:
   a process instead of evicting pages used in the last second. At each boot,
   `systemd-tmpfiles` sets the value again from
   `/etc/tmpfiles.d/astack-memory-guard.conf`.
-- The script moves `/tmp` from RAM to disk at the next reboot, where files live
-  in the page cache that the kernel can free. To do so, it comments out an
-  `/etc/fstab` line that mounts `/tmp` as tmpfs. When a unit file would still
-  mount a tmpfs on `/tmp` at boot, the script also runs
+- The script moves `/tmp` from RAM to disk at the next reboot. On disk, files in
+  `/tmp` live in the page cache, which the kernel can free. The script comments
+  out an `/etc/fstab` line that mounts `/tmp` as tmpfs. When a unit file would
+  still mount a tmpfs on `/tmp` at boot, the script also runs
   `systemctl mask tmp.mount`. Some distributions, such as Ubuntu 26.04, ship
   that unit file.
 
 Before the script replaces `/etc/fstab`, it checks the edited copy with
 `findmnt --verify`. `install` stops before it changes anything when that check
-fails, or when a unit file in `/etc/systemd/system` defines `tmp.mount`. It
-also stops, without masking `tmp.mount`, when `/etc/fstab` mounts `/tmp` in a
-line the script does not recognize. `uninstall` restores what `install`
-changed before it stopped, and it keeps `/etc/fstab.astack-backup`.
+fails. It also stops first when a unit file in `/etc/systemd/system` defines
+`tmp.mount`, or when `tmp.mount` has a runtime mask, which ends at the next
+reboot. When `/etc/fstab` mounts `/tmp` in a line the script does not
+recognize, `install` stops without masking `tmp.mount`, and `uninstall`
+reverts the changes that `install` made before it stopped. Only one `install`
+or `uninstall` runs at a time.
 
 The script never leaves `tmp.mount` masked while `/etc/fstab` mounts `/tmp`,
 because systemd cannot start a masked unit that `/etc/fstab` requires.
-`install` saves the previous `/etc/fstab` as `/etc/fstab.astack-backup`. To
-restore that file by hand, first run `sudo systemctl unmask tmp.mount`.
+`install` saves the previous `/etc/fstab` as `/etc/fstab.astack-backup`, and
+`uninstall` leaves that file in place. To restore it by hand, first run
+`sudo systemctl unmask tmp.mount`.
 
 To check the machine, preview the changes, and make them:
 

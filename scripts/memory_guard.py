@@ -7,7 +7,9 @@ root. The script needs systemd.
 """
 
 import argparse
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -17,7 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Callable, Literal, Sequence
+from typing import Callable, Iterator, Literal, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import astack_files as files
@@ -28,7 +30,7 @@ RECORD_MARKER = "# astack memory-guard record: "
 COMMENT_OUT_YOURSELF = "Comment out that line yourself, then run install again."
 
 Place = Literal["RAM", "disk"]
-TmpMount = Literal["masked", "from fstab", "admin unit file", "unit file", "none"]
+TmpMount = Literal["masked", "runtime masked", "from fstab", "admin unit file", "unit file", "none"]
 Run = Callable[[Sequence[str]], subprocess.CompletedProcess]
 Say = Callable[[str], None]
 Step = tuple[str, Callable[[], object]]
@@ -45,6 +47,7 @@ class Host:
     record_file: Path
     fstab_file: Path
     mounts_file: Path
+    lock_file: Path
     run: Run
 
 
@@ -79,6 +82,7 @@ def real_host() -> Host:
         record_file=Path("/etc/tmpfiles.d/astack-memory-guard.conf"),
         fstab_file=Path("/etc/fstab"),
         mounts_file=Path("/proc/self/mounts"),
+        lock_file=Path("/run/lock/astack-memory-guard.lock"),
         run=lambda argv: subprocess.run(argv, capture_output=True, text=True),
     )
 
@@ -108,11 +112,18 @@ def _systemctl(host: Host, *arguments: str) -> str:
     return result.stdout
 
 
+def _unit_file_state(host: Host) -> str:
+    return host.run(["systemctl", "is-enabled", "tmp.mount"]).stdout.strip()
+
+
 def _tmp_mount(host: Host) -> TmpMount:
+    on_disk = _unit_file_state(host)
+    if on_disk == "masked":
+        return "masked"
+    if on_disk == "masked-runtime":
+        return "runtime masked"
     shown = _systemctl(host, "show", "tmp.mount", "--property=LoadState,Type,FragmentPath,SourcePath")
     unit = dict(line.split("=", 1) for line in shown.splitlines() if "=" in line)
-    if unit.get("LoadState") == "masked":
-        return "masked"
     if unit.get("LoadState") != "loaded" or unit.get("Type") != "tmpfs":
         return "none"
     if unit.get("SourcePath") == str(host.fstab_file):
@@ -190,6 +201,20 @@ def _ttl_step(host: Host, value: int) -> Step:
     return "SET {} {}".format(host.min_ttl_ms_file, value), lambda: host.min_ttl_ms_file.write_text("{}\n".format(value))
 
 
+@contextmanager
+def _exclusive(host: Host, *, dry_run: bool) -> Iterator[None]:
+    if dry_run:
+        yield
+        return
+    with open(host.lock_file, "a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise GuardError("another install or uninstall is running. Run this one again after it ends.") from None
+        _systemctl(host, "daemon-reload")
+        yield
+
+
 def _run_steps(steps: list[Step], *, dry_run: bool, say: Say) -> None:
     for message, action in steps:
         say(message)
@@ -198,69 +223,74 @@ def _run_steps(steps: list[Step], *, dry_run: bool, say: Say) -> None:
 
 
 def install(host: Host, *, dry_run: bool, say: Say) -> None:
-    current = status(host)
-    if current.tmp_mount == "admin unit file":
-        raise GuardError("a unit file in /etc/systemd/system defines tmp.mount, so systemctl cannot mask it. "
-                         "Remove that file or mask tmp.mount yourself, then run install again.")
-    fstab_text = _checked_fstab(host, lambda line: FSTAB_MARKER + line if _mounts_tmpfs_on_tmp(line) else line)
-    if current.tmp_mount == "from fstab" and fstab_text is None:
-        raise GuardError("{} mounts /tmp in a line this script does not recognize. {}".format(
-            host.fstab_file, COMMENT_OUT_YOURSELF))
-    before = current.record_or_default
-    ttl_before = current.min_ttl_ms if before.min_ttl_ms_before is None else before.min_ttl_ms_before
-    may_mask = (fstab_text is not None and current.tmp_mount != "masked") or current.tmp_mount == "unit file"
-    backup = host.fstab_file.with_name(host.fstab_file.name + ".astack-backup")
-
-    def write_record(masked: bool) -> None:
-        record = Record(ttl_before, before.masked_tmp_mount or masked)
-        _write_record(host, record, persist_ttl=current.min_ttl_ms is not None)
-
-    def mask() -> None:
-        unit = _tmp_mount(host)
-        if unit == "unit file":
-            try:
-                _systemctl(host, "mask", "tmp.mount")
-            finally:
-                if _tmp_mount(host) == "masked":
-                    write_record(True)
-        elif unit == "from fstab":
-            raise GuardError("{} still mounts /tmp after the edit, so tmp.mount stays unmasked. {}".format(
+    with _exclusive(host, dry_run=dry_run):
+        current = status(host)
+        if current.tmp_mount == "admin unit file":
+            raise GuardError("a unit file in /etc/systemd/system defines tmp.mount, so systemctl cannot mask it. "
+                             "Remove that file or mask tmp.mount yourself, then run install again.")
+        if current.tmp_mount == "runtime masked":
+            raise GuardError("tmp.mount has a runtime mask, which ends at the next reboot. "
+                             "Run sudo systemctl unmask --runtime tmp.mount, then run install again.")
+        fstab_text = _checked_fstab(host, lambda line: FSTAB_MARKER + line if _mounts_tmpfs_on_tmp(line) else line)
+        if current.tmp_mount == "from fstab" and fstab_text is None:
+            raise GuardError("{} mounts /tmp in a line this script does not recognize. {}".format(
                 host.fstab_file, COMMENT_OUT_YOURSELF))
+        before = current.record_or_default
+        ttl_before = current.min_ttl_ms if before.min_ttl_ms_before is None else before.min_ttl_ms_before
+        may_mask = (fstab_text is not None and current.tmp_mount != "masked") or current.tmp_mount == "unit file"
+        backup = host.fstab_file.with_name(host.fstab_file.name + ".astack-backup")
 
-    steps: list[Step] = [("WRITE {}".format(host.record_file), lambda: write_record(False))]
-    if current.min_ttl_ms is None:
-        say("SKIP thrashing prevention: the kernel's multi-gen LRU is missing or off")
-    else:
-        steps.append(_ttl_step(host, MIN_TTL_MS))
-    if fstab_text is not None:
-        steps.append(("COPY {} to {}".format(host.fstab_file, backup), lambda: shutil.copy2(host.fstab_file, backup)))
-        steps.append(_fstab_step(host, fstab_text, "comment out its tmpfs /tmp line"))
-    if may_mask:
-        steps.append(("MASK tmp.mount if a unit file would mount a tmpfs on /tmp at boot", mask))
-    _run_steps(steps, dry_run=dry_run, say=say)
-    if current.tmp_now == "RAM":
-        say("Reboot to move /tmp to disk.")
+        def write_record(masked: bool) -> None:
+            record = Record(ttl_before, before.masked_tmp_mount or masked)
+            _write_record(host, record, persist_ttl=current.min_ttl_ms is not None)
+
+        def mask() -> None:
+            unit = _tmp_mount(host)
+            if unit == "unit file":
+                try:
+                    _systemctl(host, "mask", "tmp.mount")
+                finally:
+                    if _unit_file_state(host) == "masked":
+                        write_record(True)
+            elif unit == "from fstab":
+                raise GuardError("{} still mounts /tmp after the edit, so tmp.mount stays unmasked. {}".format(
+                    host.fstab_file, COMMENT_OUT_YOURSELF))
+
+        steps: list[Step] = [("WRITE {}".format(host.record_file), lambda: write_record(False))]
+        if current.min_ttl_ms is None:
+            say("SKIP thrashing prevention: the kernel's multi-gen LRU is missing or off")
+        else:
+            steps.append(_ttl_step(host, MIN_TTL_MS))
+        if fstab_text is not None:
+            steps.append(("COPY {} to {}".format(host.fstab_file, backup), lambda: shutil.copy2(host.fstab_file, backup)))
+            steps.append(_fstab_step(host, fstab_text, "comment out its tmpfs /tmp line"))
+        if may_mask:
+            steps.append(("MASK tmp.mount if a unit file would mount a tmpfs on /tmp at boot", mask))
+        _run_steps(steps, dry_run=dry_run, say=say)
+        if current.tmp_now == "RAM":
+            say("Reboot to move /tmp to disk.")
 
 
 def uninstall(host: Host, *, dry_run: bool, say: Say) -> None:
-    current = status(host)
-    record = current.record_or_default
-    fstab_text = _checked_fstab(host, lambda line: line[len(FSTAB_MARKER):] if _disabled_by_us(line) else line)
-    unmask = current.tmp_mount == "masked" and (fstab_text is not None or record.masked_tmp_mount)
-    previous_ttl = record.min_ttl_ms_before
+    with _exclusive(host, dry_run=dry_run):
+        current = status(host)
+        record = current.record_or_default
+        fstab_text = _checked_fstab(host, lambda line: line[len(FSTAB_MARKER):] if _disabled_by_us(line) else line)
+        unmask = current.tmp_mount == "masked" and (fstab_text is not None or record.masked_tmp_mount)
+        previous_ttl = record.min_ttl_ms_before
 
-    steps: list[Step] = []
-    if unmask:
-        steps.append(("UNMASK tmp.mount", lambda: _systemctl(host, "unmask", "tmp.mount")))
-    if fstab_text is not None:
-        steps.append(_fstab_step(host, fstab_text, "restore its tmpfs /tmp line"))
-    if previous_ttl is not None and current.min_ttl_ms is not None:
-        steps.append(_ttl_step(host, previous_ttl))
-    if current.record is not None:
-        steps.append(("REMOVE {}".format(host.record_file), host.record_file.unlink))
-    _run_steps(steps, dry_run=dry_run, say=say)
-    if (unmask or fstab_text is not None) and current.tmp_now == "disk":
-        say("Reboot to move /tmp back to RAM.")
+        steps: list[Step] = []
+        if unmask:
+            steps.append(("UNMASK tmp.mount", lambda: _systemctl(host, "unmask", "tmp.mount")))
+        if fstab_text is not None:
+            steps.append(_fstab_step(host, fstab_text, "restore its tmpfs /tmp line"))
+        if previous_ttl is not None and current.min_ttl_ms is not None:
+            steps.append(_ttl_step(host, previous_ttl))
+        if current.record is not None:
+            steps.append(("REMOVE {}".format(host.record_file), host.record_file.unlink))
+        _run_steps(steps, dry_run=dry_run, say=say)
+        if (unmask or fstab_text is not None) and current.tmp_now == "disk":
+            say("Reboot to move /tmp back to RAM.")
 
 
 def describe(current: Status) -> str:
