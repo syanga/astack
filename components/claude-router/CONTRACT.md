@@ -2992,7 +2992,7 @@ Without writing, `activate` reads the owned keys and the two env tokens in
 each `--project` settings file and in the managed settings file.
 It reads the two env tokens in its own environment and in the output of
 `launchctl getenv` or `systemctl --user show-environment`. It runs `--claude
-PATH --version` and reads `--agent-sdk DIR/package.json`.
+PATH` to send `check`'s test message (Check, above).
 
 Of these, the Claude settings file is the one that tools outside astack
 also write, and the router owns only its three keys there. If the switcher
@@ -3026,10 +3026,6 @@ so the retirement requirement stays blocked (Verification, below).
   browser does not open, the SDK prints SSH tunnel instructions and looks
   up this machine's public IP address over the network to fill them in. The
   router hides the instructions but cannot stop the lookup.
-- `--agent-sdk DIR` is the caller's choice. Activation compares the version
-  in its `package.json` with the record and does not check that it is T3's
-  bundled SDK. The runbook's `t3-check` step compares the SDK version that
-  T3's app bundle carries with the record.
 - `--verify` counts requests by conversation, not by process. A request in
   the named session from another client, or one that started before the
   command and completed while it ran, also counts. Name a session that
