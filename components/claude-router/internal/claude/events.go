@@ -82,28 +82,29 @@ type eventLog struct {
 }
 
 func openEventLog(path string) (*eventLog, error) {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, err
 	}
-	torn, err := endsMidLine(f)
-	if err != nil {
-		f.Close()
-		return nil, err
-	}
-	return &eventLog{out: f, torn: torn}, nil
+	return &eventLog{out: f, torn: mayEndMidLine(path)}, nil
 }
 
-func endsMidLine(f *os.File) (bool, error) {
+func mayEndMidLine(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return true
+	}
+	defer f.Close()
 	info, err := f.Stat()
-	if err != nil || info.Size() == 0 {
-		return false, err
+	if err != nil {
+		return true
+	}
+	if info.Size() == 0 {
+		return false
 	}
 	var last [1]byte
-	if _, err := f.ReadAt(last[:], info.Size()-1); err != nil {
-		return false, err
-	}
-	return last[0] != '\n', nil
+	_, err = f.ReadAt(last[:], info.Size()-1)
+	return err != nil || last[0] != '\n'
 }
 
 func (l *eventLog) emit(e Event) {

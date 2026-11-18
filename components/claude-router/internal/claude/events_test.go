@@ -76,3 +76,32 @@ func TestAnEventAfterAFailedWriteIsStillLogged(t *testing.T) {
 		}
 	})
 }
+
+func TestEventsAppendToALogTheServiceCanWriteButNotRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file without read permission")
+	}
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	if err := os.WriteFile(path, []byte(`{"at":"2026-11-18T00:00:00Z","kind":"stopped"}`+"\n"+`{"at":"2026-11-18T00:00:01Z","kind":"sto`), 0o200); err != nil {
+		t.Fatal(err)
+	}
+	l, err := openEventLog(path)
+	if err != nil {
+		t.Fatalf("open a log the service can append to but not read: %v", err)
+	}
+	l.emit(Event{Kind: "started"})
+	if err := l.close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := parsedKinds(data); len(got) != 2 || got[0] != "stopped" || got[1] != "started" {
+		t.Fatalf("events a reader parses %v, want the earlier stopped and the new started event", got)
+	}
+}
