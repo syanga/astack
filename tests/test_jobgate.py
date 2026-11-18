@@ -94,7 +94,8 @@ class JobgateTest(unittest.TestCase):
         self.env.update(
             HOME=str(self.root / "home"), XDG_CACHE_HOME=str(self.root / "xdg cache"),
             XDG_CONFIG_HOME=str(self.root / "xdg config"), XDG_RUNTIME_DIR=str(self.root / "runtime"),
-            PATH=str(fake_bin) + os.pathsep + os.environ.get("PATH", ""), JOBGATE_MACHINE_FILE=str(self.machine_file))
+            PATH=str(fake_bin) + os.pathsep + os.environ.get("PATH", ""), JOBGATE_MACHINE_FILE=str(self.machine_file),
+            GIT_CEILING_DIRECTORIES=str(self.root), GIT_CONFIG_NOSYSTEM="1")
         self.held = []
         self.addCleanup(self.stop_held)
         self.profiles(test=("1G", "1G", 4, "TEST_WORKERS"))

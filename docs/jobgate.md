@@ -3,7 +3,8 @@
 `jobgate` admits heavy commands, such as test suites, builds, and renders, so
 that concurrent runs from many repositories and agent lanes fit one machine. It
 is one Python script, [scripts/jobgate.py](../scripts/jobgate.py), that runs on
-macOS and Linux with Python 3.9 or newer and no other dependencies. Runs
+macOS and Linux with Python 3.9 or newer. Before Python 3.11, it reads TOML with
+the copy of the standard library's `tomllib` in `scripts/_vendor/`. Runs
 coordinate through lock files, with no daemon. To gate a repository's commands,
 see [Gate a repository's commands with jobgate](jobgate-setup.md).
 
@@ -76,8 +77,9 @@ A run is admitted when all of these hold:
 
 An admitted run takes as many workers as fit, up to `max_workers` or
 `--max-workers`, and keeps that count until it ends. The core count is the
-process's CPU affinity on Linux and the logical CPU count on macOS. Each user
-has their own queue, so the share and the core limit apply per user.
+process's CPU affinity on Linux and the logical CPU count on macOS. The queue
+lives under `HOME`, so the share and the core limit apply to all runs with the
+same `HOME`.
 
 When a run's `base_mem + 1 × worker_mem` exceeds the share, jobgate exits with
 code 125 instead of waiting.
@@ -129,7 +131,8 @@ prints the slice's settings and use.
 
 On Linux without a systemd user session, such as in containers and some WSL
 setups, jobgate prints one line saying the kernel memory cap is off, then
-applies admission and the pressure hold without it.
+applies admission and the pressure hold without it. It does the same when the
+run's scope has no memory controller, as on hosts that still use cgroup v1.
 
 macOS has no cgroups, so it has no kernel memory cap. A run can use more memory
 than it states, and only the pressure hold responds, by delaying new runs. A

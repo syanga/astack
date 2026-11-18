@@ -35,8 +35,8 @@ except ModuleNotFoundError:
     from _vendor import tomllib
 
 DEFAULT_MEMORY_SHARE = 0.5
-RECORD = ".json"
-SCOPE = ".scope"
+RECORD_SUFFIX = ".json"
+SCOPE_SUFFIX = ".scope"
 PSI_HOLD_PERCENT = 10.0
 DARWIN_LEVELS = {1: "normal", 2: "warn", 4: "critical"}
 DARWIN_HOLD_LEVEL = 4
@@ -50,7 +50,7 @@ REPORT_SECONDS = 60.0
 RUN_ENV = "JOBGATE_RUN"
 WORKERS_ENV = "JOBGATE_WORKERS"
 MACHINE_ENV = "JOBGATE_MACHINE_FILE"
-FAILED = 125
+REFUSED = 125
 CANNOT_EXECUTE = 126
 NOT_FOUND = 127
 PROFILE_KEYS = ("base_mem", "worker_mem", "max_workers", "workers_env")
@@ -307,7 +307,7 @@ class RunFiles(NamedTuple):
 
     @classmethod
     def of(cls, runs: Path, run_id: str) -> RunFiles:
-        return cls(runs / (run_id + RECORD), runs / (run_id + SCOPE))
+        return cls(runs / (run_id + RECORD_SUFFIX), runs / (run_id + SCOPE_SUFFIX))
 
     def remove(self) -> None:
         for path in (self.record, self.scope, temporary(self.scope)):
@@ -323,10 +323,10 @@ class Queue:
 
     @classmethod
     def open(cls) -> Queue:
-        directory = Path.home() / ".cache/jobgate"
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        (directory / "runs").mkdir(mode=0o700, exist_ok=True)
-        return cls(directory)
+        queue = cls(Path.home() / ".cache/jobgate")
+        queue.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        queue.runs.mkdir(mode=0o700, exist_ok=True)
+        return queue
 
     @contextlib.contextmanager
     def lock(self):
@@ -339,7 +339,7 @@ class Queue:
 
     def live(self) -> list[Run]:
         runs = []
-        for path in self.runs.glob("*" + RECORD):
+        for path in self.runs.glob("*" + RECORD_SUFFIX):
             try:
                 fd = os.open(str(path), os.O_RDONLY)
             except FileNotFoundError:
@@ -635,9 +635,8 @@ def execute(command: list[str], env: dict, share: int, ticket: Ticket, profile: 
             result = read_json(ticket.files.scope)
             if "cgroup" in result or outcome.signal is not None:
                 return outcome, result.get("peak")
-            say("systemd-run could not start a scope, so this run has no kernel memory cap")
-        else:
-            say("the kernel memory cap is off ({}); admission and the pressure hold still apply".format(failure))
+            failure = result.get("failure") or "systemd-run could not start a scope"
+        say("the kernel memory cap is off ({}); admission and the pressure hold still apply".format(failure))
     monitor = TreeMonitor(darwin=sys.platform == "darwin")
     outcome = supervise(command, env, monitor.sample)
     return outcome, monitor.peak or None
@@ -648,6 +647,9 @@ def scope_main(result: Path, command: list[str]) -> int:
     with open("/proc/self/cgroup") as stream:
         path = next((line[3:].strip() for line in stream if line.startswith("0::")), "")
     cgroup = Path("/sys/fs/cgroup" + path)
+    if not (cgroup / "memory.max").exists():
+        write_json(result, {"failure": "the scope {} has no memory controller".format(cgroup)})
+        return REFUSED
     write_json(result, {"cgroup": str(cgroup)})
     peak_file = cgroup / "memory.peak"
     samples: list[int] = []
@@ -719,11 +721,11 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
     config = find_config(Path.cwd())
     profile = load_profile(config, profile_name)
     limit = min(profile.max_workers, max_workers or profile.max_workers)
-    queue = Queue.open()
     outer = os.environ.get(RUN_ENV, "")
     outer_workers = os.environ.get(WORKERS_ENV, "")
     if outer_workers.isdigit() and int(outer_workers) >= 1 and held(outer):
         return nested(profile, min(limit, int(outer_workers)), command, outer)
+    queue = Queue.open()
     found = machine()
     if profile.memory(1) > found.share:
         raise Refusal("[{}] needs {} for 1 worker, more than this machine's {} share; lower its base_mem or "
@@ -778,13 +780,13 @@ def status() -> int:
     queue = Queue.open()
     with queue.lock():
         runs = queue.live()
-    running = [run.admission for run in runs if run.admission is not None]
+    taken = used([run.admission for run in runs if run.admission is not None])
     now = time.time()
     source = machine_config() if machine_config().is_file() else "default"
     lines = [
         "share     {} ({:.0%} of {}; {})".format(size(found.share), found.memory_share, size(found.memory), source),
-        "memory    {} of {} stated by running runs".format(size(used(running).memory), size(found.share)),
-        "cores     {} of {} used by gated workers".format(used(running).workers, found.cores),
+        "memory    {} of {} stated by running runs".format(size(taken.memory), size(found.share)),
+        "cores     {} of {} used by gated workers".format(taken.workers, found.cores),
         "pressure  {}{}".format(level.reading, "; new runs wait" if level.holding else ""),
         "cap       {}".format(cap_text()),
     ]
@@ -804,7 +806,7 @@ class Parser(argparse.ArgumentParser):
     def error(self, message):
         self.print_usage(sys.stderr)
         say(message)
-        sys.exit(FAILED)
+        sys.exit(REFUSED)
 
 
 def positive(text: str) -> int:
@@ -836,7 +838,7 @@ def main(argv: list[str]) -> int:
         return run(args.profile, args.max_workers, command)
     except Refusal as refusal:
         say(str(refusal))
-        return FAILED
+        return REFUSED
     except KeyboardInterrupt:
         return 128 + signal.SIGINT
 
