@@ -205,7 +205,8 @@ To move `/tmp` to disk at the next reboot:
      such a unit file.
    - In any other case, go to step 4. For example, the output can say that
      `tmp.mount` is masked, or that no files were found for it.
-4. Reboot. `findmnt /tmp` then prints nothing.
+4. Reboot. `findmnt /tmp` then prints nothing, or shows an `FSTYPE` other than
+   `tmpfs`.
 
 On disk, `/tmp` keeps files until `systemd-tmpfiles` deletes them.
 `systemd-tmpfiles-clean.timer` starts `systemd-tmpfiles` once a day.
