@@ -13,7 +13,7 @@ import argparse
 import contextlib
 import ctypes
 import errno
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 import datetime
 import fcntl
 import hashlib
@@ -266,6 +266,10 @@ def machine() -> Machine:
     return Machine(int(memory), int(cores), load_memory_share())
 
 
+def with_current_share(host: Machine) -> Machine:
+    return replace(host, memory_share=load_memory_share())
+
+
 def psi_pressure(text: str) -> Pressure:
     match = re.search(r"^full avg10=(\d+(?:\.\d+)?)", text, re.MULTILINE)
     if match is None:
@@ -474,6 +478,7 @@ def wait_for_admission(queue: Queue, ticket: Ticket, machine: Machine, profile: 
                 reason = "behind {}".format(plural(len(ahead), "earlier run"))
             else:
                 level = pressure()
+                machine = with_current_share(machine)
                 workers = fit(machine, running, profile, limit)
                 if level.holding:
                     reason = "for memory pressure to ease: " + level.reading
@@ -668,9 +673,9 @@ def write_json(path: Path, data: dict) -> None:
     os.replace(str(staged), str(path))
 
 
-def execute(command: list[str], env: dict, share: int, ticket: Ticket, profile: Profile) -> tuple[Exit, int | None]:
+def execute(command: list[str], env: dict, host: Machine, ticket: Ticket, profile: Profile) -> tuple[Exit, int | None]:
     if sys.platform == "linux":
-        failure = set_slice_cap(share)
+        failure = set_slice_cap(with_current_share(host).share)
         if failure is None:
             version = systemd_version()
             options = ["-p", "OOMPolicy=continue"] if version >= OOM_POLICY_MIN_SYSTEMD else []
@@ -790,7 +795,7 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
             profile.name, plural(workers, "worker"), profile.workers_env, workers, size(stated),
             ", after waiting {}".format(duration(waited)) if waited >= 1 else ""))
         env = dict(os.environ, **{profile.workers_env: str(workers), RUN_ENV: str(ticket.files.record), WORKERS_ENV: str(workers)})
-        outcome, peak = execute(command, env, host.share, ticket, profile)
+        outcome, peak = execute(command, env, host, ticket, profile)
     finally:
         ticket.leave()
     if peak is not None and peak > stated:

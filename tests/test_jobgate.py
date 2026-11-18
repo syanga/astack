@@ -85,7 +85,7 @@ def wait_for(predicate, timeout=30.0):
 
 
 class HeldRun:
-    def __init__(self, test, name, profile, flags, variable):
+    def __init__(self, test, name, profile, flags, variable, env):
         self.started = test.root / (name + ".started")
         self.release_file = test.root / (name + ".release")
         self.stderr_path = test.root / (name + ".stderr")
@@ -93,7 +93,7 @@ class HeldRun:
             self.process = subprocess.Popen(
                 [sys.executable, str(SCRIPT), "run", *flags, profile, "--", sys.executable, "-c", HOLD,
                  str(self.started), str(self.release_file), variable],
-                cwd=str(test.repo), env=test.env, stdout=subprocess.DEVNULL, stderr=stderr)
+                cwd=str(test.repo), env=env or test.env, stdout=subprocess.DEVNULL, stderr=stderr)
 
     @property
     def pid(self):
@@ -184,8 +184,8 @@ class JobgateTest(unittest.TestCase):
             (session_bin / tool).chmod(0o755)
         return dict(self.env, PATH=str(session_bin) + os.pathsep + self.env["PATH"])
 
-    def hold(self, name, profile="test", flags=(), variable="TEST_WORKERS"):
-        held = HeldRun(self, name, profile, flags, variable)
+    def hold(self, name, profile="test", flags=(), variable="TEST_WORKERS", env=None):
+        held = HeldRun(self, name, profile, flags, variable, env)
         self.held.append(held)
         return held
 
@@ -512,7 +512,25 @@ class ExitCodeTests(JobgateTest):
         self.assertEqual(units["jobgate.slice"].get("CPUWeight"), "30")
         self.assertNotIn("MemoryMax", units["jobgate.slice"])
 
-    @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
+    @unittest.skipUnless(sys.platform == "linux", "systemd slices exist only on Linux")
+    def test_raising_the_share_starts_a_waiting_run_and_raises_the_cap(self):
+        log = self.root / "systemd.log"
+        recording = self.systemd_session("recording systemd", RECORDING_SYSTEMCTL,
+                                         RECORDING_RUN.format(python=sys.executable))
+        recording["SYSTEMD_LOG"] = str(log)
+        self.set_machine(memory=8 * GIB, cores=16, psi=CALM)
+        self.profiles(test=("1G", "1G", 3, "TEST_WORKERS"))
+        first = self.hold("first")
+        self.assertEqual(first.workers(), 3)
+        second = self.hold("second", env=recording)
+        self.assertIn("waits for memory", second.wait_message("waits"))
+        self.share(0.75)
+        self.assertEqual(second.workers(), 1)
+        caps = [line.rsplit("MemoryMax=", 1)[1] for line in log.read_text().splitlines() if "MemoryMax=" in line]
+        self.assertEqual(caps, [str(6 * GIB)])
+        self.assertEqual(first.release(), 0)
+        self.assertEqual(second.release(), 0)
+
     @unittest.skipUnless(sys.platform == "linux", "systemd slices exist only on Linux")
     def test_a_home_that_is_not_utf8_gets_a_slice_and_a_status(self):
         home = self.root / os.fsdecode(b"home\xff")
@@ -529,6 +547,7 @@ class ExitCodeTests(JobgateTest):
         self.assertEqual(status.returncode, 0, status.stderr)
         self.assertRegex(status.stdout, r"cap +jobgate-[0-9a-f]{12}\.slice ")
 
+    @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
     def test_ctrl_c_while_the_scope_starts_skips_the_command(self):
         starting = self.root / "scope starting"
         env = self.systemd_session("session bin", "exit 0\n",

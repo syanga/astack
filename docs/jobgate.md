@@ -60,7 +60,9 @@ memory_share = 0.6
 ```
 
 `memory_share` is a number above 0 and at most 1. Without the file, it is 0.5.
-Inside a container, jobgate reads the host's physical memory, not the
+jobgate reads `memory_share` again before each admission attempt and before it
+sets the kernel memory cap. A change therefore also applies to runs that already
+wait. Inside a container, jobgate reads the host's physical memory, not the
 container's memory limit.
 
 ## Admission
