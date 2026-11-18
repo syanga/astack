@@ -25,16 +25,20 @@ ROOT_AND_SWAP = (
     "/swapfile                                 swap           swap    defaults   0 0\n"
 )
 TMPFS_LINE = "tmpfs                                     /tmp           tmpfs   defaults,noatime,mode=1777 0 0\n"
+ESCAPED_TMPFS_LINE = "tmpfs /\\164mp tmpfs defaults 0 0\n"
 FSTAB = ROOT_AND_SWAP + TMPFS_LINE
+TMP_IN_RAM = "/dev/nvme0n1p2 / ext4 rw,relatime 0 0\ntmpfs /tmp tmpfs rw,noatime,inode64 0 0\n"
+TMP_ON_DISK = "/dev/nvme0n1p2 / ext4 rw,relatime 0 0\n"
 
 
 class FakeSystemd:
-    """Answers for tmp.mount as systemd does while /tmp is a mounted tmpfs.
+    """Answers for tmp.mount as systemd does.
 
     A mask wins, then a unit file in /etc/systemd/system, then the unit the fstab
     generator wrote at the last reload, then a packaged unit file. Without any of
-    them, systemd still shows a loaded tmpfs unit for the live mount, with no
-    unit file.
+    them, systemd still shows a loaded tmpfs unit for a live mount, with no unit
+    file. The generator decodes octal escapes and collapses slashes in a mount
+    point, as systemd does.
     """
 
     def __init__(self, fstab, packaged_tmp_mount):
@@ -53,7 +57,8 @@ class FakeSystemd:
         for line in self.fstab.read_text().splitlines():
             fields = line.split()
             if len(fields) >= 3 and not line.startswith("#") and fields[2] == "tmpfs":
-                if (re.sub("/+", "/", fields[1]).rstrip("/") or "/") == "/tmp":
+                where = re.sub(r"\\([0-7]{3})", lambda match: chr(int(match.group(1), 8)), fields[1])
+                if (re.sub("/+", "/", where).rstrip("/") or "/") == "/tmp":
                     return True
         return False
 
@@ -106,11 +111,11 @@ class MemoryGuardTests(unittest.TestCase):
         self.fstab.write_text(FSTAB)
         self.backup = self.etc / "fstab.astack-backup"
         self.record = self.etc / "tmpfiles.d/astack-memory-guard.conf"
-        mounts = root / "mounts"
-        mounts.write_text("/dev/nvme0n1p2 / ext4 rw,relatime 0 0\ntmpfs /tmp tmpfs rw,noatime,inode64 0 0\n")
+        self.mounts = root / "mounts"
+        self.mounts.write_text(TMP_IN_RAM)
         self.systemd = FakeSystemd(self.fstab, packaged_tmp_mount=True)
         self.host = memory_guard.Host(lru_gen_enabled_file=self.enabled, min_ttl_ms_file=self.ttl,
-                                      record_file=self.record, fstab_file=self.fstab, mounts_file=mounts,
+                                      record_file=self.record, fstab_file=self.fstab, mounts_file=self.mounts,
                                       run=self.systemd)
         self.said = []
 
@@ -131,10 +136,11 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertEqual(self.systemd.changes, [])
 
     def run_main(self, *argv, platform="linux", uid=0):
-        output = io.StringIO()
+        output, error = io.StringIO(), io.StringIO()
         with patch("sys.platform", platform), patch("os.geteuid", return_value=uid), \
-                redirect_stdout(output), redirect_stderr(io.StringIO()):
-            return memory_guard.main(list(argv), host=self.host), output.getvalue()
+                redirect_stdout(output), redirect_stderr(error):
+            code = memory_guard.main(list(argv), host=self.host)
+        return code, output.getvalue(), error.getvalue()
 
     def test_install_turns_on_thrashing_prevention_and_keeps_tmpfs_off_tmp_at_boot(self):
         self.install()
@@ -179,13 +185,25 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertEqual(self.fstab.read_text(), fstab)
 
     def test_install_refuses_an_fstab_line_it_does_not_recognize(self):
-        fstab = ROOT_AND_SWAP + "tmpfs /scratch tmpfs defaults 0 0\n"
+        fstab = ROOT_AND_SWAP + ESCAPED_TMPFS_LINE
         self.set_fstab(fstab)
-        self.systemd.generated = True
         with self.assertRaisesRegex(memory_guard.GuardError, "does not recognize"):
             self.install()
 
         self.assert_untouched(fstab)
+
+    def test_the_mask_step_refuses_a_tmp_mount_that_still_comes_from_fstab(self):
+        fstab = FSTAB + ESCAPED_TMPFS_LINE
+        self.set_fstab(fstab)
+        self.ttl.write_text("250\n")
+        with self.assertRaisesRegex(memory_guard.GuardError, "still mounts /tmp"):
+            self.install()
+        self.assertFalse(self.systemd.masked)
+        self.assertEqual(self.systemd.unsafe, [])
+
+        self.uninstall()
+        self.assertEqual(self.fstab.read_text(), fstab)
+        self.assertEqual(self.ttl.read_text().strip(), "250")
 
     def test_install_refuses_a_tmp_mount_unit_file_in_etc(self):
         self.systemd.admin_tmp_mount = True
@@ -207,6 +225,16 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertEqual(self.systemd.unsafe, [])
         self.assertEqual(self.backup.read_text(), FSTAB, "uninstall keeps the pre-install backup")
 
+    def test_uninstall_removes_a_mask_that_install_made_without_an_fstab_line(self):
+        self.set_fstab(ROOT_AND_SWAP)
+        self.install()
+        self.install()
+        self.assertTrue(self.systemd.masked)
+        self.uninstall()
+
+        self.assertFalse(self.systemd.masked)
+        self.assertTrue(self.systemd.boot_mounts_tmpfs())
+
     def test_a_mask_made_before_install_survives_uninstall(self):
         self.set_fstab(ROOT_AND_SWAP)
         self.systemd.masked = True
@@ -216,6 +244,29 @@ class MemoryGuardTests(unittest.TestCase):
 
         self.assertEqual(self.ttl.read_text().strip(), "0")
         self.assertTrue(self.systemd.masked)
+
+    def test_a_mask_made_after_a_failed_mask_step_survives_uninstall(self):
+        self.set_fstab(ROOT_AND_SWAP)
+        self.systemd.failing = {"mask"}
+        with self.assertRaisesRegex(memory_guard.GuardError, "mask"):
+            self.install()
+        self.systemd.failing = set()
+        self.systemd.masked = True
+        self.uninstall()
+
+        self.assertTrue(self.systemd.masked)
+        self.assertEqual(self.ttl.read_text().strip(), "0")
+        self.assertFalse(self.record.exists())
+
+    def test_a_mask_step_that_finds_no_unit_file_records_no_mask(self):
+        self.systemd.packaged_tmp_mount = False
+        self.install()
+        self.set_fstab(ROOT_AND_SWAP)
+        self.systemd.masked = True
+        self.uninstall()
+
+        self.assertTrue(self.systemd.masked)
+        self.assertFalse(self.record.exists())
 
     def test_uninstall_unmasks_rather_than_leave_a_mask_that_fstab_requires(self):
         self.systemd.masked = True
@@ -227,13 +278,44 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertFalse(self.systemd.masked)
         self.assertEqual(self.systemd.unsafe, [])
 
-    def test_status_warns_about_a_mask_that_fstab_requires(self):
+    def test_status_warns_only_about_a_mask_that_fstab_requires(self):
+        self.set_fstab(ROOT_AND_SWAP)
+        self.install()
+        self.assertTrue(self.systemd.masked)
         self.assertNotIn("tmp.mount is masked", self.run_main("status", uid=1000)[1])
 
-        self.systemd.masked = True
-        code, output = self.run_main("status", uid=1000)
+        self.set_fstab(FSTAB)
+        code, output, _ = self.run_main("status", uid=1000)
         self.assertEqual(code, 0)
         self.assertIn("tmp.mount is masked", output)
+
+    def test_status_shows_where_tmp_will_be_after_a_reboot(self):
+        self.set_fstab(ROOT_AND_SWAP)
+        self.assertNotIn("after the next reboot", self.run_main("status", uid=1000)[1])
+        self.install()
+
+        self.assertIn("disk after the next reboot", self.run_main("status", uid=1000)[1])
+
+    def test_status_reports_an_unreadable_record_as_an_error(self):
+        self.assertEqual(self.run_main("status", uid=1000)[0], 0)
+        self.record.parent.mkdir(parents=True)
+        self.record.write_text(memory_guard.RECORD_MARKER + '{"unexpected": 1}\n')
+
+        code, _, error = self.run_main("status", uid=1000)
+        self.assertEqual(code, 1)
+        self.assertIn(str(self.record), error)
+
+    def test_install_and_uninstall_say_when_a_reboot_is_needed(self):
+        self.install()
+        self.assertTrue(any("Reboot" in line for line in self.said))
+        self.mounts.write_text(TMP_ON_DISK)
+        self.said = []
+        self.uninstall()
+        self.assertTrue(any("Reboot" in line for line in self.said))
+
+        self.said = []
+        self.install()
+        self.assertFalse(any("Reboot" in line for line in self.said))
 
     def test_a_second_install_keeps_what_uninstall_restores(self):
         self.ttl.write_text("250\n")
@@ -307,14 +389,16 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertFalse(self.systemd.boot_mounts_tmpfs())
 
     def test_only_install_and_uninstall_need_root(self):
-        self.assertEqual(self.run_main("install", uid=1000)[0], 1)
+        for command in ("install", "uninstall"):
+            code, _, error = self.run_main(command, uid=1000)
+            self.assertEqual(code, 1, command)
+            self.assertIn("sudo", error)
         self.assertEqual(self.run_main("install", "--dry-run", uid=1000)[0], 0)
         self.assertEqual(self.run_main("status", uid=1000)[0], 0)
         self.assert_untouched()
 
         self.assertEqual(self.run_main("install", uid=0)[0], 0)
         self.assertFalse(self.systemd.boot_mounts_tmpfs())
-        self.assertIn("disk after the next reboot", self.run_main("status", uid=1000)[1])
 
     def test_install_changes_only_a_linux_machine(self):
         self.assertEqual(self.run_main("install", platform="darwin")[0], 0)

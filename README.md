@@ -186,16 +186,22 @@ sudo python3 scripts/memory_guard.py install
 
 The new `min_ttl_ms` applies immediately. Reboot to move `/tmp` to disk. On
 disk, `/tmp` keeps files until `systemd-tmpfiles` deletes them.
-`systemd-tmpfiles-clean.timer` runs it daily, and
+`systemd-tmpfiles-clean.timer` starts `systemd-tmpfiles` once a day, and
 `/usr/lib/tmpfiles.d/tmp.conf` sets the age limit, 10 days on Ubuntu 26.04.
 
 When thrashing prevention acts, the kernel ends the process with the highest
 OOM score. That is usually the largest process, which can be an agent session.
 
-To revert both changes, run `sudo python3 scripts/memory_guard.py uninstall`,
-then reboot. When `uninstall` restores the `/etc/fstab` line, it also unmasks
-`tmp.mount`, even a mask that `install` did not make. `status` warns when
-`tmp.mount` is masked while `/etc/fstab` mounts `/tmp`.
+To preview and revert both changes, then reboot:
+
+```sh
+python3 scripts/memory_guard.py uninstall --dry-run
+sudo python3 scripts/memory_guard.py uninstall
+```
+
+When `uninstall` restores the `/etc/fstab` line, it also unmasks `tmp.mount`,
+even a mask that `install` did not make. `status` warns when `tmp.mount` is
+masked while `/etc/fstab` mounts `/tmp`.
 
 The script needs systemd. It changes nothing on macOS.
 
