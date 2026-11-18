@@ -2600,21 +2600,21 @@ matches, the Python suite fails
 (`test_the_accepted_record_covers_the_router_code_in_this_checkout`), because
 install and activation would refuse that code.
 
-The record at `b5ef231` comes from a scoped run the operator chose for newer
-models and the installer PATH lines (PR103). Like the run for PR102 at
-`956b5e8`, it ran on Linux 7.0 x86_64 with real accounts `work` and `alumni`,
-Claude Code 2.1.305, and a foreground router on its own port and state
-directory, beside the daily router. It reran the identity at the start and end,
-stable routing, resume, a subagent, and a restart (A1 to A4), cache counters,
-every overage read `disabled`, the run budget, the limit windows and reset
-grants against the usage endpoint's own answers, and status on a terminal and
-in a pipe. It added two rows: the start read the model catalog and added
-`claude-haiku-5-5`, and a Claude Code request for `claude-haiku-5-5` completed
-with 200. The installer's PATH lines rest on the Python suite. The rows the
-change cannot affect, such as migration, waiting, Agent SDK placement, the
-cache comparison, `apiKeyHelper` precedence, the controlled-upstream lane
-reruns, and the Linux service lifecycle, are `accepted` and cite earlier
-records' evidence.
+The record's `scope` field describes the run that produced it, and its
+`platform` and `clients` fields name that run's platform and client versions.
+Describe each run in its record, not in this contract. Every acceptance run
+follows these rules:
+
+- A foreground router runs the record's code against real accounts, on its
+  own port and state directory, beside the daily router.
+- The router's `code_sha256`, `binary_sha256`, and `sdk` in
+  `GET /claude-router/status` are the same at the end of the run as at its
+  start.
+- The paid-overflow reading of each of the run's accounts is `disabled` at
+  the start and at the end of the run.
+- The run reruns every scenario that the change can affect. Other scenarios
+  keep the results of earlier runs. The record's `prior_acceptance` names the
+  previous record.
 
 ### Check
 
