@@ -60,10 +60,10 @@ memory_share = 0.6
 ```
 
 `memory_share` is a number above 0 and at most 1. Without the file, it is 0.5.
-jobgate reads `memory_share` when a run arrives, before each admission attempt,
-and before it sets the kernel memory cap. A change therefore also applies to
-runs that already wait. jobgate exits with code 125 when the file is invalid at
-arrival. When the file turns invalid while a run waits, jobgate prints one
+jobgate reads `memory_share` when a run arrives, about once a second while it
+waits, and before it sets the kernel memory cap. A change therefore also applies
+to runs that already wait. jobgate exits with code 125 when the file is invalid
+at arrival. When the file turns invalid while a run waits, jobgate prints one
 warning and keeps the last valid value. Inside a container, jobgate reads the
 host's physical memory, not the container's memory limit.
 
@@ -91,8 +91,9 @@ under two `HOME` values can therefore state two shares of memory and use the
 cores twice.
 
 When a run's `base_mem + 1 × worker_mem` exceeds the share, jobgate exits with
-code 125 instead of waiting. This applies at arrival and at each admission
-attempt, so a run that waits also exits when the share drops below its need.
+code 125 instead of waiting. jobgate makes the same check at arrival and about
+once a second while the run waits. A waiting run therefore also exits when the
+share drops below its need.
 
 A waiting run has no time limit. The caller's own timeout ends the wait, and so
 do SIGINT from Ctrl-C, SIGTERM, and SIGHUP. A waiting run prints its reason when
@@ -180,8 +181,9 @@ That slice's `MemoryMax` still caps the command together with later runs under
 its `HOME`. On macOS, or on Linux with the kernel memory cap off, only the
 pressure hold protects new runs from that command's memory. `jobgate status` no
 longer lists the command. On Linux with the kernel memory cap on,
-`systemctl --user list-units 'jobgate-*.scope'` lists the scope that still holds
-it. Otherwise, find it by its command line, for example with `pgrep -fl`.
+`systemctl --user list-units 'jobgate-*.scope'` lists the scope that still
+contains it. Otherwise, find it by its command line, for example with
+`pgrep -fl`.
 
 ## Results
 

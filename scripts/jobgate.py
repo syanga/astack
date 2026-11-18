@@ -496,6 +496,8 @@ def wait_for_admission(queue: Queue, ticket: Ticket, share: LiveShare, profile: 
     arrived = time.monotonic()
     next_report = arrived
     while True:
+        machine = share.read()
+        refuse_if_never_fits(profile, machine, config)
         with queue.lock():
             runs = queue.live()
             ahead = [run for run in runs if run.admission is None and run.seq < ticket.run.seq]
@@ -504,8 +506,6 @@ def wait_for_admission(queue: Queue, ticket: Ticket, share: LiveShare, profile: 
                 reason = "behind {}".format(plural(len(ahead), "earlier run"))
             else:
                 level = pressure()
-                machine = share.read()
-                refuse_if_never_fits(profile, machine, config)
                 workers = fit(machine, running, profile, limit)
                 if level.holding:
                     reason = "for memory pressure to ease: " + level.reading

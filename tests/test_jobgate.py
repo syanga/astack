@@ -249,23 +249,45 @@ class AdmissionTests(JobgateTest):
         self.assertFalse(second.started.exists())
         self.assertEqual(first.release(), 0)
 
+    def test_a_run_behind_another_waiting_run_exits_when_the_share_drops_below_its_need(self):
+        self.set_machine(memory=8 * GIB, cores=16, psi=CALM)
+        self.profiles(test=("1G", "1G", 3, "TEST_WORKERS"), small=("512M", "512M", 1, "SMALL_WORKERS"))
+        first = self.hold("first")
+        self.assertEqual(first.workers(), 3)
+        second = self.hold("second", profile="small", variable="SMALL_WORKERS")
+        second.wait_message("waits for memory")
+        third = self.hold("third")
+        third.wait_message("waits behind 1 earlier run")
+        self.share(0.2)
+        self.assertEqual(third.process.wait(timeout=15), 125)
+        self.assertIn("[test] needs 2.0G for 1 worker, more than this machine's 1.6G share", third.stderr())
+        self.assertIsNone(second.process.poll())
+        self.assertEqual(first.release(), 0)
+        self.assertEqual(second.workers(), 1)
+        self.assertEqual(second.release(), 0)
+
     def test_an_invalid_share_file_keeps_waiting_runs_on_the_last_valid_share(self):
         self.set_machine(memory=8 * GIB, cores=16, psi=CALM)
         self.profiles(test=("1G", "1G", 3, "TEST_WORKERS"))
-        self.share(0.5)
+        self.share(0.4)
         first = self.hold("first")
-        self.assertEqual(first.workers(), 3)
+        self.assertEqual(first.workers(), 2)
         second = self.hold("second")
         second.wait_message("waits for memory")
         self.share(2)
-        second.wait_message("keeping memory_share 0.5")
+        second.wait_message("keeping memory_share 0.4 ")
         time.sleep(2.5)
         self.assertIsNone(second.process.poll())
         self.assertEqual(second.stderr().count("keeping memory_share"), 1)
         arriving = self.gate("run", "test", "--", sys.executable, "-c", "pass")
         self.assertEqual(arriving.returncode, 125, arriving.stderr)
+        self.share(0.45)
+        time.sleep(2.5)
+        self.share(2)
+        second.wait_message("keeping memory_share 0.45 ")
+        self.assertEqual(second.stderr().count("keeping memory_share"), 2)
         self.assertEqual(first.release(), 0)
-        self.assertEqual(second.workers(), 3)
+        self.assertEqual(second.workers(), 2)
         self.assertEqual(second.release(), 0)
 
     def test_max_workers_flag_only_lowers_the_profile(self):
@@ -659,16 +681,20 @@ class ExitCodeTests(JobgateTest):
     def test_a_home_that_jobgate_cannot_write_exits_125_with_one_line(self):
         if os.geteuid() == 0:
             self.skipTest("root can write a read-only directory")
-        home = self.root / "read-only home"
-        home.mkdir(mode=0o555)
-        self.addCleanup(home.chmod, 0o755)
-        env = dict(self.env, HOME=str(home))
-        for arguments in (("run", "test", "--", sys.executable, "-c", "pass"), ("status",)):
-            with self.subTest(command=arguments[0]):
-                result = self.gate(*arguments, env=env)
-                self.assertEqual(result.returncode, 125, result.stderr)
-                self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
-                self.assertIn("cannot create {}".format(home / ".cache"), result.stderr)
+        read_only = self.root / "read-only home"
+        read_only.mkdir(mode=0o555)
+        self.addCleanup(read_only.chmod, 0o755)
+        no_lock = self.root / "home without a lock file"
+        (no_lock / ".cache/jobgate/runs").mkdir(parents=True)
+        (no_lock / ".cache/jobgate").chmod(0o555)
+        self.addCleanup((no_lock / ".cache/jobgate").chmod, 0o755)
+        for home, failing in ((read_only, read_only / ".cache"), (no_lock, no_lock / ".cache/jobgate/queue.lock")):
+            for arguments in (("run", "test", "--", sys.executable, "-c", "pass"), ("status",)):
+                with self.subTest(home=home.name, command=arguments[0]):
+                    result = self.gate(*arguments, env=dict(self.env, HOME=str(home)))
+                    self.assertEqual(result.returncode, 125, result.stderr)
+                    self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
+                    self.assertIn("cannot create {}".format(failing), result.stderr)
 
     def test_sigterm_or_sighup_while_waiting_exits_128_plus_n(self):
         self.set_machine(memory=64 * GIB, cores=4, psi=CALM)
