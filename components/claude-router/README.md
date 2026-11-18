@@ -281,10 +281,10 @@ check     passed
 ```
 
 On Linux, the first line ends with `(systemd)`. The fifth line names the
-record's platform, so it reads `(darwin/arm64)` on Linux too. When the record's
-platform differs from this machine's, activation and `setup` also print a
-`note` line that says `not yet tested on real Linux`. That text predates the
-Linux container run in [Install the service](#install-the-service).
+platform of the record's acceptance run. When that platform differs from this
+machine's, activation and `setup` also print a `note` line that names both.
+On Linux, the note ends with `not yet tested on real Linux`. That text
+predates the acceptance runs on Linux.
 
 When a check fails, `check` skips the test message, exits 1, and prints the
 next step. With the router stopped, it marks the checks that need the router
