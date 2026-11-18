@@ -7,7 +7,7 @@ description: Measured performance work. Use when the user asks to make something
 
 **You own the measurements. Plan, review, verify the numbers.** Tie every fix to a measurement.
 
-When the user asks for sustained improvement against a metric, such as iterating toward a target, use [hillclimb](../hillclimb/SKILL.md). Pass the workload, target, baseline evidence, traced model, measurement command, correctness checks, delivery scope, and existing authorization. Hillclimb then owns the repeated experiments, stopping criteria, closing review, and delivery.
+When the user asks for sustained improvement against a metric, such as iterating toward a target, use [hillclimb](../hillclimb/SKILL.md). Pass the workload, target, baseline evidence, traced model, measurement command, correctness checks, delivery scope, and existing authorization. Hillclimb then owns the repeated experiments, stopping criteria, closing review, and delivery. Run its closing review for every kept change, however small.
 
 For a diagnosis-only request, stop before implementation with the measurements, supported cause, and proposed next experiment. A read-only request also excludes instrumentation and code edits.
 
