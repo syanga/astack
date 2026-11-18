@@ -154,8 +154,8 @@ keep logins and assignments.
 The default install puts `jobgate` on `PATH`. To make a repository's test suite
 or build wait for room on the machine, follow
 [Gate a repository's commands with jobgate](docs/jobgate-setup.md). The
-[jobgate reference](docs/jobgate.md) covers admission, the Linux memory cap,
-macOS priority, and the result log.
+[jobgate reference](docs/jobgate.md) covers admission, the kernel memory cap on
+Linux, macOS priority, and the result log.
 
 ## Find a skill
 

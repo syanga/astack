@@ -2,8 +2,9 @@
 
 To keep a repository's test suite or build from overloading a machine that runs
 many of them at once, give the repository a `jobgate.toml` and call
-`jobgate run` from its commands. The command runs directly with 2 workers on a
-machine without jobgate. For every option, see the [jobgate reference](jobgate.md).
+`jobgate run` from its commands. With the fallback patterns below, the command
+runs directly with 2 workers on a machine without jobgate. For every option, see
+the [jobgate reference](jobgate.md).
 
 ## Add a profile
 

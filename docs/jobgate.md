@@ -14,20 +14,21 @@ jobgate run [--max-workers N] PROFILE -- COMMAND [ARG...]
 jobgate status
 ```
 
-`jobgate run` reads `PROFILE` from the nearest `jobgate.toml` in the current
-directory or its parents. It waits until the run fits, sets the profile's
-`workers_env` variable to the worker count, runs the command, and prints a
-result line. `--max-workers N` lowers the profile's `max_workers` for one run.
-A value above `max_workers` has no effect.
+`jobgate run` reads `PROFILE` from the `jobgate.toml` at the root of the Git
+repository that holds the current directory. Outside a Git repository, it reads
+`jobgate.toml` in the current directory. It waits until the run fits, sets the
+profile's `workers_env` variable to the worker count, runs the command, and
+prints a result line. `--max-workers N` lowers the profile's `max_workers` for
+one run. A value above `max_workers` has no effect.
 
-`jobgate status` prints the share, the memory and cores that running runs
-state, the pressure reading, the kernel cap, and one line per running or
+`jobgate status` prints the share, the stated memory and workers of running
+runs, the pressure reading, the kernel memory cap, and one line per running or
 waiting run.
 
 ## Repository file
 
-A repository's `jobgate.toml`, at its root, holds one table per profile. Each
-profile needs all four keys, and jobgate refuses unknown keys.
+A repository's `jobgate.toml` holds one table per profile. Each profile needs
+all four keys, and jobgate refuses unknown keys.
 
 ```toml
 [test]
@@ -49,16 +50,17 @@ learns these numbers from past runs.
 
 ## Machine file
 
-`~/.config/jobgate.toml`, or `$XDG_CONFIG_HOME/jobgate.toml`, overrides the
-share of physical memory that gated runs get. The share is per user.
+The share is the memory that all of one user's gated runs may state together.
+It is `memory_share` times the machine's physical memory. `memory_share` comes
+from `~/.config/jobgate.toml`, or `$XDG_CONFIG_HOME/jobgate.toml`:
 
 ```toml
 memory_share = 0.6
 ```
 
-`memory_share` is a number above 0 and at most 1. Without the file, the share
-is 0.5. Inside a container, physical memory is the host's, so set a share that
-fits the container's memory limit.
+`memory_share` is a number above 0 and at most 1. Without the file, it is 0.5.
+Inside a container, jobgate reads the host's physical memory, not the
+container's memory limit.
 
 ## Admission
 
@@ -74,13 +76,14 @@ A run is admitted when all of these hold:
 
 An admitted run takes as many workers as fit, up to `max_workers` or
 `--max-workers`, and keeps that count until it ends. The core count is the
-process's CPU affinity on Linux and the logical CPU count on macOS.
+process's CPU affinity on Linux and the logical CPU count on macOS. Each user
+has their own queue, so the share and the core limit apply per user.
 
-A run whose single worker exceeds the share can never start, so jobgate refuses
-it with exit code 125 instead of waiting.
+jobgate refuses a run whose single worker exceeds the share with exit code 125,
+because that run could never start.
 
-A waiting run has no time limit. It prints its reason when it starts waiting
-and once a minute after that, such as:
+A waiting run has no time limit, so only the caller's own timeout ends it. It
+prints its reason when it starts waiting and once a minute after that:
 
 ```text
 jobgate: test waits for memory: 1 worker needs 2.0G, and 1.0G of the 8.0G share is free; waited 1m 00s
@@ -89,16 +92,14 @@ jobgate: test waits for memory pressure to ease: full avg10=23.40% (holds at 10%
 jobgate: test waits behind 2 earlier runs; waited 0s
 ```
 
-To bound the wait, use the caller's own timeout.
-
 ### Nested calls
 
 A command that runs under jobgate and calls `jobgate run` again runs inside the
 outer run's reservation and never waits. The nested command gets the smaller of
-the outer run's worker count and its own profile's limit. jobgate marks the
-outer run with `JOBGATE_RUN` and `JOBGATE_WORKERS`. When the run that
-`JOBGATE_RUN` names has ended, a nested call goes through admission like any
-other run.
+the outer run's worker count and its own profile's limit, and prints no result
+line of its own. jobgate marks the outer run with `JOBGATE_RUN` and
+`JOBGATE_WORKERS`. When the run that `JOBGATE_RUN` names has ended, a nested
+call goes through admission like any other run.
 
 ### Pressure thresholds
 
@@ -107,33 +108,11 @@ other run.
 | Linux | `full avg10` in `/proc/pressure/memory` | `full avg10` is 10% or more |
 | macOS | `sysctl kern.memorystatus_vm_pressure_level` | the level is 4, critical |
 
-When the reading is unavailable, such as on a kernel without PSI, nothing
-holds runs, and `jobgate status` shows the reading as unknown.
-
-The Linux threshold comes from these facts:
-
-- `full` is the share of time in which all non-idle tasks wait on memory at
-  once, and the kernel calls a workload that stays there thrashing
-  ([PSI documentation](https://docs.kernel.org/accounting/psi.html)). `some`
-  counts any single stalled task, so page cache reclaim on a busy machine
-  raises it. jobgate ignores `some`.
-- systemd-oomd kills a cgroup after its `full avg10` stays above 60% for 30
-  seconds by default
-  ([oomd.conf](https://www.freedesktop.org/software/systemd/man/latest/oomd.conf.html)).
-  Android's lmkd kills at 700 ms of full stall per second
-  ([lmkd](https://source.android.com/docs/core/perf/lmkd)). A hold at 10% acts
-  well before either.
-- On a 16-core, 22 GiB Ubuntu 26.04 machine running several agent lanes, 643
-  samples over 21 minutes, with the load average up to 27.5 and `MemAvailable`
-  down to 542 MiB, peaked at `full avg10=1.49`. A hold at 10% leaves that
-  machine room.
-
-The macOS threshold comes from XNU's
-[memorystatus_notify.md](https://github.com/apple-oss-distributions/xnu/blob/main/doc/vm/memorystatus_notify.md).
-The level turns to warn, 2, when uncompressed available memory falls below half
-of all available memory, which is routine on a Mac that compresses memory. It
-turns critical, 4, below 29%, where the compressor starts swapping. Holding at
-warn would keep a busy but healthy Mac from starting runs for hours.
+jobgate ignores the Linux `some` line and the macOS warn level, 2. When the
+reading is unavailable, such as on a kernel without PSI, no run waits for
+pressure, and `jobgate status` shows the reading as unknown.
+[Why jobgate holds at these pressure levels](jobgate-thresholds.md) gives the
+evidence for both thresholds.
 
 ## Enforcement and priority
 
@@ -143,27 +122,26 @@ the weight systemd gives its own `background.slice`, through
 `systemctl --user set-property --runtime`. Each run is a scope,
 `jobgate-<run id>.scope`, inside that slice. There is no per-run cap, so one run
 can exceed its stated memory and keep running while all runs together fit the
-slice. On systemd 253 or newer, the scope has `OOMPolicy=continue`, so a kernel
-OOM kill inside the slice ends one process instead of the whole run. Check the
-slice with:
-
-```sh
-systemctl --user show jobgate.slice -p MemoryMax -p CPUWeight -p MemoryCurrent
-```
+slice. On systemd 253 or newer, each scope has `OOMPolicy=continue`, so a kernel
+OOM kill inside the slice ends one process instead of the whole run.
+`systemctl --user show jobgate.slice -p MemoryMax -p CPUWeight -p MemoryCurrent`
+prints the slice's settings and use.
 
 On Linux without a systemd user session, such as in containers and some WSL
 setups, jobgate prints one line saying the kernel memory cap is off, then
 applies admission and the pressure hold without it.
 
-macOS has no cgroups, so it has no kernel cap, and the pressure hold is the
-backstop. A run's processes get background priority, `PRIO_DARWIN_BG`, while
-someone uses the Mac. After 2 minutes without keyboard or mouse input, read
-from `ioreg`'s `HIDIdleTime`, they get normal priority. jobgate checks every 2
-seconds and prints a line when the priority changes.
+macOS has no cgroups, so it has no kernel memory cap, and the pressure hold is
+the backstop. A run's processes get background priority, `PRIO_DARWIN_BG`,
+while someone uses the Mac. After 2 minutes without keyboard or mouse input,
+read from `ioreg`'s `HIDIdleTime`, they get normal priority. jobgate checks
+every 2 seconds and prints a line when the priority changes.
 
 jobgate passes SIGTERM and SIGHUP on to the command and waits for it. Ctrl-C
 reaches the command from the terminal, and jobgate waits for the command to
-exit.
+exit. When jobgate itself dies, the OS releases its reservation, and its command
+keeps running. On Linux, that command stays in `jobgate.slice` under its
+`MemoryMax`.
 
 ## Results
 
@@ -222,7 +200,7 @@ worktrees like clean ones.
 | --- | --- |
 | The profile's `workers_env` | jobgate sets it to the worker count. |
 | `JOBGATE_WORKERS` | jobgate sets it to the worker count. |
-| `JOBGATE_RUN` | jobgate sets it to the run id, which marks nested calls. |
+| `JOBGATE_RUN` | jobgate sets it to the path of the run's file, which marks nested calls. |
 | `XDG_CACHE_HOME` | Holds `jobgate/`, when set to an absolute path. |
 | `XDG_CONFIG_HOME` | Holds the machine file, when set to an absolute path. |
 | `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with `memory`, `cores`, and `psi` or `darwin_level` readings that replace the OS readings. jobgate rereads it on every check. |

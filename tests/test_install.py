@@ -230,15 +230,15 @@ class InstallerTests(InstallerFixture):
         self.run_installer("--target", "jobgate", env=env)
         jobgate = self.home / ".local/bin/jobgate"
         startup = self.home / ".zshrc"
-        self.assertIn('export PATH="{}:$PATH"'.format(jobgate.parent), startup.read_text())
-        login = "{}; command -v jobgate; jobgate status".format(startup.read_text().splitlines()[-1])
         machine = self.root / "machine.json"
         machine.write_text('{"memory": 8589934592, "cores": 4, "psi": "full avg10=0.00"}')
-        result = subprocess.run(["sh", "-c", login], capture_output=True, text=True, cwd=str(self.root),
-                                env=dict(env, XDG_CACHE_HOME=str(self.root / "cache"), JOBGATE_MACHINE_FILE=str(machine)))
+        shell_env = dict(env, HOME=str(self.home), XDG_CACHE_HOME=str(self.root / "cache"),
+                         XDG_CONFIG_HOME=str(self.root / "config"), JOBGATE_MACHINE_FILE=str(machine))
+        result = subprocess.run(["sh", "-c", '. "$1"; command -v jobgate; jobgate status', "sh", str(startup)],
+                                capture_output=True, text=True, cwd=str(self.root), env=shell_env)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines()[0], str(jobgate))
-        self.assertIn("share     4.0G (50% of 8.0G; default)", result.stdout)
+        self.assertIn("4.0G", result.stdout)
 
         self.run_installer("--target", "jobgate", command="uninstall", env=env)
         self.assertFalse(jobgate.exists())

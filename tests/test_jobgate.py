@@ -197,6 +197,17 @@ class AdmissionTests(JobgateTest):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), ["test 4", "lint 2"])
 
+    def test_nested_call_with_its_own_cache_folder_stays_inside(self):
+        other_cache = self.root / "other cache"
+        inner = ("import os, subprocess, sys\n"
+                 "env = dict(os.environ, XDG_CACHE_HOME=sys.argv[2])\n"
+                 "subprocess.run([sys.executable, sys.argv[1], 'run', 'test', '--', sys.executable, '-c', 'pass'],"
+                 " env=env, check=True, timeout=30)\n")
+        result = self.gate("run", "test", "--", sys.executable, "-c", inner, str(SCRIPT), str(other_cache))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len((self.root / "cache/jobgate/results.log").read_text().splitlines()), 1)
+        self.assertFalse((other_cache / "jobgate/results.log").exists())
+
     def test_marker_of_an_ended_run_does_not_count_as_nesting(self):
         ended = self.gate("run", "test", "--", sys.executable, "-c", "import os; print(os.environ['JOBGATE_RUN'])")
         self.assertEqual(ended.returncode, 0, ended.stderr)
@@ -302,6 +313,15 @@ class ResultTests(JobgateTest):
         line, fields = self.result_line(dirty.stderr)
         self.assertEqual(fields["dirty"], "yes")
         self.assertEqual(log.read_text().splitlines()[-1], line)
+
+    def test_a_subdirectory_uses_the_repository_root_profile(self):
+        self.git("init", "-q")
+        subdirectory = self.repo / "tests/unit"
+        subdirectory.mkdir(parents=True)
+        (subdirectory / "jobgate.toml").write_text("[unrelated]\n")
+        result = subprocess.run([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", PRINT_WORKERS],
+                                cwd=str(subdirectory), env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "4"), result.stderr)
 
     def test_peak_above_the_stated_memory_names_the_number_to_raise(self):
         self.profiles(test=("1M", "1M", 1, "TEST_WORKERS"))

@@ -56,13 +56,12 @@ MACHINE_KEYS = ("memory_share",)
 SIZE = re.compile(r"(\d+(?:\.\d+)?)\s*([KMGT])(?:i?B)?", re.IGNORECASE)
 UNITS = {"K": 2**10, "M": 2**20, "G": 2**30, "T": 2**40}
 ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-RUN_ID = re.compile(r"[0-9]+-[0-9a-f]+")
 # Python defines os.PRIO_DARWIN_* only from 3.12; these are the <sys/resource.h> values.
 PRIO_DARWIN_PROCESS = 4
 PRIO_DARWIN_BG = 0x1000
 HID_IDLE = re.compile(rb'"HIDIdleTime" = (\d+)')
 
-State = Literal["waiting", "running"]
+Dirty = Literal["yes", "no", "unknown"]
 
 
 class Refusal(Exception):
@@ -126,6 +125,13 @@ class Pressure:
     holding: bool
 
 
+@dataclass(frozen=True)
+class Admission:
+    workers: int
+    memory: int
+    started: float
+
+
 @dataclass
 class Run:
     id: str
@@ -135,10 +141,7 @@ class Run:
     repo: str
     command: str
     arrived: float
-    state: State = "waiting"
-    workers: int = 0
-    memory: int = 0
-    started: float | None = None
+    admission: Admission | None = None
 
 
 def parse_size(value: object, where: str) -> int:
@@ -157,11 +160,16 @@ def read_toml(path: Path) -> dict:
 
 
 def find_config(start: Path) -> Path:
-    for directory in (start, *start.parents):
-        candidate = directory / "jobgate.toml"
-        if candidate.is_file():
-            return candidate
-    raise Refusal("no jobgate.toml in {} or its parents".format(start))
+    try:
+        top = subprocess.run(["git", "-C", str(start), "rev-parse", "--show-toplevel"], capture_output=True,
+                             text=True, timeout=60, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        top = None
+    root = Path(top.stdout.strip()) if top is not None and top.returncode == 0 else start
+    candidate = root / "jobgate.toml"
+    if not candidate.is_file():
+        raise Refusal("no jobgate.toml in {}".format(root))
+    return candidate
 
 
 def load_profile(path: Path, name: str) -> Profile:
@@ -266,27 +274,33 @@ def pressure() -> Pressure:
         return Pressure("unknown ({})".format(error.strerror or error), False)
 
 
-def fit(machine: Machine, running: list[Run], profile: Profile, limit: int) -> int:
-    free_memory = machine.budget - sum(run.memory for run in running) - profile.base_mem
-    free_cores = machine.cores - sum(run.workers for run in running)
-    if free_memory < 0:
+def free(machine: Machine, running: list[Admission]) -> tuple[int, int]:
+    return (machine.budget - sum(admission.memory for admission in running),
+            machine.cores - sum(admission.workers for admission in running))
+
+
+def fit(machine: Machine, running: list[Admission], profile: Profile, limit: int) -> int:
+    free_memory, free_cores = free(machine, running)
+    beyond_base = free_memory - profile.base_mem
+    if beyond_base < 0:
         return 0
-    by_memory = limit if profile.worker_mem == 0 else free_memory // profile.worker_mem
+    by_memory = limit if profile.worker_mem == 0 else beyond_base // profile.worker_mem
     return max(0, min(limit, free_cores, by_memory))
 
 
-def shortage(machine: Machine, running: list[Run], profile: Profile) -> str:
-    free_cores = machine.cores - sum(run.workers for run in running)
+def shortage(machine: Machine, running: list[Admission], profile: Profile) -> str:
+    free_memory, free_cores = free(machine, running)
     if free_cores < 1:
         return "for a core: gated workers use all {} cores".format(machine.cores)
-    free_memory = max(0, machine.budget - sum(run.memory for run in running))
     return "for memory: 1 worker needs {}, and {} of the {} share is free".format(
-        size(profile.memory(1)), size(free_memory), size(machine.budget))
+        size(profile.memory(1)), size(max(0, free_memory)), size(machine.budget))
+
+
+def run_files(runs: Path, run_id: str) -> list[Path]:
+    return [runs / (run_id + suffix) for suffix in (".json", ".scope", ".scope.tmp")]
 
 
 class Queue:
-    """The OS drops a process's flock when the process dies, so a crashed run cannot keep its reservation."""
-
     def __init__(self, directory: Path) -> None:
         self.directory = directory
         self.runs = directory / "runs"
@@ -322,7 +336,7 @@ class Queue:
                     if run is not None:
                         runs.append(run)
                     continue
-                for leftover in (path, path.with_suffix(".scope"), path.with_suffix(".scope.tmp")):
+                for leftover in run_files(self.runs, path.stem):
                     with contextlib.suppress(FileNotFoundError):
                         leftover.unlink()
             finally:
@@ -341,20 +355,21 @@ class Queue:
             ticket.save()
             return ticket
 
-    def holds(self, run_id: str) -> bool:
-        if not RUN_ID.fullmatch(run_id):
-            return False
-        try:
-            fd = os.open(str(self.runs / (run_id + ".json")), os.O_RDONLY)
-        except OSError:
-            return False
-        try:
-            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return True
-        finally:
-            os.close(fd)
+
+def held(run_file: str) -> bool:
+    if not os.path.isabs(run_file):
         return False
+    try:
+        fd = os.open(run_file, os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    finally:
+        os.close(fd)
+    return False
 
 
 def read_run(fd: int) -> Run | None:
@@ -366,8 +381,11 @@ def read_run(fd: int) -> Run | None:
         chunks.append(chunk)
     try:
         data = json.loads(b"".join(chunks))
-        return Run(**{field.name: data[field.name] for field in fields(Run) if field.name in data})
-    except (ValueError, TypeError, AttributeError):
+        run = Run(**{field.name: data[field.name] for field in fields(Run) if field.name in data})
+        if run.admission is not None:
+            run.admission = Admission(**{field.name: run.admission[field.name] for field in fields(Admission)})
+        return run
+    except (ValueError, TypeError, KeyError, AttributeError):
         return None
 
 
@@ -376,6 +394,10 @@ class Ticket:
         self.queue = queue
         self.run = run
         self.fd = fd
+
+    @property
+    def path(self) -> Path:
+        return self.queue.runs / (self.run.id + ".json")
 
     @property
     def scope_result(self) -> Path:
@@ -387,20 +409,20 @@ class Ticket:
 
     def leave(self) -> None:
         with self.queue.lock():
-            for path in (self.queue.runs / (self.run.id + ".json"), self.scope_result):
+            for path in run_files(self.queue.runs, self.run.id):
                 with contextlib.suppress(FileNotFoundError):
                     path.unlink()
         os.close(self.fd)
 
 
-def admit(queue: Queue, ticket: Ticket, machine: Machine, profile: Profile, limit: int) -> float:
+def admit(queue: Queue, ticket: Ticket, machine: Machine, profile: Profile, limit: int) -> tuple[Admission, float]:
     arrived = time.monotonic()
     next_report = arrived
     while True:
         with queue.lock():
             runs = queue.live()
-            ahead = [run for run in runs if run.state == "waiting" and run.seq < ticket.run.seq]
-            running = [run for run in runs if run.state == "running"]
+            ahead = [run for run in runs if run.admission is None and run.seq < ticket.run.seq]
+            running = [run.admission for run in runs if run.admission is not None]
             if ahead:
                 reason = "behind {}".format(plural(len(ahead), "earlier run"))
             else:
@@ -411,10 +433,9 @@ def admit(queue: Queue, ticket: Ticket, machine: Machine, profile: Profile, limi
                 elif workers < 1:
                     reason = shortage(machine, running, profile)
                 else:
-                    ticket.run.state, ticket.run.workers = "running", workers
-                    ticket.run.memory, ticket.run.started = profile.memory(workers), time.time()
+                    ticket.run.admission = Admission(workers, profile.memory(workers), time.time())
                     ticket.save()
-                    return time.monotonic() - arrived
+                    return ticket.run.admission, time.monotonic() - arrived
         now = time.monotonic()
         if now >= next_report:
             say("{} waits {}; waited {}".format(profile.name, reason, duration(now - arrived)))
@@ -452,12 +473,8 @@ def supervise(command: list[str], env: dict | None, sample: Callable[[int], None
     try:
         try:
             child.append(subprocess.Popen(command, env=env))
-        except FileNotFoundError:
-            say("command not found: {}".format(command[0]))
-            return Exit(NOT_FOUND)
         except OSError as error:
-            say("cannot run {}: {}".format(command[0], error.strerror or error))
-            return Exit(CANNOT_EXECUTE)
+            return Exit(launch_failure(command, error))
         for number in received:
             with contextlib.suppress(ProcessLookupError):
                 child[0].send_signal(number)
@@ -498,9 +515,9 @@ def process_table() -> dict[int, Process]:
     output = subprocess.run(["ps", "-axo", "pid=,ppid=,rss="], capture_output=True, text=True, timeout=10,
                             stdin=subprocess.DEVNULL).stdout
     for line in output.splitlines():
-        fields = line.split()
-        if len(fields) == 3 and all(field.isdigit() for field in fields):
-            table[int(fields[0])] = Process(int(fields[1]), int(fields[2]) * 1024)
+        columns = line.split()
+        if len(columns) == 3 and all(column.isdigit() for column in columns):
+            table[int(columns[0])] = Process(int(columns[1]), int(columns[2]) * 1024)
     return table
 
 
@@ -580,8 +597,7 @@ def set_slice_cap(budget: int) -> str | None:
     except (OSError, subprocess.TimeoutExpired) as error:
         return "no systemd user session: {}".format(error)
     if result.returncode != 0:
-        detail = (result.stderr.strip().splitlines() or ["systemctl exited with {}".format(result.returncode)])[-1]
-        return "no systemd user session: {}".format(detail)
+        return "no systemd user session: {}".format(last_error(result))
     return None
 
 
@@ -640,7 +656,7 @@ def scope_main(result: Path, command: list[str]) -> int:
     return outcome.code
 
 
-def git_state(repo: Path) -> tuple[str, str]:
+def git_state(repo: Path) -> tuple[str, Dirty]:
     def git(*arguments: str) -> subprocess.CompletedProcess | None:
         try:
             return subprocess.run(["git", "-C", str(repo), *arguments], capture_output=True, text=True,
@@ -651,7 +667,7 @@ def git_state(repo: Path) -> tuple[str, str]:
     head = git("rev-parse", "--verify", "--quiet", "HEAD")
     status = git("status", "--porcelain")
     commit = head.stdout.strip() if head and head.returncode == 0 else "none"
-    dirty = "unknown" if status is None or status.returncode != 0 else ("yes" if status.stdout.strip() else "no")
+    dirty: Dirty = "unknown" if status is None or status.returncode != 0 else ("yes" if status.stdout.strip() else "no")
     return commit, dirty
 
 
@@ -670,17 +686,25 @@ def report(queue: Queue, entries: list[tuple[str, object]]) -> None:
         say("cannot append to {}: {}".format(queue.directory / "results.log", error.strerror or error))
 
 
-def nested(profile: Profile, workers: int, command: list[str], run_id: str) -> int:
-    say("{} runs inside run {} with {}".format(profile.name, run_id, plural(workers, "worker")))
+def launch_failure(command: list[str], error: OSError) -> int:
+    if isinstance(error, FileNotFoundError):
+        say("command not found: {}".format(command[0]))
+        return NOT_FOUND
+    say("cannot run {}: {}".format(command[0], error.strerror or error))
+    return CANNOT_EXECUTE
+
+
+def last_error(result: subprocess.CompletedProcess) -> str:
+    return (result.stderr.strip().splitlines() or ["{} exited with {}".format(result.args[0], result.returncode)])[-1]
+
+
+def nested(profile: Profile, workers: int, command: list[str], run_file: str) -> int:
+    say("{} runs inside run {} with {}".format(profile.name, Path(run_file).stem, plural(workers, "worker")))
     env = dict(os.environ, **{profile.workers_env: str(workers), WORKERS_ENV: str(workers)})
     try:
         os.execvpe(command[0], command, env)
-    except FileNotFoundError:
-        say("command not found: {}".format(command[0]))
-        return NOT_FOUND
     except OSError as error:
-        say("cannot run {}: {}".format(command[0], error.strerror or error))
-        return CANNOT_EXECUTE
+        return launch_failure(command, error)
 
 
 def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
@@ -690,7 +714,7 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
     queue = Queue.open()
     outer = os.environ.get(RUN_ENV, "")
     outer_workers = os.environ.get(WORKERS_ENV, "")
-    if outer_workers.isdigit() and int(outer_workers) >= 1 and queue.holds(outer):
+    if outer_workers.isdigit() and int(outer_workers) >= 1 and held(outer):
         return nested(profile, min(limit, int(outer_workers)), command, outer)
     found = machine()
     if profile.memory(1) > found.budget:
@@ -699,14 +723,13 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
                           profile.name, size(profile.memory(1)), size(found.budget), config, machine_config()))
     ticket = queue.enter(profile.name, config.parent, command)
     try:
-        waited = admit(queue, ticket, found, profile, limit)
-        workers = ticket.run.workers
+        admission, waited = admit(queue, ticket, found, profile, limit)
+        workers, stated = admission.workers, admission.memory
         commit, dirty = git_state(config.parent)
-        stated = profile.memory(workers)
         say("{} starts with {} ({}={}), {} stated{}".format(
             profile.name, plural(workers, "worker"), profile.workers_env, workers, size(stated),
             ", after waiting {}".format(duration(waited)) if waited >= 1 else ""))
-        env = dict(os.environ, **{profile.workers_env: str(workers), RUN_ENV: ticket.run.id, WORKERS_ENV: str(workers)})
+        env = dict(os.environ, **{profile.workers_env: str(workers), RUN_ENV: str(ticket.path), WORKERS_ENV: str(workers)})
         outcome, peak = execute(command, env, found.budget, ticket, profile)
     finally:
         ticket.leave()
@@ -734,7 +757,7 @@ def cap_text() -> str:
     except (OSError, subprocess.TimeoutExpired) as error:
         return "off: {}".format(error)
     if result.returncode != 0:
-        return "off: " + (result.stderr.strip().splitlines() or ["systemctl exited with {}".format(result.returncode)])[-1]
+        return "off: " + last_error(result)
     values = dict(line.partition("=")[::2] for line in result.stdout.splitlines() if "=" in line)
     shown = ["{}={}".format(key, size(int(values[key])) if values.get(key, "").isdigit() and key != "CPUWeight"
                             else values.get(key, "?")) for key in ("MemoryMax", "CPUWeight", "MemoryCurrent")]
@@ -747,21 +770,21 @@ def status() -> int:
     queue = Queue.open()
     with queue.lock():
         runs = queue.live()
-    running = [run for run in runs if run.state == "running"]
+    running = [run.admission for run in runs if run.admission is not None]
     now = time.time()
     source = machine_config() if machine_config().is_file() else "default"
     lines = [
         "share     {} ({:.0%} of {}; {})".format(size(found.budget), found.share, size(found.memory), source),
-        "memory    {} of {} stated by running runs".format(size(sum(run.memory for run in running)), size(found.budget)),
-        "cores     {} of {} used by gated workers".format(sum(run.workers for run in running), found.cores),
+        "memory    {} of {} stated by running runs".format(size(found.budget - free(found, running)[0]), size(found.budget)),
+        "cores     {} of {} used by gated workers".format(found.cores - free(found, running)[1], found.cores),
         "pressure  {}{}".format(level.reading, "; new runs wait" if level.holding else ""),
         "cap       {}".format(cap_text()),
     ]
     for run in runs:
-        if run.state == "running":
+        if run.admission is not None:
             lines.append("running   {} pid {}, {}, {} stated, for {}, in {}: {}".format(
-                run.profile, run.pid, plural(run.workers, "worker"), size(run.memory),
-                duration(now - (run.started or now)), run.repo, run.command))
+                run.profile, run.pid, plural(run.admission.workers, "worker"), size(run.admission.memory),
+                duration(now - run.admission.started), run.repo, run.command))
         else:
             lines.append("waiting   {} pid {}, for {}, in {}: {}".format(
                 run.profile, run.pid, duration(now - run.arrived), run.repo, run.command))
