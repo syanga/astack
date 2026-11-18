@@ -117,7 +117,7 @@ Outside coverage is unavailable only in these cases:
 - The host's identity is unclear, or its inherited host markers conflict.
 - The help check fails: the CLI is missing or its help exits nonzero.
 - `delegate_task` fails.
-- The invocation fails: approval is denied or cannot be requested, or an unsandboxed or approved run errors or times out.
+- The provider command fails: approval is denied or cannot be requested, or the command errors or times out when run unsandboxed or with approval.
 - The review stays incomplete under [results and limits](../harden-pr/outside-review.md#results-and-limits).
 
 A directory listing can be cut off, so open a linked file by its path before treating it as missing. A file that seems to be missing never makes outside coverage unavailable. When outside coverage is unavailable, run the same prompt in a fresh native sub-agent labelled `native fallback`. Report the outside coverage as missing, with the case that applied and any error you saw.
@@ -134,7 +134,7 @@ Each review-pr invocation is one run. All reviews of one candidate, from every a
 
 In fix-and-review mode with existing PRs, [finalize the PRs](../harden-pr/pr-work.md#finalize-reviewed-prs), including committing and pushing verified repairs. A fix made while finalizing, such as a CI fix, is a later repair. Handle it as step 5 handles every later repair, before step 6. Without a PR, return the reviewed changes to the caller's delivery workflow.
 
-Verify Correctness findings against the evidence requirements before presenting or posting them. Present each report under its axis heading (`## Standards`, `## Spec`, `## Correctness`), verbatim or lightly cleaned. Under `## Correctness`, name the reviewer (outside provider, `native fallback`, or not run with the reason), each finding's disposition, and any repair-verification result. When Correctness never ran before the pass limit, the reason is the condition no candidate met: Standards, Spec, or required checks. Do **not** merge or rerank findings, because the axes are deliberately separate (see _Why three axes_).
+Verify Correctness findings against the evidence requirements before presenting or posting them. Present each report under its axis heading (`## Standards`, `## Spec`, `## Correctness`), verbatim or lightly cleaned. Under `## Correctness`, name the reviewer (outside provider, `native fallback` with the case that applied, or not run with the reason), each finding's disposition, and any repair-verification result. When Correctness never ran before the pass limit, the reason is the condition no candidate met: Standards, Spec, or required checks. Do **not** merge or rerank findings, because the axes are deliberately separate (see _Why three axes_).
 
 End the axis reports with a one-line summary: remaining findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes: that's the reranking the separation exists to prevent. When the run stopped at its pass limit, begin that line with `Not converged after <n> review-pr passes. Do not merge.` For a visual change without screenshots, add `Visual: not reviewed` and the reason.
 
