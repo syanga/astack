@@ -180,7 +180,7 @@ sudo python3 scripts/memory_guard.py uninstall
 
 `uninstall` restores the value that `min_ttl_ms` had before the first `install`.
 
-### Move /tmp from RAM to disk
+### Move `/tmp` from RAM to disk
 
 A tmpfs `/tmp` keeps its files in RAM, and the kernel can free that memory only
 by writing the files to swap. A `/tmp` on disk keeps its files on disk. The
@@ -193,18 +193,13 @@ then stop in emergency mode.
 
 To move `/tmp` to disk at the next reboot:
 
-1. If `/etc/fstab` has a line that mounts a tmpfs on `/tmp`, comment out that
-   line with `sudoedit /etc/fstab`.
+1. Run `findmnt --fstab --types tmpfs /tmp`. If it prints a `/tmp` line,
+   comment out that line of `/etc/fstab` with `sudoedit /etc/fstab`, and repeat
+   this step. If it prints nothing, go to step 2.
 2. Run `sudo systemctl daemon-reload`.
-3. Run `systemctl cat tmp.mount`.
-   - If the first line of the output names
-     `/run/systemd/generator/tmp.mount`, `/etc/fstab` still mounts `/tmp`. Go
-     back to step 1 without masking `tmp.mount`.
-   - If the first line names another unit file, and that file has
-     `Type=tmpfs`, run `sudo systemctl mask tmp.mount`. Ubuntu 26.04 ships
-     such a unit file.
-   - In any other case, go to step 4. For example, the output can say that
-     `tmp.mount` is masked, or that no files were found for it.
+3. Run `systemctl cat tmp.mount`. If its output has a `Type=tmpfs` line, run
+   `sudo systemctl mask tmp.mount`. Ubuntu 26.04 ships a `tmp.mount` with that
+   line.
 4. Reboot. `findmnt /tmp` then prints nothing, or shows an `FSTYPE` other than
    `tmpfs`.
 

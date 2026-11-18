@@ -1,8 +1,3 @@
-"""Install and revert the Linux memory guard against files in a temporary directory.
-
-No test reads or writes the real /etc or /sys.
-"""
-
 from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import io
@@ -61,7 +56,7 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertEqual(self.ttl_now(), "1000")
         self.assertEqual(self.ttl_at_boot(), "1000")
 
-    def test_uninstall_restores_the_previous_min_ttl_ms_now_and_at_boot(self):
+    def test_uninstall_restores_the_previous_min_ttl_ms_and_deletes_the_boot_file(self):
         self.ttl.write_text("250\n")
         self.run_main("install")
         self.assertEqual(self.run_main("uninstall")[0], 0)
