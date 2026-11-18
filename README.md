@@ -201,8 +201,7 @@ To move `/tmp` to disk at the next reboot:
 3. Run `sudo systemctl mask tmp.mount`. The mask stops a packaged `tmp.mount`,
    such as the one in Ubuntu 26.04, from mounting a tmpfs on `/tmp`. If
    `systemctl mask` reports that `/etc/systemd/system/tmp.mount` already
-   exists, stop here. These steps do not cover a `tmp.mount` file in
-   `/etc/systemd/system`.
+   exists, stop here. These steps do not cover that file.
 4. Reboot. `findmnt /tmp` then prints nothing, or shows an `FSTYPE` other than
    `tmpfs`.
 
