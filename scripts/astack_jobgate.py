@@ -172,7 +172,7 @@ def add_path_lines(state, home, use_env, dry_run, save):
         owned.store()
 
 
-def finish(command, state, home, use_env, recorded, dry_run, save):
+def update_shell_and_library(command, state, home, use_env, recorded, dry_run, save):
     if command == "install":
         add_path_lines(state, home, use_env, dry_run, save)
         current = lib_dir(home, use_env)

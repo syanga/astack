@@ -295,8 +295,8 @@ def deploy(args, harnesses, selected, home, use_env, state_root, state_path, sta
         files.save_manifest(state_path, state)
 
     if astack_jobgate.NAME in selected:
-        astack_jobgate.finish(args.command, state, home, use_env, jobgate_lib, args.dry_run,
-                              lambda: files.save_manifest(state_path, state))
+        astack_jobgate.update_shell_and_library(args.command, state, home, use_env, jobgate_lib, args.dry_run,
+                                                lambda: files.save_manifest(state_path, state))
     for change in settings:
         change.apply(state, state_path, backup_root, dry_run=args.dry_run)
     for target in agents:

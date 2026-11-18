@@ -190,6 +190,18 @@ class InstallerLifecycleTests(InstallerFixture):
         self.run_with_config(module, env, "uninstall", "--target", "jobgate")
         self.assertFalse((data / "astack").exists())
 
+    def test_jobgate_uninstall_prunes_when_the_install_never_recorded_its_folder(self):
+        module = self.manager()
+        data = self.root / "data"
+        env = {"XDG_DATA_HOME": str(data), "SHELL": "/bin/zsh", "PATH": "/usr/bin:/bin"}
+        self.run_with_config(module, env, "install", "--target", "jobgate")
+        manifest = self.home / ".local/state/astack/manifest.json"
+        state = json.loads(manifest.read_text())
+        del state["jobgate"]["lib"]
+        manifest.write_text(json.dumps(state))
+        self.run_with_config(module, env, "uninstall", "--target", "jobgate")
+        self.assertFalse((data / "astack").exists())
+
     def test_jobgate_relative_zdotdir_uninstalls_from_another_folder(self):
         module = self.manager()
         (self.root / "dotfiles").mkdir()

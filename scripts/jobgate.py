@@ -43,7 +43,8 @@ SCOPE_SUFFIX = ".scope"
 PSI_HOLD_PERCENT = 10.0
 DARWIN_LEVELS = {1: "normal", 2: "warn", 4: "critical"}
 DARWIN_HOLD_LEVEL = 4
-SLICE = "jobgate.slice"
+UNIT_PREFIX = "jobgate"
+SLICE = UNIT_PREFIX + ".slice"
 CPU_WEIGHT = 30
 OOM_POLICY_MIN_SYSTEMD = 253
 # systemd-run gained --expand-environment in 254. Before 254 it never expands $VAR in a scope's command;
@@ -190,7 +191,7 @@ def last_error(result: subprocess.CompletedProcess) -> str:
 
 def find_config(start: Path) -> Path:
     top = run_captured(["git", "-C", str(start), "rev-parse", "--show-toplevel"])
-    root = Path(top.stdout.rstrip("\n")) if top.returncode == 0 else start
+    root = Path(top.stdout[:-1] if top.stdout.endswith("\n") else top.stdout) if top.returncode == 0 else start
     candidate = root / "jobgate.toml"
     if not candidate.is_file():
         raise Refusal("no jobgate.toml in {}".format(root))
@@ -635,7 +636,7 @@ def home_key() -> str:
 
 def home_slice() -> str:
     """systemd nests a slice named jobgate-<key>.slice inside jobgate.slice."""
-    return "{}-{}.slice".format(SLICE[:-len(".slice")], home_key())
+    return "{}-{}.slice".format(UNIT_PREFIX, home_key())
 
 
 def set_slice_cap(share: int) -> str | None:
@@ -670,7 +671,7 @@ def execute(command: list[str], env: dict, share: int, ticket: Ticket, profile: 
             if version >= EXPAND_ENVIRONMENT_MIN_SYSTEMD:
                 options.append("--expand-environment=no")
             scope = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--slice=" + home_slice(),
-                     "--unit=jobgate-{}-{}".format(home_key(), ticket.run.id),
+                     "--unit={}-{}-{}".format(UNIT_PREFIX, home_key(), ticket.run.id),
                      "--description=jobgate {} in {}".format(profile.name, ticket.run.repo), *options, "--",
                      sys.executable, str(Path(__file__).resolve()), "_scope", str(ticket.files.scope), "--", *command]
             outcome = supervise(scope, env)

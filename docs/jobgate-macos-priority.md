@@ -1,8 +1,8 @@
 # Why jobgate runs macOS commands at utility QoS
 
 On macOS, jobgate starts each command under `taskpolicy -c utility`, which sets
-a QoS clamp. The clamp puts the command and every process it starts in the
-utility quality-of-service (QoS) class for the whole run. The
+a quality-of-service (QoS) clamp. The clamp puts the command and every process
+it starts in the utility QoS class for the whole run. The
 [jobgate reference](jobgate.md#enforcement-and-priority) describes the behavior.
 This page gives the measurements behind the choice.
 

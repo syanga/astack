@@ -72,8 +72,8 @@ A run is admitted when all of these hold:
 - At least one worker fits. The stated memory of all running runs, plus this
   run's `base_mem + 1 × worker_mem`, is at most the share. The workers of all
   running runs, plus one, are at most the core count.
-- The pressure reading is below its threshold in the table below. Runs that
-  already started keep going under pressure.
+- The pressure reading is under its threshold in the table that follows. Runs
+  that already started keep going under pressure.
 
 An admitted run takes as many workers as fit, up to `max_workers` or
 `--max-workers`. It keeps that count until it ends. Its stated memory and its
@@ -129,9 +129,9 @@ SHA-256 of the resolved `HOME`. systemd places that slice inside
 `jobgate.slice`. Through `systemctl --user set-property --runtime`, each run
 sets the `HOME` slice's `MemoryMax` to the share. That `MemoryMax` is the kernel
 memory cap. Each run also sets `jobgate.slice` to `CPUWeight=30`, the weight
-systemd gives its own `background.slice`. `CPUWeight` competes only among
-sibling slices. Set on `jobgate.slice`, it lowers all gated runs against
-`app.slice`.
+systemd gives its own `background.slice`. Slices compete for CPU only against
+their siblings. `jobgate.slice` sits beside `app.slice`, whose weight is 100, so
+gated runs get less CPU time than apps when both are busy.
 
 Each run is a scope, `jobgate-<key>-<run id>.scope`, inside its `HOME` slice.
 There is no per-run cap. One run can exceed its stated memory and keep running
@@ -150,11 +150,11 @@ scope has no memory controller, as on hosts that still use cgroup v1.
 
 macOS has no cgroups, so it has no kernel memory cap. A run can use more memory
 than it states, and only the pressure hold responds, by delaying new runs.
-jobgate starts the command under `taskpolicy -c utility`, which sets a QoS
-clamp. The clamp holds the command and every process it starts in the utility
-QoS class for the whole run. A running process cannot leave the clamp. When
-`/usr/sbin/taskpolicy` is missing, jobgate prints one line and runs the command
-without the clamp.
+jobgate starts the command under `taskpolicy -c utility`, which sets a
+quality-of-service (QoS) clamp. The clamp holds the command and every process it
+starts in the utility QoS class for the whole run. A running process cannot
+leave the clamp. When `/usr/sbin/taskpolicy` is missing, jobgate prints one line
+and runs the command without the clamp.
 [Why jobgate runs macOS commands at utility QoS](jobgate-macos-priority.md)
 gives the measurements.
 

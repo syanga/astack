@@ -69,8 +69,8 @@ test:
 	fi
 ```
 
-Copy this pattern into `package.json`, and set `workers_env = "TEST_WORKERS"` in
-the profile it runs:
+In `jobgate.toml`, set `workers_env = "TEST_WORKERS"` in the `[test]` profile.
+Then copy this pattern into `package.json`:
 
 ```json
 {
@@ -88,8 +88,8 @@ jobgate. make reports a nonzero code as `Error N`.
 
 ## Follow a run
 
-While a run waits, `jobgate status` lists it with how long it has waited. Once
-the run starts, the list shows its worker count, its stated memory, and how long
-it has run. When the run ends, jobgate prints its result line. The same line
-goes to `~/.cache/jobgate/results.log`, where other runs' lines can follow it.
-Match a line there by its `time` and `repo` fields.
+1. Run `jobgate status`. A waiting run shows how long it has waited. A running
+   run shows its worker count, its stated memory, and how long it has run.
+2. Read the result line that jobgate prints when the run ends.
+3. To find that line later, search `~/.cache/jobgate/results.log` for its
+   `time` and `repo` fields. Other runs' lines can follow it there.
