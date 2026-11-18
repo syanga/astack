@@ -161,6 +161,15 @@ class JobgateTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return int(result.stdout)
 
+    def systemd_session(self, name, systemctl_body, systemd_run):
+        session_bin = self.root / name
+        session_bin.mkdir()
+        (session_bin / "systemctl").write_text("#!/bin/sh\n" + systemctl_body)
+        (session_bin / "systemd-run").write_text(systemd_run)
+        for tool in ("systemctl", "systemd-run"):
+            (session_bin / tool).chmod(0o755)
+        return dict(self.env, PATH=str(session_bin) + os.pathsep + self.env["PATH"])
+
     def hold(self, name, profile="test", flags=(), variable="TEST_WORKERS"):
         held = HeldRun(self, name, profile, flags, variable)
         self.held.append(held)
@@ -403,14 +412,9 @@ class ExitCodeTests(JobgateTest):
     def test_scope_passes_dollar_arguments_unchanged_on_each_systemd(self):
         for version in (252, 259):
             with self.subTest(systemd=version):
-                session_bin = self.root / "systemd {}".format(version)
-                session_bin.mkdir()
-                (session_bin / "systemctl").write_text(
-                    '#!/bin/sh\n[ "$1" = --version ] && echo "systemd {}"\nexit 0\n'.format(version))
-                (session_bin / "systemd-run").write_text(SYSTEMD_RUN.format(python=sys.executable, version=version))
-                for tool in ("systemctl", "systemd-run"):
-                    (session_bin / tool).chmod(0o755)
-                env = dict(self.env, PATH=str(session_bin) + os.pathsep + self.env["PATH"])
+                env = self.systemd_session("systemd {}".format(version),
+                                           '[ "$1" = --version ] && echo "systemd {}"\nexit 0\n'.format(version),
+                                           SYSTEMD_RUN.format(python=sys.executable, version=version))
                 result = self.gate("run", "test", "--", sys.executable, "-c", "import sys; print(sys.argv[1:])",
                                    "${HOME}", "$HOME", env=env)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -419,19 +423,14 @@ class ExitCodeTests(JobgateTest):
 
     @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
     def test_ctrl_c_while_the_scope_starts_skips_the_command(self):
-        session_bin = self.root / "session bin"
-        session_bin.mkdir()
-        (session_bin / "systemctl").write_text("#!/bin/sh\nexit 0\n")
         starting = self.root / "scope starting"
-        (session_bin / "systemd-run").write_text('#!/bin/sh\ntouch "{}"\nexec sleep 30\n'.format(starting))
-        for tool in ("systemctl", "systemd-run"):
-            (session_bin / tool).chmod(0o755)
+        env = self.systemd_session("session bin", "exit 0\n",
+                                   '#!/bin/sh\ntouch "{}"\nexec sleep 30\n'.format(starting))
         ran = self.root / "command ran"
         touch = [sys.executable, "-c", "import pathlib, sys; pathlib.Path(sys.argv[1]).touch()", str(ran)]
         self.assertEqual(self.gate("run", "test", "--", *touch).returncode, 0)
         self.assertTrue(ran.exists())
         ran.unlink()
-        env = dict(self.env, PATH=str(session_bin) + os.pathsep + self.env["PATH"])
         process = subprocess.Popen([sys.executable, str(SCRIPT), "run", "test", "--", *touch],
                                    cwd=str(self.repo), env=env, stderr=subprocess.PIPE, text=True,
                                    start_new_session=True)

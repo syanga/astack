@@ -88,7 +88,7 @@ jobgate. make reports a nonzero code as `Error N`.
 ## Follow a run
 
 While a run waits, `jobgate status` lists it with how long it has waited. Once
-the run starts, the list also shows its worker count and stated memory. When
-the run ends, jobgate prints its result line. The same line goes to
-`~/.cache/jobgate/results.log`, where other runs' lines can follow it. Match a
-line there by its `time` and `repo` fields.
+the run starts, the list shows its worker count, its stated memory, and how
+long it has run. When the run ends, jobgate prints its result line. The same
+line goes to `~/.cache/jobgate/results.log`, where other runs' lines can follow
+it. Match a line there by its `time` and `repo` fields.

@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 SOURCE = Path(__file__).resolve().parent.parent
+JOBGATE_PATH = os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"])
 
 
 class InstallerFixture(unittest.TestCase):
@@ -246,7 +247,7 @@ class InstallerTests(InstallerFixture):
 
     def test_jobgate_adds_a_path_line_only_when_the_directory_is_missing_from_path(self):
         jobgate = self.home / ".local/bin/jobgate"
-        path = os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"])
+        path = JOBGATE_PATH
         env = dict(os.environ, SHELL="/bin/zsh", PATH=os.pathsep.join([str(jobgate.parent), path]))
         self.run_installer("--target", "jobgate", env=env)
         self.assertTrue(jobgate.exists())
@@ -256,7 +257,11 @@ class InstallerTests(InstallerFixture):
         self.assertIn(str(jobgate.parent), (self.home / ".zshrc").read_text())
 
     def test_installed_jobgate_reads_toml_with_its_vendored_copy(self):
-        path = os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"])
+        fake_bin = self.root / "fake bin"
+        fake_bin.mkdir()
+        (fake_bin / "systemctl").write_text("#!/bin/sh\nexit 1\n")
+        (fake_bin / "systemctl").chmod(0o755)
+        path = os.pathsep.join([str(fake_bin), JOBGATE_PATH])
         self.run_installer("--target", "jobgate", env=dict(os.environ, SHELL="/bin/zsh", PATH=path))
         without_tomllib = self.root / "no stdlib tomllib"
         without_tomllib.mkdir()
@@ -273,7 +278,7 @@ class InstallerTests(InstallerFixture):
         self.assertIn("2.0G (25% of 8.0G", result.stdout)
 
     def test_bash_login_shell_that_skips_bashrc_finds_jobgate(self):
-        path = os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"])
+        path = JOBGATE_PATH
         env = dict(os.environ, SHELL="/bin/bash", PATH=path)
         self.home.mkdir(parents=True)
         profile = self.home / ".bash_profile"
@@ -290,7 +295,7 @@ class InstallerTests(InstallerFixture):
         self.assertFalse((self.home / ".bashrc").exists())
 
     def jobgate_shell(self, startup_text):
-        path = os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"])
+        path = JOBGATE_PATH
         env = dict(os.environ, SHELL="/bin/zsh", PATH=path)
         startup = self.home / ".zshrc"
         self.home.mkdir(parents=True)

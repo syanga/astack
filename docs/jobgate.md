@@ -76,7 +76,8 @@ A run is admitted when all of these hold:
   already started keep going under pressure.
 
 An admitted run takes as many workers as fit, up to `max_workers` or
-`--max-workers`. It keeps that count until it ends. The core count is the
+`--max-workers`. It keeps that count until it ends. Its stated memory and its
+workers are its reservation until then. The core count is the
 process's CPU affinity on Linux and the logical CPU count on macOS. The queue
 lives under `HOME`, so the share and the core limit apply to all runs with the
 same `HOME`.
@@ -170,7 +171,8 @@ jobgate measures each run's peak memory:
 - On Linux without a scope, it adds up the resident memory of the command's
   process tree every 2 seconds.
 
-The macOS and Linux sums count shared pages once per process. They skip a
+The macOS and Linux sums count a page that several processes map once for each
+of them. They skip a
 process they cannot read, and they miss processes that leave the tree.
 
 When the peak exceeds the stated memory, jobgate prints a warning with the
@@ -201,7 +203,8 @@ time=2026-11-17T18:00:00Z profile=test where=local repo=/src/app commit=4f0c2d9e
 | `stated` | `base_mem + workers × worker_mem` in MiB |
 | `exit` | The exit code jobgate returns |
 
-Values that contain spaces, quotes, or `=` are JSON strings. All runs append to
+Values that are empty or contain whitespace, a double quote, or `=` are JSON
+strings. All runs append to
 the same log in the order they end. jobgate runs dirty worktrees like clean
 ones.
 

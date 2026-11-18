@@ -151,7 +151,8 @@ keep logins and assignments.
 
 ## Gate heavy commands with jobgate
 
-The default install puts `jobgate` on `PATH`. To make a repository's test suite
+The default install puts `jobgate` in `~/.local/bin` and, for zsh and bash, on
+`PATH`. To make a repository's test suite
 or build wait for room on the machine, follow
 [Gate a repository's commands with jobgate](docs/jobgate-setup.md). The
 [jobgate reference](docs/jobgate.md) covers admission, the kernel memory cap on

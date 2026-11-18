@@ -2,8 +2,8 @@
 
 jobgate makes new runs wait while the OS reports memory pressure. A threshold
 set too low holds runs on a machine that is busy but healthy, and those runs
-wait for hours. A threshold set too high starts a suite on a machine that is
-already thrashing. The [jobgate reference](jobgate.md#pressure-thresholds)
+wait for hours. If the threshold is too high, a suite starts on a machine that
+is already thrashing. The [jobgate reference](jobgate.md#pressure-thresholds)
 lists the thresholds. This page gives the evidence for each.
 
 ## Linux holds at 10% full stall
@@ -29,9 +29,9 @@ ran several agent lanes, two runs of this repository's test suite, and other
 parallel test runs. Meanwhile, a sampler read `/proc/pressure/memory` every 2
 seconds. Over 53 minutes and 1,597 samples, the load average reached 27.5,
 `MemAvailable` fell to 542 MiB, and `full avg10` peaked at 2.44%. Its 99th
-percentile was 1.26%. To measure another machine, run this sampler for as long
-as a normal working session lasts. Each line gives the time, `full avg10`, the
-1-minute load average, and `MemAvailable` in KiB:
+percentile was 1.26%. The sampler below reads the same values on any Linux
+machine. Each line gives the time, `full avg10`, the 1-minute load average, and
+`MemAvailable` in KiB:
 
 ```sh
 while sleep 2; do
@@ -53,6 +53,7 @@ reaches warn routinely, and XNU's advice at warn is only to relax caching. The
 level turns critical below 29%, where the compressor starts swapping and XNU
 warns of latency. Holding at warn would stop a busy but healthy Mac from
 starting runs for hours, so jobgate holds only at critical.
+
 On macOS, the share limits the memory that gated runs state. Runs can use more
 than they state, and other programs use memory too. Nothing on macOS responds
 to either except the pressure hold at critical, which delays new runs.

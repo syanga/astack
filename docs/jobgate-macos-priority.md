@@ -7,7 +7,7 @@ describes the behavior. This page gives the measurements behind the choice.
 
 A gated run on a Mac competes for the CPU with the person at the keyboard and
 with their agents. It should finish as fast as a normal run when the Mac is
-free. It should yield when someone needs the CPU. macOS offers three ways to set
+idle, and yield when someone needs the CPU. macOS offers three ways to set
 a run's CPU priority: normal priority, the utility QoS class, and background
 priority. Background priority is `PRIO_DARWIN_BG`, the state that
 `taskpolicy -b` sets.
@@ -55,10 +55,10 @@ python3 burn.py 10 & taskpolicy -c utility python3 burn.py 14; wait
 python3 burn.py 10 & taskpolicy -b python3 burn.py 14; wait
 ```
 
-Utility costs nothing on a free Mac. The test run took 0.88 s against 0.91 s at
+Utility costs nothing on an idle Mac. The test run took 0.88 s against 0.91 s at
 normal priority. Under load, it slowed the foreground work by 0.11 s and still
 finished its own work in 1.58 s. Background priority kept the foreground work
-at full speed, but it slowed the test run about 18 times even on a free Mac.
+at full speed, but it slowed the test run about 18 times even on an idle Mac.
 The `setpriority(2)` man page says that background state also throttles disk
 I/O. It throttles network I/O too, on sockets that the process opens while it
 is in that state.
