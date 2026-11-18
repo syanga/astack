@@ -150,39 +150,16 @@ keep logins and assignments.
 
 When agents and test suites fill a Linux machine's RAM, the kernel evicts the
 code of running programs, and the desktop freezes until the OOM killer ends a
-process. [scripts/memory_guard.py](scripts/memory_guard.py) makes two changes:
+process. [scripts/memory_guard.py](scripts/memory_guard.py) turns on the
+kernel's
+[thrashing prevention](https://docs.kernel.org/admin-guide/mm/multigen_lru.html#thrashing-prevention)
+by setting `/sys/kernel/mm/lru_gen/min_ttl_ms` to 1000. The kernel then ends a
+process instead of evicting pages used in the last second. At each boot,
+`systemd-tmpfiles` sets the value again from
+`/etc/tmpfiles.d/astack-memory-guard.conf`. The script needs the kernel's
+multi-gen LRU, and it changes nothing on macOS.
 
-- The script turns on the kernel's
-  [thrashing prevention](https://docs.kernel.org/admin-guide/mm/multigen_lru.html#thrashing-prevention)
-  by setting `/sys/kernel/mm/lru_gen/min_ttl_ms` to 1000. The kernel then ends
-  a process instead of evicting pages used in the last second. At each boot,
-  `systemd-tmpfiles` sets the value again from
-  `/etc/tmpfiles.d/astack-memory-guard.conf`.
-- The script moves `/tmp` from RAM to disk at the next reboot. On disk, files in
-  `/tmp` live in the page cache, which the kernel can free. The script comments
-  out an `/etc/fstab` line that mounts `/tmp` as tmpfs. When a unit file would
-  still mount a tmpfs on `/tmp` at boot, the script also runs
-  `systemctl mask tmp.mount`. Some distributions, such as Ubuntu 26.04, ship
-  that unit file.
-
-Before the script replaces `/etc/fstab`, it checks the edited copy with
-`findmnt --verify`. `install` first reloads systemd, so that it reads current
-state. It then stops before any other change when that check fails. It also
-stops when a unit file in `/etc/systemd/system` defines `tmp.mount`, or when
-`tmp.mount` has a runtime mask, which ends at the next reboot.
-
-When `/etc/fstab` mounts `/tmp` in a line the script does not recognize,
-`install` stops without masking `tmp.mount`. Run `uninstall` to revert the
-changes that `install` made before stopping. While one `install` or
-`uninstall` runs, a second one stops with an error.
-
-The script never leaves `tmp.mount` masked while `/etc/fstab` mounts `/tmp`,
-because systemd cannot start a masked unit that `/etc/fstab` requires.
-`install` saves the previous `/etc/fstab` as `/etc/fstab.astack-backup`, and
-`uninstall` leaves that file in place. To restore `/etc/fstab.astack-backup` by
-hand, first run `sudo systemctl unmask tmp.mount`.
-
-To check the machine, preview the changes, and make them:
+To check the machine, preview the change, and make it:
 
 ```sh
 python3 scripts/memory_guard.py status
@@ -190,26 +167,42 @@ python3 scripts/memory_guard.py install --dry-run
 sudo python3 scripts/memory_guard.py install
 ```
 
-The new `min_ttl_ms` applies immediately. Reboot to move `/tmp` to disk. On
-disk, `/tmp` keeps files until `systemd-tmpfiles` deletes them.
-`systemd-tmpfiles-clean.timer` starts `systemd-tmpfiles` once a day, and
-`/usr/lib/tmpfiles.d/tmp.conf` sets the age limit, 10 days on Ubuntu 26.04.
-
 When thrashing prevention acts, the kernel ends the process with the highest
 OOM score. That is usually the largest process, which can be an agent session.
 
-To preview and revert both changes, then reboot:
+To preview and revert the change:
 
 ```sh
 python3 scripts/memory_guard.py uninstall --dry-run
 sudo python3 scripts/memory_guard.py uninstall
 ```
 
-When `uninstall` restores the `/etc/fstab` line, it also unmasks `tmp.mount`,
-even a mask that `install` did not make. `status` warns when `tmp.mount` is
-masked while `/etc/fstab` mounts `/tmp`.
+`uninstall` restores the value that `min_ttl_ms` had before the first `install`.
 
-The script needs systemd. It changes nothing on macOS.
+### Move /tmp from RAM to disk
+
+A tmpfs `/tmp` keeps its files in RAM, where the kernel cannot free them. On
+disk, files in `/tmp` live in the page cache, which the kernel can free.
+`findmnt /tmp` shows `tmpfs` in the `FSTYPE` column when `/tmp` is in RAM.
+
+To move `/tmp` to disk at the next reboot:
+
+1. If `/etc/fstab` has a line that mounts a tmpfs on `/tmp`, comment out that
+   line with `sudoedit /etc/fstab`.
+2. Run `sudo systemctl daemon-reload`.
+3. Run `systemctl cat tmp.mount`. If it prints a unit file with `Type=tmpfs`,
+   run `sudo systemctl mask tmp.mount`. Ubuntu 26.04 ships such a unit file.
+4. Reboot. `findmnt /tmp` then prints nothing.
+
+Do step 1 before step 3. If `/etc/fstab` mounts `/tmp` while `tmp.mount` is
+masked, the boot can stop in emergency mode.
+
+On disk, `/tmp` keeps files until `systemd-tmpfiles` deletes them.
+`systemd-tmpfiles-clean.timer` starts `systemd-tmpfiles` once a day, and
+`/usr/lib/tmpfiles.d/tmp.conf` sets the age limit, 10 days on Ubuntu 26.04.
+
+To move `/tmp` back to RAM, first run `sudo systemctl unmask tmp.mount`. Then
+restore the `/etc/fstab` line and reboot.
 
 ## Find a skill
 
