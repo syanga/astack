@@ -1082,8 +1082,7 @@ def platform_note(accepted, current):
     recorded = accepted.get("platform")
     if not isinstance(recorded, str) or recorded == current["platform"]:
         return None
-    untested = ", not yet tested on real Linux" if current["platform"].startswith("linux/") else ""
-    return "accepted on {}, this is {}{}".format(recorded, current["platform"], untested)
+    return "accepted on {}, this is {}".format(recorded, current["platform"])
 
 
 CHECK_LINE = "{:<9} {}"

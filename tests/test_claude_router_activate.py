@@ -483,8 +483,7 @@ class ActivationTests(ActivationFixture):
         result = self.run_activate(verify=())
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        untested = ", not yet tested on real Linux" if host.startswith("linux") else ""
-        self.assertIn("note    accepted on {}, this is {}{}\n".format(other, host, untested), result.stdout)
+        self.assertIn("note    accepted on {}, this is {}\n".format(other, host), result.stdout)
         self.assertIn("ok        code matches the accepted record ({})\n".format(other), result.stdout)
 
     def test_the_helpers_digest_covers_each_installed_file_by_path_and_content(self):

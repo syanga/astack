@@ -283,9 +283,7 @@ check     passed
 
 On Linux, the first line ends with `(systemd)`. The fifth line names the
 record's platform. When the record's platform differs from this machine's,
-activation and `setup` also print a `note` line that names both platforms. On
-Linux, the note ends with `not yet tested on real Linux`. That text predates
-the acceptance runs on Linux.
+activation and `setup` also print a `note` line that names both platforms.
 
 When a check fails, `check` skips the test message, exits 1, and prints the
 next step. With the router stopped, it marks the checks that need the router

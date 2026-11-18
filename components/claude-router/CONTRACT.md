@@ -2580,8 +2580,8 @@ at another commit with the same router code, another build of it, and other
 client versions (`test_a_record_matches_by_code_digest_at_another_commit`,
 `test_a_record_with_another_head_build_and_client_versions_activates_when_check_passes`).
 When the record's `platform` differs from this host's, activation prints
-`note    accepted on <record platform>, this is <host platform>`, followed
-by `, not yet tested on real Linux` on Linux, and continues
+`note    accepted on <record platform>, this is <host platform>` and
+continues
 (`test_activation_on_another_platform_than_the_record_s_names_both`).
 
 A missing record, a record that does not parse, or any mismatch refuses
