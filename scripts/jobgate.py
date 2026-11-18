@@ -440,6 +440,10 @@ class Ticket:
     def files(self) -> RunFiles:
         return RunFiles.of(self.queue.runs, self.run.id)
 
+    def admit(self, admission: Admission) -> None:
+        self.run.admission = admission
+        self.save()
+
     def save(self) -> None:
         os.ftruncate(self.fd, 0)
         os.pwrite(self.fd, json.dumps(asdict(self.run)).encode(), 0)
@@ -468,8 +472,7 @@ def admit(queue: Queue, ticket: Ticket, machine: Machine, profile: Profile, limi
                 elif workers < 1:
                     reason = shortage(machine, running, profile)
                 else:
-                    ticket.run.admission = Admission(workers, profile.memory(workers), time.time())
-                    ticket.save()
+                    ticket.admit(Admission(workers, profile.memory(workers), time.time()))
                     return ticket.run.admission, time.monotonic() - arrived
         now = time.monotonic()
         if now >= next_report:

@@ -480,15 +480,17 @@ class ExitCodeTests(JobgateTest):
         self.assertEqual(result.returncode, 125)
         self.assertIn("no jobgate.toml", result.stderr)
 
-    def test_sigterm_while_waiting_exits_143(self):
+    def test_sigterm_or_sighup_while_waiting_exits_128_plus_n(self):
         self.set_machine(memory=64 * GIB, cores=4, psi=CALM)
         first = self.hold("first")
         self.assertEqual(first.workers(), 4)
-        second = self.hold("second")
-        second.wait_message("waits for a core")
-        second.process.send_signal(signal.SIGTERM)
-        self.assertEqual(second.process.wait(timeout=30), 128 + signal.SIGTERM)
-        self.assertFalse(second.started.exists())
+        for number in (signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(signal=number):
+                waiting = self.hold("waiting {}".format(int(number)))
+                waiting.wait_message("waits for a core")
+                waiting.process.send_signal(number)
+                self.assertEqual(waiting.process.wait(timeout=30), 128 + number)
+                self.assertFalse(waiting.started.exists())
         self.assertEqual(first.release(), 0)
 
     def test_runs_under_the_system_python_before_3_10(self):

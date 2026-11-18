@@ -54,8 +54,23 @@ def startup_files(home, use_env):
     return []
 
 
-def owned_blocks(records):
-    return list(records.get(NAME) or [])
+class PathRecords:
+    def __init__(self, state, dry_run, save):
+        self.state, self.dry_run, self.save = state, dry_run, save
+        self.records = dict(state.get("shell_path", {}))
+        self.entries = list(self.records.get(NAME) or [])
+
+    def store(self):
+        if self.entries:
+            self.records[NAME] = self.entries
+        else:
+            self.records.pop(NAME, None)
+        if self.records:
+            self.state["shell_path"] = self.records
+        else:
+            self.state.pop("shell_path", None)
+        if not self.dry_run:
+            self.save()
 
 
 def needs_separator(path):
@@ -66,38 +81,24 @@ def needs_separator(path):
     return bool(data) and not data.endswith(b"\n")
 
 
-def update_path(command, state, home, use_env, dry_run, save):
-    records = dict(state.get("shell_path", {}))
-    entries = owned_blocks(records)
-
-    def store():
-        if entries:
-            records[NAME] = entries
+def remove_path_lines(state, dry_run, save):
+    owned = PathRecords(state, dry_run, save)
+    for entry in list(owned.entries):
+        print("REMOVE {} {}".format(entry["file"], entry["lines"][1]))
+        if dry_run:
+            continue
+        try:
+            claude_router.remove_block(Path(entry["file"]), ("\n".join(entry["lines"]) + "\n").encode(),
+                                       entry["separator"], entry["created"])
+        except OSError as error:
+            print("WARN {} ({}); uninstall again to remove: {}".format(
+                entry["file"], claude_router.reason(error), " / ".join(entry["lines"])))
         else:
-            records.pop(NAME, None)
-        if records:
-            state["shell_path"] = records
-        else:
-            state.pop("shell_path", None)
-        if not dry_run:
-            save()
+            owned.entries.remove(entry)
+            owned.store()
 
-    if command == "uninstall":
-        for entry in list(entries):
-            print("REMOVE {} {}".format(entry["file"], entry["lines"][1]))
-            if dry_run:
-                continue
-            try:
-                claude_router.remove_block(Path(entry["file"]), ("\n".join(entry["lines"]) + "\n").encode(),
-                                           entry["separator"], entry["created"])
-            except OSError as error:
-                print("WARN {} ({}); uninstall again to remove: {}".format(
-                    entry["file"], claude_router.reason(error), " / ".join(entry["lines"])))
-            else:
-                entries.remove(entry)
-        if owned_blocks(records) != entries:
-            store()
-        return
+
+def add_path_lines(state, home, use_env, dry_run, save):
     directory = bin_path(home).parent
     escaped = re.sub(r'([\\"$`])', r"\\\1", str(directory))
     lines = (MARKER, 'export PATH="{}:$PATH"'.format(escaped))
@@ -110,8 +111,9 @@ def update_path(command, state, home, use_env, dry_run, save):
         print("SKIP PATH (no shell file known for SHELL={}; to add it yourself: {})".format(
             os.environ.get("SHELL", ""), lines[1]))
         return
+    owned = PathRecords(state, dry_run, save)
     for path in files:
-        entry = next((entry for entry in entries if entry["file"] == str(path)), None)
+        entry = next((entry for entry in owned.entries if entry["file"] == str(path)), None)
         try:
             present = block in path.read_bytes().decode(errors="replace")
         except OSError:
@@ -124,15 +126,15 @@ def update_path(command, state, home, use_env, dry_run, save):
             continue
         if entry is None:
             entry = {"file": str(path), "lines": list(lines)}
-            entries.append(entry)
+            owned.entries.append(entry)
         entry.update(created=not path.exists(), separator=needs_separator(path))
-        store()
+        owned.store()
         try:
             entry["created"], entry["separator"] = claude_router.append_block(path, block.encode())
         except OSError as error:
             print("WARN {} ({}); to add it yourself: {}".format(path, claude_router.reason(error), lines[1]))
-            entries.remove(entry)
-        store()
+            owned.entries.remove(entry)
+        owned.store()
 
 
 def prune(lib, dry_run):

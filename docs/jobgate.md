@@ -85,8 +85,8 @@ same `HOME`.
 When a run's `base_mem + 1 × worker_mem` exceeds the share, jobgate exits with
 code 125 instead of waiting.
 
-A waiting run has no time limit. The caller's own timeout, or a signal such as
-Ctrl-C, ends the wait. A waiting run prints its reason when it starts waiting
+A waiting run has no time limit. The caller's own timeout ends the wait, and so
+do SIGINT from Ctrl-C, SIGTERM, and SIGHUP. A waiting run prints its reason when it starts waiting
 and once a minute after that:
 
 ```text
@@ -171,9 +171,9 @@ jobgate measures each run's peak memory:
 - On Linux without a scope, it adds up the resident memory of the command's
   process tree every 2 seconds.
 
-The macOS and Linux sums count a page that several processes map once for each
-of them. They skip a
-process they cannot read, and they miss processes that leave the tree.
+When several processes map one page, the macOS and Linux sums count that page
+once per process. The sums skip a process they cannot read, and they miss
+processes that leave the tree.
 
 When the peak exceeds the stated memory, jobgate prints a warning with the
 `worker_mem` value that would have covered the peak:
@@ -265,8 +265,8 @@ files for other `PATH` lines. The startup files depend on `SHELL`:
 The installer records each line before it writes the line.
 
 `./uninstall.sh` removes the installed files and the marked lines. When it
-cannot rewrite a startup file, it keeps the record of that line. The next
-`./uninstall.sh` then removes the line. `./uninstall.sh` also removes the
+cannot rewrite a startup file, it keeps the record of the line in that file.
+The next `./uninstall.sh` then removes the line. `./uninstall.sh` also removes the
 directories that held the recorded script, when they are empty. It leaves
 `~/.cache/jobgate/`, the machine file, and the runtime slice settings. Those
 settings last until the machine reboots or the user's last login session ends.

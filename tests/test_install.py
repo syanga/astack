@@ -221,19 +221,22 @@ class InstallerTests(InstallerFixture):
         self.assertFalse(outside.exists())
         self.assertTrue((self.home / ".codex/AGENTS.md").exists())
 
-    def test_jobgate_goes_on_path_and_uninstall_removes_what_it_added(self):
+    def jobgate_status_env(self):
         fake_bin = self.root / "fake bin"
         fake_bin.mkdir()
         (fake_bin / "systemctl").write_text("#!/bin/sh\nexit 1\n")
         (fake_bin / "systemctl").chmod(0o755)
-        path = os.pathsep.join([str(fake_bin), str(Path(sys.executable).parent), "/usr/bin", "/bin"])
-        env = dict(os.environ, SHELL="/bin/zsh", PATH=path)
+        machine = self.root / "machine.json"
+        machine.write_text('{"memory": 8589934592, "cores": 4, "psi": "full avg10=0.00"}')
+        return dict(os.environ, SHELL="/bin/zsh", PATH=os.pathsep.join([str(fake_bin), JOBGATE_PATH]),
+                    JOBGATE_MACHINE_FILE=str(machine))
+
+    def test_jobgate_goes_on_path_and_uninstall_removes_what_it_added(self):
+        env = self.jobgate_status_env()
         self.run_installer("--target", "jobgate", env=env)
         jobgate = self.home / ".local/bin/jobgate"
         startup = self.home / ".zshrc"
-        machine = self.root / "machine.json"
-        machine.write_text('{"memory": 8589934592, "cores": 4, "psi": "full avg10=0.00"}')
-        shell_env = dict(env, HOME=str(self.home), JOBGATE_MACHINE_FILE=str(machine))
+        shell_env = dict(env, HOME=str(self.home))
         result = subprocess.run(["sh", "-c", '. "$1"; command -v jobgate; jobgate status', "sh", str(startup)],
                                 capture_output=True, text=True, cwd=str(self.root), env=shell_env)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -257,23 +260,15 @@ class InstallerTests(InstallerFixture):
         self.assertIn(str(jobgate.parent), (self.home / ".zshrc").read_text())
 
     def test_installed_jobgate_reads_toml_with_its_vendored_copy(self):
-        fake_bin = self.root / "fake bin"
-        fake_bin.mkdir()
-        (fake_bin / "systemctl").write_text("#!/bin/sh\nexit 1\n")
-        (fake_bin / "systemctl").chmod(0o755)
-        path = os.pathsep.join([str(fake_bin), JOBGATE_PATH])
-        self.run_installer("--target", "jobgate", env=dict(os.environ, SHELL="/bin/zsh", PATH=path))
+        env = self.jobgate_status_env()
+        self.run_installer("--target", "jobgate", env=env)
         without_tomllib = self.root / "no stdlib tomllib"
         without_tomllib.mkdir()
         (without_tomllib / "tomllib.py").write_text("raise ModuleNotFoundError(\"No module named 'tomllib'\")\n")
         (self.home / ".config").mkdir(parents=True)
         (self.home / ".config/jobgate.toml").write_text("memory_share = 0.25\n")
-        machine = self.root / "machine.json"
-        machine.write_text('{"memory": 8589934592, "cores": 4, "psi": "full avg10=0.00"}')
         result = subprocess.run([str(self.home / ".local/bin/jobgate"), "status"], capture_output=True, text=True,
-                                cwd=str(self.root), env=dict(os.environ, PATH=path, HOME=str(self.home),
-                                                             PYTHONPATH=str(without_tomllib),
-                                                             JOBGATE_MACHINE_FILE=str(machine)))
+                                cwd=str(self.root), env=dict(env, HOME=str(self.home), PYTHONPATH=str(without_tomllib)))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("2.0G (25% of 8.0G", result.stdout)
 
@@ -294,18 +289,13 @@ class InstallerTests(InstallerFixture):
         self.assertEqual(profile.read_text(), "export EDITOR=vi\n")
         self.assertFalse((self.home / ".bashrc").exists())
 
-    def jobgate_shell(self, startup_text):
-        path = JOBGATE_PATH
-        env = dict(os.environ, SHELL="/bin/zsh", PATH=path)
-        startup = self.home / ".zshrc"
-        self.home.mkdir(parents=True)
-        startup.write_text(startup_text)
-        return env, startup
-
     def test_jobgate_uninstall_removes_the_path_line_after_a_failed_removal(self):
         if os.geteuid() == 0:
             self.skipTest("root can rewrite a read-only home")
-        env, startup = self.jobgate_shell("alias ll='ls -l'\n")
+        env = dict(os.environ, SHELL="/bin/zsh", PATH=JOBGATE_PATH)
+        startup = self.home / ".zshrc"
+        self.home.mkdir(parents=True)
+        startup.write_text("alias ll='ls -l'\n")
         self.run_installer("--target", "jobgate", env=env)
         self.home.chmod(0o555)
         try:

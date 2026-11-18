@@ -295,8 +295,11 @@ def deploy(args, harnesses, selected, home, use_env, state_root, state_path, sta
         files.save_manifest(state_path, state)
 
     if astack_jobgate.NAME in selected:
-        astack_jobgate.update_path(args.command, state, home, use_env, args.dry_run,
-                                   lambda: files.save_manifest(state_path, state))
+        save = lambda: files.save_manifest(state_path, state)
+        if args.command == "install":
+            astack_jobgate.add_path_lines(state, home, use_env, args.dry_run, save)
+        else:
+            astack_jobgate.remove_path_lines(state, args.dry_run, save)
         if args.command == "uninstall":
             astack_jobgate.prune(jobgate_lib, args.dry_run)
     for change in settings:
