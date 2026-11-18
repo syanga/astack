@@ -1,4 +1,4 @@
-"""Check the repository's own skills against the installer's rules, without installing."""
+"""Check the repository's own skills against the installer's rules and against each other, without installing."""
 
 from pathlib import Path
 import re
@@ -19,7 +19,7 @@ class RepositorySkillsTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_review_pr_runs_the_provider_invocations_from_provider_execution(self):
+    def test_review_pr_copies_provider_execution_invocations(self):
         def invocations(relative):
             text = (SOURCE / "skills" / relative).read_text(encoding="utf-8")
             blocks = re.findall(r"^```bash\n(.*?)^```", text, re.DOTALL | re.MULTILINE)
