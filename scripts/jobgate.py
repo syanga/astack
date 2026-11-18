@@ -16,6 +16,7 @@ import errno
 from dataclasses import asdict, dataclass, fields
 import datetime
 import fcntl
+import hashlib
 import json
 import math
 import os
@@ -170,7 +171,7 @@ def read_toml(path: Path) -> dict:
     try:
         with open(path, "rb") as stream:
             return tomllib.load(stream)
-    except (OSError, tomllib.TOMLDecodeError) as error:
+    except (OSError, ValueError) as error:
         raise Refusal("cannot read {}: {}".format(path, error)) from None
 
 
@@ -189,7 +190,7 @@ def last_error(result: subprocess.CompletedProcess) -> str:
 
 def find_config(start: Path) -> Path:
     top = run_captured(["git", "-C", str(start), "rev-parse", "--show-toplevel"])
-    root = Path(top.stdout.strip()) if top.returncode == 0 else start
+    root = Path(top.stdout.rstrip("\n")) if top.returncode == 0 else start
     candidate = root / "jobgate.toml"
     if not candidate.is_file():
         raise Refusal("no jobgate.toml in {}".format(root))
@@ -628,13 +629,23 @@ def systemd_version() -> int:
     return int(match.group(1)) if match else 0
 
 
+def home_key() -> str:
+    return hashlib.sha256(str(Path.home().resolve()).encode()).hexdigest()[:12]
+
+
+def home_slice() -> str:
+    """systemd nests a slice named jobgate-<key>.slice inside jobgate.slice."""
+    return "jobgate-{}.slice".format(home_key())
+
+
 def set_slice_cap(share: int) -> str | None:
     if shutil.which("systemd-run") is None:
         return "systemd-run is not installed"
-    result = run_captured(["systemctl", "--user", "set-property", "--runtime", SLICE,
-                           "MemoryMax={}".format(share), "CPUWeight={}".format(CPU_WEIGHT)], 15)
-    if result.returncode != 0:
-        return "no systemd user session: {}".format(last_error(result))
+    for unit, properties in ((SLICE, ["CPUWeight={}".format(CPU_WEIGHT), "MemoryMax=infinity"]),
+                             (home_slice(), ["MemoryMax={}".format(share)])):
+        result = run_captured(["systemctl", "--user", "set-property", "--runtime", unit, *properties], 15)
+        if result.returncode != 0:
+            return "no systemd user session: {}".format(last_error(result))
     return None
 
 
@@ -659,8 +670,8 @@ def execute(command: list[str], env: dict, share: int, ticket: Ticket, profile: 
             options = ["-p", "OOMPolicy=continue"] if version >= OOM_POLICY_MIN_SYSTEMD else []
             if version >= EXPAND_ENVIRONMENT_MIN_SYSTEMD:
                 options.append("--expand-environment=no")
-            scope = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--slice=" + SLICE,
-                     "--unit=jobgate-{}".format(ticket.run.id),
+            scope = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--slice=" + home_slice(),
+                     "--unit=jobgate-{}-{}".format(home_key(), ticket.run.id),
                      "--description=jobgate {} in {}".format(profile.name, ticket.run.repo), *options, "--",
                      sys.executable, str(Path(__file__).resolve()), "_scope", str(ticket.files.scope), "--", *command]
             outcome = supervise(scope, env)
@@ -791,14 +802,16 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
 def cap_text() -> str:
     if sys.platform == "darwin":
         return "none on macOS; the pressure hold delays new runs instead"
-    result = run_captured(["systemctl", "--user", "show", SLICE, "-p", "MemoryMax", "-p", "CPUWeight",
-                           "-p", "MemoryCurrent"], 15)
-    if result.returncode != 0:
-        return "off: " + last_error(result)
-    values = dict(line.partition("=")[::2] for line in result.stdout.splitlines() if "=" in line)
-    shown = ["{}={}".format(key, size(int(values[key])) if values.get(key, "").isdigit() and key != "CPUWeight"
-                            else values.get(key, "?")) for key in ("MemoryMax", "CPUWeight", "MemoryCurrent")]
-    return "{} {}".format(SLICE, " ".join(shown))
+    shown = []
+    for unit, keys in ((home_slice(), ("MemoryMax", "MemoryCurrent")), (SLICE, ("CPUWeight",))):
+        result = run_captured(["systemctl", "--user", "show", unit, *["-p" + key for key in keys]], 15)
+        if result.returncode != 0:
+            return "off: " + last_error(result)
+        values = dict(line.partition("=")[::2] for line in result.stdout.splitlines() if "=" in line)
+        shown.append("{} {}".format(unit, " ".join(
+            "{}={}".format(key, size(int(values[key])) if values.get(key, "").isdigit() and key != "CPUWeight"
+                           else values.get(key, "?")) for key in keys)))
+    return ", ".join(shown)
 
 
 def status() -> int:

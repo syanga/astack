@@ -52,6 +52,20 @@ os.execvp(command[0], command)
 """
 
 
+RECORDING_RUN = r"""#!{python}
+import os, sys
+arguments = sys.argv[1:]
+split = arguments.index("--")
+with open(os.environ["SYSTEMD_LOG"], "a") as log:
+    log.write("run " + " ".join(argument for argument in arguments[:split] if argument.startswith("--slice=")) + "\n")
+os.execvp(arguments[split + 1], arguments[split + 1:])
+"""
+RECORDING_SYSTEMCTL = """[ "$1" = --version ] && echo "systemd 259"
+echo "$*" >> "$SYSTEMD_LOG"
+exit 0
+"""
+
+
 def cgroup_has_memory_controller():
     try:
         with open("/proc/self/cgroup") as stream:
@@ -350,6 +364,28 @@ class ResultTests(JobgateTest):
         self.assertEqual(fields["dirty"], "yes")
         self.assertEqual(log.read_text().splitlines()[-1], line)
 
+    def test_invalid_utf8_in_a_config_exits_125_without_a_traceback(self):
+        text = (self.repo / "jobgate.toml").read_bytes()
+        for target in ("repository", "machine"):
+            with self.subTest(file=target):
+                (self.repo / "jobgate.toml").write_bytes(text + (b"# \xff\n" if target == "repository" else b""))
+                machine = self.root / "home/.config/jobgate.toml"
+                machine.parent.mkdir(parents=True, exist_ok=True)
+                machine.write_bytes(b"memory_share = 0.5\n" + (b"# \xff\n" if target == "machine" else b""))
+                result = self.gate("run", "test", "--", sys.executable, "-c", "pass")
+                self.assertEqual(result.returncode, 125, result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
+
+    def test_a_git_root_whose_name_ends_in_a_space_loads_its_profile(self):
+        spaced = self.root / "checkout "
+        spaced.mkdir()
+        (spaced / "jobgate.toml").write_text((self.repo / "jobgate.toml").read_text())
+        subprocess.run(["git", "init", "-q", str(spaced)], check=True, env=self.env)
+        result = subprocess.run([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", PRINT_WORKERS],
+                                cwd=str(spaced), env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "4"), result.stderr)
+
     def test_a_checkout_path_with_braces_loads_its_profile(self):
         braced = self.root / "project {copy}"
         braced.mkdir()
@@ -420,6 +456,29 @@ class ExitCodeTests(JobgateTest):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout.strip(), "['${HOME}', '$HOME']")
                 self.assertNotIn("kernel memory cap is off", result.stderr)
+
+    @unittest.skipUnless(sys.platform == "linux" and cgroup_has_memory_controller(),
+                         "needs Linux and a cgroup with the memory controller for the scope helper")
+    def test_each_home_caps_its_own_slice(self):
+        log = self.root / "systemd.log"
+        env = self.systemd_session("recording systemd", RECORDING_SYSTEMCTL, RECORDING_RUN.format(python=sys.executable))
+        env["SYSTEMD_LOG"] = str(log)
+        self.set_machine(memory=8 * GIB, cores=8, psi=CALM)
+        homes = {"first home": 0.5, "second home": 0.25}
+        for name, memory_share in homes.items():
+            (self.root / name / ".config").mkdir(parents=True)
+            (self.root / name / ".config/jobgate.toml").write_text("memory_share = {}\n".format(memory_share))
+            result = self.gate("run", "test", "--", sys.executable, "-c", "pass", env=dict(env, HOME=str(self.root / name)))
+            self.assertEqual(result.returncode, 0, result.stderr)
+        calls = log.read_text().splitlines()
+        caps = [line.split() for line in calls if line.startswith("--user set-property") and "MemoryMax=infinity" not in line]
+        runs = [line.split("--slice=")[1] for line in calls if line.startswith("run ")]
+        self.assertEqual([cap[3] for cap in caps], runs)
+        self.assertEqual(len(set(runs)), 2)
+        self.assertEqual([cap[4] for cap in caps], ["MemoryMax={}".format(4 * GIB), "MemoryMax={}".format(2 * GIB)])
+        self.assertTrue(all(run.startswith("jobgate-") and run.endswith(".slice") for run in runs))
+        parents = [set(line.split()[3:]) for line in calls if line.startswith("--user set-property --runtime jobgate.slice ")]
+        self.assertEqual(parents, [{"jobgate.slice", "CPUWeight=30", "MemoryMax=infinity"}] * 2)
 
     @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
     def test_ctrl_c_while_the_scope_starts_skips_the_command(self):

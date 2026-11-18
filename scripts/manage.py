@@ -298,9 +298,18 @@ def deploy(args, harnesses, selected, home, use_env, state_root, state_path, sta
         save = lambda: files.save_manifest(state_path, state)
         if args.command == "install":
             astack_jobgate.add_path_lines(state, home, use_env, args.dry_run, save)
+            current_lib = astack_jobgate.lib_dir(home, use_env)
+            if jobgate_lib != current_lib:
+                astack_jobgate.prune(jobgate_lib, args.dry_run)
+            if not args.dry_run:
+                astack_jobgate.record_lib(state, current_lib)
+                save()
         else:
             astack_jobgate.remove_path_lines(state, args.dry_run, save)
             astack_jobgate.prune(jobgate_lib, args.dry_run)
+            if not args.dry_run and jobgate_lib is not None:
+                astack_jobgate.record_lib(state, None)
+                save()
     for change in settings:
         change.apply(state, state_path, backup_root, dry_run=args.dry_run)
     for target in agents:

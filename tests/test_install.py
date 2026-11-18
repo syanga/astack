@@ -290,6 +290,17 @@ class InstallerTests(InstallerFixture):
         self.assertEqual(profile.read_text(), "export EDITOR=vi\n")
         self.assertFalse((self.home / ".bashrc").exists())
 
+    def test_jobgate_uninstall_keeps_a_marked_block_it_did_not_write(self):
+        env = dict(os.environ, SHELL="/bin/zsh", PATH=JOBGATE_PATH)
+        self.home.mkdir(parents=True)
+        own = '# astack: jobgate on PATH\nexport PATH="{}:$PATH"\nexport EDITOR=vi\n'.format(self.home / ".local/bin")
+        startup = self.home / ".zshrc"
+        startup.write_text(own)
+        self.run_installer("--target", "jobgate", env=env)
+        self.assertEqual(startup.read_text().count("# astack: jobgate on PATH"), 2)
+        self.run_installer("--target", "jobgate", command="uninstall", env=env)
+        self.assertEqual(startup.read_text(), own)
+
     def test_jobgate_uninstall_removes_the_path_line_after_a_failed_removal(self):
         if os.geteuid() == 0:
             self.skipTest("root can rewrite a read-only home")

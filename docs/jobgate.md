@@ -78,8 +78,11 @@ A run is admitted when all of these hold:
 An admitted run takes as many workers as fit, up to `max_workers` or
 `--max-workers`. It keeps that count until it ends. Its stated memory and its
 workers are its reservation until then. The core count is the process's CPU
-affinity on Linux and the logical CPU count on macOS. The queue lives under
-`HOME`, so the share and the core limit apply to all runs with the same `HOME`.
+affinity on Linux and the logical CPU count on macOS.
+
+Each `HOME` has its own queue and share, and counts its own workers against the
+cores. Runs with two `HOME` values do not see each other, so together they can
+state two shares of memory and use the cores twice.
 
 When a run's `base_mem + 1 × worker_mem` exceeds the share, jobgate exits with
 code 125 instead of waiting.
@@ -119,19 +122,25 @@ evidence for both thresholds.
 
 ## Enforcement and priority
 
-On Linux with a systemd user session, all gated runs run in `jobgate.slice`.
-Each run sets the slice's `MemoryMax` to the share through
-`systemctl --user set-property --runtime`. It also sets the slice's `CPUWeight`
-to 30, the weight systemd gives its own `background.slice`. Each run is a scope,
-`jobgate-<run id>.scope`, inside that slice. There is no per-run cap. One run
-can exceed its stated memory and keep running while all runs together fit the
-slice. On systemd 253 or newer, each scope has `OOMPolicy=continue`. A kernel
-OOM kill inside the slice then ends one process instead of the whole run. On
-systemd 254 or newer, jobgate passes `--expand-environment=no`, so the command
-receives `$` in its arguments unchanged. Earlier versions never expand a scope's
-arguments.
-`systemctl --user show jobgate.slice -p MemoryMax -p CPUWeight -p MemoryCurrent`
-prints the slice's settings and use.
+On Linux with a systemd user session, all gated runs with the same `HOME` run in
+one slice, `jobgate-<key>.slice`. The key is the first 12 hex digits of the
+SHA-256 of the resolved `HOME`. systemd places that slice inside
+`jobgate.slice`. Through `systemctl --user set-property --runtime`, each run
+sets the `HOME` slice's `MemoryMax` to the share. That `MemoryMax` is the kernel
+memory cap. Each run also sets `jobgate.slice` to `CPUWeight=30`, the weight
+systemd gives its own `background.slice`, and to `MemoryMax=infinity`, so the
+parent adds no cap of its own. Weight competes only among sibling slices, so the
+weight on `jobgate.slice` lowers all gated runs against `app.slice`.
+
+Each run is a scope, `jobgate-<key>-<run id>.scope`, inside its `HOME` slice.
+There is no per-run cap. One run can exceed its stated memory and keep running
+while all runs with its `HOME` together fit the cap. On systemd 253 or newer,
+each scope has `OOMPolicy=continue`. A kernel OOM kill inside the `HOME` slice
+then ends one process instead of the whole run. On systemd 254 or newer, jobgate
+passes `--expand-environment=no`, so the command receives `$` in its arguments
+unchanged. Earlier versions never expand a scope's arguments. `jobgate status`
+prints the `HOME` slice's `MemoryMax` and `MemoryCurrent`, and the `CPUWeight`
+of `jobgate.slice`.
 
 On Linux without a systemd user session, as in containers and some WSL setups,
 jobgate prints one line saying the kernel memory cap is off. It then applies
@@ -153,10 +162,10 @@ exit.
 
 When jobgate alone is killed with SIGKILL, the OS releases its reservation, and
 its command keeps running. Later runs are admitted as if that command had ended.
-On Linux with the kernel memory cap on, the command stays in `jobgate.slice`, so
-`MemoryMax` still caps all gated runs together. On macOS, or on Linux with the
-kernel memory cap off, only the pressure hold protects new runs from that
-command's memory.
+On Linux with the kernel memory cap on, the command stays in its `HOME` slice,
+so that slice's `MemoryMax` still caps those runs together. On macOS, or on
+Linux with the kernel memory cap off, only the pressure hold protects new runs
+from that command's memory.
 
 ## Results
 
@@ -227,7 +236,7 @@ code of `taskpolicy`.
 | The profile's `workers_env` | jobgate sets it to the worker count. |
 | `JOBGATE_WORKERS` | jobgate sets it to the worker count. |
 | `JOBGATE_RUN` | jobgate sets it to the path of the run's file. A nested call reads it to find the outer run. |
-| `HOME` | Holds `.cache/jobgate/` and `.config/jobgate.toml`. jobgate ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. Processes with the same `HOME` use one queue, and a process with another `HOME` uses a separate queue. |
+| `HOME` | Holds `.cache/jobgate/` and `.config/jobgate.toml`, and names the `HOME` slice. jobgate ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. Processes with the same `HOME` use one queue, share, and slice. |
 | `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with `memory`, `cores`, and either `psi` or `darwin_level` readings that replace the OS readings. jobgate reads `memory` and `cores` once per run. It reads the pressure reading before each admission attempt. |
 
 ## Files
@@ -236,7 +245,7 @@ code of `taskpolicy`.
 | --- | --- |
 | `~/.cache/jobgate/queue.lock` | The lock that runs hold while they read or change the queue |
 | `~/.cache/jobgate/runs/<run id>.json` | One file per waiting or running run, which the run holds a `flock` on. The OS releases the lock when the run's process dies. The next run that reads the queue then deletes the file. |
-| `~/.cache/jobgate/runs/<run id>.scope` | The scope's cgroup and peak memory, which the scope writes before it ends, or the reason the scope could not cap memory |
+| `~/.cache/jobgate/runs/<run id>.scope` | Written by jobgate's helper inside the scope: the scope's cgroup and peak memory, or why the kernel memory cap is off |
 | `~/.cache/jobgate/results.log` | Result lines |
 
 ## Install and remove
@@ -255,16 +264,20 @@ files for other `PATH` lines. The startup files depend on `SHELL`:
 
 | Shell | Startup files |
 | --- | --- |
-| zsh | `~/.zshrc`, which interactive shells read, and `~/.zprofile`, which login shells read. With `ZDOTDIR` set, both files are in `$ZDOTDIR`. |
+| zsh | `~/.zshrc`, which interactive shells read, and `~/.zprofile`, which login shells read. With `ZDOTDIR` set, both files are in `$ZDOTDIR`, resolved to an absolute path at install. |
 | bash | `~/.bashrc` and the bash login file. Interactive non-login shells read `~/.bashrc`. Login shells read only the first of `~/.bash_profile`, `~/.bash_login`, and `~/.profile` that exists, so the installer writes that file. When none of the three exists, it creates `~/.profile`. |
 | other | None. The installer prints the line to add instead. |
 
-The installer records each line before it writes the line.
+The installer records each line before it writes the line, and it records the
+folder that holds the script.
 
-`./uninstall.sh` removes the installed files and the marked lines. When it
-cannot rewrite a startup file, it keeps the record of the line in that file. The
-next `./uninstall.sh` then removes the line. `./uninstall.sh` also removes the
-directories that held the recorded script, when they are empty. It leaves
+`./uninstall.sh` removes the installed files and the marked lines. In each
+startup file, it removes the last marked line, the one the installer wrote, and
+leaves any earlier copy. When it cannot rewrite a startup file, it keeps the
+record of the line in that file. The next `./uninstall.sh` then removes the
+line. `./uninstall.sh` also removes the recorded folder and its parent, when
+they are empty. A reinstall that moves the script, such as to another
+`XDG_DATA_HOME`, removes the old folder the same way. It leaves
 `~/.cache/jobgate/`, `~/.config/jobgate.toml`, and the runtime slice settings.
 Those settings last until the machine reboots or the user's last login session
 ends.

@@ -2,8 +2,10 @@ import os
 from pathlib import Path
 import re
 import shlex
+import stat
 import sys
 
+import astack_files as files
 import claude_router
 
 NAME = "jobgate"
@@ -31,10 +33,19 @@ def desired_files(scripts, home, use_env):
 
 
 def recorded_lib(state):
+    if state.get(NAME, {}).get("lib"):
+        return Path(state[NAME]["lib"])
     for filename in state.get("targets", {}).get(NAME, {}):
         if Path(filename).name == "jobgate.py":
             return Path(filename).parent
     return None
+
+
+def record_lib(state, lib):
+    if lib is None:
+        state.pop(NAME, None)
+    else:
+        state[NAME] = {"lib": str(lib)}
 
 
 def on_path(directory):
@@ -47,7 +58,7 @@ def startup_files(home, use_env):
     reads only the first of BASH_LOGIN_FILES that exists."""
     shell = Path(os.environ.get("SHELL", "")).name or ("zsh" if sys.platform == "darwin" else "bash")
     if shell == "zsh":
-        zdotdir = Path((os.environ.get("ZDOTDIR") if use_env else None) or home)
+        zdotdir = Path(os.path.abspath(os.path.expanduser((os.environ.get("ZDOTDIR") if use_env else None) or str(home))))
         return [zdotdir / ".zshrc", zdotdir / ".zprofile"]
     if shell == "bash":
         login = next((home / name for name in BASH_LOGIN_FILES if (home / name).is_file()), home / ".profile")
@@ -81,6 +92,26 @@ def needs_separator(path):
     return bool(data) and not data.endswith(b"\n")
 
 
+def remove_last_block(path, block, separator, created):
+    target = path.resolve() if path.is_symlink() else path
+    try:
+        data = target.read_bytes()
+    except FileNotFoundError:
+        return False
+    index = data.rfind(block)
+    if index < 0:
+        return False
+    end = index + len(block)
+    if separator and end == len(data) and data[index - 1:index] == b"\n":
+        index -= 1
+    rest = data[:index] + data[end:]
+    if created and not rest:
+        target.unlink()
+    else:
+        files.atomic_write(target, rest, stat.S_IMODE(target.stat().st_mode))
+    return True
+
+
 def remove_path_lines(state, dry_run, save):
     owned = PathRecords(state, save)
     for entry in list(owned.entries):
@@ -88,8 +119,8 @@ def remove_path_lines(state, dry_run, save):
         if dry_run:
             continue
         try:
-            claude_router.remove_block(Path(entry["file"]), ("\n".join(entry["lines"]) + "\n").encode(),
-                                       entry["separator"], entry["created"])
+            remove_last_block(Path(entry["file"]), ("\n".join(entry["lines"]) + "\n").encode(),
+                              entry["separator"], entry["created"])
         except OSError as error:
             print("WARN {} ({}); uninstall again to remove: {}".format(
                 entry["file"], claude_router.reason(error), " / ".join(entry["lines"])))
