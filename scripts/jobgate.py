@@ -161,13 +161,22 @@ def read_toml(path: Path) -> dict:
         raise Refusal("cannot read {}: {}".format(path, error)) from None
 
 
-def find_config(start: Path) -> Path:
+def quiet(argv: list[str], timeout: float = 60) -> subprocess.CompletedProcess:
     try:
-        top = subprocess.run(["git", "-C", str(start), "rev-parse", "--show-toplevel"], capture_output=True,
-                             text=True, timeout=60, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.TimeoutExpired):
-        top = None
-    root = Path(top.stdout.strip()) if top is not None and top.returncode == 0 else start
+        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(argv, 124, "", "{} timed out after {:g}s".format(argv[0], timeout))
+    except OSError as error:
+        return subprocess.CompletedProcess(argv, 127, "", "cannot run {}: {}".format(argv[0], error.strerror or error))
+
+
+def last_error(result: subprocess.CompletedProcess) -> str:
+    return (result.stderr.strip().splitlines() or ["{} exited with {}".format(result.args[0], result.returncode)])[-1]
+
+
+def find_config(start: Path) -> Path:
+    top = quiet(["git", "-C", str(start), "rev-parse", "--show-toplevel"])
+    root = Path(top.stdout.strip()) if top.returncode == 0 else start
     candidate = root / "jobgate.toml"
     if not candidate.is_file():
         raise Refusal("no jobgate.toml in {}".format(root))
@@ -261,11 +270,9 @@ def pressure() -> Pressure:
     if "darwin_level" in readings:
         return darwin_pressure(str(readings["darwin_level"]))
     if sys.platform == "darwin":
-        try:
-            result = subprocess.run(["sysctl", "-n", "kern.memorystatus_vm_pressure_level"], capture_output=True,
-                                    text=True, timeout=10, stdin=subprocess.DEVNULL)
-        except (OSError, subprocess.TimeoutExpired) as error:
-            return Pressure("unknown ({})".format(error), False)
+        result = quiet(["sysctl", "-n", "kern.memorystatus_vm_pressure_level"], 10)
+        if result.returncode != 0:
+            return Pressure("unknown ({})".format(last_error(result)), False)
         return darwin_pressure(result.stdout)
     try:
         return psi_pressure(Path("/proc/pressure/memory").read_text())
@@ -513,9 +520,7 @@ def parents() -> dict[int, int]:
             except (OSError, ValueError, IndexError):
                 continue
         return table
-    output = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True, timeout=10,
-                            stdin=subprocess.DEVNULL).stdout
-    for line in output.splitlines():
+    for line in quiet(["ps", "-axo", "pid=,ppid="], 10).stdout.splitlines():
         columns = line.split()
         if len(columns) == 2 and all(column.isdigit() for column in columns):
             table[int(columns[0])] = int(columns[1])
@@ -560,7 +565,7 @@ class Libproc:
     @classmethod
     def phys_footprint(cls, pid: int) -> int | None:
         if cls.library is None:
-            cls.library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+            cls.library = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
             cls.library.proc_pid_rusage.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
             cls.library.proc_pid_rusage.restype = ctypes.c_int
         info = RUsageInfoV0()
@@ -595,24 +600,15 @@ def unrunnable(command: list[str], env: dict) -> int | None:
 
 
 def systemd_version() -> int:
-    try:
-        output = subprocess.run(["systemctl", "--version"], capture_output=True, text=True, timeout=10,
-                                stdin=subprocess.DEVNULL).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return 0
-    match = re.match(r"systemd (\d+)", output)
+    match = re.match(r"systemd (\d+)", quiet(["systemctl", "--version"], 10).stdout)
     return int(match.group(1)) if match else 0
 
 
 def set_slice_cap(share: int) -> str | None:
     if shutil.which("systemd-run") is None:
         return "systemd-run is not installed"
-    try:
-        result = subprocess.run(["systemctl", "--user", "set-property", "--runtime", SLICE,
-                                 "MemoryMax={}".format(share), "CPUWeight={}".format(CPU_WEIGHT)],
-                                capture_output=True, text=True, timeout=15, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        return "no systemd user session: {}".format(error)
+    result = quiet(["systemctl", "--user", "set-property", "--runtime", SLICE,
+                    "MemoryMax={}".format(share), "CPUWeight={}".format(CPU_WEIGHT)], 15)
     if result.returncode != 0:
         return "no systemd user session: {}".format(last_error(result))
     return None
@@ -686,17 +682,10 @@ def scope_main(result: Path, command: list[str]) -> int:
 
 
 def git_state(repo: Path) -> tuple[str, Dirty]:
-    def git(*arguments: str) -> subprocess.CompletedProcess | None:
-        try:
-            return subprocess.run(["git", "-C", str(repo), *arguments], capture_output=True, text=True,
-                                  timeout=60, stdin=subprocess.DEVNULL)
-        except (OSError, subprocess.TimeoutExpired):
-            return None
-
-    head = git("rev-parse", "--verify", "--quiet", "HEAD")
-    status = git("status", "--porcelain")
-    commit = head.stdout.strip() if head and head.returncode == 0 else "none"
-    dirty: Dirty = "unknown" if status is None or status.returncode != 0 else ("yes" if status.stdout.strip() else "no")
+    head = quiet(["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", "HEAD"])
+    status = quiet(["git", "-C", str(repo), "status", "--porcelain"])
+    commit = head.stdout.strip() if head.returncode == 0 else "none"
+    dirty: Dirty = "unknown" if status.returncode != 0 else ("yes" if status.stdout.strip() else "no")
     return commit, dirty
 
 
@@ -723,10 +712,6 @@ def launch_failure(command: list[str], error: OSError) -> int:
     return CANNOT_EXECUTE
 
 
-def last_error(result: subprocess.CompletedProcess) -> str:
-    return (result.stderr.strip().splitlines() or ["{} exited with {}".format(result.args[0], result.returncode)])[-1]
-
-
 def nested(profile: Profile, workers: int, command: list[str], run_file: str) -> int:
     say("{} runs inside run {} with {}".format(profile.name, Path(run_file).stem, plural(workers, "worker")))
     env = dict(os.environ, **{profile.workers_env: str(workers), WORKERS_ENV: str(workers)})
@@ -745,21 +730,21 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
     if outer_workers.isdigit() and int(outer_workers) >= 1 and held(outer):
         return nested(profile, min(limit, int(outer_workers)), command, outer)
     queue = Queue.open()
-    found = machine()
-    if profile.memory(1) > found.share:
+    host = machine()
+    if profile.memory(1) > host.share:
         raise Refusal("[{}] needs {} for 1 worker, more than this machine's {} share; lower its base_mem or "
                       "worker_mem in {}, or raise memory_share in {}".format(
-                          profile.name, size(profile.memory(1)), size(found.share), config, machine_config()))
+                          profile.name, size(profile.memory(1)), size(host.share), config, machine_config()))
     ticket = queue.enter(profile.name, config.parent, command)
     try:
-        admission, waited = admit(queue, ticket, found, profile, limit)
+        admission, waited = admit(queue, ticket, host, profile, limit)
         workers, stated = admission.workers, admission.memory
         commit, dirty = git_state(config.parent)
         say("{} starts with {} ({}={}), {} stated{}".format(
             profile.name, plural(workers, "worker"), profile.workers_env, workers, size(stated),
             ", after waiting {}".format(duration(waited)) if waited >= 1 else ""))
         env = dict(os.environ, **{profile.workers_env: str(workers), RUN_ENV: str(ticket.files.record), WORKERS_ENV: str(workers)})
-        outcome, peak = execute(command, env, found.share, ticket, profile)
+        outcome, peak = execute(command, env, host.share, ticket, profile)
     finally:
         ticket.leave()
     if peak is not None and peak > stated:
@@ -779,12 +764,8 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
 def cap_text() -> str:
     if sys.platform == "darwin":
         return "none on macOS; the pressure hold delays new runs instead"
-    try:
-        result = subprocess.run(["systemctl", "--user", "show", SLICE, "-p", "MemoryMax", "-p", "CPUWeight",
-                                 "-p", "MemoryCurrent"], capture_output=True, text=True, timeout=15,
-                                stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        return "off: {}".format(error)
+    result = quiet(["systemctl", "--user", "show", SLICE, "-p", "MemoryMax", "-p", "CPUWeight", "-p", "MemoryCurrent"],
+                   15)
     if result.returncode != 0:
         return "off: " + last_error(result)
     values = dict(line.partition("=")[::2] for line in result.stdout.splitlines() if "=" in line)
@@ -794,7 +775,7 @@ def cap_text() -> str:
 
 
 def status() -> int:
-    found = machine()
+    host = machine()
     level = pressure()
     queue = Queue.open()
     with queue.lock():
@@ -803,9 +784,9 @@ def status() -> int:
     now = time.time()
     source = machine_config() if machine_config().is_file() else "default"
     lines = [
-        "share     {} ({:.0%} of {}; {})".format(size(found.share), found.memory_share, size(found.memory), source),
-        "memory    {} of {} stated by running runs".format(size(taken.memory), size(found.share)),
-        "cores     {} of {} used by gated workers".format(taken.workers, found.cores),
+        "share     {} ({:.0%} of {}; {})".format(size(host.share), host.memory_share, size(host.memory), source),
+        "memory    {} of {} stated by running runs".format(size(taken.memory), size(host.share)),
+        "cores     {} of {} used by gated workers".format(taken.workers, host.cores),
         "pressure  {}{}".format(level.reading, "; new runs wait" if level.holding else ""),
         "cap       {}".format(cap_text()),
     ]

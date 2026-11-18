@@ -348,6 +348,16 @@ class ExitCodeTests(JobgateTest):
         result = self.gate("run", "test", "--", str(self.root / "no-such-command"))
         self.assertEqual(result.returncode, 127, result.stderr)
 
+    def test_command_that_cannot_run_exits_126(self):
+        script = self.root / "not-executable"
+        script.write_text("#!/bin/sh\nexit 0\n")
+        script.chmod(0o644)
+        for command in (str(script), str(self.root)):
+            with self.subTest(command=command):
+                result = self.gate("run", "test", "--", command)
+                self.assertEqual(result.returncode, 126, result.stderr)
+                self.assertIn("exit=126", result.stderr)
+
     def test_sigterm_reaches_the_command(self):
         marker = self.root / "terminated"
         trap = ("import pathlib, signal, sys, time\n"

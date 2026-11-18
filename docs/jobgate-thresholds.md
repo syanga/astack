@@ -25,7 +25,7 @@ of full stall per second. A hold at 10% stops new runs well before either.
 
 A busy machine stays far below 10%. One 16-core, 22 GiB Ubuntu 26.04 machine
 ran several agent lanes, two runs of this repository's test suite, and other
-parallel test runs while a sampler read `/proc/pressure/memory` every 2
+parallel test runs. Meanwhile, a sampler read `/proc/pressure/memory` every 2
 seconds. Over 53 minutes and 1,597 samples, the load average reached 27.5,
 `MemAvailable` fell to 542 MiB, and `full avg10` peaked at 2.44%. Its 99th
 percentile was 1.26%. To measure another machine, run this sampler for as long
@@ -43,10 +43,10 @@ done
 ## macOS holds only at critical
 
 `kern.memorystatus_vm_pressure_level` reads 1 for normal, 2 for warn, and 4
-for critical. XNU's
+for critical. XNU sets the levels from uncompressed available memory, the sum
+of active, inactive, free, and speculative pages, as its
 [memorystatus_notify.md](https://github.com/apple-oss-distributions/xnu/blob/main/doc/vm/memorystatus_notify.md)
-sets the levels from uncompressed available memory, the sum of active,
-inactive, free, and speculative pages. The level turns to warn when that sum
+describes. The level turns to warn when that sum
 falls below half of all available memory, compressed pages included. A Mac
 that compresses memory reaches warn routinely, and XNU's advice at warn is only
 to relax caching. The level turns critical below 29%, where the compressor

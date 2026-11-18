@@ -84,8 +84,9 @@ same `HOME`.
 When a run's `base_mem + 1 × worker_mem` exceeds the share, jobgate exits with
 code 125 instead of waiting.
 
-A waiting run has no time limit, so only the caller's own timeout ends it. It
-prints its reason when it starts waiting and once a minute after that:
+A waiting run has no time limit. The caller's own timeout, or a signal such as
+Ctrl-C, ends the wait. A waiting run prints its reason when it starts waiting
+and once a minute after that:
 
 ```text
 jobgate: test waits for memory: 1 worker needs 2.0G, and 1.0G of the 8.0G share is free; waited 1m 00s
@@ -97,7 +98,7 @@ jobgate: test waits behind 2 earlier runs; waited 0s
 ### Nested calls
 
 A command that runs under jobgate and calls `jobgate run` again runs inside the
-outer run's reservation and never waits. The nested command gets the smaller of
+outer run's reservation and never waits. The nested call gets the smaller of
 the outer run's worker count and its own profile's limit, and prints no result
 line of its own. jobgate marks the outer run with `JOBGATE_RUN` and
 `JOBGATE_WORKERS`. When the run that `JOBGATE_RUN` names has ended, a nested
@@ -119,9 +120,9 @@ evidence for both thresholds.
 ## Enforcement and priority
 
 On Linux with a systemd user session, all gated runs run in `jobgate.slice`.
-Each run sets the slice's `MemoryMax` to the share and its `CPUWeight` to 30,
-the weight systemd gives its own `background.slice`, through
-`systemctl --user set-property --runtime`. Each run is a scope,
+Each run sets the slice's `MemoryMax` to the share and the slice's `CPUWeight`
+to 30 through `systemctl --user set-property --runtime`. systemd gives its own
+`background.slice` the same weight. Each run is a scope,
 `jobgate-<run id>.scope`, inside that slice. There is no per-run cap, so one run
 can exceed its stated memory and keep running while all runs together fit the
 slice. On systemd 253 or newer, each scope has `OOMPolicy=continue`, so a kernel
@@ -245,7 +246,7 @@ on the script in `~/.local/share/astack/jobgate/`, or in
 `$XDG_DATA_HOME/astack/jobgate/` when `XDG_DATA_HOME` is set. When
 `~/.local/bin` is not on `PATH` and no `PATH` assignment in the shell startup
 file names it, the installer appends a `PATH` line to that file.
-`./uninstall.sh` removes those files and that line. When the uninstaller cannot
-rewrite the startup file, it keeps a record of the line, and the next uninstall
-removes the line. Uninstall leaves `~/.cache/jobgate/`, the machine file, and the runtime
-slice settings, which last until reboot.
+`./uninstall.sh` removes those files and that line. When `./uninstall.sh`
+cannot rewrite the startup file, it keeps a record of the line, and the next
+`./uninstall.sh` removes the line. `./uninstall.sh` leaves `~/.cache/jobgate/`,
+the machine file, and the runtime slice settings, which last until reboot.
