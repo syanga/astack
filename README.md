@@ -109,11 +109,11 @@ To install and activate the router:
    claude-router setup -account work -account alumni
    ```
 
-   Activation points Claude Code's settings at the router. `setup` ends with
-   `activated Claude Code routes through the router`. If it refuses because
-   an account has paid overflow on, turn paid overflow off on claude.ai, run
-   `claude-router stop`, and run `setup` again. For any other refusal, follow
-   its `next` line.
+   Activation points Claude Code's settings at the router. When `setup`
+   succeeds, it prints `activated Claude Code routes through the router`. If
+   it refuses because an account has paid overflow on, turn paid overflow off
+   on claude.ai, run `claude-router stop`, and run `setup` again. For any
+   other refusal, follow its `next` line.
 7. Start a new Claude Code session, because a session reads its settings when
    it starts.
 8. Check the router. It sends one short test message and ends with
