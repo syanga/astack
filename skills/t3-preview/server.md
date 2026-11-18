@@ -1,6 +1,6 @@
 # Server previews
 
-In T3 Code, `preview_open` opens a URL in a preview tab. The tab's browser runs on the agent machine, so it loads `localhost` URLs. T3 streams the tab to the user's device. On web and mobile, T3's browser panel also loads URLs on the agent machine. The desktop app connected to another machine loads them on the user's device until the user picks **Open in `<environment>`'s browser**. By default, a `localhost` link in chat opens in the user's own browser. That browser can't reach the server when the user is on another device.
+In T3 Code, `preview_open` opens a URL in a preview tab. The tab's browser runs on the agent machine, so it loads `localhost` URLs. T3 streams the tab to the user's device. On web and mobile, T3's browser panel also loads URLs on the agent machine. The desktop app connected to another machine loads them on the user's device unless the user moves the tab with **Open in `<environment>`'s browser**. By default, a `localhost` link in chat opens in the user's own browser. That browser can't reach the server when the user is on another device.
 
 1. Serve only the preview directory, a prototype's scratch app, or the task's dev server. Use task-specific logs and record each process in the [cleanup record](cleanup.md). For static files on macOS, use the firewall-approved `/usr/bin/python3`.
 2. Hand off the page:
