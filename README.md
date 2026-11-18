@@ -192,16 +192,17 @@ then stop in emergency mode.
 
 To move `/tmp` to disk at the next reboot:
 
-1. Run `findmnt --fstab --types tmpfs /tmp`. If it prints a `/tmp` line, use
-   `sudoedit /etc/fstab` to comment out the line that mounts a tmpfs on `/tmp`.
-   Then repeat this step. If it prints nothing, go to step 2.
-2. Run `findmnt --fstab /tmp`. If it prints a line, skip to step 4, because
-   `/etc/fstab` mounts another file system on `/tmp`. If it prints nothing, go
-   to step 3.
+1. Run `findmnt --fstab --types tmpfs --mountpoint /tmp`. If it prints a
+   `/tmp` line, use `sudoedit /etc/fstab` to comment out the line that mounts a
+   tmpfs on `/tmp`. Then repeat this step. If it prints nothing, go to step 2.
+2. Run `findmnt --fstab --mountpoint /tmp`. If it prints a `/tmp` line, skip to
+   step 4, because `/etc/fstab` mounts another file system on `/tmp`. If it
+   prints nothing, go to step 3.
 3. Run `sudo systemctl mask tmp.mount`. The mask stops a packaged `tmp.mount`,
    such as the one in Ubuntu 26.04, from mounting a tmpfs on `/tmp`. If
    `systemctl mask` reports that `/etc/systemd/system/tmp.mount` already
-   exists, stop here. These steps do not cover a local `tmp.mount` file.
+   exists, stop here. These steps do not cover a `tmp.mount` file in
+   `/etc/systemd/system`.
 4. Reboot. `findmnt /tmp` then prints nothing, or shows an `FSTYPE` other than
    `tmpfs`.
 
