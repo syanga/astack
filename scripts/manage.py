@@ -194,6 +194,7 @@ def deploy(args, harnesses, selected, home, use_env, state_root, state_path, sta
     component = None
     if args.component:
         component = claude_router.plan(args.command, state, claude_router.layout(home, use_env, state_root), args.force, lock)
+    jobgate_lib = astack_jobgate.recorded_lib(state)
     operations = []
     conflicts = []
     for target in selected:
@@ -297,7 +298,7 @@ def deploy(args, harnesses, selected, home, use_env, state_root, state_path, sta
         astack_jobgate.update_path(args.command, state, home, use_env, args.dry_run,
                                    lambda: files.save_manifest(state_path, state))
         if args.command == "uninstall":
-            astack_jobgate.prune(home, use_env, args.dry_run)
+            astack_jobgate.prune(jobgate_lib, args.dry_run)
     for change in settings:
         change.apply(state, state_path, backup_root, dry_run=args.dry_run)
     for target in agents:

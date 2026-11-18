@@ -244,9 +244,46 @@ class InstallerTests(InstallerFixture):
         self.assertFalse((self.home / ".local/share/astack").exists())
         self.assertFalse(startup.exists())
 
-        self.run_installer("--target", "jobgate", env=dict(env, PATH=os.pathsep.join([str(jobgate.parent), path])))
+    def test_jobgate_adds_no_path_line_when_the_directory_is_on_path(self):
+        jobgate = self.home / ".local/bin/jobgate"
+        path = os.pathsep.join([str(jobgate.parent), str(Path(sys.executable).parent), "/usr/bin", "/bin"])
+        self.run_installer("--target", "jobgate", env=dict(os.environ, SHELL="/bin/zsh", PATH=path))
         self.assertTrue(jobgate.exists())
-        self.assertFalse(startup.exists())
+        self.assertFalse((self.home / ".zshrc").exists())
+
+    def test_installed_jobgate_reads_toml_with_its_vendored_copy(self):
+        path = os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"])
+        self.run_installer("--target", "jobgate", env=dict(os.environ, SHELL="/bin/zsh", PATH=path))
+        without_tomllib = self.root / "no stdlib tomllib"
+        without_tomllib.mkdir()
+        (without_tomllib / "tomllib.py").write_text("raise ModuleNotFoundError(\"No module named 'tomllib'\")\n")
+        (self.home / ".config").mkdir(parents=True)
+        (self.home / ".config/jobgate.toml").write_text("memory_share = 0.25\n")
+        machine = self.root / "machine.json"
+        machine.write_text('{"memory": 8589934592, "cores": 4, "psi": "full avg10=0.00"}')
+        result = subprocess.run([str(self.home / ".local/bin/jobgate"), "status"], capture_output=True, text=True,
+                                cwd=str(self.root), env=dict(os.environ, PATH=path, HOME=str(self.home),
+                                                             PYTHONPATH=str(without_tomllib),
+                                                             JOBGATE_MACHINE_FILE=str(machine)))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("2.0G (25% of 8.0G", result.stdout)
+
+    def test_bash_login_shell_that_skips_bashrc_finds_jobgate(self):
+        path = os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"])
+        env = dict(os.environ, SHELL="/bin/bash", PATH=path)
+        self.home.mkdir(parents=True)
+        profile = self.home / ".bash_profile"
+        profile.write_text("export EDITOR=vi\n")
+        self.run_installer("--target", "jobgate", env=env)
+        jobgate = str((self.home / ".local/bin/jobgate").resolve())
+        for flags in (["--login"], ["-i"]):
+            with self.subTest(flags=flags):
+                found = subprocess.run(["bash", *flags, "-c", "command -v jobgate"], capture_output=True, text=True,
+                                       stdin=subprocess.DEVNULL, env=dict(env, HOME=str(self.home)))
+                self.assertEqual(found.stdout.strip().splitlines()[-1:], [jobgate], found.stderr)
+        self.run_installer("--target", "jobgate", command="uninstall", env=env)
+        self.assertEqual(profile.read_text(), "export EDITOR=vi\n")
+        self.assertFalse((self.home / ".bashrc").exists())
 
     def jobgate_shell(self, startup_text):
         path = os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"])
@@ -262,13 +299,6 @@ class InstallerTests(InstallerFixture):
         found = subprocess.run(["sh", "-c", '. "$1"; command -v jobgate', "sh", str(startup)], capture_output=True,
                                text=True, env=dict(env, HOME=str(self.home)))
         self.assertEqual(found.stdout.strip(), str((self.home / ".local/bin/jobgate").resolve()), found.stderr)
-
-    def test_jobgate_keeps_a_startup_file_that_already_names_the_directory(self):
-        text = 'export PATH="$HOME/.local/bin:$PATH"\n'
-        env, startup = self.jobgate_shell(text)
-        self.run_installer("--target", "jobgate", env=env)
-        self.assertTrue((self.home / ".local/bin/jobgate").exists())
-        self.assertEqual(startup.read_text(), text)
 
     def test_jobgate_uninstall_removes_the_path_line_after_a_failed_removal(self):
         if os.geteuid() == 0:

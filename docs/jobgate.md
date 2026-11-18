@@ -1,10 +1,10 @@
 # jobgate reference
 
-`jobgate` admits heavy commands, such as test suites, builds, and renders, so
-that concurrent runs from many repositories and agent lanes fit one machine. It
-is one Python script, [scripts/jobgate.py](../scripts/jobgate.py), that runs on
-macOS and Linux with Python 3.9 or newer. Before Python 3.11, it reads TOML with
-the copy of the standard library's `tomllib` in `scripts/_vendor/`. Runs
+`jobgate` admits heavy commands, such as test suites, builds, and renders. It
+makes concurrent runs from many repositories and agent lanes fit one machine.
+It is one Python script, [scripts/jobgate.py](../scripts/jobgate.py), that runs
+on macOS and Linux with Python 3.9 or newer. Before Python 3.11, it reads TOML
+with the copy of the standard library's `tomllib` in `scripts/_vendor/`. Runs
 coordinate through lock files, with no daemon. To gate a repository's commands,
 see [Gate a repository's commands with jobgate](jobgate-setup.md).
 
@@ -18,13 +18,13 @@ jobgate status
 `jobgate run` reads `PROFILE` from the `jobgate.toml` at the root of the Git
 repository that holds the current directory. Outside a Git repository, it reads
 `jobgate.toml` in the current directory. It waits until the run fits, sets the
-profile's `workers_env` variable to the worker count, runs the command, and
-prints a result line. `--max-workers N` lowers the profile's `max_workers` for
-one run. A value above `max_workers` has no effect.
+profile's `workers_env` variable to the worker count, and runs the command.
+Then it prints a result line. `--max-workers N` lowers the profile's
+`max_workers` for one run. A value above `max_workers` has no effect.
 
-`jobgate status` prints the share, the stated memory and workers of running
-runs, the pressure reading, the kernel memory cap, and one line per running or
-waiting run.
+`jobgate status` prints the share, the memory and workers that running runs
+state, and the pressure reading. It also prints the kernel memory cap and one
+line per running or waiting run.
 
 ## Repository file
 
@@ -52,8 +52,8 @@ learns these numbers from past runs.
 ## Machine file
 
 The share is the memory that all gated runs with the same `HOME` may state
-together. It is `memory_share` times the machine's physical memory. `memory_share` comes
-from `~/.config/jobgate.toml`:
+together. It is `memory_share` times the machine's physical memory.
+`memory_share` comes from `~/.config/jobgate.toml`:
 
 ```toml
 memory_share = 0.6
@@ -76,7 +76,7 @@ A run is admitted when all of these hold:
   already started keep going under pressure.
 
 An admitted run takes as many workers as fit, up to `max_workers` or
-`--max-workers`, and keeps that count until it ends. The core count is the
+`--max-workers`. It keeps that count until it ends. The core count is the
 process's CPU affinity on Linux and the logical CPU count on macOS. The queue
 lives under `HOME`, so the share and the core limit apply to all runs with the
 same `HOME`.
@@ -99,7 +99,7 @@ jobgate: test waits behind 2 earlier runs; waited 0s
 
 A command that runs under jobgate and calls `jobgate run` again runs inside the
 outer run's reservation and never waits. The nested call gets the smaller of
-the outer run's worker count and its own profile's limit, and prints no result
+the outer run's worker count and its own profile's limit. It prints no result
 line of its own. jobgate marks the outer run with `JOBGATE_RUN` and
 `JOBGATE_WORKERS`. When the run that `JOBGATE_RUN` names has ended, a nested
 call goes through admission like any other run.
@@ -113,35 +113,37 @@ call goes through admission like any other run.
 
 jobgate ignores the Linux `some` line and the macOS warn level, 2. When the
 reading is unavailable, such as on a kernel without PSI, no run waits for
-pressure, and `jobgate status` shows the reading as unknown.
+pressure. `jobgate status` then shows the reading as unknown.
 [Why jobgate holds at these pressure levels](jobgate-thresholds.md) gives the
 evidence for both thresholds.
 
 ## Enforcement and priority
 
 On Linux with a systemd user session, all gated runs run in `jobgate.slice`.
-Each run sets the slice's `MemoryMax` to the share and the slice's `CPUWeight`
-to 30 through `systemctl --user set-property --runtime`. systemd gives its own
-`background.slice` the same weight. Each run is a scope,
-`jobgate-<run id>.scope`, inside that slice. There is no per-run cap, so one run
-can exceed its stated memory and keep running while all runs together fit the
-slice. On systemd 253 or newer, each scope has `OOMPolicy=continue`, so a kernel
-OOM kill inside the slice ends one process instead of the whole run.
+Each run sets the slice's `MemoryMax` to the share through
+`systemctl --user set-property --runtime`. It also sets the slice's `CPUWeight`
+to 30, the weight systemd gives its own `background.slice`. Each run is a
+scope, `jobgate-<run id>.scope`, inside that slice. There is no per-run cap. One
+run can exceed its stated memory and keep running while all runs together fit
+the slice. On systemd 253 or newer, each scope has `OOMPolicy=continue`. A
+kernel OOM kill inside the slice then ends one process instead of the whole
+run. On systemd 254 or newer, jobgate passes `--expand-environment=no`, so the
+command receives `$` in its arguments unchanged. Earlier versions never expand
+a scope's arguments.
 `systemctl --user show jobgate.slice -p MemoryMax -p CPUWeight -p MemoryCurrent`
 prints the slice's settings and use.
 
-On Linux without a systemd user session, such as in containers and some WSL
-setups, jobgate prints one line saying the kernel memory cap is off, then
-applies admission and the pressure hold without it. It does the same when the
-run's scope has no memory controller, as on hosts that still use cgroup v1.
+On Linux without a systemd user session, as in containers and some WSL setups,
+jobgate prints one line saying the kernel memory cap is off. It then
+applies admission and the pressure hold without the cap. It does the same when
+the run's scope has no memory controller, as on hosts that still use cgroup v1.
 
 macOS has no cgroups, so it has no kernel memory cap. A run can use more memory
 than it states, and only the pressure hold responds, by delaying new runs.
-jobgate starts the command under `taskpolicy -c utility`, which clamps the
+jobgate starts the command under `taskpolicy -c utility`. That clamps the
 command and every process it starts to the utility QoS class for the whole run.
-A running process cannot leave the clamp.
-When `/usr/sbin/taskpolicy` is missing, jobgate prints one line and runs the
-command without the clamp.
+A running process cannot leave the clamp. When `/usr/sbin/taskpolicy` is
+missing, jobgate prints one line and runs the command without the clamp.
 [Why jobgate runs macOS commands at utility QoS](jobgate-macos-priority.md)
 gives the measurements.
 
@@ -154,7 +156,7 @@ its command keeps running. Later runs are admitted as if that command had
 ended. On Linux with the kernel memory cap on, the command stays in
 `jobgate.slice`, so `MemoryMax` still caps all gated runs together. On macOS, or
 on Linux with the kernel memory cap off, only the pressure hold protects new
-runs from the memory that command still uses.
+runs from that command's memory.
 
 ## Results
 
@@ -199,8 +201,9 @@ time=2026-11-17T18:00:00Z profile=test where=local repo=/src/app commit=4f0c2d9e
 | `stated` | `base_mem + workers × worker_mem` in MiB |
 | `exit` | The exit code jobgate returns |
 
-Values that contain spaces, quotes, or `=` are JSON strings. jobgate runs dirty
-worktrees like clean ones.
+Values that contain spaces, quotes, or `=` are JSON strings. All runs append to
+the same log in the order they end. jobgate runs dirty worktrees like clean
+ones.
 
 ## Exit codes
 
@@ -210,7 +213,7 @@ worktrees like clean ones.
 | 125 | jobgate refused the run: a usage error, a configuration error, or a run that can never fit. |
 | 126 | The command is not executable. |
 | 127 | The command was not found. |
-| 128+N | jobgate received signal N while the run waited or before its command started, such as 130 for Ctrl-C. |
+| 128+N | jobgate received signal N, such as SIGTERM, SIGHUP, or SIGINT from Ctrl-C, before the command started. |
 
 On macOS, `taskpolicy` starts the command. When it cannot start an executable
 file, such as a script whose interpreter is missing, jobgate returns the exit
@@ -224,7 +227,7 @@ code of `taskpolicy`.
 | `JOBGATE_WORKERS` | jobgate sets it to the worker count. |
 | `JOBGATE_RUN` | jobgate sets it to the path of the run's file. A nested call reads it to find the outer run. |
 | `HOME` | Holds `.cache/jobgate/` and `.config/jobgate.toml`. jobgate ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. Processes with the same `HOME` use one queue, and a process with another `HOME` uses a separate queue. |
-| `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with `memory`, `cores`, and `psi` or `darwin_level` readings that replace the OS readings. jobgate reads `memory` and `cores` once per run, and the pressure reading before each admission attempt. |
+| `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with `memory`, `cores`, and `psi` or `darwin_level` readings that replace the OS readings. jobgate reads `memory` and `cores` once per run. It reads the pressure reading before each admission attempt. |
 
 ## Files
 
@@ -240,13 +243,27 @@ code of `taskpolicy`.
 `./install.sh` installs jobgate by default, as the `jobgate` target. The
 installer needs Python 3.10 or newer as `python3`, while jobgate itself runs on
 Python 3.9. A stock Mac's `python3` is 3.9, which cannot run the installer.
-The installer writes `~/.local/bin/jobgate`, a shell wrapper that runs `python3`
-on the script in `~/.local/share/astack/jobgate/`, or in
-`$XDG_DATA_HOME/astack/jobgate/` when `XDG_DATA_HOME` is set. When
-`~/.local/bin` is not on `PATH` and no `PATH` assignment in the shell startup
-file names it, the installer appends a `PATH` line to that file.
-`./uninstall.sh` removes those files and that line. When `./uninstall.sh`
-cannot rewrite the startup file, it keeps a record of the line, and the next
-`./uninstall.sh` removes the line. `./uninstall.sh` leaves `~/.cache/jobgate/`,
-the machine file, and the runtime slice settings. Those settings last until the
-machine reboots or the user's last login session ends.
+
+The installer writes `~/.local/bin/jobgate`, a shell wrapper that runs
+`python3` on the script in `~/.local/share/astack/jobgate/`. When
+`XDG_DATA_HOME` is set, the script goes to `$XDG_DATA_HOME/astack/jobgate/`
+instead.
+
+When `~/.local/bin` is not on the installer's own `PATH`, the installer appends
+a marked `PATH` line to the shell's startup files. It does not read the startup
+files for other `PATH` lines. The startup files depend on `SHELL`:
+
+| Shell | Startup files |
+| --- | --- |
+| zsh | `~/.zshrc`, or `$ZDOTDIR/.zshrc` when `ZDOTDIR` is set |
+| bash | `~/.bashrc`, which interactive shells read, and the first of `~/.bash_profile`, `~/.bash_login`, and `~/.profile` that exists, which login shells read. When none of the three exists, the installer creates `~/.profile`. |
+| other | None. The installer prints the line to add instead. |
+
+The installer records each line before it writes the line.
+
+`./uninstall.sh` removes the installed files and the marked lines. When it
+cannot rewrite a startup file, it keeps the record of that line. The next
+`./uninstall.sh` then removes the line. Uninstall also removes the folders that
+the recorded script lived in, when they are empty. It leaves
+`~/.cache/jobgate/`, the machine file, and the runtime slice settings. Those
+settings last until the machine reboots or the user's last login session ends.

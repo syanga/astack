@@ -1,10 +1,10 @@
 # Gate a repository's commands with jobgate
 
-To keep a repository's test suite or build from overloading a machine that runs
-many of them at once, give the repository a `jobgate.toml` and call
-`jobgate run` from its commands. With the fallback patterns below, the command
-runs directly with 2 workers on a machine without jobgate. For every option, see
-the [jobgate reference](jobgate.md).
+jobgate keeps a repository's test suite or build from overloading a machine
+that runs many of them at once. To gate a command, give the repository a
+`jobgate.toml`. Then call `jobgate run` from the repository's commands. With the
+fallback patterns below, the command runs directly with 2 workers on a machine
+without jobgate. For every option, see the [jobgate reference](jobgate.md).
 
 ## Add a profile
 
@@ -25,22 +25,25 @@ the [jobgate reference](jobgate.md).
    workers_env = "CARGO_BUILD_JOBS"
    ```
 
-2. Run the command once under jobgate and read `workers` and `peak` from the
-   result line:
+2. Run the command once under jobgate:
 
    ```sh
    jobgate run test -- pytest -n auto
    ```
 
-3. Set `worker_mem` to about `(peak - base_mem) / workers`. When a later peak
-   exceeds `base_mem + workers × worker_mem`, jobgate prints the `worker_mem`
-   value that would have covered it.
+3. Read `workers` and `peak` from the result line that jobgate prints at the
+   end of the run.
+
+4. Set `worker_mem` to about `(peak - base_mem) / workers`.
+
+When a later peak exceeds `base_mem + workers × worker_mem`, jobgate prints the
+`worker_mem` value that would have covered it.
 
 ## Pass the worker count to the tool
 
 jobgate passes the count to the command through the environment, never as an
-argument. Set `workers_env` to a variable the tool reads, or expand the variable
-in `sh -c`:
+argument. Set `workers_env` to a variable the tool reads. For a tool that takes
+the count as a flag, expand the variable in `sh -c`:
 
 | Tool | `workers_env` | Command |
 | --- | --- | --- |
@@ -77,7 +80,7 @@ Copy this pattern into `package.json`:
 ```
 
 npm appends the arguments of `npm test -- ARGS` after `fi`, where the shell
-rejects them, so add a separate script for each filtered run.
+rejects them. Add a separate script for each filtered run.
 
 In both patterns, the shell exits with the command's exit code, with or without
 jobgate. make reports a nonzero code as `Error N`.
@@ -85,5 +88,7 @@ jobgate. make reports a nonzero code as `Error N`.
 ## Follow a run
 
 While a run waits, `jobgate status` lists it with how long it has waited. Once
-the run starts, the list also shows its worker count and stated memory. After
-it ends, its result line is the last line of `~/.cache/jobgate/results.log`.
+the run starts, the list also shows its worker count and stated memory. When
+the run ends, jobgate prints its result line. The same line goes to
+`~/.cache/jobgate/results.log`, where other runs' lines can follow it. Match a
+line there by its `time` and `repo` fields.

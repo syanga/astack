@@ -44,7 +44,10 @@ DARWIN_LEVELS = {1: "normal", 2: "warn", 4: "critical"}
 DARWIN_HOLD_LEVEL = 4
 SLICE = "jobgate.slice"
 CPU_WEIGHT = 30
-SCOPE_OOM_POLICY_SYSTEMD = 253
+OOM_POLICY_MIN_SYSTEMD = 253
+# systemd-run gained --expand-environment in 254. Before 254 it never expands $VAR in a scope's command;
+# 254 to 257 do not expand by default but warn on a "$", and 258 and later expand by default.
+EXPAND_ENVIRONMENT_MIN_SYSTEMD = 254
 POLL_SECONDS = 1.0
 SAMPLE_SECONDS = 2.0
 REPORT_SECONDS = 60.0
@@ -68,6 +71,16 @@ Dirty = Literal["yes", "no", "unknown"]
 
 class Refusal(Exception):
     pass
+
+
+class Stopped(BaseException):
+    def __init__(self, number: int) -> None:
+        super().__init__(number)
+        self.number = number
+
+
+def stop(number, frame):
+    raise Stopped(number)
 
 
 def say(text: str) -> None:
@@ -195,17 +208,19 @@ def load_profile(path: Path, name: str) -> Profile:
         problems = (["unknown keys: " + ", ".join(unknown)] if unknown else []) + (
             ["missing keys: " + ", ".join(missing)] if missing else [])
         raise Refusal("[{}] in {} has {}".format(name, path, "; ".join(problems)))
-    where = "[{}] {{}} in {}".format(name, path)
+    def where(key: str) -> str:
+        return "[{}] {} in {}".format(name, key, path)
+
     max_workers = table["max_workers"]
     if isinstance(max_workers, bool) or not isinstance(max_workers, int) or max_workers < 1:
-        raise Refusal("{} must be a whole number of at least 1, not {!r}".format(where.format("max_workers"), max_workers))
+        raise Refusal("{} must be a whole number of at least 1, not {!r}".format(where("max_workers"), max_workers))
     workers_env = table["workers_env"]
     if not isinstance(workers_env, str) or not ENV_NAME.fullmatch(workers_env):
-        raise Refusal("{} must be an environment variable name, not {!r}".format(where.format("workers_env"), workers_env))
+        raise Refusal("{} must be an environment variable name, not {!r}".format(where("workers_env"), workers_env))
     if workers_env in (RUN_ENV, WORKERS_ENV):
-        raise Refusal("{} cannot be {}, which jobgate sets itself".format(where.format("workers_env"), workers_env))
-    return Profile(name, parse_size(table["base_mem"], where.format("base_mem")),
-                   parse_size(table["worker_mem"], where.format("worker_mem")), max_workers, workers_env)
+        raise Refusal("{} cannot be {}, which jobgate sets itself".format(where("workers_env"), workers_env))
+    return Profile(name, parse_size(table["base_mem"], where("base_mem")),
+                   parse_size(table["worker_mem"], where("worker_mem")), max_workers, workers_env)
 
 
 def machine_config() -> Path:
@@ -503,7 +518,7 @@ def supervise(command: list[str], env: dict | None, sample: Callable[[int], None
                 child[0].send_signal(number)
         while True:
             if sample is not None:
-                with contextlib.suppress(OSError, ValueError, subprocess.SubprocessError):
+                with contextlib.suppress(OSError, ValueError, AttributeError, subprocess.SubprocessError):
                     sample(child[0].pid)
             try:
                 return Exit(exit_code(child[0].wait(timeout=SAMPLE_SECONDS)), received[0] if received else None)
@@ -637,10 +652,13 @@ def execute(command: list[str], env: dict, share: int, ticket: Ticket, profile: 
     if sys.platform == "linux":
         failure = set_slice_cap(share)
         if failure is None:
-            policy = ["-p", "OOMPolicy=continue"] if systemd_version() >= SCOPE_OOM_POLICY_SYSTEMD else []
+            version = systemd_version()
+            options = ["-p", "OOMPolicy=continue"] if version >= OOM_POLICY_MIN_SYSTEMD else []
+            if version >= EXPAND_ENVIRONMENT_MIN_SYSTEMD:
+                options.append("--expand-environment=no")
             scope = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--slice=" + SLICE,
                      "--unit=jobgate-{}".format(ticket.run.id),
-                     "--description=jobgate {} in {}".format(profile.name, ticket.run.repo), *policy, "--",
+                     "--description=jobgate {} in {}".format(profile.name, ticket.run.repo).replace("%", "%%"), *options, "--",
                      sys.executable, str(Path(__file__).resolve()), "_scope", str(ticket.files.scope), "--", *command]
             outcome = supervise(scope, env)
             result = read_json(ticket.files.scope)
@@ -837,6 +855,9 @@ def main(argv: list[str]) -> int:
     run_parser.add_argument("profile", help="a [profile] table in the repository's jobgate.toml")
     actions.add_parser("status", help="show the share, pressure, cap, and runs")
     args = parser.parse_args(argv)
+    for number in (signal.SIGTERM, signal.SIGHUP):
+        if signal.getsignal(number) is not signal.SIG_IGN:
+            signal.signal(number, stop)
     try:
         if args.action == "status":
             return status()
@@ -848,6 +869,8 @@ def main(argv: list[str]) -> int:
         return REFUSED
     except KeyboardInterrupt:
         return 128 + signal.SIGINT
+    except Stopped as stopped:
+        return 128 + stopped.number
 
 
 if __name__ == "__main__":

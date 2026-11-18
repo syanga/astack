@@ -152,6 +152,17 @@ class InstallerLifecycleTests(InstallerFixture):
         self.assertTrue(all(not path.exists() for path in expected))
         self.assertEqual(json.loads(state.read_text())["targets"], {})
 
+    def test_jobgate_uninstall_prunes_the_folder_it_installed_into(self):
+        module = self.manager()
+        first, second = self.root / "first data", self.root / "second data"
+        (second / "astack").mkdir(parents=True)
+        env = {"XDG_DATA_HOME": str(first), "SHELL": "/bin/zsh", "PATH": "/usr/bin:/bin"}
+        self.run_with_config(module, env, "install", "--target", "jobgate")
+        self.assertTrue((first / "astack/jobgate/jobgate.py").is_file())
+        self.run_with_config(module, dict(env, XDG_DATA_HOME=str(second)), "uninstall", "--target", "jobgate")
+        self.assertFalse((first / "astack").exists())
+        self.assertTrue((second / "astack").is_dir())
+
     def test_changed_config_requires_uninstall_then_reinstall(self):
         module = self.manager()
         original = self.root / "original config"

@@ -35,6 +35,18 @@ for profile, variable in (("test", "TEST_WORKERS"), ("lint", "LINT_WORKERS")):
 '''
 
 
+SYSTEMD_258_RUN = r"""#!{python}
+import os, re, sys
+arguments = sys.argv[1:]
+split = arguments.index("--")
+options, command = arguments[:split], arguments[split + 1:]
+if "--expand-environment=no" not in options:
+    command = [re.sub(r"\$\{{(\w+)\}}|\$(\w+)", lambda match: os.environ.get(match.group(1) or match.group(2), ""), argument)
+               for argument in command]
+os.execvp(command[0], command)
+"""
+
+
 def wait_for(predicate, timeout=30.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -315,6 +327,14 @@ class ResultTests(JobgateTest):
         self.assertEqual(fields["dirty"], "yes")
         self.assertEqual(log.read_text().splitlines()[-1], line)
 
+    def test_a_checkout_path_with_braces_loads_its_profile(self):
+        braced = self.root / "project {copy}"
+        braced.mkdir()
+        (braced / "jobgate.toml").write_text((self.repo / "jobgate.toml").read_text())
+        result = subprocess.run([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", PRINT_WORKERS],
+                                cwd=str(braced), env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "4"), result.stderr)
+
     def test_a_subdirectory_uses_the_repository_root_profile(self):
         self.git("init", "-q")
         subdirectory = self.repo / "tests/unit"
@@ -363,6 +383,20 @@ class ExitCodeTests(JobgateTest):
         result = self.gate("run", "test", "--", sys.executable, "-c", PRINT_WORKERS)
         self.assertEqual((result.returncode, result.stdout.strip()), (0, "4"), result.stderr)
         self.assertEqual(result.stderr.count("the kernel memory cap is off"), 1, result.stderr)
+
+    @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
+    def test_scope_passes_dollar_arguments_unchanged(self):
+        session_bin = self.root / "session bin"
+        session_bin.mkdir()
+        (session_bin / "systemctl").write_text('#!/bin/sh\n[ "$1" = --version ] && echo "systemd 259"\nexit 0\n')
+        (session_bin / "systemd-run").write_text(SYSTEMD_258_RUN.format(python=sys.executable))
+        for tool in ("systemctl", "systemd-run"):
+            (session_bin / tool).chmod(0o755)
+        env = dict(self.env, PATH=str(session_bin) + os.pathsep + self.env["PATH"])
+        result = self.gate("run", "test", "--", sys.executable, "-c", "import sys; print(sys.argv[1:])",
+                           "${HOME}", "$HOME", env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "['${HOME}', '$HOME']")
 
     @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
     def test_ctrl_c_while_the_scope_starts_skips_the_command(self):
@@ -427,6 +461,17 @@ class ExitCodeTests(JobgateTest):
         result = self.gate("run", "test", "--", sys.executable, "-c", "raise SystemExit(9)")
         self.assertEqual(result.returncode, 125)
         self.assertIn("no jobgate.toml", result.stderr)
+
+    def test_sigterm_while_waiting_exits_143(self):
+        self.set_machine(memory=64 * GIB, cores=4, psi=CALM)
+        first = self.hold("first")
+        self.assertEqual(first.workers(), 4)
+        second = self.hold("second")
+        second.wait_message("waits for a core")
+        second.process.send_signal(signal.SIGTERM)
+        self.assertEqual(second.process.wait(timeout=30), 128 + signal.SIGTERM)
+        self.assertFalse(second.started.exists())
+        self.assertEqual(first.release(), 0)
 
     def test_runs_under_the_system_python_before_3_10(self):
         if not system_python_before_3_10():
