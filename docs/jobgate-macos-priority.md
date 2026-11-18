@@ -8,9 +8,9 @@ This page gives the measurements behind the choice.
 
 A gated run on a Mac competes for the CPU with the user and with the user's
 agents. It should finish as fast as a normal run when the Mac is idle, and yield
-when the user needs the CPU. macOS offers three ways to set a run's CPU
-priority: normal priority, the utility QoS class, and background priority.
-Background priority is `PRIO_DARWIN_BG`, the state that `taskpolicy -b` sets.
+when the user needs the CPU. This page compares three CPU priorities: normal
+priority, the utility QoS class, and background priority. Background priority is
+`PRIO_DARWIN_BG`, the state that `taskpolicy -b` sets.
 
 The measurements below come from an M4 Pro Mac with 14 cores, 10 performance and
 4 efficiency. A test run used 14 CPU-bound Python workers. A foreground load of
@@ -66,6 +66,6 @@ process opens at background priority.
 Switching a test run to background priority while the user works would make the
 foreground load 0.11 s faster, 0.71 s instead of 0.82 s. It would cost the test
 run 15.7 s, 17.24 s instead of 1.58 s. jobgate uses utility QoS, which keeps
-both the foreground load and the test run fast. A clamp also cannot change on a
-running process, because `taskpolicy -p` accepts only its `-b`, `-B`, `-t`, and
-`-l` options.
+both the foreground load and the test run fast. jobgate also cannot set or lift
+a clamp on a running process. `taskpolicy -p` accepts only its `-b`, `-B`, `-t`,
+and `-l` options.

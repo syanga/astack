@@ -1,3 +1,4 @@
+from dataclasses import asdict, dataclass
 import os
 from pathlib import Path
 import re
@@ -32,15 +33,29 @@ def desired_files(scripts, home, use_env):
     return result
 
 
+@dataclass
+class PathLine:
+    file: str
+    marker: str
+    export: str
+    created: bool = False
+    separator: bool = False
+
+    @property
+    def block(self):
+        return (self.marker + "\n" + self.export + "\n").encode()
+
+
 class Record:
     def __init__(self, state, save):
         self.state, self.save = state, save
         record = state.get(NAME, {})
         self.lib = record.get("lib")
-        self.path_lines = list(record.get("path_lines", []))
+        self.path_lines = [PathLine(**line) for line in record.get("path_lines", [])]
 
     def store(self):
-        record = {key: value for key, value in (("lib", self.lib), ("path_lines", self.path_lines)) if value}
+        path_lines = [asdict(line) for line in self.path_lines]
+        record = {key: value for key, value in (("lib", self.lib), ("path_lines", path_lines)) if value}
         if record:
             self.state[NAME] = record
         else:
@@ -118,57 +133,55 @@ def remove_last_block(path, block, separator, created):
 
 def remove_path_lines(state, dry_run, save):
     owned = Record(state, save)
-    for entry in list(owned.path_lines):
-        print("REMOVE {} {}".format(entry["file"], entry["lines"][1]))
+    for line in list(owned.path_lines):
+        print("REMOVE {} {}".format(line.file, line.export))
         if dry_run:
             continue
         try:
-            remove_last_block(Path(entry["file"]), ("\n".join(entry["lines"]) + "\n").encode(),
-                              entry["separator"], entry["created"])
+            remove_last_block(Path(line.file), line.block, line.separator, line.created)
         except OSError as error:
-            print("WARN {} ({}); uninstall again to remove: {}".format(
-                entry["file"], claude_router.reason(error), " / ".join(entry["lines"])))
+            print("WARN {} ({}); uninstall again to remove: {} / {}".format(
+                line.file, claude_router.reason(error), line.marker, line.export))
         else:
-            owned.path_lines.remove(entry)
+            owned.path_lines.remove(line)
             owned.store()
 
 
 def add_path_lines(state, home, use_env, dry_run, save):
     directory = bin_path(home).parent
     escaped = re.sub(r'([\\"$`])', r"\\\1", str(directory))
-    lines = (MARKER, 'export PATH="{}:$PATH"'.format(escaped))
-    block = "\n".join(lines) + "\n"
+    export = 'export PATH="{}:$PATH"'.format(escaped)
     if on_path(directory):
         print("KEEP PATH ({} is on PATH)".format(directory))
         return
     startup = startup_files(home, use_env)
     if not startup:
         print("SKIP PATH (no shell file known for SHELL={}; to add it yourself: {})".format(
-            os.environ.get("SHELL", ""), lines[1]))
+            os.environ.get("SHELL", ""), export))
         return
     owned = Record(state, save)
     for path in startup:
-        entry = next((entry for entry in owned.path_lines if entry["file"] == str(path)), None)
+        line = next((line for line in owned.path_lines if line.file == str(path)), None)
         try:
-            present = block in path.read_bytes().decode(errors="replace")
+            present = line is not None and line.block in path.read_bytes()
         except OSError:
             present = False
-        if entry is not None and present:
+        if present:
             print("KEEP {}".format(path))
             continue
-        print("APPEND {} {}".format(path, lines[1]))
+        print("APPEND {} {}".format(path, export))
         if dry_run:
             continue
-        if entry is None:
-            entry = {"file": str(path), "lines": list(lines)}
-            owned.path_lines.append(entry)
-        entry.update(created=not path.exists(), separator=needs_separator(path))
+        if line is None:
+            line = PathLine(str(path), MARKER, export)
+            owned.path_lines.append(line)
+        line.created, line.separator = not path.exists(), needs_separator(path)
         owned.store()
         try:
-            entry["created"], entry["separator"] = claude_router.append_block(path, block.encode())
+            line.created, line.separator = claude_router.append_block(path, line.block)
         except OSError as error:
-            print("WARN {} ({}); to add it yourself: {}".format(path, claude_router.reason(error), lines[1]))
-            owned.path_lines.remove(entry)
+            print("WARN {} ({}); to add it yourself: {}".format(path, claude_router.reason(error), export))
+            owned.path_lines.remove(line)
         owned.store()
 
 

@@ -191,7 +191,7 @@ def last_error(result: subprocess.CompletedProcess) -> str:
 
 def find_config(start: Path) -> Path:
     top = run_captured(["git", "-C", str(start), "rev-parse", "--show-toplevel"])
-    root = Path(top.stdout[:-1] if top.stdout.endswith("\n") else top.stdout) if top.returncode == 0 else start
+    root = Path(top.stdout.removesuffix("\n")) if top.returncode == 0 else start
     candidate = root / "jobgate.toml"
     if not candidate.is_file():
         raise Refusal("no jobgate.toml in {}".format(root))

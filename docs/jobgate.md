@@ -16,11 +16,11 @@ jobgate status
 ```
 
 `jobgate run` reads `PROFILE` from the `jobgate.toml` at the root of the Git
-repository that holds the current directory. Outside a Git repository, it reads
-`jobgate.toml` in the current directory. It waits until the run fits, sets the
-profile's `workers_env` variable to the worker count, and runs the command. Then
-it prints a result line. `--max-workers N` lowers the profile's `max_workers`
-for one run. A value above `max_workers` has no effect.
+repository that contains the current directory. Outside a Git repository, it
+reads `jobgate.toml` in the current directory. It waits until the run fits, sets
+the profile's `workers_env` variable to the worker count, and runs the command.
+Then it prints a result line. `--max-workers N` lowers the profile's
+`max_workers` for one run. A value above `max_workers` has no effect.
 
 `jobgate status` prints the share, the stated memory of running runs, the
 workers they use, and the pressure reading. It also prints the kernel memory cap
@@ -28,7 +28,7 @@ and one line per running or waiting run.
 
 ## Repository file
 
-A repository's `jobgate.toml` holds one table per profile. Each profile needs
+A repository's `jobgate.toml` contains one table per profile. Each profile needs
 all four keys, and jobgate refuses unknown keys.
 
 ```toml
@@ -65,15 +65,16 @@ container's memory limit.
 
 ## Admission
 
-A run is admitted when all of these hold:
+A run is admitted when all of these are true:
 
 - No earlier run waits. Runs start in arrival order, so a small run waits behind
   a large one that arrived first.
 - At least one worker fits. The stated memory of all running runs, plus this
   run's `base_mem + 1 × worker_mem`, is at most the share. The workers of all
   running runs, plus one, are at most the core count.
-- The pressure reading is under its threshold in the table that follows. Runs
-  that already started keep going under pressure.
+- The pressure reading is under its threshold in the table that follows. While
+  it is not, new runs wait. This wait is the pressure hold. Runs that already
+  started keep going under pressure.
 
 An admitted run takes as many workers as fit, up to `max_workers` or
 `--max-workers`. It keeps that count until it ends. Its stated memory and its
@@ -130,8 +131,9 @@ SHA-256 of the resolved `HOME`. systemd places that slice inside
 sets the `HOME` slice's `MemoryMax` to the share. That `MemoryMax` is the kernel
 memory cap. Each run also sets `jobgate.slice` to `CPUWeight=30`, the weight
 systemd gives its own `background.slice`. Slices compete for CPU only against
-their siblings. `jobgate.slice` sits beside `app.slice`, whose weight is 100, so
-gated runs get less CPU time than apps when both are busy.
+their siblings. `jobgate.slice` and `app.slice` are siblings, and `app.slice`
+has `CPUWeight=100`. When both are busy, gated runs therefore get less CPU time
+than `app.slice`.
 
 Each run is a scope, `jobgate-<key>-<run id>.scope`, inside its `HOME` slice.
 There is no per-run cap. One run can exceed its stated memory and keep running
@@ -151,7 +153,7 @@ scope has no memory controller, as on hosts that still use cgroup v1.
 macOS has no cgroups, so it has no kernel memory cap. A run can use more memory
 than it states, and only the pressure hold responds, by delaying new runs.
 jobgate starts the command under `taskpolicy -c utility`, which sets a
-quality-of-service (QoS) clamp. The clamp holds the command and every process it
+quality-of-service (QoS) clamp. The clamp keeps the command and every process it
 starts in the utility QoS class for the whole run. A running process cannot
 leave the clamp. When `/usr/sbin/taskpolicy` is missing, jobgate prints one line
 and runs the command without the clamp.
@@ -164,10 +166,10 @@ exit.
 
 When jobgate alone is killed with SIGKILL, the OS releases its reservation, and
 its command keeps running. Later runs are admitted as if that command had ended.
-On Linux with the kernel memory cap on, the command stays in its `HOME` slice,
-so that slice's `MemoryMax` still caps those runs together. On macOS, or on
-Linux with the kernel memory cap off, only the pressure hold protects new runs
-from that command's memory.
+On Linux with the kernel memory cap on, the command stays in its `HOME` slice.
+That slice's `MemoryMax` still caps the command together with later runs under
+its `HOME`. On macOS, or on Linux with the kernel memory cap off, only the
+pressure hold protects new runs from that command's memory.
 
 ## Results
 
@@ -204,7 +206,7 @@ time=2026-11-17T18:00:00Z profile=test where=local repo=/src/app commit=4f0c2d9e
 | `time` | When the run ended, in UTC |
 | `profile` | The profile name |
 | `where` | Where the run ran: `local` |
-| `repo` | The directory that holds `jobgate.toml` |
+| `repo` | The directory that contains `jobgate.toml` |
 | `commit` | `git rev-parse HEAD` when the run started, or `none` |
 | `dirty` | `yes` when `git status --porcelain` printed anything when the run started, `no` when it printed nothing, `unknown` outside Git |
 | `workers` | The worker count |
@@ -238,15 +240,15 @@ code of `taskpolicy`.
 | The profile's `workers_env` | jobgate sets it to the worker count. |
 | `JOBGATE_WORKERS` | jobgate sets it to the worker count. |
 | `JOBGATE_RUN` | jobgate sets it to the path of the run's file. A nested call reads it to find the outer run. |
-| `HOME` | Holds `.cache/jobgate/` and `.config/jobgate.toml`, and names the `HOME` slice. jobgate ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. Processes with the same `HOME` use one queue, share, and slice. |
+| `HOME` | Contains `.cache/jobgate/` and `.config/jobgate.toml`, and names the `HOME` slice. jobgate ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. Processes with the same `HOME` use one queue, share, and slice. |
 | `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with `memory`, `cores`, and either `psi` or `darwin_level` readings that replace the OS readings. jobgate reads `memory` and `cores` once per run. It reads the pressure reading before each admission attempt. |
 
 ## Files
 
 | Path | Content |
 | --- | --- |
-| `~/.cache/jobgate/queue.lock` | The lock that runs hold while they read or change the queue |
-| `~/.cache/jobgate/runs/<run id>.json` | One file per waiting or running run, which the run holds a `flock` on. The OS releases the lock when the run's process dies. The next run that reads the queue then deletes the file. |
+| `~/.cache/jobgate/queue.lock` | The lock that runs take while they read or change the queue |
+| `~/.cache/jobgate/runs/<run id>.json` | One file per waiting or running run, which the run locks with `flock`. The OS releases the lock when the run's process dies. The next run that reads the queue then deletes the file. |
 | `~/.cache/jobgate/runs/<run id>.scope` | Written by jobgate's helper inside the scope: the scope's cgroup and peak memory, or why the kernel memory cap is off |
 | `~/.cache/jobgate/results.log` | Result lines |
 
@@ -271,7 +273,7 @@ files for other `PATH` lines. The startup files depend on `SHELL`:
 | other | None. The installer prints the line to add instead. |
 
 The installer records each line before it writes the line, and it records the
-directory that holds the script.
+directory that contains the script.
 
 `./uninstall.sh` removes the installed files and the marked lines. In each
 startup file, it removes the last marked line, the one the installer wrote, and
@@ -281,5 +283,5 @@ line. `./uninstall.sh` also removes the recorded directory and its parent, when
 they are empty. A reinstall that moves the script, such as to another
 `XDG_DATA_HOME`, removes the old directory the same way. `./uninstall.sh` leaves
 `~/.cache/jobgate/`, `~/.config/jobgate.toml`, and the runtime slice settings.
-Those settings last until the machine reboots or the user's last login session
-ends.
+Each `HOME` that ran jobgate leaves its empty slice and its `MemoryMax` setting.
+Those last until the machine reboots or the user's last login session ends.
