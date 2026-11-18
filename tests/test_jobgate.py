@@ -207,7 +207,7 @@ class AdmissionTests(JobgateTest):
         result = self.gate("run", "test", "--", sys.executable, "-c", inner, str(SCRIPT), str(other_home))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len((self.root / "home/.cache/jobgate/results.log").read_text().splitlines()), 1)
-        self.assertFalse((other_home / ".cache/jobgate/results.log").exists())
+        self.assertFalse((other_home / ".cache/jobgate").exists())
 
     def test_marker_of_an_ended_run_does_not_count_as_nesting(self):
         ended = self.gate("run", "test", "--", sys.executable, "-c", "import os; print(os.environ['JOBGATE_RUN'])")

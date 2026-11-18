@@ -44,7 +44,7 @@ workers_env = "PYTEST_XDIST_AUTO_NUM_WORKERS"
 | `base_mem` | Memory a run needs apart from its workers, as a string with a `K`, `M`, `G`, or `T` suffix. Suffixes are powers of 1024, and `MiB` or `MB` spell the same unit as `M`. |
 | `worker_mem` | Memory each worker adds, in the same format. |
 | `max_workers` | The most workers a run takes, a whole number of at least 1. |
-| `workers_env` | The environment variable through which jobgate passes the worker count to the command. |
+| `workers_env` | The environment variable through which jobgate passes the worker count to the command. It cannot be `JOBGATE_RUN` or `JOBGATE_WORKERS`, which jobgate sets itself. |
 
 A run's stated memory is `base_mem + workers × worker_mem`. jobgate never
 learns these numbers from past runs.
@@ -151,9 +151,9 @@ exit.
 
 When jobgate alone is killed with SIGKILL, the OS releases its reservation, and
 its command keeps running. Later runs are admitted as if that command had
-ended. On Linux with a systemd user session, the command stays in
+ended. On Linux with the kernel memory cap on, the command stays in
 `jobgate.slice`, so `MemoryMax` still caps all gated runs together. On macOS, or
-on Linux without a systemd user session, only the pressure hold protects new
+on Linux with the kernel memory cap off, only the pressure hold protects new
 runs from the memory that command still uses.
 
 ## Results
@@ -210,7 +210,11 @@ worktrees like clean ones.
 | 125 | jobgate refused the run: a usage error, a configuration error, or a run that can never fit. |
 | 126 | The command is not executable. |
 | 127 | The command was not found. |
-| 128+N | jobgate received signal N while the run waited, such as 130 for Ctrl-C. |
+| 128+N | jobgate received signal N while the run waited or before its command started, such as 130 for Ctrl-C. |
+
+On macOS, `taskpolicy` starts the command. When it cannot start an executable
+file, such as a script whose interpreter is missing, jobgate returns the exit
+code of `taskpolicy`.
 
 ## Environment
 
@@ -241,7 +245,7 @@ on the script in `~/.local/share/astack/jobgate/`, or in
 `$XDG_DATA_HOME/astack/jobgate/` when `XDG_DATA_HOME` is set. When
 `~/.local/bin` is not on `PATH` and no `PATH` assignment in the shell startup
 file names it, the installer appends a `PATH` line to that file.
-`./uninstall.sh` removes those files and that line. If it cannot rewrite the
-startup file, it keeps the line in its record and removes it on the next
-uninstall. It leaves `~/.cache/jobgate/`, the machine file, and the runtime
+`./uninstall.sh` removes those files and that line. When the uninstaller cannot
+rewrite the startup file, it keeps a record of the line, and the next uninstall
+removes the line. Uninstall leaves `~/.cache/jobgate/`, the machine file, and the runtime
 slice settings, which last until reboot.

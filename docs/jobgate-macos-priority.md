@@ -7,13 +7,13 @@ describes the behavior. This page gives the measurements behind the choice.
 
 A gated run on a Mac shares the CPU with the person at the keyboard and with
 their agents. It should finish as fast as a normal run when the Mac is free,
-and it should give way when someone needs the CPU. macOS offers three
+and it should yield when someone needs the CPU. macOS offers three
 candidates for that: normal priority, the utility QoS class, and background
 priority (`PRIO_DARWIN_BG`, the state that `taskpolicy -b` sets).
 
 The measurements below come from an M4 Pro Mac with 14 cores, 10 performance
 and 4 efficiency. A test run used 14 CPU-bound Python workers. A foreground
-load of 10 workers at default QoS stood in for the user's own work.
+load of 10 workers at default QoS represented the user's own work.
 
 | Run | Time |
 | --- | --- |
@@ -24,12 +24,42 @@ load of 10 workers at default QoS stood in for the user's own work.
 | Foreground load next to a utility test run | 0.82 s, and the test run took 1.58 s |
 | Foreground load next to a background test run | 0.71 s, and the test run took 17.24 s |
 
+This script repeats the measurement on a Mac. Its loop size sets the absolute
+times, so expect different numbers from the table:
+
+```sh
+cat > burn.py <<'PY'
+import sys, time
+from multiprocessing import Pool
+
+def burn(_):
+    total = 0
+    for i in range(3000000):
+        total += i
+    return total
+
+if __name__ == "__main__":
+    workers = int(sys.argv[1])
+    start = time.time()
+    with Pool(workers) as pool:
+        pool.map(burn, range(workers))
+    print("{} workers: {:.2f} s".format(workers, time.time() - start))
+PY
+python3 burn.py 14
+taskpolicy -c utility python3 burn.py 14
+taskpolicy -b python3 burn.py 14
+python3 burn.py 10
+python3 burn.py 10 & taskpolicy -c utility python3 burn.py 14; wait
+python3 burn.py 10 & taskpolicy -b python3 burn.py 14; wait
+```
+
 Utility costs nothing on a free Mac: the test run took 0.88 s against 0.91 s at
 normal priority. Under load, it slowed the foreground work by 0.11 s and still
 finished its own work in 1.58 s. Background priority kept the foreground work
 at full speed, but it slowed the test run about 18 times even on a free Mac.
-`setpriority(2)` adds that background state also throttles disk I/O and the
-network I/O of sockets opened after the switch.
+The `setpriority(2)` man page says that background state also throttles disk
+I/O, and network I/O on sockets that the process opens while it is in that
+state.
 
 Switching a run between background and normal priority by keyboard and mouse
 idle time would add nothing on top of utility. Utility already runs at full

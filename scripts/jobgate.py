@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import ctypes
+import errno
 from dataclasses import asdict, dataclass, fields
 import datetime
 import fcntl
@@ -580,12 +581,17 @@ class PeakSampler:
 
 def unrunnable(command: list[str], env: dict) -> int | None:
     name = command[0]
-    if "/" not in name:
-        found = shutil.which(name, path=env.get("PATH", os.defpath))
-        return None if found else launch_failure(command, FileNotFoundError())
-    if not os.path.exists(name):
-        return launch_failure(command, FileNotFoundError())
-    return None if os.access(name, os.X_OK) else launch_failure(command, PermissionError(13, "Permission denied"))
+    if "/" in name:
+        candidates = [name]
+    else:
+        candidates = [os.path.join(directory or ".", name) for directory in env.get("PATH", os.defpath).split(os.pathsep)]
+    denied = False
+    for candidate in candidates:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return None
+        denied = denied or os.path.exists(candidate)
+    error = PermissionError(errno.EACCES, os.strerror(errno.EACCES)) if denied else FileNotFoundError()
+    return launch_failure(command, error)
 
 
 def systemd_version() -> int:
