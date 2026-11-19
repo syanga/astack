@@ -10,9 +10,9 @@ Treat invocation as authorization to update and reinstall astack without another
 
 Fetch astack's upstream, then fast-forward its `main` worktree to remote main when possible. Leave unrelated untracked files and directories in place. If local edits, unpublished commits, or conflicting paths prevent the fast-forward, install from a separate clean worktree at remote main. Preserve the existing work and task branches.
 
-Run `./install.sh` from the updated checkout even when already current. Preserve installed harness targets unless the user specifies others. For installer conflicts, use the installer's `--force` option to back up conflicting files and complete the upgrade. Report any backup locations with the result.
+Run `./install.sh` from the updated checkout even when already current. Pass `--target` for each target under `targets` in the astack manifest, `${XDG_STATE_HOME:-$HOME/.local/state}/astack/manifest.json`. Also pass `--target jobgate`, even when the manifest has no `jobgate` target. Without a manifest, pass no `--target`, so the installer installs its default targets. When the user names targets, pass only those. For installer conflicts, use the installer's `--force` option to back up conflicting files and complete the upgrade. Report any backup locations, and any `APPEND`, `SKIP PATH`, or `WARN` line, with the result.
 
-When the astack manifest, `${XDG_STATE_HOME:-$HOME/.local/state}/astack/manifest.json`, lists `claude-router` under `components`, update the router after the harness install succeeds:
+When the manifest lists `claude-router` under `components`, update the router after the harness install succeeds:
 
 1. Run `python3 scripts/claude_router.py identity --code-only` in the updated checkout. Compare `components/claude-router/accepted.json` with it:
    - `result` is `pass`.
