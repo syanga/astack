@@ -80,7 +80,7 @@ A run is admitted when all of these are true:
 - At least one worker fits. The stated memory of all running runs, plus this
   run's `base_mem + 1 × worker_mem`, is at most the share. The workers of all
   running runs, plus one, are at most the core count.
-- At least one worker fits in free memory: this run's `base_mem + 1 × worker_mem` is at most the free memory left. That is the machine's available memory, less what running runs stated but do not use yet. [Free memory](#free-memory) defines both.
+- At least one worker fits in free memory. This run's `base_mem + 1 × worker_mem` is at most the free memory left. That is the machine's available memory, less what running runs stated but do not use yet. [Free memory](#free-memory) defines both.
 - The pressure reading is under its threshold in the table that follows. While
   it is not, new runs wait. This wait is the pressure hold. Runs that already
   started keep going under pressure.
@@ -128,15 +128,17 @@ call goes through admission like any other run.
 
 The macOS sum counts free pages, file cache, and purgeable pages. A new process
 can get that memory without compressing or swapping memory in use.
-[Why jobgate holds at these pressure levels](jobgate-thresholds.md#macos-free-memory)
+[Why jobgate holds at these pressure levels](jobgate-thresholds.md#macos-free-memory-counts-free-file-backed-and-purgeable-pages)
 says why jobgate does not use `kern.memorystatus_level`.
 
-About every 2 seconds, each running jobgate measures the memory its run uses and
-records it in the run's file. On Linux in a scope, it reads the scope's
-`memory.current`, less the page cache that `memory.stat` lists as `active_file`
-and `inactive_file`. The available memory already counts that cache as free.
-Otherwise, it uses the sums that [Results](#results) describes. A run that
-states S and uses U may still use S − U, or nothing once U exceeds S. Admission
+At each admission attempt, jobgate measures the memory that each running run
+uses. On Linux in a scope, that is the scope's `memory.current`, less the page
+cache that `memory.stat` lists as `active_file` and `inactive_file`. The
+available memory already counts that cache as free. Elsewhere, jobgate adds up
+the processes in the tree of the run's jobgate process. On Linux, it adds each
+process's `RssAnon` and `RssShmem` from `/proc/<pid>/status`, which leave out
+file pages. On macOS, it adds each process's `phys_footprint`. A run that states
+S and uses U may still use S − U, or nothing once U exceeds S. Admission
 subtracts that from the available memory. A run that has just started therefore
 counts with all of its stated memory. Memory that a run already uses counts
 once, through the available memory. Memory that ungated commands use is missing
@@ -277,7 +279,7 @@ to one log in the order they end. jobgate runs dirty worktrees like clean ones.
 | Code | Meaning |
 | --- | --- |
 | The command's code | The command exited. A command killed by signal N gives 128+N. |
-| 125 | jobgate refused the run: a usage error, a configuration error, a run that can never fit, or a ledger directory that jobgate cannot create or use. |
+| 125 | jobgate refused the run: a usage error, a configuration error, a run that can never fit, or a home directory in which jobgate cannot create `.cache/jobgate/`, its `runs/` directory, or its `queue.lock`. |
 | 126 | The command is not executable. |
 | 127 | The command was not found. |
 | 128+N | jobgate received signal N, such as SIGTERM, SIGHUP, or SIGINT from Ctrl-C, before the command started. |
@@ -293,25 +295,20 @@ code of `taskpolicy`.
 | The profile's `workers_env` | jobgate sets it to the worker count. |
 | `JOBGATE_WORKERS` | jobgate sets it to the worker count. |
 | `JOBGATE_RUN` | jobgate sets it to the path of the run's file. A nested call reads it to find the outer run. |
-| `HOME` | jobgate takes `~` from the password database instead, so runs under every `HOME` share one configuration, results log, queue, and cap. It reads `HOME` only when the account has no entry there. jobgate also ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. |
-| `XDG_RUNTIME_DIR` on Linux, `TMPDIR` on macOS | Holds the ledger. [Files](#files) gives where. |
-| `JOBGATE_HOME` | Tests only. Replaces the account's home directory. |
-| `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with readings that replace the OS readings: `memory`, `cores`, `psi` or `darwin_level`, and `meminfo` or `vm_stat` text. jobgate reads `memory` and `cores` once per run. It reads the pressure and free-memory readings before each admission attempt. A `cgroup` value names a directory that stands in for the scope's cgroup. With a real systemd user session, a run that uses this file or `JOBGATE_HOME` still sets the real `jobgate.slice` cap from them. |
+| `HOME` | jobgate takes `~` from the password database instead, so runs under every `HOME` share one configuration, queue, and results log. It reads `HOME` only when the account has no entry there. jobgate also ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. |
+| `JOBGATE_HOME` | Tests only. Replaces the account's home directory, which holds the configuration, the queue, and the results log. With a real systemd user session, a run that sets it still sets the real `jobgate.slice` cap from the `memory_share` it finds there. |
+| `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with readings that replace the OS readings: `memory`, `cores`, `psi` or `darwin_level`, and `meminfo` or `vm_stat` text. jobgate reads `memory` and `cores` once per run. It reads the pressure and free-memory readings before each admission attempt. A `cgroup` value names a directory that stands in for the scope's cgroup. With a real systemd user session, a run that uses this file still sets the real `jobgate.slice` cap from its `memory` reading. |
 
 ## Files
 
-The ledger is the directory of run files that admission reads, `jobgate-<uid>/`.
-jobgate puts it in the first of these directories that exists. On Linux, the
-candidates are `$XDG_RUNTIME_DIR` and then `/run/user/<uid>`. On macOS, they are
-`$TMPDIR` and then the per-user temporary directory. Without either, the ledger
-goes in `/tmp`. The ledger must belong to the user and have mode 700, or jobgate
-exits with code 125.
+`~` is the account's home directory from the password database, so one user's
+runs share these files under every `HOME`.
 
 | Path | Content |
 | --- | --- |
-| `jobgate-<uid>/queue.lock` | The lock that runs take while they read or change the queue |
-| `jobgate-<uid>/runs/<run id>.json` | One file per waiting or running run, which the run locks with `flock`. It holds the run's admission, the memory the run uses, and why it waits. The OS releases the lock when the run's process dies. The next run that reads the queue then deletes the file. |
-| `jobgate-<uid>/runs/<run id>.scope` | Written by jobgate's helper inside the scope: the scope's cgroup and peak memory, or why the kernel memory cap is off. The next run that reads the queue deletes it after the run's `.json` file is gone. |
+| `~/.cache/jobgate/queue.lock` | The lock that runs take while they read or change the queue |
+| `~/.cache/jobgate/runs/<run id>.json` | One file per waiting or running run, which the run locks with `flock`. It holds the run's admission and, while the run waits, why it waits. The OS releases the lock when the run's process dies. The next run that reads the queue then deletes the file. |
+| `~/.cache/jobgate/runs/<run id>.scope` | Written by jobgate's helper inside the scope: the scope's cgroup and peak memory, or why the kernel memory cap is off. The next run that reads the queue deletes it after the run's `.json` file is gone. |
 | `~/.cache/jobgate/results.log` | Result lines |
 
 ## Install and remove
@@ -348,9 +345,9 @@ rewrite a startup file, it keeps the record of the line in that file. The next
 recorded directory and its parent, when they are empty. A reinstall that moves
 the script, such as to another `XDG_DATA_HOME`, removes the old directory the
 same way. `./uninstall.sh` leaves `~/.cache/jobgate/`, `~/.config/jobgate.toml`,
-the ledger, and the runtime settings of `jobgate.slice`. Those settings last
-until the user's systemd manager stops: at reboot, or at the user's last logout
-when lingering is off. With `Linger=yes`, they last until reboot.
+and the runtime settings of `jobgate.slice`. Those settings last until the
+user's systemd manager stops: at reboot, or at the user's last logout when
+lingering is off. With `Linger=yes`, they last until reboot.
 
 Earlier jobgate versions put each `HOME` in its own `jobgate-<key>.slice` inside
 `jobgate.slice`. Those empty slices stay just as long. To remove them sooner,

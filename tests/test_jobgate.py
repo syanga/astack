@@ -144,15 +144,12 @@ class JobgateTest(unittest.TestCase):
         systemctl.chmod(0o755)
         self.machine_file = self.root / "machine.json"
         self.set_machine(memory=64 * GIB, cores=8, psi=CALM)
-        runtime = self.root / ("tmp" if sys.platform == "darwin" else "runtime")
-        runtime.mkdir()
-        self.ledger = runtime / "jobgate-{}".format(os.getuid())
+        self.ledger = self.root / "home/.cache/jobgate"
         self.env = {key: value for key, value in os.environ.items()
                     if not key.startswith(("JOBGATE_", "XDG_", "DBUS_"))}
         self.env.update(
             HOME=str(self.root / "home"), XDG_CACHE_HOME=str(self.root / "xdg cache"),
             XDG_CONFIG_HOME=str(self.root / "xdg config"), XDG_RUNTIME_DIR=str(self.root / "runtime"),
-            TMPDIR=str(self.root / "tmp"),
             PATH=str(fake_bin) + os.pathsep + os.environ.get("PATH", ""), JOBGATE_MACHINE_FILE=str(self.machine_file),
             JOBGATE_HOME=str(self.root / "home"),
             GIT_CEILING_DIRECTORIES=str(self.root), GIT_CONFIG_NOSYSTEM="1")
@@ -485,9 +482,8 @@ class AdmissionTests(JobgateTest):
         self.assertEqual(second.release(), 0)
 
     def test_the_next_run_removes_scope_files_that_a_killed_run_left(self):
-        self.ledger.mkdir(mode=0o700)
         runs = self.ledger / "runs"
-        runs.mkdir()
+        runs.mkdir(parents=True)
         (runs / "7-0a1b2c3d.scope").write_text('{"cgroup": "/gone", "peak": 1}')
         (runs / "8-0a1b2c3e.scope.tmp").write_text('{"cgroup": "/gone"')
         result = self.gate("run", "test", "--", sys.executable, "-c", "pass")
@@ -670,8 +666,8 @@ class ResultTests(JobgateTest):
         cgroup.mkdir()
         (cgroup / "memory.max").write_text("max\n")
         (cgroup / "memory.current").write_text(str(600 * 2**20))
-        (cgroup / "memory.stat").write_text("anon {}\nfile {}\nactive_file {}\ninactive_file {}\nshmem 0\n".format(
-            200 * 2**20, 400 * 2**20, 300 * 2**20, 100 * 2**20))
+        (cgroup / "memory.stat").write_text("anon {}\nfile {}\nactive_file {}\ninactive_file {}\nshmem {}\n".format(
+            150 * 2**20, 450 * 2**20, 300 * 2**20, 100 * 2**20, 50 * 2**20))
         self.set_machine(memory=64 * GIB, cores=8, psi=CALM, cgroup=str(cgroup))
         held = self.hold("held", env=env)
         held.workers()
@@ -844,31 +840,23 @@ class ExitCodeTests(JobgateTest):
         self.assertEqual(result.returncode, 125)
         self.assertIn("no jobgate.toml", result.stderr)
 
-    def test_a_ledger_that_jobgate_cannot_use_exits_125_with_one_line(self):
+    def test_a_home_where_jobgate_cannot_keep_its_queue_exits_125_with_one_line(self):
         if os.geteuid() == 0:
             self.skipTest("root can write a read-only directory")
-        read_only = self.root / "read-only runtime"
+        read_only = self.root / "read-only home"
         read_only.mkdir(mode=0o555)
         self.addCleanup(read_only.chmod, 0o755)
-        unwritable = self.root / "runtime without a lock file"
-        ledger = unwritable / "jobgate-{}".format(os.getuid())
-        (ledger / "runs").mkdir(parents=True)
-        ledger.chmod(0o500)
-        self.addCleanup(ledger.chmod, 0o700)
-        shared = self.root / "runtime with a shared ledger"
-        (shared / "jobgate-{}".format(os.getuid())).mkdir(parents=True, mode=0o777)
-        (shared / "jobgate-{}".format(os.getuid())).chmod(0o777)
-        cases = ((read_only, "cannot create {}".format(read_only / "jobgate-{}".format(os.getuid()))),
-                 (unwritable, "cannot create {}".format(ledger / "queue.lock")),
-                 (shared, "must belong to this user and have mode 700"))
-        for runtime, message in cases:
+        no_lock = self.root / "home without a lock file"
+        (no_lock / ".cache/jobgate/runs").mkdir(parents=True)
+        (no_lock / ".cache/jobgate").chmod(0o555)
+        self.addCleanup((no_lock / ".cache/jobgate").chmod, 0o755)
+        for home, failing in ((read_only, read_only / ".cache"), (no_lock, no_lock / ".cache/jobgate/queue.lock")):
             for arguments in (("run", "test", "--", sys.executable, "-c", "pass"), ("status",)):
-                with self.subTest(runtime=runtime.name, command=arguments[0]):
-                    env = dict(self.env, XDG_RUNTIME_DIR=str(runtime), TMPDIR=str(runtime))
-                    result = self.gate(*arguments, env=env)
+                with self.subTest(home=home.name, command=arguments[0]):
+                    result = self.gate(*arguments, env=dict(self.env, JOBGATE_HOME=str(home)))
                     self.assertEqual(result.returncode, 125, result.stderr)
                     self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
-                    self.assertIn(message, result.stderr)
+                    self.assertIn("cannot create {}".format(failing), result.stderr)
 
     def test_sigterm_or_sighup_while_waiting_exits_128_plus_n(self):
         self.set_machine(memory=64 * GIB, cores=4, psi=CALM)

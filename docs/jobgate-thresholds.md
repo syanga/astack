@@ -55,7 +55,7 @@ At that point, the compressor starts swapping, and XNU warns of latency. Holding
 at warn would stop a busy but healthy Mac from starting runs for hours, so
 jobgate holds only at critical.
 
-## macOS free memory
+## macOS free memory counts free, file-backed, and purgeable pages
 
 For free memory, jobgate sums the free, file-backed, and purgeable pages that
 `vm_stat` reports. `kern.memorystatus_level` would be simpler to read, but it
