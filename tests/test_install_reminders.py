@@ -6,6 +6,7 @@ from pathlib import Path
 import pwd
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -105,6 +106,17 @@ class ReminderTests(unittest.TestCase):
         self.ttl.write_text("0\n")
         self.assertIsNotNone(self.guard_command(self.pending()))
 
+    @unittest.skipIf(shutil.which("systemd-tmpfiles") is None, "needs systemd-tmpfiles")
+    def test_no_guard_reminder_while_another_tmpfiles_d_rule_sets_min_ttl_ms_at_boot(self):
+        rule = self.root / "etc/tmpfiles.d/mglru.conf"
+        rule.parent.mkdir(parents=True)
+        rule.write_text("w- {} - - - - 1000\n".format(memory_guard.MIN_TTL_MS_PATH))
+        self.ttl.write_text("1000\n")
+        self.assertIsNone(self.guard_command(self.pending()))
+
+        rule.unlink()
+        self.assertIsNotNone(self.guard_command(self.pending()))
+
     def test_no_guard_reminder_where_the_kernel_has_no_multi_gen_lru(self):
         self.assertIsNotNone(self.guard_command(self.pending()))
 
@@ -182,7 +194,7 @@ class ReminderTests(unittest.TestCase):
 
     def test_a_reminder_that_cannot_read_its_state_leaves_the_others(self):
         self.guard.boot_file.parent.mkdir(parents=True)
-        self.guard.boot_file.write_text("w {} - - - - 1000\n".format(self.ttl))
+        self.guard.boot_file.write_text("w {} - - - - 1000\n".format(memory_guard.MIN_TTL_MS_PATH))
         (self.router_state / "config.json").write_text("[]")
         output = self.pending(self.installed_router("systemd"))
 

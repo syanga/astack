@@ -6,7 +6,7 @@ systemd-tmpfiles sets the same value again at each boot.
 install changes nothing when another tmpfiles.d rule already sets min_ttl_ms at boot.
 uninstall restores min_ttl_ms to its value from before the first install.
 status reports min_ttl_ms, the value systemd-tmpfiles sets at boot, and whether the guard is installed.
-It needs no root.
+status needs no root.
 """
 
 from __future__ import annotations

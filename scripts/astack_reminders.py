@@ -33,6 +33,8 @@ def guard_step(host: Host) -> list[str]:
     current = memory_guard.status(host.guard)
     if not current.available or current.installed:
         return []
+    if memory_guard.at_boot(host.guard).value_without_astack is not None:
+        return []
     script = shlex.quote(str(Path(memory_guard.__file__).resolve()))
     return todo("memory guard", GUARD_README, "sudo python3 {} install".format(script))
 
