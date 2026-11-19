@@ -116,6 +116,22 @@ class ReminderTests(unittest.TestCase):
         self.activate()
         self.assertNotIn("claude-router", self.pending(state))
 
+    def test_an_interrupted_router_install_names_the_install_again_instead_of_setup(self):
+        state = self.installed_router("systemd")
+        binary = self.root / "router data/bin/claude-router"
+        state["components"]["claude-router"]["pending"] = {str(binary): "sha256 of the binary it was writing"}
+        output = self.pending(state)
+
+        command = [shlex.split(line) for line in output.splitlines() if "--component" in line]
+        self.assertEqual(len(command), 1)
+        self.assertTrue(Path(command[0][0]).samefile(SOURCE / "install.sh"))
+        self.assertEqual(command[0][1:], ["--component", "claude-router"])
+        self.assertIsNone(self.setup_command(output))
+        self.assertNotIn(LINGER, output)
+
+        state["components"]["claude-router"]["pending"] = {}
+        self.assertEqual(self.setup_command(self.pending(state)), SETUP)
+
     def test_installed_launchd_router_names_setup_but_never_linger(self):
         state = self.installed_router("launchd")
         output = self.pending(state)
