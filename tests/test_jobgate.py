@@ -2,6 +2,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import select
 import shlex
 import signal
 import subprocess
@@ -268,6 +269,52 @@ class AdmissionTests(JobgateTest):
         self.assertEqual(first.release(), 0)
         self.assertEqual(second.workers(), 1)
         self.assertEqual(second.release(), 0)
+
+    def test_a_blocked_share_warning_does_not_hold_the_queue_lock(self):
+        self.set_machine(memory=8 * GIB, cores=16, psi=THRASHING)
+        self.share(0.4)
+        read_end, write_end = os.pipe()
+        self.addCleanup(os.close, read_end)
+        waiter = subprocess.Popen([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", "pass"],
+                                  cwd=str(self.repo), env=self.env, stdout=subprocess.DEVNULL, stderr=write_end)
+        self.addCleanup(waiter.wait)
+        self.addCleanup(waiter.kill)
+        seen = b""
+        deadline = time.monotonic() + 30
+        while b"waits for memory pressure" not in seen:
+            self.assertLess(time.monotonic(), deadline, seen)
+            if select.select([read_end], [], [], 0.5)[0]:
+                seen += os.read(read_end, 65536)
+        os.set_blocking(write_end, False)
+        for chunk in (4096, 1):
+            try:
+                while True:
+                    os.write(write_end, b"x" * chunk)
+            except BlockingIOError:
+                pass
+        os.set_blocking(write_end, True)
+        os.close(write_end)
+        self.share(2)
+        time.sleep(2.5)
+        lock = os.open(str(self.root / "home/.cache/jobgate/queue.lock"), os.O_RDWR)
+        try:
+            deadline = time.monotonic() + 10
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    self.assertLess(time.monotonic(), deadline, "the waiter holds the queue lock while its warning blocks")
+                    time.sleep(0.1)
+        finally:
+            os.close(lock)
+        self.assertIsNone(waiter.poll())
+        drained = b""
+        deadline = time.monotonic() + 30
+        while b"keeping memory_share 0.4 " not in drained:
+            self.assertLess(time.monotonic(), deadline)
+            if select.select([read_end], [], [], 0.5)[0]:
+                drained = (drained + os.read(read_end, 65536))[-4096:]
 
     def test_a_share_lowered_while_a_run_waits_for_the_queue_lock_still_refuses_it(self):
         self.set_machine(memory=8 * GIB, cores=16, psi=THRASHING)
