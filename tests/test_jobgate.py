@@ -438,7 +438,8 @@ class AdmissionTests(JobgateTest):
 
     @unittest.skipUnless(sys.platform == "linux", "smaps_rollup exists only on Linux")
     def test_free_memory_splits_pages_that_forked_workers_share(self):
-        if b"Pss_Anon" not in Path("/proc/self/smaps_rollup").read_bytes():
+        rollup = Path("/proc/self/smaps_rollup")
+        if not rollup.exists() or b"Pss_Anon" not in rollup.read_bytes():
             self.skipTest("this kernel has no Pss_Anon in smaps_rollup")
         self.set_machine(memory=64 * GIB, cores=16, psi=CALM, meminfo=meminfo(1100 * 2**20))
         self.profiles(big=("900M", "100M", 1, "BIG_WORKERS"), small=("400M", "100M", 1, "SMALL_WORKERS"))

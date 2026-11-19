@@ -383,16 +383,13 @@ class Load(NamedTuple):
         return None if self.available is None else self.available - self.still_to_use
 
 
-def smaller(first: int | None, second: int | None) -> int | None:
-    return second if first is None else first if second is None else min(first, second)
-
-
 def load_of(queue: Queue, runs: list[Run]) -> Load:
     running = [run for run in runs if run.admission is not None]
     table = parents() if running else {}
-    before = {run.id: memory_in_use(queue, run, table) for run in running}
-    available = available_memory()
-    in_use = {run.id: smaller(before[run.id], memory_in_use(queue, run, table)) for run in running}
+    first = available_memory()
+    in_use = {run.id: memory_in_use(queue, run, table) for run in running}
+    readings = [reading for reading in (first, available_memory()) if reading is not None]
+    available = min(readings) if readings else None
     return Load(sum(run.admission.memory for run in running), sum(run.admission.workers for run in running), available,
                 sum(max(0, run.admission.memory - (in_use[run.id] or 0)) for run in running), in_use)
 
@@ -740,7 +737,7 @@ def tree_total(root: int, table: dict[int, int], measure: Callable[[int], int | 
     return sum(size for size in sizes if size is not None)
 
 
-def proc_kibibytes(pid: int, name: str, keys: tuple[bytes, ...]) -> int | None:
+def proc_bytes(pid: int, name: str, keys: tuple[bytes, ...]) -> int | None:
     try:
         with open("/proc/{}/{}".format(pid, name), "rb") as stream:
             values = dict(line.split(b":", 1) for line in stream if b":" in line)
@@ -750,8 +747,8 @@ def proc_kibibytes(pid: int, name: str, keys: tuple[bytes, ...]) -> int | None:
 
 
 def owned_bytes(pid: int) -> int | None:
-    proportional = proc_kibibytes(pid, "smaps_rollup", (b"Pss_Anon", b"Pss_Shmem"))
-    return proportional if proportional is not None else proc_kibibytes(pid, "status", (b"RssAnon", b"RssShmem"))
+    proportional = proc_bytes(pid, "smaps_rollup", (b"Pss_Anon", b"Pss_Shmem"))
+    return proportional if proportional is not None else proc_bytes(pid, "status", (b"RssAnon", b"RssShmem"))
 
 
 def cgroup_memory_in_use(cgroup: Path) -> int:

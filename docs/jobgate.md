@@ -141,19 +141,19 @@ cache that `memory.stat` lists as `active_file` and `inactive_file`. The
 available memory already counts that cache as free. Elsewhere, jobgate adds up
 the processes in the tree of the run's jobgate process. On Linux, it adds each
 process's `Pss_Anon` and `Pss_Shmem` from `/proc/<pid>/smaps_rollup`. Those
-leave out file pages and split a shared page among the processes that map it. On
-kernels without them, it uses `RssAnon` and `RssShmem` from
-`/proc/<pid>/status`, which count a shared page once per process. On macOS, it
-adds each process's `phys_footprint`, which also counts a shared page once per
-process. A run that states S and uses U may still use S − U, or nothing once U
-exceeds S. Admission subtracts that from the available memory. jobgate measures
-each run just before and just after it reads the available memory, and it uses
-the smaller measurement. A run that allocates or frees memory between the
-readings therefore counts with more of its reservation, not less. A run that has
-just started therefore counts with all of its stated memory. Memory that a run
-already uses counts once, through the available memory. Memory that ungated
-commands use is missing from the available memory too, so ungated work also
-delays new runs.
+leave out file pages and split a shared page among the processes that map it.
+Older kernels lack those fields, and a process that is not dumpable hides them.
+jobgate then uses `RssAnon` and `RssShmem` from `/proc/<pid>/status`. Those
+count a shared page once per process. On macOS, it adds each process's
+`phys_footprint`, which also counts a shared page once per process. A run that
+states S and uses U may still use S − U, or nothing once U exceeds S. Admission
+subtracts that from the available memory. A run that has just started therefore
+counts with all of its stated memory. Memory that a run already uses counts
+once, through the available memory. jobgate reads the available memory just
+before and just after it measures the runs, and it uses the smaller reading.
+Memory that a run allocates or frees during the measurement then makes admission
+stricter, not looser. Memory that ungated commands use is missing from the
+available memory too, so ungated work also delays new runs.
 
 When the reading is unavailable, no run waits for free memory, and
 `jobgate status` shows free memory as unknown.
@@ -247,8 +247,8 @@ the cap, but the kernel can reclaim it. Files that the run leaves in a tmpfs,
 such as a `/tmp` mounted as tmpfs, stay charged and cannot be reclaimed without
 swap.
 
-When several processes map one page, the macOS and Linux sums count that page
-once per process. The sums skip a process they cannot read, and they miss
+When several processes map one page, the macOS and Linux peak sums count that
+page once per process. The sums skip a process they cannot read, and they miss
 processes that leave the tree.
 
 When the peak exceeds the stated memory, jobgate prints a warning with the
