@@ -57,8 +57,7 @@ these numbers from past runs.
 The share is the memory that all of a user's gated runs may state together,
 under every `HOME`. It is `memory_share` times the machine's physical memory.
 `memory_share` comes from `~/.config/jobgate.toml`, where `~` is the account's
-home directory from the password database. Every run of the user therefore reads
-the same file, under any `HOME`:
+home directory from the password database:
 
 ```toml
 memory_share = 0.6
@@ -82,11 +81,13 @@ A run is admitted when all of these are true:
 - At least one worker fits. The stated memory of all running runs, plus this
   run's `base_mem + 1 × worker_mem`, is at most the share. The workers of all
   running runs, plus one, are at most the core count.
-- At least one worker fits in free memory. This run's `base_mem + 1 × worker_mem`
-  is at most the free memory that [Free memory](#free-memory) defines.
-- The pressure reading is under its threshold in [Pressure thresholds](#pressure-thresholds). While
-  it is not, new runs wait. This wait is the pressure hold. Runs that already
-  started keep going under pressure.
+- At least one worker fits in free memory. This run's
+  `base_mem + 1 × worker_mem` is at most the free memory that
+  [Free memory](#free-memory) defines.
+- The pressure reading is under its threshold in
+  [Pressure thresholds](#pressure-thresholds). While it is not, new runs wait.
+  This wait is the pressure hold. Runs that already started keep going under
+  pressure.
 
 An admitted run takes as many workers as fit the share, free memory, and the
 free cores, up to `max_workers` or `--max-workers`. It keeps that count until it
@@ -136,11 +137,9 @@ counts memory in active use as available.
 
 At each admission attempt, jobgate computes free memory: the available memory,
 less S − M for each running run. S is the run's stated memory, and M is the
-memory it uses. A run whose M exceeds S subtracts nothing. A run that has just
-started therefore counts with all of its stated memory. Memory that a run
-already uses counts once, through the available memory. jobgate measures M just
-before and just after it reads the available memory, and it keeps the smaller
-measurement. A failed measurement counts as 0.
+memory it uses. A run whose M exceeds S subtracts nothing. jobgate measures M
+just before and just after it reads the available memory, and it keeps the
+smaller measurement. A failed measurement counts as 0.
 
 | Run | How jobgate measures M |
 | --- | --- |
