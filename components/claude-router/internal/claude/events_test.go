@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"syscall"
 	"testing"
 )
@@ -25,6 +27,17 @@ func (w *failOnceWriter) Write(p []byte) (int, error) {
 
 func (w *failOnceWriter) Close() error { return nil }
 
+func parsedKinds(data []byte) []string {
+	var kinds []string
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		var e Event
+		if json.Unmarshal(line, &e) == nil {
+			kinds = append(kinds, e.Kind)
+		}
+	}
+	return kinds
+}
+
 func TestAnEventAfterAFailedWriteIsStillLogged(t *testing.T) {
 	for _, keep := range []int{0, 10} {
 		t.Run(fmt.Sprintf("%d bytes written before the failure", keep), func(t *testing.T) {
@@ -34,16 +47,61 @@ func TestAnEventAfterAFailedWriteIsStillLogged(t *testing.T) {
 			l.emit(Event{Kind: "journal_failed"})
 			l.emit(Event{Kind: "journal_recovered"})
 
-			var got []string
-			for _, line := range bytes.Split(w.Bytes(), []byte("\n")) {
-				var e Event
-				if json.Unmarshal(line, &e) == nil {
-					got = append(got, e.Kind)
-				}
-			}
-			if len(got) != 1 || got[0] != "journal_recovered" {
+			if got := parsedKinds(w.Bytes()); len(got) != 1 || got[0] != "journal_recovered" {
 				t.Fatalf("events a reader parses after a failed write %v, want the later journal_recovered event", got)
 			}
 		})
+	}
+	t.Run("a log file that ends mid-line when the service starts", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "events.jsonl")
+		if err := os.WriteFile(path, []byte(`{"at":"2026-11-18T00:00:00Z","kind":"journal_fa`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		l, err := openEventLog(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		l.emit(Event{Kind: "journal_recovered"})
+		if err := l.close(); err != nil {
+			t.Fatal(err)
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := parsedKinds(data); len(got) != 1 || got[0] != "journal_recovered" {
+			t.Fatalf("events a reader parses after a restart over a partial line %v, want the new journal_recovered event", got)
+		}
+	})
+}
+
+func TestEventsAppendToALogTheServiceCanWriteButNotRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file without read permission")
+	}
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	if err := os.WriteFile(path, []byte(`{"at":"2026-11-18T00:00:00Z","kind":"stopped"}`+"\n"+`{"at":"2026-11-18T00:00:01Z","kind":"sto`), 0o200); err != nil {
+		t.Fatal(err)
+	}
+	l, err := openEventLog(path)
+	if err != nil {
+		t.Fatalf("open a log the service can append to but not read: %v", err)
+	}
+	l.emit(Event{Kind: "started"})
+	if err := l.close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := parsedKinds(data); len(got) != 2 || got[0] != "stopped" || got[1] != "started" {
+		t.Fatalf("events a reader parses %v, want the earlier stopped and the new started event", got)
 	}
 }

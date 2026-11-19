@@ -1082,8 +1082,7 @@ def platform_note(accepted, current):
     recorded = accepted.get("platform")
     if not isinstance(recorded, str) or recorded == current["platform"]:
         return None
-    untested = ", not yet tested on real Linux" if current["platform"].startswith("linux/") else ""
-    return "accepted on {}, this is {}{}".format(recorded, current["platform"], untested)
+    return "accepted on {}, this is {}".format(recorded, current["platform"])
 
 
 CHECK_LINE = "{:<9} {}"
@@ -1621,7 +1620,6 @@ def main():
     i.add_argument("--claude", type=Path, help="the terminal Claude Code executable to record")
     i.add_argument("--agent-sdk", type=Path, help="the installed @anthropic-ai/claude-agent-sdk package directory")
     i.add_argument("--code-only", action="store_true", help="print the checkout's code and helpers digests only")
-    a.add_argument("--agent-sdk", type=Path, help=argparse.SUPPRESS)
     a.add_argument("--brief", action="store_true", help="print only the check lines and the result")
     a.add_argument("--project", type=Path, action="append", default=[], help="a project whose .claude settings to check; repeat")
     a.add_argument("--verify", nargs=2, action="append", default=[], metavar=("SESSION", "COMMAND"),

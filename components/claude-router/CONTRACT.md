@@ -506,7 +506,7 @@ tested and after the user's attended login, and it must pass before PR4 starts.
 | PS-4 | Torn tail truncates; corrupt or incomplete interior records fail closed | passed | `TestJournalTruncatesTornFinalRecord`, `TestJournalRefusesCorruptInteriorRecord` | PR1 |
 | PS-7 | A write or sync error stops acknowledgments until recovery, and no acknowledgment disagrees with replay | passed | `TestJournalStopsAcknowledgingAfterFailedSync`, `TestJournalRecoversFromPartialWrite` | PR1 |
 | PS-5 | Durability across OS crash or power loss | blocked | No power-cut rig. Relies on `F_FULLFSYNC` and `fsync`. PR5's supervision lane killed the service with SIGKILL, which is a process crash (PS-1), not an OS crash. The README states the untested scope. | A rig that cuts power or crashes the OS during journal writes and checks replay after the reboot. No one has accepted this gap as a limit. Never pass it on documentation |
-| PS-6 | Storage behavior on Linux | passed | The PR9 Linux lane ran at `2e61073` in a Debian 13 container. The kernel was Linux 7.0.12 arm64 in a Docker Desktop VM on macOS. `go test -race ./...` passed, including the journal tests. The assignments survived `systemctl --user restart` and a container restart. A hand comparison of the assignments before and after checked the container restart (`evidence/PR9/linux/linux.json`). The state lived on the container's file system inside the VM's disk image, not on a Linux machine's own disk. The accounts were fake. | PR9. A run with real accounts on a Linux machine is not yet done |
+| PS-6 | Storage behavior on Linux | passed | The PR9 Linux lane ran at `2e61073` in a Debian 13 container. The kernel was Linux 7.0.12 arm64 in a Docker Desktop VM on macOS. `go test -race ./...` passed, including the journal tests. The assignments survived `systemctl --user restart` and a container restart. A hand comparison of the assignments before and after checked the container restart (`evidence/PR9/linux/linux.json`). The state lived on the container's file system inside the VM's disk image, not on a Linux machine's own disk. The accounts were fake. Later acceptance runs on a Linux machine, Linux 7.0 x86_64, used real accounts, with the lane state on the machine's ext4 root file system. The record that #183 committed (`accepted.json` at `1bce1c9`) shows failed journal writes recovering in the same process, a torn record trimmed, and the same bindings after a lane restart. The record that #196 committed shows `go test -race ./...` passing on that machine with its temporary directory on ext4, including `TestJournalKeepsAcknowledgedAssignmentsAcrossKill9`. | PR9, then the Linux acceptance runs of #183 and #196 |
 | DS-1 | Pinned source build with an explicit Go prerequisite | passed | `go.mod`, `go.sum`; `toolchain/go-toolchain.json` in the store | PR1 |
 | DS-2 | SDK license and version requirement recorded | passed | Pinned SDK table above | PR1 |
 | DS-3 | Offline build and test from the prepared module cache | passed | `evidence/PR6/unit-35075a7/`: `run.sh` runs `go test -race` and `go vet` with `GOPROXY=off GOSUMDB=off`, and `go.exit` and `vet.exit` are 0. PR1's run, `evidence/PR1/unit-ac9169d/go.log`, passed, but its record does not show the proxy setting. | PR6 |
@@ -1966,12 +1966,15 @@ statuses, classes, decisions, durations, and, on `request`, the usage
 counters the upstream
 reported. An `attempt_failed` event for a network failure carries its `phase`
 and the error text in `detail`. A counter the upstream did not report is
-`null`, not 0. While the service runs, a failed write to `events.jsonl`,
-such as on a full disk, loses only that event. Writing resumes with the next
-event, on a line of its own even after a partial write
-(`TestAnEventAfterAFailedWriteIsStillLogged`). After a partial write and a
-restart, the first event that the new process logs joins the partial line,
-and readers skip that line.
+`null`, not 0. A failed write to `events.jsonl`, such as on a full disk,
+loses only that event. Writing resumes with the next event, on a line of its
+own even after a partial write. A service whose `events.jsonl` ends in a
+partial line writes its first event on a line of its own
+(`TestAnEventAfterAFailedWriteIsStillLogged`). A service that can append to
+`events.jsonl` but cannot read the file treats the file as ending mid-line
+(`TestEventsAppendToALogTheServiceCanWriteButNotRead`). If the file ends in
+a newline, a blank line then precedes the first event, and readers skip blank
+lines.
 `TestNoSecretInStatusEventsOrLogs` and lane 2 search events, status, logs,
 the journal, and the SDK configuration for every token.
 
@@ -2581,8 +2584,8 @@ at another commit with the same router code, another build of it, and other
 client versions (`test_a_record_matches_by_code_digest_at_another_commit`,
 `test_a_record_with_another_head_build_and_client_versions_activates_when_check_passes`).
 When the record's `platform` differs from this host's, activation prints
-`note    accepted on <record platform>, this is <host platform>`, followed
-by `, not yet tested on real Linux` on Linux, and continues
+`note    accepted on <record platform>, this is <host platform>` and
+continues
 (`test_activation_on_another_platform_than_the_record_s_names_both`).
 
 A missing record, a record that does not parse, or any mismatch refuses
@@ -2993,7 +2996,7 @@ Without writing, `activate` reads the owned keys and the two env tokens in
 each `--project` settings file and in the managed settings file.
 It reads the two env tokens in its own environment and in the output of
 `launchctl getenv` or `systemctl --user show-environment`. It runs `--claude
-PATH --version` and reads `--agent-sdk DIR/package.json`.
+PATH` to send `check`'s test message (Check, above).
 
 Of these, the Claude settings file is the one that tools outside astack
 also write, and the router owns only its three keys there. If the switcher
@@ -3027,10 +3030,6 @@ so the retirement requirement stays blocked (Verification, below).
   browser does not open, the SDK prints SSH tunnel instructions and looks
   up this machine's public IP address over the network to fill them in. The
   router hides the instructions but cannot stop the lookup.
-- `--agent-sdk DIR` is the caller's choice. Activation compares the version
-  in its `package.json` with the record and does not check that it is T3's
-  bundled SDK. The runbook's `t3-check` step compares the SDK version that
-  T3's app bundle carries with the record.
 - `--verify` counts requests by conversation, not by process. A request in
   the named session from another client, or one that started before the
   command and completed while it ran, also counts. Name a session that

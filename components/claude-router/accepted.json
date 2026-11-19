@@ -1,23 +1,23 @@
 {
- "head": "ff158999aaa27dc79c340420e96a1982bf7280c8",
- "code_sha256": "ff86a5b123003665e81839d76fc1f6e95a2ccad7d4b2d11b24cf3cfe7a22ccd6",
- "binary_sha256": "e5d4fbbf08eb2e9dfbb6c3101fde67e4913cc3c971195246342c350fb27d03cc",
- "helpers_sha256": "4bc4da547f346e0cf0ad12832eccfdcb972257e91876189234cab1e424400243",
+ "head": "1de824953d2e2cae0326bb505c334c75404218a5",
+ "code_sha256": "d90e26f044865b2dab1109f654672f8dc81487cb85ab3d81a2b1b2949faab4a1",
+ "binary_sha256": "bf0df023a254dd211800b2cefae632a2acc55a42935ce9c9725aa8a3105eb1bf",
+ "helpers_sha256": "081c437f8bd6ff145cde0dc2ef1afd0766a80a1897f85860767bf8f19fd33e59",
  "sdk": "v8.0.11",
  "go": "go1.27.4",
  "platform": "linux/amd64",
  "clients": {
-  "claude_code": "2.1.325"
+  "claude_code": "2.1.327"
  },
  "result": "pass",
- "scope": "Issue 131 in-place journal recovery. A foreground lane router on port 18797 ran this code on Linux 7.0 x86_64. It used the real accounts through copies of the dobby and work logins (lane.py, lane-config.json). The daily router kept running beside the lane, unchanged. To cause real write failures, lane.py set RLIMIT_FSIZE on the lane process with prlimit. With a 64-byte limit, below the journal's 258 bytes, a new conversation got a 503 that named \"file too large\". The 503 carried x-should-retry: true and retry-after: 5, and status showed the failure. A request 5 s later still got the 503, and the failed recovery attempts rose. lane.py then started a real claude -p request for claude-haiku-5-5 and lifted the limit 9 s later. The same lane process answered that request without a restart. A limit 10 bytes above the journal left a torn record, which the next recovery trimmed. A resume of the first conversation after recovery stayed on its account and kept its content, and a lane restart loaded the same bindings. The router answered each probe request with a 503 from Route, before dispatch, so the probes sent nothing to the provider. The size limit also blocked writes to events.jsonl, so the 503 request events are missing from it. record.py built the record. Unchanged historical scenarios are references and were not rerun.",
- "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue131/evidence",
+ "scope": "Issues 185, 193, and 194. A foreground lane router on port 18797 ran this code on Linux 7.0 x86_64, with its state on the machine's ext4 disk. It used the real accounts through copies of the dobby and work logins (lane.py, lane-config.json). The daily router kept running beside the lane, unchanged. A real claude -p request for claude-haiku-5-5 started a conversation. A lane restart over an events.jsonl that ended in a newline added no blank line. lane.py then stopped the lane and appended the first half of the last event line, as a short write leaves it. After the next restart, the first new event, model_catalog, began on a line of its own and parsed. A resume of the first conversation stayed on its account and kept its content, and digest.go's readDigest and account.go's requestsSince counted its request. The changes to the platform note and to activate's flags send no request. tests/test_claude_router_activate.py checks the platform note text and runs activate without the removed --agent-sdk flag. record.py built the record. Unchanged historical scenarios are references and were not rerun.",
+ "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence",
  "matrix": [
   {
    "scenario": "dobby token expires more than 4.5 h from now, outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 473,
+    "expires_in_min": 308,
     "evidence": [
      "results.json",
      "lane.py"
@@ -28,7 +28,7 @@
    "scenario": "work token expires more than 4.5 h from now, outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 473,
+    "expires_in_min": 308,
     "evidence": [
      "results.json",
      "lane.py"
@@ -36,11 +36,11 @@
    }
   },
   {
-   "scenario": "Lane code and executable match the build at ff15899",
+   "scenario": "Lane code, executable, and SDK match the build at 1de8249 and go.mod",
    "status": "pass",
    "detail": {
-    "code_sha256": "ff86a5b123003665e81839d76fc1f6e95a2ccad7d4b2d11b24cf3cfe7a22ccd6",
-    "binary_sha256": "e5d4fbbf08eb2e9dfbb6c3101fde67e4913cc3c971195246342c350fb27d03cc",
+    "code_sha256": "d90e26f044865b2dab1109f654672f8dc81487cb85ab3d81a2b1b2949faab4a1",
+    "binary_sha256": "bf0df023a254dd211800b2cefae632a2acc55a42935ce9c9725aa8a3105eb1bf",
     "sdk": "v8.0.11",
     "evidence": [
      "status-start.json"
@@ -84,14 +84,14 @@
     "requests": [
      {
       "account": "work",
-      "decision": "place",
-      "reason": "reset_preference",
+      "decision": "dispatch",
+      "reason": "assigned",
       "status": 200
      },
      {
       "account": "work",
-      "decision": "dispatch",
-      "reason": "assigned",
+      "decision": "place",
+      "reason": "reset_preference",
       "status": 200
      }
     ],
@@ -103,118 +103,46 @@
    }
   },
   {
-   "scenario": "With the lane's file size limit below the journal (258 bytes), a new conversation gets a 503 naming the cause, and status shows it",
+   "scenario": "A restart over an events.jsonl that ends in a newline adds no blank line",
    "status": "pass",
    "detail": {
-    "answer": {
-     "status": 503,
-     "message": "claude-router: assignment journal unavailable: write /home/alany/.local/state/astack/claude-router-lanes/issue131/state/assignments/assignments.jsonl: file too large; the router retries it on a later request",
-     "x_should_retry": "true",
-     "retry_after": "5",
-     "at": "2026-11-17T06:48:50.896531+00:00"
-    },
-    "status_journal": "assignment journal unavailable: write /home/alany/.local/state/astack/claude-router-lanes/issue131/state/assignments/assignments.jsonl: file too large",
-    "journal_failure": {
-     "since": "2026-11-16T22:48:50.896059856-08:00",
-     "recovery_attempts": 0,
-     "retry_after": "2026-11-16T22:48:55.896059856-08:00"
-    },
+    "size_before": 1497,
+    "byte_after": "{",
+    "first_kind": "model_catalog",
     "evidence": [
-     "s2-probe-limit.json",
-     "status-failed.json",
-     "serve.log"
+     "clean-restart.json",
+     "events.jsonl"
     ]
    }
   },
   {
-   "scenario": "The journal 503 carries x-should-retry: true and retry-after: 5",
+   "scenario": "Before the restart, events.jsonl ends mid-line with the first half of its last event",
    "status": "pass",
    "detail": {
-    "x_should_retry": "true",
-    "retry_after": "5",
+    "partial_bytes": 30,
+    "size": 2084,
     "evidence": [
-     "s2-probe-limit.json",
-     "s3-probe-still-limited.json"
+     "partial-line.json"
     ]
    }
   },
   {
-   "scenario": "While the limit holds, a request 5 s later gets the 503 naming the cause, and the failed recovery attempts rise",
+   "scenario": "After the restart, the first new event starts on a line of its own and parses",
    "status": "pass",
    "detail": {
-    "answer": {
-     "status": 503,
-     "message": "claude-router: assignment journal unavailable: write /home/alany/.local/state/astack/claude-router-lanes/issue131/state/assignments/assignments.jsonl: file too large; the router retries it on a later request",
-     "x_should_retry": "true",
-     "retry_after": "5",
-     "at": "2026-11-17T06:48:56.398760+00:00"
-    },
-    "recovery_attempts": 1,
-    "pid": 456235,
+    "byte_after_partial": "\n",
+    "first_new_line": "{\"at\":\"2026-11-18T17:33:32.13496718-08:00\",\"kind\":\"model_catalog\",\"outcome\":\"read\",\"detail\":\"claude-fable-5-2 claude-haiku-5-5\"}",
+    "first_kind": "model_catalog",
+    "partial_line_kept": true,
     "evidence": [
-     "s3-probe-still-limited.json",
-     "status-still-failed.json",
-     "serve.log"
+     "partial-line.json",
+     "events-after-restart.jsonl",
+     "status-after-restart.json"
     ]
    }
   },
   {
-   "scenario": "A Claude Code request sent while the journal fails is retried by the client and answered once the limit is lifted, by the same process",
-   "status": "pass",
-   "detail": {
-    "exit": 0,
-    "seconds": 12.5,
-    "requests": [
-     {
-      "account": "dobby",
-      "decision": "place",
-      "reason": "capacity",
-      "status": 200
-     },
-     {
-      "account": "dobby",
-      "decision": "dispatch",
-      "reason": "assigned",
-      "status": 200
-     }
-    ],
-    "answer": "ok",
-    "status_journal": "ok",
-    "pid": 456235,
-    "recovered_lines": [
-     "[lane] claude-router: assignment journal recovered after 2 failed attempts since 2026-11-16T22:48:50-08:00"
-    ],
-    "evidence": [
-     "s4-client-retry.out.txt",
-     "s4-client-retry.events.json",
-     "status-recovered.json",
-     "serve.log"
-    ],
-    "support": "Claude Code printed no retry line. The request took 12.5 s, against under 2 s for s1-new. Recovery attempt 2 failed while only this claude -p was sending requests. The router answered the request after lane.py lifted the limit. Any 503 that Claude Code got while the limit held is missing from events.jsonl, because the limit also blocked writes to events.jsonl."
-   }
-  },
-  {
-   "scenario": "A partial write leaves a torn record, and the next recovery trims it",
-   "status": "pass",
-   "detail": {
-    "answer": {
-     "status": 503,
-     "message": "claude-router: assignment journal unavailable: write /home/alany/.local/state/astack/claude-router-lanes/issue131/state/assignments/assignments.jsonl: file too large; the router retries it on a later request",
-     "x_should_retry": "true",
-     "retry_after": "5",
-     "at": "2026-11-17T06:49:09.937852+00:00"
-    },
-    "torn_bytes": 10,
-    "records_after": 4,
-    "evidence": [
-     "s5-probe-torn.json",
-     "assignments.jsonl",
-     "serve.log"
-    ]
-   }
-  },
-  {
-   "scenario": "Resuming the first conversation after recovery stays on its account and keeps its content",
+   "scenario": "After the restart, resuming the first conversation stays on its account and keeps its content",
    "status": "pass",
    "detail": {
     "exit": 0,
@@ -229,20 +157,41 @@
     ],
     "answer": "kumquat",
     "evidence": [
-     "s6-resume.out.txt",
-     "s6-resume.events.json"
+     "s2-resume.out.txt",
+     "s2-resume.events.json"
     ]
    }
   },
   {
-   "scenario": "A lane restart loads the same bindings as before it",
+   "scenario": "After the restart, the first new line decodes as the readers' claude.Event, and digest.go and account.go read past the partial line and count the resumed request",
    "status": "pass",
    "detail": {
-    "before": 2,
-    "after": 2,
+    "go_test_exit": 0,
+    "read": {
+     "digest_conversation_last": "2026-11-18T17:33:34.969254615-08:00",
+     "digest_requests_since_restart": 1,
+     "first_new_kind": "model_catalog",
+     "first_new_parses": true,
+     "requests_since_conversations": 1,
+     "requests_since_has_conversation": true
+    },
+    "request_events_after_restart": 1,
     "evidence": [
-     "status-before-restart.json",
-     "status-after-restart.json"
+     "readers.json",
+     "readers-go-test.txt",
+     "lane_readers_test.go",
+     "events-after-restart.jsonl"
+    ],
+    "method": "lane_readers_test.go, added only to a temporary copy of the checkout, called readDigest (digest.go) and requestsSince (account.go) on the lane's events.jsonl after the restart, with the restart time as the window start. It also decoded the first new line with json.Unmarshal into claude.Event. Both readers decode each line the same way (digest.go:108, account.go:339). digest.go acts only on request and migrated events. account.go acts only on request events. Neither acts on the first new line, a model_catalog event, so a live run cannot show more than that decode."
+   }
+  },
+  {
+   "scenario": "claude-router cache reads the lane's events.jsonl after the restart",
+   "status": "pass",
+   "detail": {
+    "exit": 0,
+    "evidence": [
+     "cache.txt"
     ]
    }
   },
@@ -250,8 +199,8 @@
    "scenario": "Identity is the same at the start and the end",
    "status": "pass",
    "detail": {
-    "code_sha256": "ff86a5b123003665e81839d76fc1f6e95a2ccad7d4b2d11b24cf3cfe7a22ccd6",
-    "binary_sha256": "e5d4fbbf08eb2e9dfbb6c3101fde67e4913cc3c971195246342c350fb27d03cc",
+    "code_sha256": "d90e26f044865b2dab1109f654672f8dc81487cb85ab3d81a2b1b2949faab4a1",
+    "binary_sha256": "bf0df023a254dd211800b2cefae632a2acc55a42935ce9c9725aa8a3105eb1bf",
     "sdk": "v8.0.11",
     "evidence": [
      "status-start.json",
@@ -271,19 +220,23 @@
    }
   },
   {
-   "scenario": "The lane logged the failure, the failed recovery attempts, and each recovery once, without flooding",
+   "scenario": "The daily router kept running in the same process during the lane run",
    "status": "pass",
    "detail": {
-    "lines": [
-     "[lane] claude-router: assignment journal failed: write /home/alany/.local/state/astack/claude-router-lanes/issue131/state/assignments/assignments.jsonl: file too large; requests get 503 until it recovers",
-     "[lane] claude-router: assignment journal recovery attempt 1 failed: write /home/alany/.local/state/astack/claude-router-lanes/issue131/state/assignments/assignments.jsonl: file too large",
-     "[lane] claude-router: assignment journal recovery attempt 2 failed: write /home/alany/.local/state/astack/claude-router-lanes/issue131/state/assignments/assignments.jsonl: file too large",
-     "[lane] claude-router: assignment journal recovered after 2 failed attempts since 2026-11-16T22:48:50-08:00",
-     "[lane] claude-router: assignment journal failed: write /home/alany/.local/state/astack/claude-router-lanes/issue131/state/assignments/assignments.jsonl: file too large; requests get 503 until it recovers",
-     "[lane] claude-router: assignment journal recovered after 0 failed attempts since 2026-11-16T22:49:09-08:00"
-    ],
+    "before": {
+     "ActiveState": "active",
+     "ActiveEnterTimestamp": "Wed 2026-11-18 15:50:42 PST",
+     "MainPID": "3412178",
+     "NRestarts": "0"
+    },
+    "after": {
+     "ActiveState": "active",
+     "ActiveEnterTimestamp": "Wed 2026-11-18 15:50:42 PST",
+     "MainPID": "3412178",
+     "NRestarts": "0"
+    },
     "evidence": [
-     "serve.log"
+     "daily-router.json"
     ]
    }
   },
@@ -305,28 +258,25 @@
    "scenario": "The lane's requests and tokens",
    "status": "pass",
    "detail": {
-    "requests": 5,
-    "attempts": 5,
+    "requests": 3,
+    "attempts": 3,
     "statuses": [
-     200,
-     200,
      200,
      200,
      200
     ],
-    "input": 16778,
-    "output": 49,
+    "input": 11084,
+    "output": 27,
     "evidence": [
      "events.jsonl"
-    ],
-    "note": "The counts cover the request events that reached events.jsonl. While the file size limit held, it also blocked writes to events.jsonl. The 503 request events of s2, s3, s5, and any Claude Code attempt in that window are missing."
+    ]
    }
   },
   {
    "scenario": "Evidence contains no copied access token",
    "status": "pass",
    "detail": {
-    "files_scanned": 22,
+    "files_scanned": 27,
     "hits": [],
     "method": "Exact client token and the tokens in the lane's login copies, plus sk-ant-, JWT, and Bearer patterns, before the copies were deleted.",
     "evidence": [
@@ -341,27 +291,46 @@
  "open": [],
  "incidents": [
   {
-   "run": "first lane run at 50e0ff3",
-   "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue131-run1/evidence",
-   "result": "fail: 17 of 19 rows passed",
-   "finding": "The journal recovered, and the router answered Claude Code's requests. events.jsonl held no event from the lane process after its first failed write, because json.Encoder keeps the first write error. The client-retry and resume rows failed because their request events were missing.",
-   "fixed_in": "668a59c (write each event on its own) and ee6f7e8 (start a new line after a partial write)"
+   "run": "first lane run at 7d048b4",
+   "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue185-run1/evidence",
+   "result": "fail: 14 of 17 rows passed",
+   "finding": "lane.py expected the first event after a start to have kind \"started\", but the service writes the model_catalog event first, then the overage_read events, then the started event. The three rows that expected a started event failed. The router met their intent: after the restart over the partial line, the next byte was a newline and the first new line, model_catalog, parsed.",
+   "fixed_in": "lane.py: those rows check that the first new line parses and record its kind"
+  },
+  {
+   "run": "second lane run at 7d048b4",
+   "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue185-run2/evidence",
+   "result": "pass: 17 of 17 rows, superseded",
+   "finding": "An outside review of the second run's record found two problems. The readers row claimed that digest.go and account.go parse the first event after the restart. Their output cannot show that, because the first event is always model_catalog. Several other checks were also weaker than their row names.",
+   "fixed_in": "lane.py. The readers row names what it checks and requires an exact count. The new conversation row requires the place decision and the answer. The resume row requires the first account on every request. The lane code row requires the SDK version from go.mod. The paid overflow rows require both account IDs in status. A new row compares the daily router's process before and after the run."
+  },
+  {
+   "run": "third lane run at 6358e4e",
+   "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue185-run3/evidence",
+   "result": "pass: 18 of 18 rows, superseded",
+   "finding": "A review found that the third run's readers row no longer required the first new line to decode into claude.Event, the way both readers decode each line. The third run's readers.json shows that the decode succeeded, but the row did not depend on it.",
+   "fixed_in": "lane.py. The readers row requires that decode again. The fourth run's rows replaced the third run's."
   }
  ],
  "prior_acceptance": {
-  "record": "components/claude-router/accepted.json from PR #178, code_sha256 6a965388\u2026",
+  "record": "components/claude-router/accepted.json from PR #183, code_sha256 ff86a5b1\u2026",
   "status": "historical reference, not rerun at this code"
  },
  "offline_verification": {
-  "head": "ee6f7e81db7feb7788b2892057afdcda5eaeacb4",
+  "head": "7d048b47296b9e34ed76ed2fd55be16587eb12a6",
+  "note": "The record's head differs from the tested head only in CONTRACT.md and accepted.json. Neither file is router code.",
   "go_test_race": "pass",
   "go_vet": "pass",
+  "tmpdir": "ext4, under the lane directory, so the journal tests, including TestJournalKeepsAcknowledgedAssignmentsAcrossKill9, ran on the machine's own disk",
   "evidence": [
-   "/home/alany/.local/state/astack/claude-router-lanes/issue131/evidence/offline/head.txt",
-   "/home/alany/.local/state/astack/claude-router-lanes/issue131/evidence/offline/gofmt.txt",
-   "/home/alany/.local/state/astack/claude-router-lanes/issue131/evidence/offline/vet.log",
-   "/home/alany/.local/state/astack/claude-router-lanes/issue131/evidence/offline/go-race.log"
+   "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/go-command.txt",
+   "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/head.txt",
+   "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/env.txt",
+   "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/gofmt.txt",
+   "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/vet.log",
+   "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/go-race.log",
+   "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/journal-tests.log"
   ]
  },
- "written": "2026-11-17T08:42:44.946633+00:00"
+ "written": "2026-11-19T01:47:44.561361+00:00"
 }

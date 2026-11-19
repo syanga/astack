@@ -294,14 +294,14 @@ class ActivationFixture(ComponentFixture):
                                        MANAGED_SETTINGS=str(self.managed), **env))
 
     def run_activate(self, *arguments, verify=((SESSION, "fake-client " + SESSION),), **env):
-        command = ["activate", "--acceptance", str(self.acceptance), "--claude", str(self.claude), "--agent-sdk", str(self.sdk)]
+        command = ["activate", "--acceptance", str(self.acceptance), "--claude", str(self.claude)]
         for session, check in verify:
             command += ["--verify", session, check]
         return self.helper(*command, *arguments, **env)
 
     def activate_command(self, *verify):
         command = [sys.executable, "-c", HELPER_WITH_MANAGED_SETTINGS, "activate", "--home", str(self.home),
-                   "--acceptance", str(self.acceptance), "--claude", str(self.claude), "--agent-sdk", str(self.sdk)]
+                   "--acceptance", str(self.acceptance), "--claude", str(self.claude)]
         for session, check in verify:
             command += ["--verify", session, check]
         return command
@@ -483,8 +483,7 @@ class ActivationTests(ActivationFixture):
         result = self.run_activate(verify=())
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        untested = ", not yet tested on real Linux" if host.startswith("linux") else ""
-        self.assertIn("note    accepted on {}, this is {}{}\n".format(other, host, untested), result.stdout)
+        self.assertIn("note    accepted on {}, this is {}\n".format(other, host), result.stdout)
         self.assertIn("ok        code matches the accepted record ({})\n".format(other), result.stdout)
 
     def test_the_helpers_digest_covers_each_installed_file_by_path_and_content(self):
@@ -539,7 +538,7 @@ class ActivationTests(ActivationFixture):
 
         (lib / "notes.txt").write_text("stray\n")
         from_lib = subprocess.run([sys.executable, str(lib / "claude_router.py"), "activate", "--prepare", "--home", str(self.home),
-                                   "--acceptance", str(self.acceptance), "--claude", str(self.claude), "--agent-sdk", str(self.sdk)],
+                                   "--acceptance", str(self.acceptance), "--claude", str(self.claude)],
                                   capture_output=True, text=True, env=dict(self.env, HOME=str(self.home.resolve())))
         self.assertEqual(from_lib.returncode, 1)
         self.assertTrue(from_lib.stderr.endswith("next    reinstall from a checkout of the accepted head: "
@@ -1149,7 +1148,7 @@ class InterruptedActivationTests(ActivationFixture):
         return helper
 
     def activate_in_process(self, helper, command="fake-client " + SESSION, timeout=60):
-        args = helper.argparse.Namespace(acceptance=self.acceptance, claude=self.claude, agent_sdk=self.sdk, settings=None,
+        args = helper.argparse.Namespace(acceptance=self.acceptance, claude=self.claude, settings=None,
                                          project=[], verify=[(SESSION, command)], verify_timeout=timeout, prepare=False,
                                          brief=False, lock_fd=None)
         stderr = io.StringIO()

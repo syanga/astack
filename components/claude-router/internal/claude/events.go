@@ -86,7 +86,25 @@ func openEventLog(path string) (*eventLog, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &eventLog{out: f}, nil
+	return &eventLog{out: f, torn: mayEndMidLine(path)}, nil
+}
+
+func mayEndMidLine(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return true
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return true
+	}
+	if info.Size() == 0 {
+		return false
+	}
+	var last [1]byte
+	_, err = f.ReadAt(last[:], info.Size()-1)
+	return err != nil || last[0] != '\n'
 }
 
 func (l *eventLog) emit(e Event) {
