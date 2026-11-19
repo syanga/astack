@@ -1,9 +1,9 @@
-"""Reminders for the setup steps that ./install.sh cannot take, against temporary host files."""
-
 from contextlib import redirect_stdout
 import io
 import json
+import os
 from pathlib import Path
+import pwd
 import re
 import shlex
 import sys
@@ -15,6 +15,7 @@ from test_install import InstallerFixture
 SOURCE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOURCE / "scripts"))
 import astack_reminders
+import claude_router
 import memory_guard
 
 ROUTER_README = "README.md#install-the-optional-claude-router"
@@ -35,8 +36,9 @@ class ReminderTests(unittest.TestCase):
         self.ttl.write_text("0\n")
         self.guard = memory_guard.Host(lru_gen_enabled_file=self.enabled, min_ttl_ms_file=self.ttl,
                                        boot_file=self.root / "etc/tmpfiles.d/astack-memory-guard.conf")
-        self.linger = self.root / "var/lib/systemd/linger/someone"
-        self.host = astack_reminders.Host(guard=self.guard, linger_file=self.linger)
+        linger_dir = self.root / "var/lib/systemd/linger"
+        self.linger = linger_dir / pwd.getpwuid(os.getuid()).pw_name
+        self.host = astack_reminders.Host(guard=self.guard, linger_dir=linger_dir)
         self.router_state = self.root / "router state"
         self.router_state.mkdir()
 
@@ -47,15 +49,17 @@ class ReminderTests(unittest.TestCase):
         commands = [shlex.split(line) for line in output.splitlines() if "memory_guard.py" in line]
         return commands[0] if commands else None
 
+    def setup_command(self, output):
+        commands = [line.strip() for line in output.splitlines() if line.strip().startswith("claude-router setup")]
+        return commands[0] if commands else None
+
     def installed_router(self, manager):
         layout = {"data": str(self.root / "router data"), "state": str(self.router_state), "manager": manager,
                   "service": "dev.astack.claude-router", "descriptor": None}
         return {"targets": {}, "components": {"claude-router": {"layout": layout}}}
 
-    def activate(self, state):
-        settings = str(self.root / "settings.json")
-        (self.router_state / "activation.json").write_text(json.dumps({"phase": "active", "settings": settings}))
-        state["settings"] = {"claude-router": {settings: {"format": "json", "keys": {}}}}
+    def activate(self):
+        claude_router.write_journal(self.router_state, {"phase": "active", "settings": str(self.root / "settings.json")})
 
     def test_guard_reminder_gives_the_install_command_until_the_guard_is_installed(self):
         command = self.guard_command(self.pending())
@@ -84,11 +88,10 @@ class ReminderTests(unittest.TestCase):
         self.assertIn("optional", lines[0].lower())
         self.assertIn(ROUTER_README, lines[0])
 
-    def test_installed_systemd_router_names_linger_and_setup_until_each_is_done(self):
+    def test_installed_systemd_router_names_linger_then_setup_until_each_is_done(self):
         state = self.installed_router("systemd")
         output = self.pending(state)
-        self.assertIn(LINGER, output)
-        self.assertIn(SETUP, output)
+        self.assertLess(output.index(LINGER), output.index(SETUP))
 
         self.linger.parent.mkdir(parents=True)
         self.linger.touch()
@@ -96,7 +99,7 @@ class ReminderTests(unittest.TestCase):
         self.assertNotIn(LINGER, output)
         self.assertIn(SETUP, output)
 
-        self.activate(state)
+        self.activate()
         self.assertNotIn("claude-router", self.pending(state))
 
     def test_installed_launchd_router_names_setup_but_never_linger(self):
@@ -105,6 +108,27 @@ class ReminderTests(unittest.TestCase):
 
         self.assertIn(SETUP, output)
         self.assertNotIn(LINGER, output)
+
+    def test_setup_reminder_reuses_the_accounts_that_config_json_lists(self):
+        state = self.installed_router("launchd")
+        config = self.router_state / "config.json"
+        config.write_text(json.dumps({"accounts": []}))
+        self.assertEqual(self.setup_command(self.pending(state)), SETUP)
+
+        config.write_text(json.dumps({"accounts": [{"id": "work", "capacity": 1}]}))
+        self.assertEqual(self.setup_command(self.pending(state)), "claude-router setup")
+
+    def test_a_machine_with_every_step_done_gets_no_reminders(self):
+        state = self.installed_router("systemd")
+        self.assertNotEqual(self.pending(state), "")
+
+        with redirect_stdout(io.StringIO()):
+            memory_guard.install(self.guard, dry_run=False)
+        self.linger.parent.mkdir(parents=True)
+        self.linger.touch()
+        self.activate()
+
+        self.assertEqual(astack_reminders.pending(state, self.host), [])
 
     def test_a_reminder_that_cannot_read_its_state_leaves_the_others(self):
         self.guard.boot_file.parent.mkdir(parents=True)
