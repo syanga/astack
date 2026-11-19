@@ -18,6 +18,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 import astack_files as files
 import astack_jobgate
 import astack_plugins
+import astack_reminders
 import astack_settings
 import claude_router
 
@@ -313,6 +314,9 @@ def deploy(args, harnesses, selected, home, use_env, state_root, state_path, sta
         files.save_manifest(state_path, state)
     print("{} complete for {}.".format("Preview" if args.dry_run else args.command.capitalize(),
                                        ", ".join(selected + (args.component or []))))
+    if args.command == "install":
+        for line in astack_reminders.pending(state):
+            print(line)
 
 
 if __name__ == "__main__":
