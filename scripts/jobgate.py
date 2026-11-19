@@ -384,7 +384,7 @@ class Load(NamedTuple):
 
 
 def smaller(first: int | None, second: int | None) -> int | None:
-    return second if first is None else first if second is None else min(first, second)
+    return None if first is None or second is None else min(first, second)
 
 
 def load_of(queue: Queue, runs: list[Run]) -> Load:

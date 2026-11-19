@@ -393,15 +393,22 @@ class AdmissionTests(JobgateTest):
         self.assertEqual(second.workers(), 2)
         self.assertEqual(second.release(), 0)
 
-    def test_runs_under_two_homes_share_one_queue(self):
+    def test_runs_under_two_homes_share_the_account_homes_queue(self):
+        site = self.root / "site"
+        site.mkdir()
+        (site / "sitecustomize.py").write_text(
+            "import pwd, types\npwd.getpwuid = lambda uid: types.SimpleNamespace(pw_dir={!r})\n".format(str(self.root / "home")))
+        env = {key: value for key, value in self.env.items() if key != "JOBGATE_HOME"}
+        env["PYTHONPATH"] = str(site)
         self.set_machine(memory=8 * GIB, cores=16, psi=CALM)
         self.profiles(test=("1G", "1G", 3, "TEST_WORKERS"))
-        first = self.hold("first", env=dict(self.env, HOME=str(self.root / "first home")))
+        first = self.hold("first", env=dict(env, HOME=str(self.root / "first home")))
         self.assertEqual(first.workers(), 3)
-        second = self.hold("second", env=dict(self.env, HOME=str(self.root / "second home")))
+        second = self.hold("second", env=dict(env, HOME=str(self.root / "second home")))
         self.assertIn("waits for memory: 1 worker needs 2.0G, and 0M of the 4.0G share is free",
                       second.wait_message("waits"))
         self.assertEqual(first.release(), 0)
+        self.assertTrue((self.queue_dir / "results.log").exists())
         self.assertEqual(second.workers(), 3)
 
     def test_a_run_waits_until_the_machine_has_its_memory_free(self):
@@ -714,6 +721,13 @@ class ResultTests(JobgateTest):
 
     @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
     def test_free_memory_keeps_the_smaller_of_two_measurements_around_the_reading(self):
+        self.assert_second_run_waits_while_the_first_measures([str(800 * 2**20).encode(), str(100 * 2**20).encode()])
+
+    @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
+    def test_free_memory_counts_a_run_as_using_nothing_when_one_measurement_fails(self):
+        self.assert_second_run_waits_while_the_first_measures([str(800 * 2**20).encode(), b"unreadable"])
+
+    def assert_second_run_waits_while_the_first_measures(self, readings):
         env = self.systemd_session("systemd 259", '[ "$1" = --version ] && echo "systemd 259"\nexit 0\n',
                                    SYSTEMD_RUN.format(python=sys.executable, version=259))
         cgroup = self.root / "scope cgroup"
@@ -725,7 +739,6 @@ class ResultTests(JobgateTest):
         stop = threading.Event()
 
         def feed():
-            readings = [str(800 * 2**20).encode(), str(100 * 2**20).encode()]
             count = 0
             while not stop.is_set():
                 try:

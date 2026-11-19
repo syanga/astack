@@ -82,7 +82,7 @@ A run is admitted when all of these are true:
   run's `base_mem + 1 × worker_mem`, is at most the share. The workers of all
   running runs, plus one, are at most the core count.
 - At least one worker fits in free memory. This run's `base_mem + 1 × worker_mem`
-  is at most the free memory left. That is the machine's available memory, less
+  is at most the free memory. That is the machine's available memory, less
   what running runs stated but do not use yet. [Free memory](#free-memory)
   defines both.
 - The pressure reading is under its threshold in the table that follows. While
@@ -131,9 +131,10 @@ call goes through admission like any other run.
 | macOS | The free, file-backed, and purgeable pages that `vm_stat` reports, times its page size |
 
 The macOS sum counts free pages, file cache, and purgeable pages. A new process
-can get that memory without compressing or swapping memory in use.
-[macOS available memory counts free, file-backed, and purgeable pages](jobgate-thresholds.md#macos-available-memory-counts-free-file-backed-and-purgeable-pages)
-says why jobgate does not use `kern.memorystatus_level`.
+can get that memory without compressing or swapping memory in use. jobgate does
+not read `kern.memorystatus_level`, which XNU computes from the active,
+inactive, free, and speculative pages. That level counts memory in active use as
+available.
 
 At each admission attempt, jobgate measures the memory that each running run
 uses. On Linux in a scope, that is the scope's `memory.current`, less the page
@@ -151,21 +152,34 @@ subtracts that from the available memory. A run that has just started therefore
 counts with all of its stated memory. Memory that a run already uses counts
 once, through the available memory. jobgate measures each run just before and
 just after it reads the available memory, and it keeps the smaller of the two
-measurements.
+measurements. When a run's memory only grows or only shrinks between them, the
+smaller one is at most what the run used at the reading. When either measurement
+fails, jobgate counts the run as using no memory.
 
-The counted free memory is then at most the available memory at the reading,
-less what running runs stated but did not use then. That holds under two
-conditions. First, each run's memory only grows or only shrinks between its two
-measurements. Second, no measurement exceeds the memory that the run holds and
-that the available memory leaves out. Admission is looser in these cases:
+The bound on free memory is the available memory at the reading, less what
+running runs stated but did not use at that moment. Free memory stays within it
+when the kept measurements count each page at most once. They must also count
+only memory that the runs used at the reading and that the available memory left
+out. These conditions fail in these known cases:
 
-- A run frees memory and allocates it again between its two measurements. The available memory then includes memory that the run still uses.
-- A measurement counts a shared page once per process. That happens with the `RssAnon` and `RssShmem` fallback and with macOS `phys_footprint`.
-- In a scope, `memory.current` includes reclaimable kernel slab, which the available memory partly counts as free.
+- A run frees memory and allocates it again between its two measurements. Both
+  measurements then count more than the run used at the reading.
+- A measurement counts a page that several processes share once per process. The
+  `RssAnon` and `RssShmem` fallback and macOS `phys_footprint` count pages that
+  way.
+- A run starts another run from its command, and the command removes
+  `JOBGATE_RUN` from the environment. The inner run then queues as a run of its
+  own. Outside a scope, both runs' measurements count its processes.
+- macOS `phys_footprint` counts compressed memory at its size before
+  compression. The available memory leaves out only its compressed size.
+- On Linux outside a scope, `Pss_Anon` counts pages that a process released with
+  `MADV_FREE`. The available memory counts those pages as free.
+- In a scope, `memory.current` includes reclaimable kernel slab, which the
+  available memory partly counts as free.
 
-In each case, admission is looser by the amount that a measurement exceeds that
-memory. Memory that ungated commands use is missing from the available memory,
-so ungated work also delays new runs.
+In each case, free memory can exceed the bound by at most the memory that the
+measurements overcount. Memory that ungated commands use is missing from the
+available memory, so ungated work also delays new runs.
 
 When the reading is unavailable, no run waits for free memory, and
 `jobgate status` shows free memory as unknown.
