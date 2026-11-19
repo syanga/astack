@@ -51,6 +51,7 @@ emit({"type": "assistant", "message": {"content": [
     {"type": "tool_use", "id": "t0", "name": "Skill", "input": {}},
     {"type": "tool_use", "id": "t1", "name": "Skill", "input": {"skill": "tdd"}},
     {"type": "tool_use", "id": "t7", "name": "Skill", "input": {"skill": "missing-skill"}},
+    {"type": "tool_use", "id": "t8", "name": "Skill", "input": {"skill": "denied-skill"}},
     {"type": "tool_use", "id": "t2", "name": "Read", "input": {"file_path": os.getcwd() + "/README.md"}},
     {"type": "tool_use", "id": "t3", "name": "Edit", "input": {"file_path": os.getcwd() + "/skills/tdd/SKILL.md"}},
     {"type": "tool_use", "id": "t4", "name": "Write", "input": {"file_path": os.getcwd() + "/notes.md"}},
@@ -58,16 +59,21 @@ emit({"type": "assistant", "message": {"content": [
     {"type": "tool_use", "id": "t6", "name": "Bash", "input": {"command": "ls missing"}},
 ]}})
 emit({"type": "user", "message": {"content": [
+    {"type": "tool_result", "tool_use_id": "t1", "is_error": False, "content": "Launching skill: tdd"},
     {"type": "tool_result", "tool_use_id": "t7", "is_error": True, "content": "Unknown skill: missing-skill"},
     {"type": "tool_result", "tool_use_id": "t5", "is_error": False, "content": "abc123 subject"},
     {"type": "tool_result", "tool_use_id": "t6", "is_error": True, "content": "Exit code 2\nls: missing: No such file"},
 ]}})
+emit({"type": "system", "subtype": "permission_denied", "tool_name": "Skill", "tool_use_id": "t8",
+      "message": "Permission to use Skill has been denied."})
 for call, tool in (("t3", "Edit"), ("t4", "Write")):
     denial = "Permission to use %s has been denied." % tool
     emit({"type": "system", "subtype": "permission_denied", "tool_name": tool, "tool_use_id": call, "message": denial})
     emit({"type": "user", "message": {"content": [
         {"type": "tool_result", "tool_use_id": call, "is_error": True, "content": denial}]}})
 if mode == "hang":
+    emit({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "t9", "name": "Skill", "input": {"skill": "interrupted-skill"}}]}})
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(45)"])
     record = Path(os.environ["FAKE_LOG"] + ".child")
     Path(str(record) + ".tmp").write_text(str(child.pid))
@@ -178,7 +184,8 @@ class RunCaseTests(unittest.TestCase):
         self.assertIn("Answered 'Add a feature' in session-", report)
         self.assertIn("Skills: tdd 2/2\n", report)
         self.assertIn("Skill missing-skill (failed: Unknown skill: missing-skill)", report)
-        self.assertIn("Denied: Edit 2/2, Write 2/2\n", report)
+        self.assertIn("Skill denied-skill (denied)", report)
+        self.assertIn("Denied: Edit 2/2, Skill 2/2, Write 2/2\n", report)
         self.assertIn("$0.50", report)
         self.assertIn(str(self.temp / "out"), report)
         self.assertEqual(len(list((self.temp / "out").glob("*.jsonl"))), 2)
@@ -196,6 +203,11 @@ class RunCaseTests(unittest.TestCase):
                                        "components/demo/.claude"),
             "a project skill in a worktree": ({".claude/worktrees/probe/.claude/skills/ship/SKILL.md": "ship it"},
                                               ".claude/worktrees/probe/.claude"),
+            "a project skill in node_modules": ({"node_modules/pkg/.claude/skills/ship/SKILL.md": "ship it"},
+                                                "node_modules/pkg/.claude"),
+            "a quoted allowed-tools key": (
+                {"skills/tdd/SKILL.md": tdd.replace("description:", '"allowed-tools": Write\ndescription:', 1)},
+                "skills/tdd/SKILL.md"),
             "a skill's allowed-tools": (
                 {"skills/tdd/SKILL.md": tdd.replace("description:", "allowed-tools: Write\ndescription:", 1)},
                 "skills/tdd/SKILL.md"),
@@ -216,7 +228,8 @@ class RunCaseTests(unittest.TestCase):
 
         checkout = self.copy_checkout()
         narrowing = {"permissions": {"deny": ["WebFetch"], "ask": ["Bash(rm:*)"]}}
-        (checkout / ".claude/worktrees/probe").mkdir(parents=True)
+        (checkout / ".claude/worktrees/probe/.claude").mkdir(parents=True)
+        (checkout / ".claude/worktrees/probe/.claude/settings.local.json").write_text("{}")
         (checkout / ".claude/settings.json").write_text(json.dumps(narrowing))
         (checkout / ".claude/settings.local.json").write_text(json.dumps({"permissions": {"allow": ["Write"]}}))
         self.log.unlink(missing_ok=True)
@@ -224,6 +237,16 @@ class RunCaseTests(unittest.TestCase):
 
         self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
         self.assertEqual(len(sessions), 1)
+
+    def test_refuses_an_output_directory_that_already_holds_transcripts(self):
+        (self.temp / "out").mkdir()
+        (self.temp / "out/run-1-turn-1.jsonl").write_text("{}")
+
+        result, sessions = self.run_case("--runs", "1", "Add a feature")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("run-1-turn-1.jsonl", result.stderr)
+        self.assertEqual(sessions, [])
 
     def test_followup_turn_resumes_the_same_session(self):
         result, sessions = self.run_case("--runs", "1", "--then", "Yes, do it", "Is the guidance clear?")
@@ -245,6 +268,7 @@ class RunCaseTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("timed out after 1 s", result.stdout)
         self.assertIn("Edit skills/tdd/SKILL.md (denied)", result.stdout)
+        self.assertIn("Skills: tdd 1/1\n", result.stdout)
         self.assertTrue(self.recorded_child_exits())
 
     def test_terminating_the_script_stops_every_session(self):

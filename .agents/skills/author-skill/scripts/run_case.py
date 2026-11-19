@@ -3,19 +3,21 @@
 
 Each run gets its own configuration directory. It holds the CLAUDE.md and skills
 that `scripts/manage.py install` would deploy from this checkout for Claude
-Code. Its settings.json copies apiKeyHelper, env, model, and autoMemoryEnabled
-from your Claude Code settings. A session signed in only through /login cannot
-sign in here. Create a token with `claude setup-token` and export it as
-CLAUDE_CODE_OAUTH_TOKEN.
+Code. The directory's settings.json copies apiKeyHelper, env, model, and
+autoMemoryEnabled from your Claude Code settings. A session signed in only
+through /login cannot sign in here. Create a token with `claude setup-token`
+and export it as CLAUDE_CODE_OAUTH_TOKEN.
 
 Sessions run in this checkout and may use only Read, Grep, Glob, Skill, and the
 shell commands Claude Code treats as read-only. Every other tool call is denied,
 so an attempt to edit, post, or merge appears in the report as a denied call
 instead of happening. Sessions skip local settings
 (.claude/settings.local.json). The script refuses to start when anything else
-in the checkout could approve a call. It accepts a .claude/settings.json with
-only deny and ask rules, and .claude/worktrees/. It refuses any other entry in
-a .claude/ folder at any depth, and a skill that declares allowed-tools.
+in the checkout could approve a call. Every .claude/ folder in the checkout may
+hold only settings.json, settings.local.json, and worktrees/, and the top-level
+settings.json may hold only deny and ask rules. The script also refuses a skill
+whose frontmatter mentions allowed-tools, and an output directory that already
+holds transcripts.
 
 The report lists each run's skills, actions, and answers, then how many runs
 used each skill and had each tool denied. The script exits 1 when any run times
@@ -45,7 +47,7 @@ CONTEXT_TOOLS = set(ALLOWED) | {"ToolSearch", "TodoWrite"}
 DRAIN_SECONDS = 5
 PROJECT_CONFIG = REPO / ".claude"
 PROJECT_SETTINGS = PROJECT_CONFIG / "settings.json"
-ACCEPTED_ENTRIES = {PROJECT_SETTINGS, PROJECT_CONFIG / "settings.local.json", PROJECT_CONFIG / "worktrees"}
+ACCEPTED_ENTRIES = {"settings.json", "settings.local.json", "worktrees"}
 NARROWING_RULES = {"deny", "ask"}
 USER_SETTINGS = ("apiKeyHelper", "env", "model", "autoMemoryEnabled")
 PARENT_SESSION_VARIABLES = (
@@ -65,6 +67,7 @@ class Turn:
     prompt: str
     calls: list[dict] = field(default_factory=list)
     errors: dict[str, object] = field(default_factory=dict)
+    completed: set[str] = field(default_factory=set)
     denied: set[str] = field(default_factory=set)
     result: dict | None = None
     problem: str | None = None
@@ -101,18 +104,14 @@ def settings_problems():
 
 def read_only_problems():
     problems = settings_problems()
-    if PROJECT_CONFIG.is_dir():
-        problems += ["{} exists".format(path) for path in sorted(PROJECT_CONFIG.iterdir())
-                     if path not in ACCEPTED_ENTRIES]
-    for folder, children, _ in os.walk(REPO):
-        children[:] = sorted(child for child in children if child not in (".git", "node_modules"))
-        nested = Path(folder) / ".claude"
-        if ".claude" in children and nested != PROJECT_CONFIG:
-            problems.append("{} exists".format(nested))
+    for folder, children, files in os.walk(REPO):
+        children[:] = sorted(child for child in children if child != ".git")
+        if Path(folder).name == ".claude":
+            problems += ["{} exists".format(Path(folder) / entry) for entry in sorted(children + files)
+                         if entry not in ACCEPTED_ENTRIES]
     for relative, data, _ in manage.skill_files():
         parts = data.decode("utf-8").split("---", 2) if relative.name == "SKILL.md" else []
-        frontmatter = parts[1] if len(parts) == 3 else ""
-        if any(line.startswith("allowed-tools") for line in frontmatter.splitlines()):
+        if len(parts) == 3 and "allowed-tools" in parts[1]:
             problems.append("skills/{} declares allowed-tools".format(relative))
     return problems
 
@@ -160,8 +159,12 @@ def read_events(text, turn):
             turn.calls += [block for block in content if block.get("type") == "tool_use"]
         elif event.get("type") == "user" and isinstance(content, list):
             for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_result" and block.get("is_error"):
+                if not isinstance(block, dict) or block.get("type") != "tool_result":
+                    continue
+                if block.get("is_error"):
                     turn.errors[block.get("tool_use_id")] = block.get("content")
+                else:
+                    turn.completed.add(block.get("tool_use_id"))
         elif event.get("type") == "result":
             turn.result = event
 
@@ -242,7 +245,7 @@ def actions(turns):
 
 def skills(turns):
     named = (call["input"].get("skill") for turn in turns for call in turn.calls
-             if call["name"] == "Skill" and call["id"] not in turn.errors)
+             if call["name"] == "Skill" and call["id"] in turn.completed)
     return list(dict.fromkeys(str(name) for name in named if name))
 
 
@@ -300,6 +303,9 @@ def main():
     for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(signum, stop_all)
     args.out = args.out or Path(tempfile.mkdtemp(prefix="run-case-"))
+    earlier = sorted(args.out.glob("run-*-turn-*.jsonl")) if args.out.is_dir() else []
+    if earlier:
+        parser.error("{} already holds transcripts, such as {}".format(args.out, earlier[0].name))
     args.out.mkdir(parents=True, exist_ok=True)
     configs = Path(tempfile.mkdtemp(prefix="run-case-config-"))
     try:
