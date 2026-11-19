@@ -86,7 +86,7 @@ func installRefreshGuard(core *coreauth.Manager, authIDs []string, onRefused fun
 			g.spendLocked(id, refreshToken(a), a.LastError != nil)
 			s := g.findLocked(id, refreshToken(a))
 			s.unseen = a.LastError == nil
-			s.refused = a.LastError != nil && refusedRefresh(a.LastError.Message)
+			s.refused = a.LastError != nil && invalidGrant(a.LastError.Message)
 			g.mu.Unlock()
 		}
 	}
@@ -108,7 +108,7 @@ func (g *refreshGuard) Refresh(ctx context.Context, a *coreauth.Auth) (*coreauth
 
 	b, err := exchange(ctx, a)
 
-	refused := err != nil && refusedRefresh(err.Error())
+	refused := err != nil && invalidGrant(err.Error())
 	g.mu.Lock()
 	switch {
 	case err != nil:
@@ -139,13 +139,11 @@ func (g *refreshGuard) failed(a *coreauth.Auth) bool {
 	return s != nil && (s.failed || s.unseen && a.LastError != nil)
 }
 
-// For an exchange the guard did not see, the SDK's failure record on the
-// credential stands in, as in failed.
 func (g *refreshGuard) refused(a *coreauth.Auth) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	s := g.findLocked(a.ID, refreshToken(a))
-	return s != nil && (s.refused || s.unseen && a.LastError != nil && refusedRefresh(a.LastError.Message))
+	return s != nil && (s.refused || s.unseen && a.LastError != nil && invalidGrant(a.LastError.Message))
 }
 
 // tokenRefusal matches the error of the SDK's Claude token exchange for a
@@ -155,7 +153,7 @@ var tokenRefusal = regexp.MustCompile(`(?s)token refresh failed with status (?:4
 
 // RFC 6749 section 5.2 gives invalid_grant for a grant that is invalid,
 // expired, or revoked.
-func refusedRefresh(text string) bool {
+func invalidGrant(text string) bool {
 	m := tokenRefusal.FindStringSubmatch(text)
 	if m == nil {
 		return false

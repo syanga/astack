@@ -117,7 +117,7 @@ class CheckTests(CheckFixture):
 
     def test_a_signed_in_account_without_a_reading_fails_beside_an_account_that_needs_login(self):
         self.needs_login("alumni")
-        self.fake_router.status["accounts"][2]["overage"] = None
+        next(a for a in self.fake_router.status["accounts"] if a["id"] == "personal")["overage"] = None
 
         result = self.check()
 

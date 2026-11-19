@@ -9,10 +9,7 @@ import (
 	"github.com/syanga/astack/components/claude-router/internal/router"
 )
 
-// expiredRefreshToken is the error of the SDK's token exchange when the
-// token endpoint refuses an expired refresh token, as a router's service.log
-// recorded it.
-const expiredRefreshToken = `token refresh failed after 3 attempts: token refresh failed with status 400: {"error": "invalid_grant", "error_description": "Refresh token expired"}`
+const sdkErrorForExpiredRefreshToken = `token refresh failed after 3 attempts: token refresh failed with status 400: {"error": "invalid_grant", "error_description": "Refresh token expired"}`
 
 func (e *env) needsLogin(account string) bool {
 	e.t.Helper()
@@ -46,7 +43,7 @@ func TestSDKRefreshRefusedForAnExpiredRefreshTokenMarksTheAccountAsNeedingLogin(
 	e.writeCredentialDueIn("acct-a", 3*time.Second)
 	e.clock.set(time.Now())
 	e.startWith(Options{ReadRetryBase: time.Hour})
-	x := &tokenExchange{up: e.upstream, account: "acct-a", fail: true, failErr: errors.New(expiredRefreshToken)}
+	x := &tokenExchange{up: e.upstream, account: "acct-a", failErr: errors.New(sdkErrorForExpiredRefreshToken)}
 	e.replaceTokenExchange(x)
 
 	e.waitFor("the SDK's refresh failed", 10*time.Second, func() bool { return e.sdkAuth("acct-a").LastError != nil })
@@ -72,7 +69,7 @@ func TestOnlyARefusedRefreshTokenMarksTheAccountAsNeedingLogin(t *testing.T) {
 		err     string
 		refused bool
 	}{
-		{"expired refresh token", expiredRefreshToken, true},
+		{"expired refresh token", sdkErrorForExpiredRefreshToken, true},
 		{"revoked refresh token answered 401",
 			`token refresh failed after 3 attempts: token refresh failed with status 401: {"error":"invalid_grant","error_description":"Refresh token revoked"}`, true},
 		{"server error",
@@ -88,7 +85,7 @@ func TestOnlyARefusedRefreshTokenMarksTheAccountAsNeedingLogin(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			e := newEnv(t, "acct-a")
-			x := &tokenExchange{up: e.upstream, account: "acct-a", fail: true, failErr: errors.New(c.err)}
+			x := &tokenExchange{up: e.upstream, account: "acct-a", failErr: errors.New(c.err)}
 			e.startWithoutSDKRefresh(x)
 
 			e.recheckNow(31 * time.Minute)
@@ -105,15 +102,21 @@ func TestOnlyARefusedRefreshTokenMarksTheAccountAsNeedingLogin(t *testing.T) {
 }
 
 func TestRefusalOfAnSDKRefreshThatBeganBeforeTheGuardMarksTheAccountAsNeedingLogin(t *testing.T) {
-	for _, endedBeforeTheGuard := range []bool{false, true} {
-		name := map[bool]string{false: "refused after the guard is registered", true: "refused before the guard is registered"}[endedBeforeTheGuard]
-		t.Run(name, func(t *testing.T) {
+	cases := []struct {
+		name                string
+		endedBeforeTheGuard bool
+	}{
+		{"refused after the guard is registered", false},
+		{"refused before the guard is registered", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			e := newEnv(t, "acct-a")
-			x := &tokenExchange{up: e.upstream, account: "acct-a", fail: true, failErr: errors.New(expiredRefreshToken)}
+			x := &tokenExchange{up: e.upstream, account: "acct-a", failErr: errors.New(sdkErrorForExpiredRefreshToken)}
 			release := e.holdExchanges(x)
 			e.startWithSDKRefreshBeforeTheGuard("acct-a", x)
-			if endedBeforeTheGuard {
+			if c.endedBeforeTheGuard {
 				release()
 				e.waitFor("the SDK recorded the refusal", 10*time.Second, func() bool { return e.sdkAuth("acct-a").LastError != nil })
 			} else {
@@ -141,7 +144,7 @@ func TestAnAccountWhoseRefreshTokenWasRefusedNeedsLoginAfterARestartUntilItSigns
 	e := newEnv(t, "acct-a", "acct-b")
 	e.clock.set(time.Now())
 	e.startWith(Options{ReadRetryBase: time.Hour})
-	e.replaceTokenExchange(&tokenExchange{up: e.upstream, account: "acct-a", fail: true, failErr: errors.New(expiredRefreshToken)})
+	e.replaceTokenExchange(&tokenExchange{up: e.upstream, account: "acct-a", failErr: errors.New(sdkErrorForExpiredRefreshToken)})
 	e.refuseAccessToken("acct-a")
 	e.recheckNow(31 * time.Minute)
 	refused := e.send(msg{Session: sessionID(1)})

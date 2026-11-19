@@ -1584,19 +1584,22 @@ whose OAuth `error` is `invalid_grant`. RFC 6749 section 5.2 gives that
 error for a grant that is invalid, expired, or revoked, so only a new login
 replaces the credential. The SDK's error for a failed exchange ends with the
 answer's status and body (`refreshHTTPError` in the SDK's
-`internal/auth/claude/anthropic_auth.go`), and the guard classifies that
-text. For an exchange it sees, the SDK's or the router's, the guard marks
-the account at once through `Router.RequireLogin`, whether or not a read
-waits for the refresh. For a refresh that began before the guard, the SDK's
+`internal/auth/claude/anthropic_auth.go`). The guard classifies that text.
+For an exchange it sees, the SDK's or the router's, the guard marks the
+account at once through `Router.RequireLogin`, whether or not a read waits
+for the refresh. For a refresh that began before the guard, the SDK's
 failure record (`LastError`) carries the same text, and the next read of the
 account marks it. A read during the failure run of a refused refresh token
 fails with `the token endpoint refused the credential's refresh token; the
-account needs login`. Every other failed exchange, such as a transport
-error, a timeout, a 429, a 5xx, or a 400 with another OAuth error, starts a
-failure run as before and leaves the login requirement unchanged. Setting
-the mark records a `login_required` event with reason `refresh_refused`. The
-mark survives a restart and clears as an `auth` failure's mark does (Login
-and manual movement)
+account needs login`. Any other failed exchange starts a failure run and
+leaves the login requirement unchanged. That covers a transport error, a
+timeout, a 429, a 5xx, and a 400 with another OAuth error. Setting the mark
+records a `login_required` event with reason `refresh_refused`. The mark
+survives a restart and clears as an `auth` failure's mark does, as Login and
+manual movement describes. A settings read can succeed after a refusal only
+with an access token that is not due and that the usage endpoint accepts.
+When that token comes due, the SDK's refresh is refused again, and the
+guard marks the account again
 (`TestSDKRefreshRefusedForAnExpiredRefreshTokenMarksTheAccountAsNeedingLogin`,
 `TestOnlyARefusedRefreshTokenMarksTheAccountAsNeedingLogin`,
 `TestRefusalOfAnSDKRefreshThatBeganBeforeTheGuardMarksTheAccountAsNeedingLogin`,
@@ -2258,9 +2261,9 @@ behavior is the client's own continuation turn.
 
 ### Login and manual movement
 
-An `auth` failure marks the account as needing login, and so does a refresh
-token that the token endpoint refuses (Paid-overflow reading). New
-conversations skip it. A conversation that has been served on it gets 503 naming
+An `auth` failure marks the account as needing login. A refresh token that
+the token endpoint refuses marks the account too (Paid-overflow reading).
+New conversations skip an account that needs login. A conversation that has been served on it gets 503 naming
 `claude-router login -account ID`, never 401, and keeps its assignment. An
 idle one moves instead when another account is eligible (Idle conversations
 are placed again). One that never served moves (PR2). That move rests on a
@@ -2269,9 +2272,9 @@ by:
 
 - `claude-router login`, which clears it in the saved account state while
   it holds the state directory, so it applies at the next start;
-- a settings read with the account's credential that began after the
-  failure that set the mark and succeeded, which shows that the credential
-  works (`login_confirmed` event). This covers a 401 that a refresh resolved.
+- a successful settings read with the account's credential that began after
+  the failure that set the mark, which shows that the credential works
+  (`login_confirmed` event). This covers a 401 that a refresh resolved.
 
 `POST /claude-router/move` moves a conversation explicitly, whatever the
 account's state (`TestRevokedLoginKeepsAssignmentsAcrossRestartUntilMovedOrConfirmed`,
