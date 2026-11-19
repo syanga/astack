@@ -158,6 +158,22 @@ class MemoryGuardTests(unittest.TestCase):
         self.enabled.write_text("0x0000\n")
         self.assertIn("unavailable", self.run_main("status", uid=1000)[1])
 
+    def test_status_reports_the_guard_installed_only_with_the_boot_file_and_a_nonzero_live_value(self):
+        def guard_line():
+            return [line for line in self.run_main("status", uid=1000)[1].splitlines() if line.startswith("memory guard")]
+
+        self.ttl.write_text("1000\n")
+        self.assertEqual(guard_line(), ["memory guard          not installed"])
+
+        self.run_main("install")
+        self.assertEqual(guard_line(), ["memory guard          installed"])
+
+        self.ttl.write_text("2000\n")
+        self.assertEqual(guard_line(), ["memory guard          installed"])
+
+        self.ttl.write_text("0\n")
+        self.assertEqual(guard_line(), ["memory guard          not installed"])
+
     def test_status_reports_a_boot_file_without_the_previous_value_as_an_error(self):
         self.boot_file.parent.mkdir(parents=True)
         self.boot_file.write_text("w {} - - - - 1000\n".format(self.ttl))

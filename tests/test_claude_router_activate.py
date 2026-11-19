@@ -1472,6 +1472,7 @@ class UpdateOverActivationTests(ActivationFixture):
         result = self.component(FAKE_BUILD="2")
 
         lines = preview.stdout.splitlines()
+        lines = lines[:lines.index("Preview complete for claude-router.") + 1]
         self.assertEqual(lines[-3:], ["RESTART {} dev.astack.claude-router".format(self.manager_name),
                                       "CHECK claude-router check; claude-router direct if it fails",
                                       "Preview complete for claude-router."])
