@@ -40,8 +40,10 @@ from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 import astack_reminders, memory_guard
 root = Path(sys.argv[2])
-guard = memory_guard.Host(root / "enabled", root / "min_ttl_ms", root / "astack-memory-guard.conf")
-print("\n".join(astack_reminders.pending(json.loads(sys.argv[3]), astack_reminders.Host(guard, root / "linger"))))
+guard = memory_guard.Host(lru_gen_enabled_file=root / "enabled", min_ttl_ms_file=root / "min_ttl_ms",
+                          boot_file=root / "astack-memory-guard.conf")
+host = astack_reminders.Host(guard=guard, linger_dir=root / "linger")
+print("\n".join(astack_reminders.pending(json.loads(sys.argv[3]), host)))
 '''
 
 
@@ -222,7 +224,6 @@ class InstallerReminderTests(InstallerFixture):
         result = self.run_installer("--target", "claude", command="uninstall")
         self.assertIn("Uninstall complete for claude.", result.stdout)
         self.assertNotIn("README.md#", result.stdout)
-
 
     def test_the_guard_command_names_this_checkout_even_when_its_path_has_spaces(self):
         host_files = self.root / "host files"
