@@ -270,17 +270,24 @@ class LiveShare:
     def __init__(self, host: Machine) -> None:
         self.host = host
         self.warned = False
+        self.warning: str | None = None
 
     def read(self) -> Machine:
         try:
             self.host = replace(self.host, memory_share=load_memory_share())
         except Refusal as refusal:
             if not self.warned:
-                say("{}; keeping memory_share {:g} until the file is valid".format(refusal, self.host.memory_share))
+                self.warning = "{}; keeping memory_share {:g} until the file is valid".format(
+                    refusal, self.host.memory_share)
             self.warned = True
         else:
             self.warned = False
         return self.host
+
+    def print_warning(self) -> None:
+        if self.warning is not None:
+            say(self.warning)
+            self.warning = None
 
 
 def refuse_if_never_fits(profile: Profile, host: Machine, config: Path) -> None:
@@ -496,24 +503,27 @@ def wait_for_admission(queue: Queue, ticket: Ticket, share: LiveShare, profile: 
     arrived = time.monotonic()
     next_report = arrived
     while True:
-        with queue.lock():
-            runs = queue.live()
-            ahead = [run for run in runs if run.admission is None and run.seq < ticket.run.seq]
-            running = [run.admission for run in runs if run.admission is not None]
-            if ahead:
-                reason = "behind {}".format(plural(len(ahead), "earlier run"))
-            else:
-                level = pressure()
+        try:
+            with queue.lock():
                 machine = share.read()
                 refuse_if_never_fits(profile, machine, config)
-                workers = fit(machine, running, profile, limit)
-                if level.holding:
-                    reason = "for memory pressure to ease: " + level.reading
-                elif workers < 1:
-                    reason = shortage(machine, running, profile)
+                runs = queue.live()
+                ahead = [run for run in runs if run.admission is None and run.seq < ticket.run.seq]
+                running = [run.admission for run in runs if run.admission is not None]
+                if ahead:
+                    reason = "behind {}".format(plural(len(ahead), "earlier run"))
                 else:
-                    ticket.admit(Admission(workers, profile.memory(workers), time.time()))
-                    return ticket.run.admission, time.monotonic() - arrived
+                    level = pressure()
+                    workers = fit(machine, running, profile, limit)
+                    if level.holding:
+                        reason = "for memory pressure to ease: " + level.reading
+                    elif workers < 1:
+                        reason = shortage(machine, running, profile)
+                    else:
+                        ticket.admit(Admission(workers, profile.memory(workers), time.time()))
+                        return ticket.run.admission, time.monotonic() - arrived
+        finally:
+            share.print_warning()
         now = time.monotonic()
         if now >= next_report:
             say("{} waits {}; waited {}".format(profile.name, reason, duration(now - arrived)))
@@ -708,7 +718,9 @@ def write_json(path: Path, data: dict) -> None:
 
 def execute(command: list[str], env: dict, share: LiveShare, ticket: Ticket, profile: Profile) -> Measured:
     if sys.platform == "linux":
-        failure = set_slice_cap(share.read().share)
+        cap = share.read().share
+        share.print_warning()
+        failure = set_slice_cap(cap)
         if failure is None:
             version = systemd_version()
             options = ["-p", "OOMPolicy=continue"] if version >= OOM_POLICY_MIN_SYSTEMD else []

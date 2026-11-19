@@ -1,6 +1,8 @@
+import fcntl
 import json
 import os
 from pathlib import Path
+import select
 import shlex
 import signal
 import subprocess
@@ -164,7 +166,9 @@ class JobgateTest(unittest.TestCase):
     def share(self, value):
         config = self.root / "home/.config"
         config.mkdir(parents=True, exist_ok=True)
-        (config / "jobgate.toml").write_text("memory_share = {}\n".format(value))
+        temporary = config / "jobgate.toml.tmp"
+        temporary.write_text("memory_share = {}\n".format(value))
+        os.replace(str(temporary), str(config / "jobgate.toml"))
 
     def gate(self, *arguments, env=None, timeout=60):
         return subprocess.run([sys.executable, str(SCRIPT), *arguments], cwd=str(self.repo), env=env or self.env,
@@ -249,23 +253,111 @@ class AdmissionTests(JobgateTest):
         self.assertFalse(second.started.exists())
         self.assertEqual(first.release(), 0)
 
+    def test_a_run_behind_another_waiting_run_exits_when_the_share_drops_below_its_need(self):
+        self.set_machine(memory=8 * GIB, cores=16, psi=CALM)
+        self.profiles(test=("1G", "1G", 3, "TEST_WORKERS"), small=("512M", "512M", 1, "SMALL_WORKERS"))
+        first = self.hold("first")
+        self.assertEqual(first.workers(), 3)
+        second = self.hold("second", profile="small", variable="SMALL_WORKERS")
+        second.wait_message("waits for memory")
+        third = self.hold("third")
+        third.wait_message("waits behind 1 earlier run")
+        self.share(0.2)
+        self.assertEqual(third.process.wait(timeout=15), 125)
+        self.assertIn("[test] needs 2.0G for 1 worker, more than this machine's 1.6G share", third.stderr())
+        self.assertIsNone(second.process.poll())
+        self.assertEqual(first.release(), 0)
+        self.assertEqual(second.workers(), 1)
+        self.assertEqual(second.release(), 0)
+
+    def test_a_blocked_share_warning_does_not_hold_the_queue_lock(self):
+        self.set_machine(memory=8 * GIB, cores=16, psi=THRASHING)
+        self.share(0.4)
+        read_end, write_end = os.pipe()
+        self.addCleanup(os.close, read_end)
+        waiter = subprocess.Popen([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", "pass"],
+                                  cwd=str(self.repo), env=self.env, stdout=subprocess.DEVNULL, stderr=write_end)
+        self.addCleanup(waiter.wait)
+        self.addCleanup(waiter.kill)
+        seen = b""
+        deadline = time.monotonic() + 30
+        while b"waits for memory pressure" not in seen:
+            self.assertLess(time.monotonic(), deadline, seen)
+            if select.select([read_end], [], [], 0.5)[0]:
+                seen += os.read(read_end, 65536)
+        os.set_blocking(write_end, False)
+        for chunk in (4096, 1):
+            try:
+                while True:
+                    os.write(write_end, b"x" * chunk)
+            except BlockingIOError:
+                pass
+        os.set_blocking(write_end, True)
+        os.close(write_end)
+        self.share(2)
+        time.sleep(2.5)
+        lock = os.open(str(self.root / "home/.cache/jobgate/queue.lock"), os.O_RDWR)
+        try:
+            deadline = time.monotonic() + 10
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    self.assertLess(time.monotonic(), deadline, "the waiter holds the queue lock while its warning blocks")
+                    time.sleep(0.1)
+        finally:
+            os.close(lock)
+        self.assertIsNone(waiter.poll())
+        drained = b""
+        deadline = time.monotonic() + 30
+        while b"keeping memory_share 0.4 " not in drained:
+            self.assertLess(time.monotonic(), deadline)
+            if select.select([read_end], [], [], 0.5)[0]:
+                drained = (drained + os.read(read_end, 65536))[-4096:]
+
+    def test_a_share_lowered_while_a_run_waits_for_the_queue_lock_still_refuses_it(self):
+        self.set_machine(memory=8 * GIB, cores=16, psi=THRASHING)
+        self.profiles(test=("1G", "1G", 3, "TEST_WORKERS"))
+        waiter = self.hold("waiter")
+        waiter.wait_message("waits for memory pressure")
+        lock = os.open(str(self.root / "home/.cache/jobgate/queue.lock"), os.O_RDWR)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            time.sleep(2.5)
+            self.share(0.2)
+            self.set_machine(memory=8 * GIB, cores=16, psi=CALM)
+        finally:
+            os.close(lock)
+        self.assertEqual(waiter.process.wait(timeout=15), 125)
+        self.assertIn("[test] needs 2.0G for 1 worker, more than this machine's 1.6G share", waiter.stderr())
+        self.assertFalse(waiter.started.exists())
+
     def test_an_invalid_share_file_keeps_waiting_runs_on_the_last_valid_share(self):
         self.set_machine(memory=8 * GIB, cores=16, psi=CALM)
         self.profiles(test=("1G", "1G", 3, "TEST_WORKERS"))
-        self.share(0.5)
+        self.share(0.4)
         first = self.hold("first")
-        self.assertEqual(first.workers(), 3)
+        self.assertEqual(first.workers(), 2)
         second = self.hold("second")
         second.wait_message("waits for memory")
         self.share(2)
-        second.wait_message("keeping memory_share 0.5")
+        second.wait_message("keeping memory_share 0.4 ")
         time.sleep(2.5)
         self.assertIsNone(second.process.poll())
         self.assertEqual(second.stderr().count("keeping memory_share"), 1)
         arriving = self.gate("run", "test", "--", sys.executable, "-c", "pass")
         self.assertEqual(arriving.returncode, 125, arriving.stderr)
+        deadline = time.monotonic() + 30
+        while second.stderr().count("keeping memory_share") < 2:
+            self.assertLess(time.monotonic(), deadline, second.stderr())
+            self.share(0.45)
+            time.sleep(1.5)
+            self.share(2)
+            time.sleep(1.5)
+        self.assertIn("keeping memory_share 0.45 ", second.stderr())
         self.assertEqual(first.release(), 0)
-        self.assertEqual(second.workers(), 3)
+        self.assertEqual(second.workers(), 2)
         self.assertEqual(second.release(), 0)
 
     def test_max_workers_flag_only_lowers_the_profile(self):
@@ -659,16 +751,20 @@ class ExitCodeTests(JobgateTest):
     def test_a_home_that_jobgate_cannot_write_exits_125_with_one_line(self):
         if os.geteuid() == 0:
             self.skipTest("root can write a read-only directory")
-        home = self.root / "read-only home"
-        home.mkdir(mode=0o555)
-        self.addCleanup(home.chmod, 0o755)
-        env = dict(self.env, HOME=str(home))
-        for arguments in (("run", "test", "--", sys.executable, "-c", "pass"), ("status",)):
-            with self.subTest(command=arguments[0]):
-                result = self.gate(*arguments, env=env)
-                self.assertEqual(result.returncode, 125, result.stderr)
-                self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
-                self.assertIn("cannot create {}".format(home / ".cache"), result.stderr)
+        read_only = self.root / "read-only home"
+        read_only.mkdir(mode=0o555)
+        self.addCleanup(read_only.chmod, 0o755)
+        no_lock = self.root / "home without a lock file"
+        (no_lock / ".cache/jobgate/runs").mkdir(parents=True)
+        (no_lock / ".cache/jobgate").chmod(0o555)
+        self.addCleanup((no_lock / ".cache/jobgate").chmod, 0o755)
+        for home, failing in ((read_only, read_only / ".cache"), (no_lock, no_lock / ".cache/jobgate/queue.lock")):
+            for arguments in (("run", "test", "--", sys.executable, "-c", "pass"), ("status",)):
+                with self.subTest(home=home.name, command=arguments[0]):
+                    result = self.gate(*arguments, env=dict(self.env, HOME=str(home)))
+                    self.assertEqual(result.returncode, 125, result.stderr)
+                    self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
+                    self.assertIn("cannot create {}".format(failing), result.stderr)
 
     def test_sigterm_or_sighup_while_waiting_exits_128_plus_n(self):
         self.set_machine(memory=64 * GIB, cores=4, psi=CALM)
