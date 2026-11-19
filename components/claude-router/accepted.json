@@ -1,8 +1,8 @@
 {
- "head": "1de824953d2e2cae0326bb505c334c75404218a5",
- "code_sha256": "d90e26f044865b2dab1109f654672f8dc81487cb85ab3d81a2b1b2949faab4a1",
- "binary_sha256": "bf0df023a254dd211800b2cefae632a2acc55a42935ce9c9725aa8a3105eb1bf",
- "helpers_sha256": "081c437f8bd6ff145cde0dc2ef1afd0766a80a1897f85860767bf8f19fd33e59",
+ "head": "622eec90df6ac069bd88c9d968cba03f317ef364",
+ "code_sha256": "aff33a40f5644e7a9dec02a0d65a941ed957a37276ce04dbf43e5c1651dc1136",
+ "binary_sha256": "b17dc178b019f63712b9387afdb1d49b2ab52244b8be542f9d759e2c7074f51c",
+ "helpers_sha256": "91ec69daf66a7ac317dcd4261552a269c88f68940a6e638df1149e1e0db7fd98",
  "sdk": "v8.0.11",
  "go": "go1.27.4",
  "platform": "linux/amd64",
@@ -10,14 +10,23 @@
   "claude_code": "2.1.327"
  },
  "result": "pass",
- "scope": "Issues 185, 193, and 194. A foreground lane router on port 18797 ran this code on Linux 7.0 x86_64, with its state on the machine's ext4 disk. It used the real accounts through copies of the dobby and work logins (lane.py, lane-config.json). The daily router kept running beside the lane, unchanged. A real claude -p request for claude-haiku-5-5 started a conversation. A lane restart over an events.jsonl that ended in a newline added no blank line. lane.py then stopped the lane and appended the first half of the last event line, as a short write leaves it. After the next restart, the first new event, model_catalog, began on a line of its own and parsed. A resume of the first conversation stayed on its account and kept its content, and digest.go's readDigest and account.go's requestsSince counted its request. The changes to the platform note and to activate's flags send no request. tests/test_claude_router_activate.py checks the platform note text and runs activate without the removed --agent-sdk flag. record.py built the record. Unchanged historical scenarios are references and were not rerun.",
- "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence",
+ "scope": "Issue 207. A foreground lane router on port 18797 ran this code on Linux 7.0 x86_64, beside the daily router, with its state on the machine's ext4 disk. It ran in a user and network namespace (lane.py). The namespace's /etc/hosts sent api.anthropic.com and raw.githubusercontent.com through socat bridges to the real hosts, and platform.claude.com to token_endpoint.py, a controlled token endpoint. Real accounts: copies of every daily login whose token expired more than 4.5 h later (personal, work, dobby, severus, and real-5) read paid overflow and usage and served requests through the real API. Only real-5 had weekly capacity, so it answered the test messages. The record labels two daily logins that no earlier record names as real-5 and real-6; the lane's evidence names them. Controlled: the fake logins expired and flaky, whose refresh tokens the controlled endpoint answered with 400 invalid_grant \"Refresh token expired\" and with 503. No real refresh token could reach the real token endpoint, and none reached the controlled one. The router marked expired as needing login at start, and status and claude-router status showed it with its login step. claude_router.py check warned with the login step and passed, before and after a restart, and its test messages went only to real accounts. A 503 left flaky signed in, and check failed on its missing reading as before. tests/test_claude_router_activate.py covers the update path, which runs the same check. record.py built the record. Unchanged historical scenarios are references and were not rerun.",
+ "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue207/evidence",
  "matrix": [
   {
-   "scenario": "dobby token expires more than 4.5 h from now, outside the four-hour refresh lead",
+   "scenario": "The lane copies only daily logins whose tokens expire more than 4.5 h from now, outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 308,
+    "copied_expires_in_min": {
+     "personal": 442,
+     "work": 444,
+     "dobby": 444,
+     "severus": 472,
+     "real-5": 471
+    },
+    "skipped_expires_in_min": {
+     "real-6": 266
+    },
     "evidence": [
      "results.json",
      "lane.py"
@@ -25,22 +34,11 @@
    }
   },
   {
-   "scenario": "work token expires more than 4.5 h from now, outside the four-hour refresh lead",
+   "scenario": "Lane code, executable, and SDK match the build at 622eec9 and go.mod",
    "status": "pass",
    "detail": {
-    "expires_in_min": 308,
-    "evidence": [
-     "results.json",
-     "lane.py"
-    ]
-   }
-  },
-  {
-   "scenario": "Lane code, executable, and SDK match the build at 1de8249 and go.mod",
-   "status": "pass",
-   "detail": {
-    "code_sha256": "d90e26f044865b2dab1109f654672f8dc81487cb85ab3d81a2b1b2949faab4a1",
-    "binary_sha256": "bf0df023a254dd211800b2cefae632a2acc55a42935ce9c9725aa8a3105eb1bf",
+    "code_sha256": "aff33a40f5644e7a9dec02a0d65a941ed957a37276ce04dbf43e5c1651dc1136",
+    "binary_sha256": "b17dc178b019f63712b9387afdb1d49b2ab52244b8be542f9d759e2c7074f51c",
     "sdk": "v8.0.11",
     "evidence": [
      "status-start.json"
@@ -48,12 +46,15 @@
    }
   },
   {
-   "scenario": "Both lane accounts are signed in with paid overflow disabled at start",
+   "scenario": "personal, work, dobby, severus, and real-5 are signed in with paid overflow disabled at start",
    "status": "pass",
    "detail": {
     "overage": {
+     "personal": "disabled",
+     "work": "disabled",
      "dobby": "disabled",
-     "work": "disabled"
+     "severus": "disabled",
+     "real-5": "disabled"
     },
     "evidence": [
      "status-start.json"
@@ -61,137 +62,214 @@
    }
   },
   {
-   "scenario": "The lane read the model catalog and serves claude-haiku-5-5",
+   "scenario": "At least one real account has weekly capacity for the test messages",
    "status": "pass",
    "detail": {
-    "catalog": [
-     {
-      "outcome": "read",
-      "added": "claude-fable-5-2 claude-haiku-5-5"
-     }
-    ],
-    "evidence": [
-     "events.jsonl"
-    ]
-   }
-  },
-  {
-   "scenario": "A new conversation for claude-haiku-5-5 is placed and answered through the lane",
-   "status": "pass",
-   "detail": {
-    "exit": 0,
-    "account": "work",
-    "requests": [
-     {
-      "account": "work",
-      "decision": "dispatch",
-      "reason": "assigned",
-      "status": 200
-     },
-     {
-      "account": "work",
-      "decision": "place",
-      "reason": "reset_preference",
-      "status": 200
-     }
-    ],
-    "answer": "ok",
-    "evidence": [
-     "s1-new.out.txt",
-     "s1-new.events.json"
-    ]
-   }
-  },
-  {
-   "scenario": "A restart over an events.jsonl that ends in a newline adds no blank line",
-   "status": "pass",
-   "detail": {
-    "size_before": 1497,
-    "byte_after": "{",
-    "first_kind": "model_catalog",
-    "evidence": [
-     "clean-restart.json",
-     "events.jsonl"
-    ]
-   }
-  },
-  {
-   "scenario": "Before the restart, events.jsonl ends mid-line with the first half of its last event",
-   "status": "pass",
-   "detail": {
-    "partial_bytes": 30,
-    "size": 2084,
-    "evidence": [
-     "partial-line.json"
-    ]
-   }
-  },
-  {
-   "scenario": "After the restart, the first new event starts on a line of its own and parses",
-   "status": "pass",
-   "detail": {
-    "byte_after_partial": "\n",
-    "first_new_line": "{\"at\":\"2026-11-18T17:33:32.13496718-08:00\",\"kind\":\"model_catalog\",\"outcome\":\"read\",\"detail\":\"claude-fable-5-2 claude-haiku-5-5\"}",
-    "first_kind": "model_catalog",
-    "partial_line_kept": true,
-    "evidence": [
-     "partial-line.json",
-     "events-after-restart.jsonl",
-     "status-after-restart.json"
-    ]
-   }
-  },
-  {
-   "scenario": "After the restart, resuming the first conversation stays on its account and keeps its content",
-   "status": "pass",
-   "detail": {
-    "exit": 0,
-    "account": "work",
-    "requests": [
-     {
-      "account": "work",
-      "decision": "dispatch",
-      "reason": "assigned",
-      "status": 200
-     }
-    ],
-    "answer": "kumquat",
-    "evidence": [
-     "s2-resume.out.txt",
-     "s2-resume.events.json"
-    ]
-   }
-  },
-  {
-   "scenario": "After the restart, the first new line decodes as the readers' claude.Event, and digest.go and account.go read past the partial line and count the resumed request",
-   "status": "pass",
-   "detail": {
-    "go_test_exit": 0,
-    "read": {
-     "digest_conversation_last": "2026-11-18T17:33:34.969254615-08:00",
-     "digest_requests_since_restart": 1,
-     "first_new_kind": "model_catalog",
-     "first_new_parses": true,
-     "requests_since_conversations": 1,
-     "requests_since_has_conversation": true
+    "weekly_used": {
+     "personal": 1,
+     "work": 1,
+     "dobby": 1,
+     "severus": 1,
+     "real-5": 0.43
     },
-    "request_events_after_restart": 1,
     "evidence": [
-     "readers.json",
-     "readers-go-test.txt",
-     "lane_readers_test.go",
-     "events-after-restart.jsonl"
-    ],
-    "method": "lane_readers_test.go, added only to a temporary copy of the checkout, called readDigest (digest.go) and requestsSince (account.go) on the lane's events.jsonl after the restart, with the restart time as the window start. It also decoded the first new line with json.Unmarshal into claude.Event. Both readers decode each line the same way (digest.go:108, account.go:339). digest.go acts only on request and migrated events. account.go acts only on request events. Neither acts on the first new line, a model_catalog event, so a live run cannot show more than that decode."
+     "status-start.json"
+    ]
    }
   },
   {
-   "scenario": "claude-router cache reads the lane's events.jsonl after the restart",
+   "scenario": "The token endpoint refused expired's refresh token, and the router marked expired as needing login at start",
+   "status": "pass",
+   "detail": {
+    "needs_login": true,
+    "needs_login_at": "2026-11-19T15:17:55.092472471-08:00",
+    "token_endpoint": [
+     [
+      400,
+      "invalid_grant",
+      "Refresh token expired"
+     ]
+    ],
+    "login_required": [
+     [
+      "expired",
+      "refresh_refused"
+     ]
+    ],
+    "evidence": [
+     "token-endpoint.jsonl",
+     "status-start.json",
+     "events.jsonl",
+     "token_endpoint.py",
+     "lane-hosts"
+    ],
+    "method": "lane.py ran the router in a user and network namespace whose /etc/hosts (lane-hosts) sent platform.claude.com to token_endpoint.py on 127.0.0.1:443, with a certificate that a lane CA signed and SSL_CERT_FILE trusted. The SDK's own refresh of the fake expired login, due at start, got 400 with the body the Mac mini's service.log recorded. The router marked expired before it began listening."
+   }
+  },
+  {
+   "scenario": "expired's read fails at once with the refusal and sends no usage request",
+   "status": "pass",
+   "detail": {
+    "last_read_failure": "the token endpoint refused the credential's refresh token; the account needs login",
+    "reads": [
+     [
+      "unknown",
+      "the token endpoint refused the credential's refresh token; the account needs login",
+      2
+     ]
+    ],
+    "evidence": [
+     "status-start.json",
+     "events.jsonl"
+    ]
+   }
+  },
+  {
+   "scenario": "claude-router status shows expired as needing login and names its login step",
    "status": "pass",
    "detail": {
     "exit": 0,
+    "row": "expired   needs login  capacity 1, 0 of 0 conversations active",
+    "next": [
+     "next    claude-router stop; claude-router login -account expired; start"
+    ],
     "evidence": [
-     "cache.txt"
+     "status-text-start.txt"
+    ]
+   }
+  },
+  {
+   "scenario": "check warns that expired is not signed in, names its login step, and passes with the real accounts ready",
+   "status": "pass",
+   "detail": {
+    "exit": 0,
+    "lines": [
+     "ok        router running on 127.0.0.1:18797 (foreground)",
+     "warn      expired not signed in",
+     "          claude-router stop; claude-router login -account expired; start",
+     "ok        paid overflow off on personal, work, dobby, severus, and real-5",
+     "ok        Claude Code settings point at the router",
+     "ok        code matches the accepted record (linux/amd64)",
+     "ok        test message answered 200 on real-5 in 3.6s",
+     "check     passed"
+    ],
+    "evidence": [
+     "check-start.txt",
+     "lane-manifest.json",
+     "lane-settings.json",
+     "accepted-lane.json",
+     "lane-claude"
+    ],
+    "method": "claude_router.py check from this checkout ran against the lane through a manifest that records a foreground layout (lane-manifest.json), the lane's client settings, a stand-in record with this code's digests (accepted-lane.json), and a claude wrapper that adds the lane settings and claude-haiku-5-5 (lane-claude). An update's recheck calls the same run_check."
+   }
+  },
+  {
+   "scenario": "The check's test message was placed on a signed-in account, never on expired",
+   "status": "pass",
+   "detail": {
+    "requests": [
+     [
+      "real-5",
+      "migrate",
+      "exhausted",
+      429
+     ],
+     [
+      "real-5",
+      "dispatch",
+      "assigned",
+      200
+     ]
+    ],
+    "evidence": [
+     "check-start.events.json",
+     "events.jsonl"
+    ],
+    "method": "The first request tried work, dobby, severus, and personal, each refused 429 for its exhausted weekly window, and moved to real-5 when it reached the router's four-attempt cap. The client's retry got 200 on real-5. No attempt went to expired."
+   }
+  },
+  {
+   "scenario": "After a restart, expired still needs login and the real accounts are ready",
+   "status": "pass",
+   "detail": {
+    "needs_login": true,
+    "refusals_after_restart": 1,
+    "overage": {
+     "personal": "disabled",
+     "work": "disabled",
+     "dobby": "disabled",
+     "severus": "disabled",
+     "real-5": "disabled"
+    },
+    "evidence": [
+     "status-after-restart.json",
+     "token-endpoint.jsonl"
+    ]
+   }
+  },
+  {
+   "scenario": "After the restart, check still warns and passes, as an update's check does",
+   "status": "pass",
+   "detail": {
+    "exit": 0,
+    "lines": [
+     "ok        router running on 127.0.0.1:18797 (foreground)",
+     "warn      expired not signed in",
+     "          claude-router stop; claude-router login -account expired; start",
+     "ok        paid overflow off on personal, work, dobby, severus, and real-5",
+     "ok        Claude Code settings point at the router",
+     "ok        code matches the accepted record (linux/amd64)",
+     "ok        test message answered 200 on real-5 in 2.0s",
+     "check     passed"
+    ],
+    "requests": [
+     [
+      "real-5",
+      200
+     ]
+    ],
+    "evidence": [
+     "check-after-restart.txt",
+     "check-after-restart.events.json"
+    ]
+   }
+  },
+  {
+   "scenario": "A 503 from the token endpoint for flaky leaves it signed in, with its read failed as before",
+   "status": "pass",
+   "detail": {
+    "needs_login": false,
+    "token_endpoint": [
+     503,
+     503,
+     503
+    ],
+    "last_read_failure": "the last refresh of the credential failed; the SDK retries it on its own schedule",
+    "evidence": [
+     "status-flaky.json",
+     "token-endpoint.jsonl",
+     "events.jsonl"
+    ]
+   }
+  },
+  {
+   "scenario": "With flaky's refresh failing transiently, check fails on its missing reading as before and sends no message",
+   "status": "pass",
+   "detail": {
+    "exit": 1,
+    "lines": [
+     "ok        router running on 127.0.0.1:18797 (foreground)",
+     "ok        personal, work, dobby, severus, real-5, flaky ready",
+     "fail      paid overflow not read yet for flaky",
+     "ok        Claude Code settings point at the router",
+     "ok        code matches the accepted record (linux/amd64)",
+     "skip      test message, not sent while a check fails",
+     "check     failed",
+     "next      claude-router status"
+    ],
+    "evidence": [
+     "check-flaky.txt",
+     "check-flaky.events.json"
     ]
    }
   },
@@ -199,8 +277,8 @@
    "scenario": "Identity is the same at the start and the end",
    "status": "pass",
    "detail": {
-    "code_sha256": "d90e26f044865b2dab1109f654672f8dc81487cb85ab3d81a2b1b2949faab4a1",
-    "binary_sha256": "bf0df023a254dd211800b2cefae632a2acc55a42935ce9c9725aa8a3105eb1bf",
+    "code_sha256": "aff33a40f5644e7a9dec02a0d65a941ed957a37276ce04dbf43e5c1651dc1136",
+    "binary_sha256": "b17dc178b019f63712b9387afdb1d49b2ab52244b8be542f9d759e2c7074f51c",
     "sdk": "v8.0.11",
     "evidence": [
      "status-start.json",
@@ -209,11 +287,14 @@
    }
   },
   {
-   "scenario": "Paid overflow remains disabled",
+   "scenario": "Paid overflow remains disabled on the real accounts",
    "status": "pass",
    "detail": {
-    "dobby": "disabled",
+    "personal": "disabled",
     "work": "disabled",
+    "dobby": "disabled",
+    "severus": "disabled",
+    "real-5": "disabled",
     "evidence": [
      "status-end.json"
     ]
@@ -225,14 +306,14 @@
    "detail": {
     "before": {
      "ActiveState": "active",
-     "ActiveEnterTimestamp": "Wed 2026-11-18 15:50:42 PST",
-     "MainPID": "3412178",
+     "ActiveEnterTimestamp": "Thu 2026-11-19 11:09:18 PST",
+     "MainPID": "106524",
      "NRestarts": "0"
     },
     "after": {
      "ActiveState": "active",
-     "ActiveEnterTimestamp": "Wed 2026-11-18 15:50:42 PST",
-     "MainPID": "3412178",
+     "ActiveEnterTimestamp": "Thu 2026-11-19 11:09:18 PST",
+     "MainPID": "106524",
      "NRestarts": "0"
     },
     "evidence": [
@@ -241,17 +322,22 @@
    }
   },
   {
-   "scenario": "No lane token refresh occurred",
+   "scenario": "No real refresh token was exchanged or changed, and none reached the token endpoint",
    "status": "pass",
    "detail": {
     "credential_refresh_events": 0,
     "refresh_unchanged": true,
+    "token_endpoint_tokens": [
+     "0b6109f8c50a42e1",
+     "bc487ae7267dda54"
+    ],
     "evidence": [
      "events.jsonl",
+     "token-endpoint.jsonl",
      "results.json",
      "lane.py"
     ],
-    "method": "lane.py hashed each refresh token in the daily login before it copied it, and again in the lane's copy after the last stop. It then deleted the copies. events.jsonl holds no credential_refresh event."
+    "method": "Real refresh tokens could not reach the real token endpoint: the namespace resolved platform.claude.com to the controlled endpoint, which logs SHA-256 prefixes. Its log holds only the two fake tokens. lane.py hashed each real refresh token in the daily login before it copied it, and again in the lane's copy after the last stop."
    }
   },
   {
@@ -259,78 +345,71 @@
    "status": "pass",
    "detail": {
     "requests": 3,
-    "attempts": 3,
+    "attempts": 6,
+    "accounts": [
+     "real-5"
+    ],
     "statuses": [
-     200,
+     429,
      200,
      200
     ],
-    "input": 11084,
-    "output": 27,
+    "input": 12884,
+    "output": 176,
     "evidence": [
      "events.jsonl"
     ]
    }
   },
   {
-   "scenario": "Evidence contains no copied access token",
+   "scenario": "Evidence contains no token",
    "status": "pass",
    "detail": {
-    "files_scanned": 27,
+    "files_scanned": 21,
     "hits": [],
-    "method": "Exact client token and the tokens in the lane's login copies, plus sk-ant-, JWT, and Bearer patterns, before the copies were deleted.",
+    "method": "Exact client token, the tokens in the lane's login copies and fake logins, plus sk-ant-, JWT, Bearer, and lane fake-token patterns, before the copies were deleted. lane.py and token_endpoint.py hold only the patterns.",
     "evidence": [
      "results.json",
-     "lane.py",
-     "rescan.json"
-    ],
-    "rescan": "A second scan covered every evidence file and accepted.json. rescan.json lists its files, method, and hits."
+     "lane.py"
+    ]
    }
   }
  ],
  "open": [],
  "incidents": [
   {
-   "run": "first lane run at 7d048b4",
-   "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue185-run1/evidence",
-   "result": "fail: 14 of 17 rows passed",
-   "finding": "lane.py expected the first event after a start to have kind \"started\", but the service writes the model_catalog event first, then the overage_read events, then the started event. The three rows that expected a started event failed. The router met their intent: after the restart over the partial line, the next byte was a newline and the first new line, model_catalog, parsed.",
-   "fixed_in": "lane.py: those rows check that the first new line parses and record its kind"
+   "run": "first lane run at 7f7e42e",
+   "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue207-run1/evidence",
+   "result": "fail: 16 of 19 rows passed",
+   "finding": "The SDK's refresh of the fake expired login ended before the router registered its refresh guard. The guard recorded the refresh token as failed but not refused, so the start read failed with the generic failure text, and the router marked expired only at the SDK's retry a minute later. Separately, dobby and work, the only real accounts in that run, had exhausted their weekly windows, so the check's test message got 429 on both.",
+   "fixed_in": "refreshguard.go: a credential whose SDK failure record already holds a refusal when the guard is registered has its refresh token recorded as refused, so the start read marks the account (TestRefusalOfAnSDKRefreshThatBeganBeforeTheGuardMarksTheAccountAsNeedingLogin, refused before the guard is registered). lane.py copies every daily login outside its refresh lead."
   },
   {
-   "run": "second lane run at 7d048b4",
-   "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue185-run2/evidence",
-   "result": "pass: 17 of 17 rows, superseded",
-   "finding": "An outside review of the second run's record found two problems. The readers row claimed that digest.go and account.go parse the first event after the restart. Their output cannot show that, because the first event is always model_catalog. Several other checks were also weaker than their row names.",
-   "fixed_in": "lane.py. The readers row names what it checks and requires an exact count. The new conversation row requires the place decision and the answer. The resume row requires the first account on every request. The lane code row requires the SDK version from go.mod. The paid overflow rows require both account IDs in status. A new row compares the daily router's process before and after the run."
-  },
-  {
-   "run": "third lane run at 6358e4e",
-   "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue185-run3/evidence",
-   "result": "pass: 18 of 18 rows, superseded",
-   "finding": "A review found that the third run's readers row no longer required the first new line to decode into claude.Event, the way both readers decode each line. The third run's readers.json shows that the decode succeeded, but the row did not depend on it.",
-   "fixed_in": "lane.py. The readers row requires that decode again. The fourth run's rows replaced the third run's."
+   "run": "second lane run at 622eec9",
+   "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue207-run2/evidence",
+   "result": "stopped before any message: personal, dobby, and work had no weekly capacity",
+   "finding": "lane.py's capacity check stopped the run before it sent a message.",
+   "fixed_in": "lane.py copies every daily login outside its refresh lead, which added severus and real-5."
   }
  ],
  "prior_acceptance": {
-  "record": "components/claude-router/accepted.json from PR #183, code_sha256 ff86a5b1\u2026",
+  "record": "components/claude-router/accepted.json from PR #196, code_sha256 d90e26f0\u2026",
   "status": "historical reference, not rerun at this code"
  },
  "offline_verification": {
-  "head": "7d048b47296b9e34ed76ed2fd55be16587eb12a6",
-  "note": "The record's head differs from the tested head only in CONTRACT.md and accepted.json. Neither file is router code.",
+  "head": "622eec90df6ac069bd88c9d968cba03f317ef364",
+  "note": "The record's head differs from the tested head only in accepted.json, which is not router code.",
   "go_test_race": "pass",
   "go_vet": "pass",
-  "tmpdir": "ext4, under the lane directory, so the journal tests, including TestJournalKeepsAcknowledgedAssignmentsAcrossKill9, ran on the machine's own disk",
+  "tmpdir": "ext4, under the lane directory, so the journal tests ran on the machine's own disk",
   "evidence": [
-   "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/go-command.txt",
-   "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/head.txt",
-   "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/env.txt",
-   "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/gofmt.txt",
-   "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/vet.log",
-   "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/go-race.log",
-   "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/journal-tests.log"
+   "/home/alany/.local/state/astack/claude-router-lanes/issue207/evidence/offline/offline.sh",
+   "/home/alany/.local/state/astack/claude-router-lanes/issue207/evidence/offline/head.txt",
+   "/home/alany/.local/state/astack/claude-router-lanes/issue207/evidence/offline/env.txt",
+   "/home/alany/.local/state/astack/claude-router-lanes/issue207/evidence/offline/gofmt.txt",
+   "/home/alany/.local/state/astack/claude-router-lanes/issue207/evidence/offline/vet.log",
+   "/home/alany/.local/state/astack/claude-router-lanes/issue207/evidence/offline/go-race.log"
   ]
  },
- "written": "2026-11-19T01:47:44.561361+00:00"
+ "written": "2026-11-19T23:24:01.844124+00:00"
 }
