@@ -53,7 +53,7 @@ class MemoryGuardTests(unittest.TestCase):
             self.skipTest("needs systemd-tmpfiles")
         self.ttl.write_text("0\n")
         subprocess.run([TMPFILES, "--root={}".format(self.root), "--boot", "--create",
-                        "--prefix=/sys/kernel/mm/lru_gen"], capture_output=True, timeout=30)
+                        "--prefix=/sys"], capture_output=True, timeout=30)
         return self.ttl_now()
 
     def write_rule(self, directory, name, line, *, through_symlink=False):
@@ -81,11 +81,13 @@ class MemoryGuardTests(unittest.TestCase):
         self.ttl.write_text("250\n")
         escaped = memory_guard.MIN_TTL_MS_PATH.replace("/min_", "/\\x6din_")
         glob = memory_guard.MIN_TTL_MS_PATH.replace("_ms", "*")
+        directory_glob = memory_guard.MIN_TTL_MS_PATH.replace("/lru_gen/", "/*/")
         cases = (("usr/lib/tmpfiles.d", "00-distro.conf", w_line(2000), False),
                  ("etc/tmpfiles.d", "mglru.conf", w_line(2000), False),
                  ("etc/tmpfiles.d", "00-linked.conf", w_line(2000), True),
                  ("usr/lib/tmpfiles.d", "00-escaped.conf", w_line(2000, escaped), False),
                  ("etc/tmpfiles.d", "zz-glob.conf", w_line(2000, glob), False),
+                 ("etc/tmpfiles.d", "mglru-glob.conf", w_line(2000, directory_glob), False),
                  ("etc/tmpfiles.d", "00-base64.conf", "w~ {} - - - - MjAwMA==".format(memory_guard.MIN_TTL_MS_PATH),
                   False),
                  ("usr/lib/tmpfiles.d", "00-boot-only.conf", w_line(2000).replace("w-", "w!"), False))
@@ -212,10 +214,16 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertIn("set to 1000 at boot by astack\n", self.run_main("status", uid=1000)[1])
         self.assertEqual(self.ttl_after_reboot(), "1000")
 
-        rule = self.write_rule("etc/tmpfiles.d", "mglru.conf", w_line(300))
-        self.assertIn("set to 1000 at boot by astack, over another tmpfiles.d rule",
-                      self.run_main("status", uid=1000)[1])
-        self.assertEqual(self.ttl_after_reboot(), "1000")
+        for value in (300, 1000):
+            rule = self.write_rule("etc/tmpfiles.d", "mglru.conf", w_line(value))
+            self.assertIn("set to 1000 at boot by astack, over another tmpfiles.d rule",
+                          self.run_main("status", uid=1000)[1])
+            self.assertEqual(self.ttl_after_reboot(), "1000")
+            rule.unlink()
+
+        glob = memory_guard.MIN_TTL_MS_PATH.replace("_ms", "*")
+        rule = self.write_rule("etc/tmpfiles.d", "zz-glob.conf", w_line(300, glob))
+        self.assertIn("set to 300 at boot by another tmpfiles.d rule", self.run_main("status", uid=1000)[1])
         rule.unlink()
 
         quoted = w_line(2000, '"//sys/kernel/mm//lru_gen/min_ttl_ms"')

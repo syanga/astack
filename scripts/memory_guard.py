@@ -14,7 +14,6 @@ import argparse
 from dataclasses import dataclass
 import os
 from pathlib import Path
-import posixpath
 import re
 import subprocess
 import sys
@@ -26,6 +25,8 @@ import astack_files as files
 
 MIN_TTL_MS = 1000
 MIN_TTL_MS_PATH = "/sys/kernel/mm/lru_gen/min_ttl_ms"
+BOOT_RULE = "w {} - - - - {{}}\n".format(MIN_TTL_MS_PATH)
+ASTACK_MARKER = "set-by-astack-memory-guard"
 BEFORE_INSTALL_PREFIX = "# min_ttl_ms before install: "
 UNAVAILABLE_REASON = "the kernel's multi-gen LRU is missing or off"
 
@@ -54,7 +55,8 @@ class Host:
 @dataclass(frozen=True)
 class AtBoot:
     value: str | None
-    without_astack: str | None
+    by_astack: bool
+    value_without_astack: str | None
 
 
 @dataclass(frozen=True)
@@ -106,11 +108,10 @@ def _tmpfiles(*arguments: str, config: str | None = None) -> subprocess.Complete
 
 def _value_at_boot(config: str) -> str | None:
     with tempfile.TemporaryDirectory(prefix="astack-memory-guard-") as scratch:
-        target = Path(scratch) / MIN_TTL_MS_PATH.lstrip("/")
+        target = Host(Path(scratch)).min_ttl_ms_file
         target.parent.mkdir(parents=True)
         target.touch()
-        result = _tmpfiles("--root=" + scratch, "--boot", "--create", "--prefix=" + posixpath.dirname(MIN_TTL_MS_PATH),
-                           "-", config=config)
+        result = _tmpfiles("--root=" + scratch, "--boot", "--create", "--prefix=/sys", "-", config=config)
         # systemd-tmpfiles exits with EX_DATAERR or EX_CANTCREAT when some lines fail, and boot skips those lines too.
         if result.returncode not in (0, os.EX_DATAERR, os.EX_CANTCREAT):
             raise GuardError("systemd-tmpfiles --create failed: " + result.stderr.strip())
@@ -121,18 +122,23 @@ def at_boot(host: Host) -> AtBoot:
     try:
         result = _tmpfiles("--root={}".format(host.root), "--cat-config", "--no-pager")
     except FileNotFoundError:
-        return AtBoot(value=None, without_astack=None)
+        return AtBoot(value=None, by_astack=False, value_without_astack=None)
     if result.returncode != 0:
         raise GuardError("systemd-tmpfiles --cat-config failed: " + result.stderr.strip())
     config = result.stdout
-    value = _value_at_boot(config)
     try:
         astack = "# {}\n{}".format(host.boot_file, host.boot_file.read_text())
     except FileNotFoundError:
-        return AtBoot(value=value, without_astack=value)
-    if astack not in config:
-        raise GuardError("systemd-tmpfiles --cat-config does not list {}".format(host.boot_file))
-    return AtBoot(value=value, without_astack=_value_at_boot(config.replace(astack, "", 1)))
+        value = _value_at_boot(config)
+        return AtBoot(value=value, by_astack=False, value_without_astack=value)
+    if astack not in config or BOOT_RULE.format(MIN_TTL_MS) not in astack:
+        raise GuardError("systemd-tmpfiles --cat-config does not list the rule in {}".format(host.boot_file))
+    without = _value_at_boot(config.replace(astack, "", 1))
+    # A w line does not truncate the file it writes, so a later, shorter value can leave digits of astack's value.
+    # A marker longer than any min_ttl_ms value shows whether astack's write is the last one.
+    marked = astack.replace(BOOT_RULE.format(MIN_TTL_MS), BOOT_RULE.format(ASTACK_MARKER))
+    by_astack = _value_at_boot(config.replace(astack, marked, 1)) == ASTACK_MARKER
+    return AtBoot(value=str(MIN_TTL_MS) if by_astack else without, by_astack=by_astack, value_without_astack=without)
 
 
 def _set_min_ttl_ms(host: Host, value: int, *, dry_run: bool) -> None:
@@ -145,18 +151,18 @@ def install(host: Host, *, dry_run: bool) -> None:
     current = status(host)
     if not current.available:
         raise GuardError(UNAVAILABLE_REASON + ", so install changed nothing")
-    other = at_boot(host).without_astack
+    other = at_boot(host).value_without_astack
     if other is not None:
-        raise GuardError("another tmpfiles.d rule sets min_ttl_ms to {} at boot, so install changed nothing. "
-                         "systemd-tmpfiles --cat-config lists the rules".format(other))
+        raise GuardError("without astack's rule, another tmpfiles.d rule would set min_ttl_ms to {} at boot, so "
+                         "install changed nothing. systemd-tmpfiles --cat-config lists the rules".format(other))
     before = current.min_ttl_ms if current.min_ttl_ms_before_install is None else current.min_ttl_ms_before_install
     print("WRITE {}".format(host.boot_file))
     if not dry_run:
         files.atomic_write(host.boot_file, (
             "# Written by astack scripts/memory_guard.py. Its uninstall restores min_ttl_ms and deletes this file.\n"
             "{}{}\n"
-            "w {} - - - - {}\n"
-        ).format(BEFORE_INSTALL_PREFIX, before, MIN_TTL_MS_PATH, MIN_TTL_MS).encode())
+            "{}"
+        ).format(BEFORE_INSTALL_PREFIX, before, BOOT_RULE.format(MIN_TTL_MS)).encode())
     _set_min_ttl_ms(host, MIN_TTL_MS, dry_run=dry_run)
 
 
@@ -178,12 +184,12 @@ def describe(host: Host) -> str:
         text = "{}: min_ttl_ms {}".format("on" if current.min_ttl_ms else "off", current.min_ttl_ms)
     else:
         text = "unavailable: " + UNAVAILABLE_REASON
-    boot = at_boot(host) if current.min_ttl_ms is not None else AtBoot(value=None, without_astack=None)
-    if boot.value is not None:
-        if boot.without_astack is None:
-            source = "astack"
-        elif boot.without_astack == boot.value:
+    boot = at_boot(host) if current.min_ttl_ms is not None else None
+    if boot is not None and boot.value is not None:
+        if not boot.by_astack:
             source = "another tmpfiles.d rule"
+        elif boot.value_without_astack is None:
+            source = "astack"
         else:
             source = "astack, over another tmpfiles.d rule"
         text += ", set to {} at boot by {}".format(boot.value, source)
