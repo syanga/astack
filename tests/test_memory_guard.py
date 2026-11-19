@@ -3,13 +3,18 @@ import importlib.util
 import io
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
+from test_run_job import SYSTEM_PYTHON, system_python_before_3_10
+
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts/memory_guard.py"
 spec = importlib.util.spec_from_file_location("memory_guard", SCRIPT)
 memory_guard = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = memory_guard
 spec.loader.exec_module(memory_guard)
 
 
@@ -179,6 +184,13 @@ class MemoryGuardTests(unittest.TestCase):
 
         self.assertEqual(self.run_main("install", platform="linux")[0], 0)
         self.assertEqual(self.ttl_now(), "1000")
+
+    def test_runs_under_the_system_python_before_3_10(self):
+        if not system_python_before_3_10():
+            self.skipTest("needs {} older than 3.10".format(SYSTEM_PYTHON))
+        result = subprocess.run([SYSTEM_PYTHON, str(SCRIPT), "--help"], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("{status,install,uninstall}", result.stdout)
 
 
 if __name__ == "__main__":

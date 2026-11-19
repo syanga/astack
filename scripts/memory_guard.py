@@ -7,6 +7,8 @@ uninstall restores min_ttl_ms to its value from before the first install.
 status reports min_ttl_ms and needs no root.
 """
 
+from __future__ import annotations
+
 import argparse
 from dataclasses import dataclass
 import os
