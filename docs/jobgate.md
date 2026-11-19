@@ -149,10 +149,11 @@ process in the `HOME` slice. Its victim can belong to any run under that `HOME`,
 not only to the run that went over. With swap, the slice can swap first, because
 jobgate does not set `MemorySwapMax`. On systemd 253 or newer, each scope has
 `OOMPolicy=continue`. When the kernel OOM-kills a process inside the `HOME`
-slice, systemd does not stop the rest of that process's run. That run still ends
-when the killed process is the command itself, or the `jobgate.py _scope`
-process, which waits for the command. On systemd 254 or newer, jobgate passes
-`--expand-environment=no`, so the command receives `$` in its arguments
+slice, systemd does not stop the rest of that process's run. jobgate still ends
+the run, with exit code 137, when the killed process is either the command
+itself or the `jobgate.py _scope` process that waits for it. Processes that the
+command started can keep running in the scope. On systemd 254 or newer, jobgate
+passes `--expand-environment=no`, so the command receives `$` in its arguments
 unchanged. Earlier versions never expand a scope's arguments. `jobgate status`
 prints the `HOME` slice's `MemoryMax` and `MemoryCurrent`, and the `CPUWeight`
 of `jobgate.slice`.
