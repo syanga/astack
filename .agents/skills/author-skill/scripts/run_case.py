@@ -11,10 +11,11 @@ CLAUDE_CODE_OAUTH_TOKEN.
 Sessions run in this checkout and may use only Read, Grep, Glob, Skill, and the
 shell commands Claude Code treats as read-only. Every other tool call is denied,
 so an attempt to edit, post, or merge appears in the report as a denied call
-instead of happening. Sessions skip local settings (.claude/settings.local.json),
-so allow rules saved there cannot loosen this. The report lists each run's skills, actions, and answers,
-then how many runs used each skill and had each tool denied. The script exits 1
-when any run times out or fails.
+instead of happening. Sessions skip local settings
+(.claude/settings.local.json), so allow rules saved there do not apply. The
+report lists each run's skills, actions, and answers, then how many runs used
+each skill and had each tool denied. The script exits 1 when any run times out
+or fails.
 """
 
 import argparse
@@ -28,7 +29,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Optional
 
 REPO = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(REPO / "scripts"))
@@ -50,8 +50,8 @@ class Turn:
     calls: list[dict] = field(default_factory=list)
     errors: dict[str, object] = field(default_factory=dict)
     denied: set[str] = field(default_factory=set)
-    result: Optional[dict] = None
-    problem: Optional[str] = None
+    result: dict | None = None
+    problem: str | None = None
 
 
 def build_config(root):

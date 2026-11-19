@@ -37,6 +37,9 @@ mode = os.environ.get("FAKE_MODE", "")
 if mode == "signed-out":
     emit({"type": "result", "subtype": "success", "is_error": True, "result": "Not logged in", "total_cost_usd": 0})
     sys.exit(1)
+if mode == "crash":
+    print("fatal: config unreadable", file=sys.stderr)
+    sys.exit(2)
 if mode == "api-error":
     emit({"type": "result", "subtype": "error_during_execution", "is_error": True, "result": "",
           "errors": ["API Error: 529 overloaded"], "total_cost_usd": 0})
@@ -162,6 +165,12 @@ class RunCaseTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("Not logged in", result.stdout)
+
+    def test_crash_without_a_result_reports_stderr_and_fails_the_command(self):
+        result, _ = self.run_case("--runs", "1", "Add a feature", mode="crash")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("fatal: config unreadable", result.stdout)
 
     def test_error_result_fails_the_command_even_when_claude_exits_0(self):
         result, _ = self.run_case("--runs", "1", "Add a feature", mode="api-error")
