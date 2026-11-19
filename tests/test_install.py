@@ -229,7 +229,7 @@ class InstallerTests(InstallerFixture):
         machine = self.root / "machine.json"
         machine.write_text('{"memory": 8589934592, "cores": 4, "psi": "full avg10=0.00"}')
         return dict(os.environ, SHELL="/bin/zsh", PATH=os.pathsep.join([str(fake_bin), JOBGATE_PATH]),
-                    JOBGATE_MACHINE_FILE=str(machine))
+                    JOBGATE_MACHINE_FILE=str(machine), JOBGATE_HOME=str(self.home))
 
     def test_jobgate_goes_on_path_and_uninstall_removes_what_it_added(self):
         env = self.jobgate_status_env()

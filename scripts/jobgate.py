@@ -16,11 +16,11 @@ import errno
 from dataclasses import asdict, dataclass, fields, replace
 import datetime
 import fcntl
-import hashlib
 import json
 import math
 import os
 from pathlib import Path
+import pwd
 import re
 import secrets
 import shlex
@@ -56,6 +56,8 @@ REPORT_SECONDS = 60.0
 RUN_ENV = "JOBGATE_RUN"
 WORKERS_ENV = "JOBGATE_WORKERS"
 MACHINE_ENV = "JOBGATE_MACHINE_FILE"
+HOME_ENV = "JOBGATE_HOME"
+DARWIN_USER_TEMP_DIR = 65537
 NO_MEMORY_CONTROLLER = 3
 REFUSED = 125
 CANNOT_EXECUTE = 126
@@ -159,6 +161,8 @@ class Run:
     command: str
     arrived: float
     admission: Admission | None = None
+    uses: int | None = None
+    waits: str | None = None
 
 
 def parse_size(value: object, where: str) -> int:
@@ -226,8 +230,36 @@ def load_profile(path: Path, name: str) -> Profile:
                    parse_size(table["worker_mem"], where("worker_mem")), max_workers, workers_env)
 
 
+def account_home() -> Path:
+    if os.environ.get(HOME_ENV):
+        return Path(os.environ[HOME_ENV])
+    try:
+        return Path(pwd.getpwuid(os.getuid()).pw_dir)
+    except KeyError:
+        return Path.home()
+
+
+def ledger_directory() -> Path:
+    if os.environ.get(HOME_ENV):
+        return account_home() / ".cache/jobgate"
+    if sys.platform == "darwin":
+        runtime = os.environ.get("TMPDIR")
+        if not runtime:
+            with contextlib.suppress(ValueError, OSError):
+                runtime = os.confstr(DARWIN_USER_TEMP_DIR)
+    else:
+        runtime = os.environ.get("XDG_RUNTIME_DIR") or "/run/user/{}".format(os.getuid())
+    if runtime and os.path.isdir(runtime):
+        return Path(runtime) / "jobgate"
+    return shared_ledger()
+
+
+def shared_ledger() -> Path:
+    return Path("/tmp/jobgate-{}".format(os.getuid()))
+
+
 def machine_config() -> Path:
-    return Path.home() / ".config/jobgate.toml"
+    return account_home() / ".config/jobgate.toml"
 
 
 def load_memory_share() -> float:
@@ -329,6 +361,35 @@ def pressure() -> Pressure:
         return Pressure("unknown ({})".format(error.strerror or error), False)
 
 
+def meminfo_available(text: str) -> int | None:
+    match = re.search(r"^MemAvailable:\s+(\d+) kB", text, re.MULTILINE)
+    return int(match.group(1)) * 1024 if match else None
+
+
+def vm_stat_available(text: str) -> int | None:
+    page = re.search(r"page size of (\d+) bytes", text)
+    counts = {name: re.search(r"^{}:\s+(\d+)\.".format(re.escape(name)), text, re.MULTILINE)
+              for name in ("Pages free", "File-backed pages", "Pages purgeable")}
+    if page is None or None in counts.values():
+        return None
+    return int(page.group(1)) * sum(int(match.group(1)) for match in counts.values())
+
+
+def available_memory() -> int | None:
+    readings = test_readings()
+    if "meminfo" in readings:
+        return meminfo_available(readings["meminfo"])
+    if "vm_stat" in readings:
+        return vm_stat_available(readings["vm_stat"])
+    if sys.platform == "darwin":
+        result = run_captured(["/usr/bin/vm_stat"], 10)
+        return vm_stat_available(result.stdout) if result.returncode == 0 else None
+    try:
+        return meminfo_available(Path("/proc/meminfo").read_text())
+    except OSError:
+        return None
+
+
 class Used(NamedTuple):
     memory: int
     workers: int
@@ -338,21 +399,45 @@ def used(running: list[Admission]) -> Used:
     return Used(sum(admission.memory for admission in running), sum(admission.workers for admission in running))
 
 
-def fit(machine: Machine, running: list[Admission], profile: Profile, limit: int) -> int:
-    taken = used(running)
-    beyond_base = machine.share - taken.memory - profile.base_mem
-    if beyond_base < 0:
+def admitted(runs: list[Run]) -> list[Admission]:
+    return [run.admission for run in runs if run.admission is not None]
+
+
+def still_to_use(runs: list[Run]) -> int:
+    return sum(max(0, run.admission.memory - (run.uses or 0)) for run in runs if run.admission is not None)
+
+
+class Room(NamedTuple):
+    in_share: int
+    in_free_memory: int | None
+
+
+def room_left(machine: Machine, runs: list[Run], available: int | None) -> Room:
+    return Room(machine.share - used(admitted(runs)).memory,
+                None if available is None else available - still_to_use(runs))
+
+
+def workers_within(memory: int | None, profile: Profile, limit: int) -> int:
+    if memory is None:
+        return limit
+    if memory < profile.base_mem:
         return 0
-    by_memory = limit if profile.worker_mem == 0 else beyond_base // profile.worker_mem
-    return max(0, min(limit, machine.cores - taken.workers, by_memory))
+    return limit if profile.worker_mem == 0 else (memory - profile.base_mem) // profile.worker_mem
 
 
-def shortage(machine: Machine, running: list[Admission], profile: Profile) -> str:
-    taken = used(running)
-    if taken.workers >= machine.cores:
+def fit(machine: Machine, runs: list[Run], profile: Profile, limit: int, room: Room) -> int:
+    return max(0, min(limit, machine.cores - used(admitted(runs)).workers,
+                      workers_within(room.in_share, profile, limit), workers_within(room.in_free_memory, profile, limit)))
+
+
+def shortage(machine: Machine, runs: list[Run], profile: Profile, room: Room, available: int | None) -> str:
+    if used(admitted(runs)).workers >= machine.cores:
         return "for a core: gated workers use all {} cores".format(machine.cores)
-    return "for memory: 1 worker needs {}, and {} of the {} share is free".format(
-        size(profile.memory(1)), size(max(0, machine.share - taken.memory)), size(machine.share))
+    if profile.memory(1) > room.in_share:
+        return "for memory: 1 worker needs {}, and {} of the {} share is free".format(
+            size(profile.memory(1)), size(max(0, room.in_share)), size(machine.share))
+    return "for free memory: 1 worker needs {}, and the machine has {} available, of which running runs may still " \
+           "use {}".format(size(profile.memory(1)), size(available or 0), size(still_to_use(runs)))
 
 
 def temporary(path: Path) -> Path:
@@ -374,22 +459,25 @@ class RunFiles(NamedTuple):
 
 
 class Queue:
-    def __init__(self, directory: Path) -> None:
+    def __init__(self, directory: Path, results: Path) -> None:
         self.directory = directory
         self.runs = directory / "runs"
-        self.results = directory / "results.log"
+        self.results = results
         self.lock_file = directory / "queue.lock"
 
     @classmethod
     def open(cls) -> Queue:
-        queue = cls(Path.home() / ".cache/jobgate")
+        queue = cls(ledger_directory(), account_home() / ".cache/jobgate/results.log")
         try:
             queue.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            owner = queue.directory.stat()
+            if queue.directory == shared_ledger() and (owner.st_uid != os.getuid() or owner.st_mode & 0o077):
+                raise Refusal("{} must belong to this user and be private (mode 700)".format(queue.directory))
             queue.runs.mkdir(mode=0o700, exist_ok=True)
             os.close(os.open(str(queue.lock_file), os.O_RDWR | os.O_CREAT, 0o600))
         except OSError as error:
-            raise Refusal("cannot create {}: {}; jobgate keeps its queue in $HOME/.cache/jobgate".format(
-                error.filename or queue.directory, error.strerror or error)) from None
+            raise Refusal("cannot create {}: {}; jobgate keeps its queue in {}".format(
+                error.filename or queue.directory, error.strerror or error, queue.directory)) from None
         return queue
 
     @contextlib.contextmanager
@@ -486,7 +574,18 @@ class Ticket:
 
     def admit(self, admission: Admission) -> None:
         self.run.admission = admission
+        self.run.waits = None
         self.save()
+
+    def wait(self, reason: str) -> None:
+        if reason != self.run.waits:
+            self.run.waits = reason
+            self.save()
+
+    def publish(self, uses: int) -> None:
+        with self.queue.lock():
+            self.run.uses = uses
+            self.save()
 
     def save(self) -> None:
         os.ftruncate(self.fd, 0)
@@ -509,19 +608,21 @@ def wait_for_admission(queue: Queue, ticket: Ticket, share: LiveShare, profile: 
                 refuse_if_never_fits(profile, machine, config)
                 runs = queue.live()
                 ahead = [run for run in runs if run.admission is None and run.seq < ticket.run.seq]
-                running = [run.admission for run in runs if run.admission is not None]
                 if ahead:
                     reason = "behind {}".format(plural(len(ahead), "earlier run"))
                 else:
                     level = pressure()
-                    workers = fit(machine, running, profile, limit)
+                    available = available_memory()
+                    room = room_left(machine, runs, available)
+                    workers = fit(machine, runs, profile, limit, room)
                     if level.holding:
                         reason = "for memory pressure to ease: " + level.reading
                     elif workers < 1:
-                        reason = shortage(machine, running, profile)
+                        reason = shortage(machine, runs, profile, room, available)
                     else:
                         ticket.admit(Admission(workers, profile.memory(workers), time.time()))
                         return ticket.run.admission, time.monotonic() - arrived
+                ticket.wait(reason)
         finally:
             share.print_warning()
         now = time.monotonic()
@@ -655,13 +756,26 @@ class Libproc:
 
 
 class PeakSampler:
-    def __init__(self) -> None:
+    def __init__(self, ticket: Ticket) -> None:
         self.peak = 0
+        self.ticket = ticket
         self.measure = resident_bytes if sys.platform == "linux" else Libproc.phys_footprint
 
     def sample(self, root: int) -> None:
         sizes = (self.measure(pid) for pid in process_tree(root, parents()))
-        self.peak = max(self.peak, sum(size for size in sizes if size is not None))
+        uses = sum(size for size in sizes if size is not None)
+        self.peak = max(self.peak, uses)
+        self.ticket.publish(uses)
+
+
+class ScopeSampler:
+    def __init__(self, ticket: Ticket) -> None:
+        self.ticket = ticket
+
+    def sample(self, root: int) -> None:
+        cgroup = read_json(self.ticket.files.scope).get("cgroup")
+        if cgroup:
+            self.ticket.publish(int((Path(cgroup) / "memory.current").read_text()))
 
 
 def exec_failure(command: list[str], env: dict) -> int | None:
@@ -684,22 +798,13 @@ def systemd_version() -> int:
     return int(match.group(1)) if match else 0
 
 
-def home_key() -> str:
-    return hashlib.sha256(os.fsencode(Path.home().resolve())).hexdigest()[:12]
-
-
-def home_slice() -> str:
-    """systemd nests a slice named jobgate-<key>.slice inside jobgate.slice."""
-    return "{}-{}.slice".format(UNIT_PREFIX, home_key())
-
-
 def set_slice_cap(share: int) -> str | None:
     if shutil.which("systemd-run") is None:
         return "systemd-run is not installed"
-    for unit, properties in ((SLICE, ["CPUWeight={}".format(CPU_WEIGHT)]), (home_slice(), ["MemoryMax={}".format(share)])):
-        result = run_captured(["systemctl", "--user", "set-property", "--runtime", unit, *properties], 15)
-        if result.returncode != 0:
-            return "no systemd user session: {}".format(last_error(result))
+    result = run_captured(["systemctl", "--user", "set-property", "--runtime", SLICE, "CPUWeight={}".format(CPU_WEIGHT),
+                           "MemoryMax={}".format(share)], 15)
+    if result.returncode != 0:
+        return "no systemd user session: {}".format(last_error(result))
     return None
 
 
@@ -727,11 +832,11 @@ def execute(command: list[str], env: dict, share: LiveShare, ticket: Ticket, pro
             if version >= EXPAND_ENVIRONMENT_MIN_SYSTEMD:
                 options.append("--expand-environment=no")
             repo = os.fsencode(ticket.run.repo).decode(errors="backslashreplace")
-            scope = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--slice=" + home_slice(),
-                     "--unit={}-{}-{}".format(UNIT_PREFIX, home_key(), ticket.run.id),
+            scope = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--slice=" + SLICE,
+                     "--unit={}-{}".format(UNIT_PREFIX, ticket.run.id),
                      "--description=jobgate {} in {}".format(profile.name, repo), *options, "--",
                      sys.executable, str(Path(__file__).resolve()), "_scope", str(ticket.files.scope), "--", *command]
-            outcome = supervise(scope, env)
+            outcome = supervise(scope, env, ScopeSampler(ticket).sample)
             result = read_json(ticket.files.scope)
             if "cgroup" in result:
                 return Measured(outcome, result.get("peak"), result.get("oom_kills"))
@@ -747,7 +852,7 @@ def execute(command: list[str], env: dict, share: LiveShare, ticket: Ticket, pro
             command = [TASKPOLICY, "-c", "utility", *command]
         else:
             say("{} is missing, so the command runs without the utility QoS clamp".format(TASKPOLICY))
-    sampler = PeakSampler()
+    sampler = PeakSampler(ticket)
     outcome = supervise(command, env, sampler.sample)
     return Measured(outcome, sampler.peak or None)
 
@@ -802,6 +907,7 @@ def report(queue: Queue, entries: list[tuple[str, object]]) -> None:
     line = " ".join("{}={}".format(key, logfmt(value)) for key, value in entries)
     say(line)
     try:
+        queue.results.parent.mkdir(parents=True, exist_ok=True)
         with open(queue.results, "a", errors="backslashreplace") as stream:
             stream.write(line + "\n")
     except OSError as error:
@@ -866,42 +972,45 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
 def cap_text() -> str:
     if sys.platform == "darwin":
         return "none on macOS; the pressure hold delays new runs instead"
-    shown = []
-    for unit, keys in ((home_slice(), ("MemoryMax", "MemoryCurrent")), (SLICE, ("CPUWeight",))):
-        result = run_captured(["systemctl", "--user", "show", unit, *["-p" + key for key in keys]], 15)
-        if result.returncode != 0:
-            return "off: " + last_error(result)
-        values = dict(line.partition("=")[::2] for line in result.stdout.splitlines() if "=" in line)
-        shown.append("{} {}".format(unit, " ".join(
-            "{}={}".format(key, size(int(values[key])) if values.get(key, "").isdigit() and key != "CPUWeight"
-                           else values.get(key, "?")) for key in keys)))
-    return ", ".join(shown)
+    keys = ("MemoryMax", "MemoryCurrent", "CPUWeight")
+    result = run_captured(["systemctl", "--user", "show", SLICE, *["-p" + key for key in keys]], 15)
+    if result.returncode != 0:
+        return "off: " + last_error(result)
+    values = dict(line.partition("=")[::2] for line in result.stdout.splitlines() if "=" in line)
+    return "{} {}".format(SLICE, " ".join(
+        "{}={}".format(key, size(int(values[key])) if values.get(key, "").isdigit() and key != "CPUWeight"
+                       else values.get(key, "?")) for key in keys))
 
 
 def status() -> int:
     host = machine()
     level = pressure()
+    available = available_memory()
     queue = Queue.open()
     with queue.lock():
         runs = queue.live()
-    taken = used([run.admission for run in runs if run.admission is not None])
+    taken = used(admitted(runs))
     now = time.time()
     source = machine_config() if machine_config().is_file() else "default"
     lines = [
         "share     {} ({:.0%} of {}; {})".format(size(host.share), host.memory_share, size(host.memory), source),
         "memory    {} of {} stated by running runs".format(size(taken.memory), size(host.share)),
+        "free      {}".format("unknown" if available is None else "{} available; running runs may still use {}".format(
+            size(available), size(still_to_use(runs)))),
         "cores     {} of {} used by gated workers".format(taken.workers, host.cores),
         "pressure  {}{}".format(level.reading, "; new runs wait" if level.holding else ""),
         "cap       {}".format(cap_text()),
     ]
     for run in runs:
         if run.admission is not None:
-            lines.append("running   {} pid {}, {}, {} stated, for {}, in {}: {}".format(
+            lines.append("running   {} pid {}, {}, {} stated, {}for {}, in {}: {}".format(
                 run.profile, run.pid, plural(run.admission.workers, "worker"), size(run.admission.memory),
-                duration(now - run.admission.started), run.repo, run.command))
+                "" if run.uses is None else "uses {}, ".format(size(run.uses)), duration(now - run.admission.started),
+                run.repo, run.command))
         else:
-            lines.append("waiting   {} pid {}, for {}, in {}: {}".format(
-                run.profile, run.pid, duration(now - run.arrived), run.repo, run.command))
+            lines.append("waiting   {} pid {}, for {}{}, in {}: {}".format(
+                run.profile, run.pid, duration(now - run.arrived), "" if run.waits is None else ", waits " + run.waits,
+                run.repo, run.command))
     sys.stdout.reconfigure(errors="backslashreplace")
     print("\n".join(lines))
     return 0
