@@ -1970,10 +1970,11 @@ and the error text in `detail`. A counter the upstream did not report is
 loses only that event. Writing resumes with the next event, on a line of its
 own even after a partial write. A service whose `events.jsonl` ends in a
 partial line writes its first event on a line of its own
-(`TestAnEventAfterAFailedWriteIsStillLogged`). When the service can append to
-the file but cannot read it, it writes a newline before its first event,
-which adds at most one blank line
-(`TestEventsAppendToALogTheServiceCanWriteButNotRead`).
+(`TestAnEventAfterAFailedWriteIsStillLogged`). A service that can append to
+`events.jsonl` but cannot read the file treats the file as ending mid-line
+(`TestEventsAppendToALogTheServiceCanWriteButNotRead`). If the file ended in
+a newline, a blank line then precedes the first event, and readers skip blank
+lines.
 `TestNoSecretInStatusEventsOrLogs` and lane 2 search events, status, logs,
 the journal, and the SDK configuration for every token.
 
