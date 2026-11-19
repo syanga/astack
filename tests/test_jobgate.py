@@ -704,15 +704,16 @@ class ResultTests(JobgateTest):
                 self.assertEqual(fields.get("oom_kills"), str(killed) if killed else None)
 
     @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
-    def test_status_counts_a_scopes_shmem_but_not_its_page_cache(self):
+    def test_status_counts_a_scopes_shmem_but_not_its_page_cache_or_reclaimable_slab(self):
         env = self.systemd_session("systemd 259", '[ "$1" = --version ] && echo "systemd 259"\nexit 0\n',
                                    SYSTEMD_RUN.format(python=sys.executable, version=259))
         cgroup = self.root / "scope cgroup"
         cgroup.mkdir()
         (cgroup / "memory.max").write_text("max\n")
-        (cgroup / "memory.current").write_text(str(600 * 2**20))
-        (cgroup / "memory.stat").write_text("anon {}\nfile {}\nactive_file {}\ninactive_file {}\nshmem {}\n".format(
-            150 * 2**20, 450 * 2**20, 300 * 2**20, 100 * 2**20, 50 * 2**20))
+        (cgroup / "memory.current").write_text(str(680 * 2**20))
+        stat_mib = {"anon": 150, "file": 450, "active_file": 300, "inactive_file": 100, "shmem": 50,
+                    "slab_reclaimable": 80, "slab_unreclaimable": 20}
+        (cgroup / "memory.stat").write_text("".join("{} {}\n".format(key, mib * 2**20) for key, mib in stat_mib.items()))
         self.set_machine(memory=64 * GIB, cores=8, psi=CALM, cgroup=str(cgroup))
         held = self.hold("held", env=env)
         held.workers()

@@ -756,7 +756,7 @@ def owned_bytes(pid: int) -> int | None:
 
 def cgroup_memory_in_use(cgroup: Path) -> int:
     stat = dict(line.split() for line in (cgroup / "memory.stat").read_text().splitlines() if len(line.split()) == 2)
-    cache = int(stat.get("active_file", 0)) + int(stat.get("inactive_file", 0))
+    cache = sum(int(stat.get(key, 0)) for key in ("active_file", "inactive_file", "slab_reclaimable"))
     return max(0, int((cgroup / "memory.current").read_text()) - cache)
 
 
