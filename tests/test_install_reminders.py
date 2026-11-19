@@ -133,10 +133,12 @@ class ReminderTests(unittest.TestCase):
     def test_a_reminder_that_cannot_read_its_state_leaves_the_others(self):
         self.guard.boot_file.parent.mkdir(parents=True)
         self.guard.boot_file.write_text("w {} - - - - 1000\n".format(self.ttl))
-        output = self.pending()
+        (self.router_state / "config.json").write_text("[]")
+        output = self.pending(self.installed_router("systemd"))
 
         self.assertIsNone(self.guard_command(output))
-        self.assertIn(ROUTER_README, output)
+        self.assertIsNone(self.setup_command(output))
+        self.assertIn(LINGER, output)
 
     def test_every_readme_link_names_a_readme_section(self):
         output = self.pending() + "\n" + self.pending(self.installed_router("systemd"))
