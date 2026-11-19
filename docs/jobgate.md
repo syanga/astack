@@ -304,11 +304,12 @@ to one log in the order they end. jobgate runs dirty worktrees like clean ones.
 | 128+N | jobgate received signal N, such as SIGTERM, SIGHUP, or SIGINT from Ctrl-C, before the command started. |
 
 On Linux in a scope, the `jobgate.py _scope` process starts the command and
-waits for it. It passes SIGTERM and SIGHUP on to the command. When another
-signal N, such as SIGKILL, kills `jobgate.py _scope`, jobgate also returns
-128+N. The command can keep running in the run's scope. The kernel's OOM killer
-sends SIGKILL, so jobgate returns 137 when the OOM killer kills
-`jobgate.py _scope`.
+waits for it. The `jobgate.py _scope` process passes SIGTERM and SIGHUP on to
+the command and keeps waiting after SIGINT. When another signal N, such as
+SIGKILL, kills the `jobgate.py _scope` process, jobgate also returns 128+N. The
+command can keep running in the run's scope. When the kernel OOM-kills the
+`jobgate.py _scope` process, jobgate returns 137, because the kernel sends
+SIGKILL.
 
 On macOS, `taskpolicy` starts the command. When it cannot start an executable
 file, such as a script whose interpreter is missing, jobgate returns the exit
