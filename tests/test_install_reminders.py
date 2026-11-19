@@ -141,8 +141,14 @@ class ReminderTests(unittest.TestCase):
         self.assertIsNone(self.setup_command(output))
         self.assertIn(LINGER, output)
 
+    def test_a_linger_check_that_cannot_read_the_layout_leaves_the_setup_reminder(self):
+        output = self.pending({"targets": {}, "components": {"claude-router": {"layout": {"state": str(self.router_state)}}}})
+
+        self.assertNotIn(LINGER, output)
+        self.assertEqual(self.setup_command(output), SETUP)
+
     def test_a_malformed_router_record_leaves_the_guard_reminder(self):
-        for components in (None, {"claude-router": {"layout": "x"}}, {"claude-router": {"layout": {}}}):
+        for components in (None, {"claude-router": {"layout": "x"}}):
             output = self.pending({"targets": {}, "components": components})
             self.assertIsNotNone(self.guard_command(output), components)
 

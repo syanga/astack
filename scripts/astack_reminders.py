@@ -56,16 +56,16 @@ def router_steps(state: dict, host: Host) -> list[str]:
     layout = state.get("components", {}).get(claude_router.NAME, {}).get("layout")
     if not layout:
         return ["OPTIONAL claude-router is not installed ({})".format(ROUTER_README)]
-    return best_effort(linger_step, layout, host) + best_effort(setup_step, layout)
+    return best_effort(lambda: linger_step(layout, host)) + best_effort(lambda: setup_step(layout))
 
 
-def best_effort(step: Callable[..., list[str]], *arguments) -> list[str]:
+def best_effort(step: Callable[[], list[str]]) -> list[str]:
     try:
-        return step(*arguments)
+        return step()
     except Exception:
         return []
 
 
 def pending(state: dict, host: Host | None = None) -> list[str]:
-    host = host or real_host()
-    return best_effort(guard_step, host) + best_effort(router_steps, state, host)
+    machine = host or real_host()
+    return best_effort(lambda: guard_step(machine)) + best_effort(lambda: router_steps(state, machine))
