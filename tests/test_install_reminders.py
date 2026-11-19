@@ -79,6 +79,9 @@ class ReminderTests(unittest.TestCase):
             memory_guard.install(self.guard, dry_run=False)
         self.assertIsNone(self.guard_command(self.pending()))
 
+        self.ttl.write_text("2000\n")
+        self.assertIsNone(self.guard_command(self.pending()))
+
         self.ttl.write_text("0\n")
         self.assertIsNotNone(self.guard_command(self.pending()))
 

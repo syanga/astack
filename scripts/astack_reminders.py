@@ -30,8 +30,7 @@ def todo(name: str, readme: str, command: str) -> list[str]:
 
 def guard_step(host: Host) -> list[str]:
     current = memory_guard.status(host.guard)
-    installed = current.min_ttl_ms_before_install is not None and current.min_ttl_ms == memory_guard.MIN_TTL_MS
-    if not current.available or installed:
+    if not current.available or current.installed:
         return []
     script = shlex.quote(str(Path(memory_guard.__file__).resolve()))
     return todo("memory guard", GUARD_README, "sudo python3 {} install".format(script))

@@ -4,7 +4,7 @@
 install sets min_ttl_ms to 1000 to turn on the kernel's thrashing prevention.
 systemd-tmpfiles sets the same value again at each boot.
 uninstall restores min_ttl_ms to its value from before the first install.
-status reports min_ttl_ms and needs no root.
+status reports min_ttl_ms and whether the guard is installed, and needs no root.
 """
 
 from __future__ import annotations
@@ -45,6 +45,10 @@ class Status:
     @property
     def available(self) -> bool:
         return self.lru_gen_on and self.min_ttl_ms is not None
+
+    @property
+    def installed(self) -> bool:
+        return self.min_ttl_ms_before_install is not None and bool(self.min_ttl_ms)
 
 
 def real_host() -> Host:
@@ -122,7 +126,8 @@ def describe(current: Status) -> str:
         text = "unavailable: " + UNAVAILABLE_REASON
     if current.min_ttl_ms_before_install is not None:
         text += ", set to {} at boot by astack".format(MIN_TTL_MS)
-    return "thrashing prevention  " + text
+    return "thrashing prevention  {}\nmemory guard          {}".format(
+        text, "installed" if current.installed else "not installed")
 
 
 def main(argv: Sequence[str] | None = None, host: Host | None = None) -> int:
