@@ -12,7 +12,8 @@ import time
 import unittest
 
 REPO = Path(__file__).resolve().parent.parent
-SCRIPT = REPO / ".agents/skills/author-skill/scripts/run_case.py"
+SCRIPT_PATH = Path(".agents/skills/author-skill/scripts/run_case.py")
+UNCOPIED = shutil.ignore_patterns(".git", ".claude", "__pycache__", "node_modules")
 
 FAKE_CLAUDE = r'''#!/usr/bin/env python3
 import json, os, subprocess, sys, time
@@ -79,6 +80,18 @@ emit({"type": "result", "subtype": "success", "is_error": False, "session_id": s
 
 
 class RunCaseTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        checkouts = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(checkouts.cleanup)
+        cls.checkout = Path(checkouts.name) / "checkout"
+        shutil.copytree(REPO, cls.checkout, ignore=UNCOPIED)
+
+    def copy_checkout(self):
+        checkout = self.temp / "checkout"
+        shutil.copytree(self.checkout, checkout)
+        return checkout
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
@@ -123,7 +136,8 @@ class RunCaseTests(unittest.TestCase):
             except ProcessLookupError:
                 pass
 
-    def run_case(self, *arguments, mode="", script=SCRIPT):
+    def run_case(self, *arguments, mode="", checkout=None):
+        script = (checkout or self.checkout) / SCRIPT_PATH
         result = subprocess.run(
             [sys.executable, str(script), "--out", str(self.temp / "out"), *arguments],
             env=dict(self.env, FAKE_MODE=mode), capture_output=True, text=True, timeout=60,
@@ -137,27 +151,27 @@ class RunCaseTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(len(sessions), 2)
         for session in sessions:
-            self.assertEqual(session["tdd"], (REPO / "skills/tdd/SKILL.md").read_text())
-            shared = (REPO / "instructions/AGENTS.md").read_text().strip()
+            self.assertEqual(session["tdd"], (self.checkout / "skills/tdd/SKILL.md").read_text())
+            shared = (self.checkout / "instructions/AGENTS.md").read_text().strip()
             self.assertIn(shared, session["instructions"])
             self.assertEqual(session["settings"], {"apiKeyHelper": "cat token",
                                                    "env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:1"},
                                                    "model": "opus", "autoMemoryEnabled": False})
             self.assertFalse(session["credentials"])
             self.assertIsNone(session["parent_session"])
-            self.assertEqual(Path(session["cwd"]).resolve(), REPO)
+            self.assertEqual(Path(session["cwd"]).resolve(), self.checkout.resolve())
             argv = session["argv"]
             self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
             self.assertEqual(argv[argv.index("--setting-sources") + 1], "user,project")
-            self.assertEqual(argv[argv.index("--allowedTools") + 1].split(","), ["Read", "Grep", "Glob", "Skill"])
+            self.assertCountEqual(argv[argv.index("--allowedTools") + 1].split(","), ["Read", "Grep", "Glob", "Skill"])
 
     def test_report_lists_skills_actions_and_answers_per_run_and_in_total(self):
         result, _ = self.run_case("--runs", "2", "Add a feature")
 
         report = result.stdout
         self.assertIn("Skills: tdd\n", report)
-        actions = report.index("Edit skills/tdd/SKILL.md (denied)")
-        self.assertLess(actions, report.index("Write notes.md (denied)"))
+        edit_position = report.index("Edit skills/tdd/SKILL.md (denied)")
+        self.assertLess(edit_position, report.index("Write notes.md (denied)"))
         self.assertIn("Bash git log --oneline\n", report)
         self.assertIn("Bash ls missing (failed: Exit code 2)", report)
         self.assertNotIn("Read README.md", report)
@@ -170,42 +184,38 @@ class RunCaseTests(unittest.TestCase):
         self.assertEqual(len(list((self.temp / "out").glob("*.jsonl"))), 2)
 
     def test_refuses_to_run_when_the_checkout_could_approve_more_than_reading(self):
-        checkout = self.temp / "checkout"
-        shutil.copytree(REPO, checkout, ignore=shutil.ignore_patterns(".git", "__pycache__", "node_modules"))
-        script = checkout / SCRIPT.relative_to(REPO)
-        settings = checkout / ".claude/settings.json"
-        settings.parent.mkdir()
-        skill = checkout / "skills/tdd/SKILL.md"
-        original_skill = skill.read_text()
+        tdd = (self.checkout / "skills/tdd/SKILL.md").read_text()
         loosening = {
-            "an allow rule": (json.dumps({"permissions": {"allow": ["Write"]}}), None, "permissions.allow"),
-            "a hook": (json.dumps({"hooks": {"PreToolUse": []}}), None, "hooks"),
-            "a sandbox": (json.dumps({"sandbox": {"enabled": True}}), None, "sandbox"),
-            "malformed settings": ("{not json", None, "not a JSON object"),
-            "a project command": ("{}", ".claude/commands/ship.md", ".claude/commands"),
-            "a skill's allowed-tools": ("{}", "skills/tdd/SKILL.md", "skills/tdd/SKILL.md"),
+            "an allow rule": ({".claude/settings.json": json.dumps({"permissions": {"allow": ["Write"]}})},
+                              "permissions.allow"),
+            "a hook": ({".claude/settings.json": json.dumps({"hooks": {"PreToolUse": []}})}, "hooks"),
+            "a sandbox": ({".claude/settings.json": json.dumps({"sandbox": {"enabled": True}})}, "sandbox"),
+            "malformed settings": ({".claude/settings.json": "{not json"}, "not a JSON object"),
+            "a project command": ({".claude/commands/ship.md": "ship it"}, ".claude/commands"),
+            "a skill's allowed-tools": (
+                {"skills/tdd/SKILL.md": tdd.replace("description:", "allowed-tools: Write\ndescription:", 1)},
+                "skills/tdd/SKILL.md"),
         }
-        for case, (contents, extra, named) in loosening.items():
+        for case, (files, named) in loosening.items():
             with self.subTest(case):
-                settings.write_text(contents)
-                if extra == "skills/tdd/SKILL.md":
-                    skill.write_text(original_skill.replace("description:", "allowed-tools: Write\ndescription:", 1))
-                elif extra:
-                    (checkout / extra).parent.mkdir(parents=True, exist_ok=True)
-                    (checkout / extra).write_text("ship it")
-                self.log.unlink(missing_ok=True)
-                refused, sessions = self.run_case("--runs", "1", "Add a feature", script=script)
+                checkout = self.copy_checkout()
+                for path, contents in files.items():
+                    (checkout / path).parent.mkdir(parents=True, exist_ok=True)
+                    (checkout / path).write_text(contents)
+                refused, sessions = self.run_case("--runs", "1", "Add a feature", checkout=checkout)
+                shutil.rmtree(checkout)
 
                 self.assertNotEqual(refused.returncode, 0)
                 self.assertIn(named, refused.stderr)
                 self.assertNotIn("Traceback", refused.stderr)
                 self.assertEqual(sessions, [])
-                skill.write_text(original_skill)
-                shutil.rmtree(checkout / ".claude/commands", ignore_errors=True)
 
-        settings.write_text(json.dumps({"permissions": {"deny": ["WebFetch"], "ask": ["Bash(rm:*)"]}}))
-        self.log.unlink(missing_ok=True)
-        allowed, sessions = self.run_case("--runs", "1", "Add a feature", script=script)
+        checkout = self.copy_checkout()
+        narrowing = {"permissions": {"deny": ["WebFetch"], "ask": ["Bash(rm:*)"]}}
+        (checkout / ".claude/worktrees/probe").mkdir(parents=True)
+        (checkout / ".claude/settings.json").write_text(json.dumps(narrowing))
+        (checkout / ".claude/settings.local.json").write_text(json.dumps({"permissions": {"allow": ["Write"]}}))
+        allowed, sessions = self.run_case("--runs", "1", "Add a feature", checkout=checkout)
 
         self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
         self.assertEqual(len(sessions), 1)
@@ -235,7 +245,8 @@ class RunCaseTests(unittest.TestCase):
     def test_terminating_the_script_stops_every_session(self):
         self.addCleanup(self.kill_recorded_child)
         script = subprocess.Popen(
-            [sys.executable, str(SCRIPT), "--out", str(self.temp / "out"), "--runs", "1", "Add a feature"],
+            [sys.executable, str(self.checkout / SCRIPT_PATH), "--out", str(self.temp / "out"), "--runs", "1",
+             "Add a feature"],
             env=dict(self.env, FAKE_MODE="hang"), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
         record = Path(str(self.log) + ".child")

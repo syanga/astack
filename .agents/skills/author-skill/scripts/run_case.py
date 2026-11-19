@@ -3,7 +3,7 @@
 
 Each run gets its own configuration directory. It holds the CLAUDE.md and skills
 that `scripts/manage.py install` would deploy from this checkout for Claude
-Code, plus the apiKeyHelper, env, model, and autoMemoryEnabled settings from
+Code. Its settings copy apiKeyHelper, env, model, and autoMemoryEnabled from
 your Claude Code settings. A session signed in only through /login cannot sign
 in here. Create a token with `claude setup-token` and export it as
 CLAUDE_CODE_OAUTH_TOKEN.
@@ -14,11 +14,12 @@ so an attempt to edit, post, or merge appears in the report as a denied call
 instead of happening. Sessions skip local settings
 (.claude/settings.local.json). The script refuses to start when anything else
 in the checkout could approve a call: a committed .claude/settings.json with
-more than deny and ask rules, any other file under .claude/, or a skill that
-declares allowed-tools. The report lists each run's skills, actions, and
-answers, then how many runs used each skill and had each tool denied. The
-script exits 1 when any run times out or fails, and stops every session when
-it is interrupted or terminated.
+more than deny and ask rules, any other entry under .claude/ except Claude
+Code's worktrees, or a skill that declares allowed-tools.
+
+The report lists each run's skills, actions, and answers, then how many runs
+used each skill and had each tool denied. The script exits 1 when any run times
+out or fails. It stops every session when it is interrupted or terminated.
 """
 
 import argparse
@@ -44,10 +45,10 @@ CONTEXT_TOOLS = set(ALLOWED) | {"ToolSearch", "TodoWrite"}
 DRAIN_SECONDS = 5
 PROJECT_CONFIG = REPO / ".claude"
 PROJECT_SETTINGS = PROJECT_CONFIG / "settings.json"
-SKIPPED_SETTINGS = PROJECT_CONFIG / "settings.local.json"
+ACCEPTED_ENTRIES = {PROJECT_SETTINGS, PROJECT_CONFIG / "settings.local.json", PROJECT_CONFIG / "worktrees"}
 NARROWING_RULES = {"deny", "ask"}
 USER_SETTINGS = ("apiKeyHelper", "env", "model", "autoMemoryEnabled")
-PARENT_SESSION = (
+PARENT_SESSION_VARIABLES = (
     "CLAUDECODE", "CLAUDE_PID", "CLAUDE_AGENT_SDK_VERSION", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH",
     "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_CHILD_NOTES_DIR",
     "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
@@ -98,11 +99,11 @@ def settings_problems():
     return ["{} sets {}".format(PROJECT_SETTINGS, ", ".join(sorted(keys)))] if keys else []
 
 
-def loosening():
+def read_only_problems():
     problems = settings_problems()
     if PROJECT_CONFIG.is_dir():
         problems += ["{} exists".format(path) for path in sorted(PROJECT_CONFIG.iterdir())
-                     if path not in (PROJECT_SETTINGS, SKIPPED_SETTINGS)]
+                     if path not in ACCEPTED_ENTRIES]
     for relative, data, _ in manage.skill_files():
         parts = data.decode("utf-8").split("---", 2) if relative.name == "SKILL.md" else []
         frontmatter = parts[1] if len(parts) == 3 else ""
@@ -161,7 +162,7 @@ def read_events(text, turn):
 
 
 def run(index, prompts, config, args):
-    env = {key: value for key, value in os.environ.items() if key not in PARENT_SESSION}
+    env = {key: value for key, value in os.environ.items() if key not in PARENT_SESSION_VARIABLES}
     env["CLAUDE_CONFIG_DIR"] = str(config)
     turns, session = [], None
     for number, prompt in enumerate(prompts, 1):
@@ -245,7 +246,7 @@ def tally(counts, runs):
 
 
 def report(results, args):
-    total, fired, refused = 0.0, Counter(), Counter()
+    total, skill_runs, denied_runs = 0.0, Counter(), Counter()
     for index, turns in enumerate(results, 1):
         cost = sum((turn.result or {}).get("total_cost_usd") or 0 for turn in turns)
         total += cost
@@ -260,8 +261,8 @@ def report(results, args):
             if was_denied:
                 denied.add(name)
             print("    " + line)
-        fired.update(run_skills)
-        refused.update(denied)
+        skill_runs.update(run_skills)
+        denied_runs.update(denied)
         for number, turn in enumerate(turns, 1):
             answer = (turn.result or {}).get("result") or "(none)"
             print("  Turn {} answer:".format(number))
@@ -269,8 +270,8 @@ def report(results, args):
     runs = len(results)
     unfinished = [str(index) for index, turns in enumerate(results, 1) if any(turn.problem for turn in turns)]
     print("Summary of {} runs".format(runs))
-    print("  Skills: {}".format(tally(fired, runs)))
-    print("  Denied: {}".format(tally(refused, runs)))
+    print("  Skills: {}".format(tally(skill_runs, runs)))
+    print("  Denied: {}".format(tally(denied_runs, runs)))
     print("  Unfinished runs: {}".format(", ".join(unfinished) or "none"))
     print("  Cost: ${:.2f} at API prices".format(total))
     print("  Transcripts: {}".format(args.out))
@@ -281,14 +282,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("prompt", help="the first user message")
     parser.add_argument("--then", action="append", default=[], metavar="PROMPT",
-                        help="a later user message in the same session; repeat for more turns")
+                        help="a later user message in the same session. Repeat for more turns.")
     parser.add_argument("--runs", type=int, default=3, help="independent sessions to run in parallel (default 3)")
     parser.add_argument("--model", help="model for every session (default: your settings or account default)")
     parser.add_argument("--max-turns", type=int, default=30, help="agent turns allowed per message (default 30)")
     parser.add_argument("--timeout", type=float, default=900, help="seconds allowed per message (default 900)")
     parser.add_argument("--out", type=Path, help="directory for transcripts (default: a new temporary directory)")
     args = parser.parse_args()
-    problems = loosening()
+    problems = read_only_problems()
     if problems:
         parser.error("sessions would not be read-only: " + "; ".join(problems))
     for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
