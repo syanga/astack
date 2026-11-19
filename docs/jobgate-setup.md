@@ -100,5 +100,6 @@ jobgate. make reports a nonzero code as `Error N`.
    running run shows its worker count, its stated memory, the memory it uses,
    and how long it has run.
 2. Read the result line that jobgate prints when the run ends.
-3. To find that line later, search `~/.cache/jobgate/results.log` for its
-   `time` and `repo` fields. Other runs' lines can follow it there.
+3. To find that line later, search `~/.cache/jobgate/results.log` in the
+   account's home directory for its `time` and `repo` fields. Other runs' lines
+   can follow it there.

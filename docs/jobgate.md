@@ -84,7 +84,7 @@ A run is admitted when all of these are true:
   running runs, plus one, are at most the core count.
 - At least one worker fits in free memory. This run's `base_mem + 1 × worker_mem`
   is at most the free memory that [Free memory](#free-memory) defines.
-- The pressure reading is under its threshold in the table that follows. While
+- The pressure reading is under its threshold in [Pressure thresholds](#pressure-thresholds). While
   it is not, new runs wait. This wait is the pressure hold. Runs that already
   started keep going under pressure.
 
@@ -148,15 +148,18 @@ measurement. A failed measurement counts as 0.
 | Linux, without a scope | The sum of `Pss_Anon` and `Pss_Shmem` from `/proc/<pid>/smaps_rollup` over the tree of the run's jobgate process. For a process that does not show those fields, jobgate uses `RssAnon` and `RssShmem` from `/proc/<pid>/status`. |
 | macOS | The sum of `phys_footprint` over the tree of the run's jobgate process |
 
+Memory that ungated commands use is missing from the available memory, so
+ungated work also delays new runs.
+
 Free memory is an estimate, read one file or process at a time. Runs that
-allocate or free memory during the check, shared pages, and moving page cache
-can each make it wrong in either direction.
+allocate or free memory during the check, shared pages, and page cache that
+grows or shrinks can each make it wrong in either direction.
 
 When the estimate is too high, jobgate can admit a run that does not fit. On
-Linux, the `MemoryMax` of `jobgate.slice` still caps all gated runs together.
-[Enforcement and priority](#enforcement-and-priority) describes that cap. On
-macOS, only the pressure hold and the OS respond. Memory that ungated commands
-use is missing from the available memory, so ungated work also delays new runs.
+Linux with the kernel memory cap on, the `MemoryMax` of `jobgate.slice` still
+caps all gated runs together.
+[Enforcement and priority](#enforcement-and-priority) describes that cap.
+Otherwise, as on macOS, only the pressure hold and the OS respond.
 
 When the reading is unavailable, no run waits for free memory, and
 `jobgate status` shows free memory as unknown.
@@ -312,7 +315,7 @@ code of `taskpolicy`.
 | `JOBGATE_RUN` | jobgate sets it to the path of the run's file. A nested call reads it to find the outer run. |
 | `HOME` | jobgate takes `~` from the password database instead, so runs under every `HOME` share one configuration, queue, and results log. It reads `HOME` only when the account has no entry there. jobgate also ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. |
 | `JOBGATE_HOME` | Tests only. Replaces the account's home directory, which holds the configuration, the queue, and the results log. With a real systemd user session, a run that sets it still sets the real `jobgate.slice` cap from the `memory_share` it finds there. |
-| `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with readings that replace the OS readings: `memory`, `cores`, `psi` or `darwin_level`, and `meminfo` or `vm_stat` text. jobgate reads `memory` and `cores` once per run. It reads the pressure and free-memory readings before each admission attempt. A `cgroup` value names a directory that stands in for the scope's cgroup. With a real systemd user session, a run that uses this file still sets the real `jobgate.slice` cap from its `memory` reading. |
+| `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with readings that replace the OS readings: `memory`, `cores`, `psi` or `darwin_level`, and `meminfo` or `vm_stat` text. jobgate reads `memory` and `cores` once per run. It reads the pressure and available-memory readings before each admission attempt. A `cgroup` value names a directory that stands in for the scope's cgroup. With a real systemd user session, a run that uses this file still sets the real `jobgate.slice` cap from its `memory` reading. |
 
 ## Files
 

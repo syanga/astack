@@ -468,9 +468,9 @@ class AdmissionTests(JobgateTest):
 
     def test_status_reads_free_memory_from_meminfo_or_vm_stat(self):
         vm_stat = ("Mach Virtual Memory Statistics: (page size of 16384 bytes)\n"
-                   "Pages free:                               32768.\nPages active:                            500000.\n"
-                   "Pages inactive:                          400000.\nPages speculative:                         2000.\n"
-                   "Pages purgeable:                              0.\nFile-backed pages:                        65536.\n"
+                   "Pages free:                               16384.\nPages active:                            500000.\n"
+                   "Pages inactive:                          400000.\nPages speculative:                        32768.\n"
+                   "Pages purgeable:                          16384.\nFile-backed pages:                        65536.\n"
                    "Anonymous pages:                        700000.\n")
         for readings in ({"meminfo": meminfo(GIB + GIB // 2)}, {"vm_stat": vm_stat}):
             with self.subTest(source=next(iter(readings))):
