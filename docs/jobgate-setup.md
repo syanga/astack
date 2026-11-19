@@ -50,10 +50,16 @@ the count as a flag, expand the variable in `sh -c`:
 | pytest with pytest-xdist 3.0.2 or newer | `PYTEST_XDIST_AUTO_NUM_WORKERS` | `pytest -n auto` |
 | cargo | `CARGO_BUILD_JOBS` | `cargo build` |
 | jest | `TEST_WORKERS` | `sh -c 'jest --maxWorkers="$TEST_WORKERS"'` |
-| vitest | `TEST_WORKERS` | `sh -c 'vitest run --maxWorkers="$TEST_WORKERS"'` |
+| vitest 4.0.0 or newer | `VITEST_MAX_WORKERS` | `vitest run` |
 
 Write `"$TEST_WORKERS"` inside the single quotes. Outside them, the calling
 shell expands it before jobgate sets it.
+
+vitest 4.0.0 is the first stable release that reads `VITEST_MAX_WORKERS`. It
+applies the variable after its command-line options and its config file, so a
+`--maxWorkers` flag cannot override jobgate's count. Releases 3.x and older do
+not read it. For those, use `TEST_WORKERS` and
+`sh -c 'vitest run --maxWorkers="$TEST_WORKERS"'`.
 
 ## Fall back when jobgate is missing
 
@@ -70,13 +76,14 @@ test:
 	fi
 ```
 
-For a command in an npm script, first set `workers_env = "TEST_WORKERS"` in the
-`[test]` profile of `jobgate.toml`. Then copy this pattern into `package.json`:
+For a command in an npm script that runs vitest 4.0.0 or newer, first set
+`workers_env = "VITEST_MAX_WORKERS"` in the `[test]` profile of `jobgate.toml`.
+Then copy this pattern into `package.json`:
 
 ```json
 {
   "scripts": {
-    "test": "if command -v jobgate >/dev/null 2>&1; then jobgate run test -- sh -c 'vitest run --maxWorkers=\"$TEST_WORKERS\"'; else echo 'warning: jobgate is not installed; running with 2 workers' >&2; vitest run --maxWorkers=2; fi"
+    "test": "if command -v jobgate >/dev/null 2>&1; then jobgate run test -- vitest run; else echo 'warning: jobgate is not installed; running with 2 workers' >&2; VITEST_MAX_WORKERS=2 vitest run; fi"
   }
 }
 ```
@@ -89,8 +96,10 @@ jobgate. make reports a nonzero code as `Error N`.
 
 ## Follow a run
 
-1. Run `jobgate status`. A waiting run shows how long it has waited. A running
-   run shows its worker count, its stated memory, and how long it has run.
+1. Run `jobgate status`. A waiting run shows how long it has waited and why. A
+   running run shows its worker count, its stated memory, the memory it uses,
+   and how long it has run.
 2. Read the result line that jobgate prints when the run ends.
-3. To find that line later, search `~/.cache/jobgate/results.log` for its
-   `time` and `repo` fields. Other runs' lines can follow it there.
+3. To find that line later, search `~/.cache/jobgate/results.log` in the
+   account's home directory for its `time` and `repo` fields. Other runs' lines
+   can follow it there.

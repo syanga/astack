@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -25,6 +26,30 @@ with open(sys.argv[1] + ".tmp", "w") as stream:
 os.replace(sys.argv[1] + ".tmp", sys.argv[1])
 while not os.path.exists(sys.argv[2]):
     time.sleep(0.02)
+'''
+ALLOCATE_ON_SIGNAL = r'''
+import os, sys, time
+while not os.path.exists(sys.argv[1]):
+    time.sleep(0.02)
+block = b"\x01" * (int(sys.argv[2]) << 20)
+open(sys.argv[3], "w").close()
+while not os.path.exists(sys.argv[4]):
+    time.sleep(0.02)
+'''
+ALLOCATE_AND_FORK = r'''
+import os, sys, time
+block = b"\x01" * (int(sys.argv[1]) << 20)
+children = []
+for _ in range(4):
+    pid = os.fork()
+    if pid == 0:
+        while not os.path.exists(sys.argv[3]):
+            time.sleep(0.05)
+        os._exit(0)
+    children.append(pid)
+open(sys.argv[2], "w").close()
+for pid in children:
+    os.waitpid(pid, 0)
 '''
 PRINT_WORKERS = "import os; print(os.environ['TEST_WORKERS'])"
 NESTED = r'''
@@ -86,6 +111,10 @@ def wait_for(predicate, timeout=30.0):
     raise AssertionError("timed out waiting for {}".format(predicate))
 
 
+def meminfo(available):
+    return "MemTotal:       67108864 kB\nMemFree:         1048576 kB\nMemAvailable:   {} kB\n".format(available // 1024)
+
+
 class HeldRun:
     def __init__(self, test, name, profile, flags, variable, env):
         self.started = test.root / (name + ".started")
@@ -131,12 +160,14 @@ class JobgateTest(unittest.TestCase):
         systemctl.chmod(0o755)
         self.machine_file = self.root / "machine.json"
         self.set_machine(memory=64 * GIB, cores=8, psi=CALM)
+        self.queue_dir = self.root / "home/.cache/jobgate"
         self.env = {key: value for key, value in os.environ.items()
                     if not key.startswith(("JOBGATE_", "XDG_", "DBUS_"))}
         self.env.update(
             HOME=str(self.root / "home"), XDG_CACHE_HOME=str(self.root / "xdg cache"),
             XDG_CONFIG_HOME=str(self.root / "xdg config"), XDG_RUNTIME_DIR=str(self.root / "runtime"),
             PATH=str(fake_bin) + os.pathsep + os.environ.get("PATH", ""), JOBGATE_MACHINE_FILE=str(self.machine_file),
+            JOBGATE_HOME=str(self.root / "home"),
             GIT_CEILING_DIRECTORIES=str(self.root), GIT_CONFIG_NOSYSTEM="1")
         self.held = []
         self.addCleanup(self.stop_held)
@@ -152,6 +183,8 @@ class JobgateTest(unittest.TestCase):
                 held.process.wait()
 
     def set_machine(self, **readings):
+        if "meminfo" not in readings and "vm_stat" not in readings:
+            readings["meminfo"] = meminfo(readings.get("memory", 64 * GIB))
         temporary = self.machine_file.with_name("machine.json.tmp")
         temporary.write_text(json.dumps(readings))
         os.replace(str(temporary), str(self.machine_file))
@@ -296,7 +329,7 @@ class AdmissionTests(JobgateTest):
         os.close(write_end)
         self.share(2)
         time.sleep(2.5)
-        lock = os.open(str(self.root / "home/.cache/jobgate/queue.lock"), os.O_RDWR)
+        lock = os.open(str(self.queue_dir / "queue.lock"), os.O_RDWR)
         try:
             deadline = time.monotonic() + 10
             while True:
@@ -321,7 +354,7 @@ class AdmissionTests(JobgateTest):
         self.profiles(test=("1G", "1G", 3, "TEST_WORKERS"))
         waiter = self.hold("waiter")
         waiter.wait_message("waits for memory pressure")
-        lock = os.open(str(self.root / "home/.cache/jobgate/queue.lock"), os.O_RDWR)
+        lock = os.open(str(self.queue_dir / "queue.lock"), os.O_RDWR)
         try:
             fcntl.flock(lock, fcntl.LOCK_EX)
             time.sleep(2.5)
@@ -359,6 +392,98 @@ class AdmissionTests(JobgateTest):
         self.assertEqual(first.release(), 0)
         self.assertEqual(second.workers(), 2)
         self.assertEqual(second.release(), 0)
+
+    def test_runs_under_two_homes_share_the_account_homes_queue(self):
+        site = self.root / "site"
+        site.mkdir()
+        (site / "sitecustomize.py").write_text(
+            "import pwd, types\npwd.getpwuid = lambda uid: types.SimpleNamespace(pw_dir={!r})\n".format(str(self.root / "home")))
+        env = {key: value for key, value in self.env.items() if key != "JOBGATE_HOME"}
+        env["PYTHONPATH"] = str(site)
+        self.set_machine(memory=8 * GIB, cores=16, psi=CALM)
+        self.profiles(test=("1G", "1G", 3, "TEST_WORKERS"))
+        first = self.hold("first", env=dict(env, HOME=str(self.root / "first home")))
+        self.assertEqual(first.workers(), 3)
+        second = self.hold("second", env=dict(env, HOME=str(self.root / "second home")))
+        self.assertIn("waits for memory: 1 worker needs 2.0G, and 0M of the 4.0G share is free",
+                      second.wait_message("waits"))
+        self.assertEqual(first.release(), 0)
+        self.assertTrue((self.queue_dir / "results.log").exists())
+        self.assertEqual(second.workers(), 3)
+
+    def test_a_run_waits_until_the_machine_has_its_memory_free(self):
+        self.set_machine(memory=64 * GIB, cores=16, psi=CALM, meminfo=meminfo(GIB + GIB // 2))
+        self.profiles(test=("1G", "1G", 4, "TEST_WORKERS"))
+        waiter = self.hold("waiter")
+        self.assertIn("waits for free memory: 1 worker needs 2.0G, and the machine has 1.5G available",
+                      waiter.wait_message("waits"))
+        status = self.gate("status")
+        self.assertIn("free      1.5G available; running runs may still use 0M", status.stdout)
+        self.assertIn("waits for free memory", [line for line in status.stdout.splitlines()
+                                                if line.startswith("waiting")][0])
+        self.set_machine(memory=64 * GIB, cores=16, psi=CALM, meminfo=meminfo(3 * GIB + GIB // 2))
+        self.assertEqual(waiter.workers(), 2)
+        self.assertEqual(waiter.release(), 0)
+
+    def test_free_memory_counts_what_running_runs_have_not_used_yet_once(self):
+        self.set_machine(memory=64 * GIB, cores=16, psi=CALM, meminfo=meminfo(500 * 2**20))
+        self.profiles(big=("200M", "100M", 1, "BIG_WORKERS"), small=("200M", "100M", 1, "SMALL_WORKERS"))
+        go, allocated, release = (self.root / name for name in ("go", "allocated", "release"))
+        first = subprocess.Popen([sys.executable, str(SCRIPT), "run", "big", "--", sys.executable, "-c",
+                                  ALLOCATE_ON_SIGNAL, str(go), "250", str(allocated), str(release)],
+                                 cwd=str(self.repo), env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(first.wait, timeout=30)
+        self.addCleanup(release.touch)
+        self.addCleanup(go.touch)
+        wait_for(lambda: "running   big" in self.gate("status").stdout)
+        second = self.hold("second", profile="small", variable="SMALL_WORKERS")
+        self.assertIn("waits for free memory", second.wait_message("waits"))
+        go.touch()
+        wait_for(allocated.exists)
+        self.assertEqual(second.workers(), 1)
+        self.assertIsNone(first.poll())
+        self.assertEqual(second.release(), 0)
+
+    @unittest.skipUnless(sys.platform == "linux", "smaps_rollup exists only on Linux")
+    def test_free_memory_splits_pages_that_forked_workers_share(self):
+        rollup = Path("/proc/self/smaps_rollup")
+        if not rollup.exists() or b"Pss_Anon" not in rollup.read_bytes():
+            self.skipTest("this kernel has no Pss_Anon in smaps_rollup")
+        self.set_machine(memory=64 * GIB, cores=16, psi=CALM, meminfo=meminfo(1100 * 2**20))
+        self.profiles(big=("900M", "100M", 1, "BIG_WORKERS"), small=("400M", "100M", 1, "SMALL_WORKERS"))
+        ready, release = self.root / "ready", self.root / "release"
+        first = subprocess.Popen([sys.executable, str(SCRIPT), "run", "big", "--", sys.executable, "-c",
+                                  ALLOCATE_AND_FORK, "200", str(ready), str(release)],
+                                 cwd=str(self.repo), env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(first.wait, timeout=30)
+        self.addCleanup(release.touch)
+        wait_for(ready.exists)
+        second = self.hold("second", profile="small", variable="SMALL_WORKERS")
+        self.assertIn("waits for free memory", second.wait_message("waits"))
+        time.sleep(2.5)
+        self.assertFalse(second.started.exists())
+        release.touch()
+        self.assertEqual(second.workers(), 1)
+        self.assertEqual(second.release(), 0)
+
+    def test_status_reads_free_memory_from_meminfo_or_vm_stat(self):
+        vm_stat = ("Mach Virtual Memory Statistics: (page size of 16384 bytes)\n"
+                   "Pages free:                               16384.\nPages active:                            500000.\n"
+                   "Pages inactive:                          400000.\nPages speculative:                        32768.\n"
+                   "Pages purgeable:                          16384.\nFile-backed pages:                        65536.\n"
+                   "Anonymous pages:                        700000.\n")
+        for readings in ({"meminfo": meminfo(GIB + GIB // 2)}, {"vm_stat": vm_stat}):
+            with self.subTest(source=next(iter(readings))):
+                self.set_machine(memory=64 * GIB, cores=16, psi=CALM, **readings)
+                status = self.gate("status")
+                self.assertEqual(status.returncode, 0, status.stderr)
+                self.assertIn("free      1.5G available", status.stdout)
+
+    def test_an_unknown_free_memory_reading_holds_no_run(self):
+        self.set_machine(memory=64 * GIB, cores=16, psi=CALM, meminfo="MemTotal:       67108864 kB\n")
+        self.assertEqual(self.workers_of(), 4)
+        status = self.gate("status")
+        self.assertIn("free      unknown", status.stdout)
 
     def test_max_workers_flag_only_lowers_the_profile(self):
         self.assertEqual(self.workers_of("--max-workers", "3"), 3)
@@ -402,7 +527,7 @@ class AdmissionTests(JobgateTest):
         self.assertEqual(second.release(), 0)
 
     def test_the_next_run_removes_scope_files_that_a_killed_run_left(self):
-        runs = self.root / "home/.cache/jobgate/runs"
+        runs = self.queue_dir / "runs"
         runs.mkdir(parents=True)
         (runs / "7-0a1b2c3d.scope").write_text('{"cgroup": "/gone", "peak": 1}')
         (runs / "8-0a1b2c3e.scope.tmp").write_text('{"cgroup": "/gone"')
@@ -461,6 +586,7 @@ class AdmissionTests(JobgateTest):
         self.assertIn("pid {}, 4 workers".format(first.pid), running[0])
         self.assertEqual(len(waiting), 1)
         self.assertIn("pid {}".format(second.pid), waiting[0])
+        self.assertIn("waits for a core", waiting[0])
 
 
 class ResultTests(JobgateTest):
@@ -577,6 +703,81 @@ class ResultTests(JobgateTest):
                 self.assertEqual(fields["peak"], "100M")
                 self.assertEqual(fields.get("oom_kills"), str(killed) if killed else None)
 
+    @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
+    def test_status_counts_a_scopes_shmem_but_not_its_page_cache_or_reclaimable_slab(self):
+        env = self.systemd_session("systemd 259", '[ "$1" = --version ] && echo "systemd 259"\nexit 0\n',
+                                   SYSTEMD_RUN.format(python=sys.executable, version=259))
+        cgroup = self.root / "scope cgroup"
+        cgroup.mkdir()
+        (cgroup / "memory.max").write_text("max\n")
+        (cgroup / "memory.current").write_text(str(680 * 2**20))
+        stat_mib = {"anon": 150, "file": 450, "active_file": 300, "inactive_file": 100, "shmem": 50,
+                    "slab_reclaimable": 80, "slab_unreclaimable": 20}
+        (cgroup / "memory.stat").write_text("".join("{} {}\n".format(key, mib * 2**20) for key, mib in stat_mib.items()))
+        self.set_machine(memory=64 * GIB, cores=8, psi=CALM, cgroup=str(cgroup))
+        held = self.hold("held", env=env)
+        held.workers()
+        wait_for(lambda: "uses 200M" in self.gate("status").stdout)
+        self.assertEqual(held.release(), 0)
+
+    @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
+    def test_free_memory_keeps_the_smaller_of_two_measurements_around_the_reading(self):
+        self.assert_second_run_waits_while_the_first_measures([b"%d\n" % (800 * 2**20), b"%d\n" % (100 * 2**20)])
+
+    @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
+    def test_free_memory_counts_a_run_as_using_nothing_when_one_measurement_fails(self):
+        self.assert_second_run_waits_while_the_first_measures([b"%d\n" % (800 * 2**20), b"unreadable\n"])
+
+    def assert_second_run_waits_while_the_first_measures(self, currents):
+        env = self.systemd_session("systemd 259", '[ "$1" = --version ] && echo "systemd 259"\nexit 0\n',
+                                   SYSTEMD_RUN.format(python=sys.executable, version=259))
+        cgroup = self.root / "scope cgroup"
+        cgroup.mkdir()
+        for name, text in (("memory.max", "max\n"), ("memory.peak", "0\n"), ("memory.events", "oom_kill 0\n")):
+            (cgroup / name).write_text(text)
+        stat = b"anon 0\nfile 0\nactive_file 0\ninactive_file 0\nshmem 0\n"
+        for name in ("memory.stat", "memory.current"):
+            os.mkfifo(str(cgroup / name))
+        between, outside = meminfo(1300 * 2**20), meminfo(2000 * 2**20)
+        stop = threading.Event()
+
+        def feed():
+            served, last = 0, None
+            while not stop.is_set():
+                for name in ("memory.stat", "memory.current"):
+                    if name == last:
+                        continue
+                    try:
+                        fd = os.open(str(cgroup / name), os.O_WRONLY | os.O_NONBLOCK)
+                    except OSError:
+                        continue
+                    first_of_pair, measurement = served % 2 == 0, served // 2 % 2
+                    if first_of_pair:
+                        self.set_machine(memory=64 * GIB, cores=16, psi=CALM, cgroup=str(cgroup),
+                                         meminfo=between if measurement == 0 else outside)
+                    os.write(fd, stat if name == "memory.stat" else currents[measurement])
+                    os.close(fd)
+                    served, last = served + 1, name
+                    break
+                else:
+                    time.sleep(0.005)
+
+        feeder = threading.Thread(target=feed, daemon=True)
+        self.addCleanup(feeder.join, 10)
+        self.addCleanup(stop.set)
+        self.set_machine(memory=64 * GIB, cores=16, psi=CALM, meminfo=between, cgroup=str(cgroup))
+        self.profiles(big=("900M", "100M", 1, "BIG_WORKERS"), small=("400M", "100M", 1, "SMALL_WORKERS"))
+        first = self.hold("first", profile="big", variable="BIG_WORKERS", env=env)
+        self.assertEqual(first.workers(), 1)
+        feeder.start()
+        second = self.hold("second", profile="small", variable="SMALL_WORKERS", env=env)
+        self.assertIn("waits for free memory", second.wait_message("waits"))
+        time.sleep(2.5)
+        self.assertFalse(second.started.exists())
+        self.assertEqual(first.release(), 0)
+        self.assertEqual(second.workers(), 1)
+        self.assertEqual(second.release(), 0)
+
     def test_peak_above_the_stated_memory_names_the_number_to_raise(self):
         self.profiles(test=("1M", "1M", 1, "TEST_WORKERS"))
         allocate = "import time; block = bytearray(96 << 20); block[::4096] = b'x' * len(block[::4096]); time.sleep(3)"
@@ -632,27 +833,22 @@ class ExitCodeTests(JobgateTest):
                 self.assertNotIn("kernel memory cap is off", result.stderr)
 
     @unittest.skipUnless(sys.platform == "linux", "systemd slices exist only on Linux")
-    def test_each_home_caps_its_own_slice(self):
+    def test_runs_under_every_home_share_one_slice_and_cap(self):
         log = self.root / "systemd.log"
         env = self.systemd_session("recording systemd", RECORDING_SYSTEMCTL, RECORDING_RUN.format(python=sys.executable))
         env["SYSTEMD_LOG"] = str(log)
         self.set_machine(memory=8 * GIB, cores=8, psi=CALM)
-        slices = []
-        for name, memory_share in (("first home", 0.5), ("second home", 0.25)):
-            (self.root / name / ".config").mkdir(parents=True)
-            (self.root / name / ".config/jobgate.toml").write_text("memory_share = {}\n".format(memory_share))
+        for name in ("first home", "second home"):
             result = self.gate("run", "test", "--", sys.executable, "-c", "pass", env=dict(env, HOME=str(self.root / name)))
             self.assertEqual(result.returncode, 0, result.stderr)
-            slices.append([line.split("--slice=")[1] for line in log.read_text().splitlines() if line.startswith("run ")][-1])
+        slices = [line.split("--slice=")[1] for line in log.read_text().splitlines() if line.startswith("run ")]
         units = {}
         for line in log.read_text().splitlines():
             words = line.split()
             if words[:3] == ["--user", "set-property", "--runtime"]:
                 units.setdefault(words[3], {}).update(word.split("=", 1) for word in words[4:])
-        self.assertEqual(len(set(slices)), 2)
-        self.assertEqual([units[unit].get("MemoryMax") for unit in slices], [str(4 * GIB), str(2 * GIB)])
-        self.assertEqual(units["jobgate.slice"].get("CPUWeight"), "30")
-        self.assertNotIn("MemoryMax", units["jobgate.slice"])
+        self.assertEqual(slices, ["jobgate.slice", "jobgate.slice"])
+        self.assertEqual(units, {"jobgate.slice": {"CPUWeight": "30", "MemoryMax": str(4 * GIB)}})
 
     @unittest.skipUnless(sys.platform == "linux", "systemd slices exist only on Linux")
     def test_raising_the_share_starts_a_waiting_run_and_raises_the_cap(self):
@@ -674,20 +870,40 @@ class ExitCodeTests(JobgateTest):
         self.assertEqual(second.release(), 0)
 
     @unittest.skipUnless(sys.platform == "linux", "systemd slices exist only on Linux")
-    def test_a_home_that_is_not_utf8_gets_a_slice_and_a_status(self):
+    def test_a_run_whose_share_file_turned_invalid_leaves_the_cap_alone(self):
+        log = self.root / "systemd.log"
+        recording = self.systemd_session("recording systemd", RECORDING_SYSTEMCTL,
+                                         RECORDING_RUN.format(python=sys.executable))
+        recording["SYSTEMD_LOG"] = str(log)
+        self.set_machine(memory=8 * GIB, cores=16, psi=CALM)
+        self.profiles(test=("1G", "1G", 3, "TEST_WORKERS"))
+        first = self.hold("first")
+        self.assertEqual(first.workers(), 3)
+        second = self.hold("second", env=recording)
+        second.wait_message("waits for memory")
+        self.share(2)
+        second.wait_message("keeping memory_share 0.5")
+        self.assertEqual(first.release(), 0)
+        self.assertEqual(second.workers(), 3)
+        calls = [line for line in log.read_text().splitlines() if line.startswith("--user set-property")]
+        self.assertEqual(calls, ["--user set-property --runtime jobgate.slice CPUWeight=30"])
+        self.assertEqual(second.release(), 0)
+
+    @unittest.skipUnless(sys.platform == "linux", "systemd slices exist only on Linux")
+    def test_a_home_that_is_not_utf8_runs_and_shows_a_status(self):
         home = self.root / os.fsdecode(b"home\xff")
         try:
             home.mkdir()
         except OSError:
             self.skipTest("this file system rejects names that are not UTF-8")
         env = self.systemd_session("recording systemd", RECORDING_SYSTEMCTL, RECORDING_RUN.format(python=sys.executable))
-        env.update(HOME=str(home), SYSTEMD_LOG=str(self.root / "systemd.log"))
+        env.update(JOBGATE_HOME=str(home), SYSTEMD_LOG=str(self.root / "systemd.log"))
         run = self.gate("run", "test", "--", sys.executable, "-c", "pass", env=env)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertNotIn("Traceback", run.stderr)
         status = self.gate("status", env=env)
         self.assertEqual(status.returncode, 0, status.stderr)
-        self.assertRegex(status.stdout, r"cap +jobgate-[0-9a-f]{12}\.slice ")
+        self.assertRegex(status.stdout, r"cap +jobgate\.slice ")
 
     @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
     def test_ctrl_c_while_the_scope_starts_skips_the_command(self):
@@ -748,7 +964,7 @@ class ExitCodeTests(JobgateTest):
         self.assertEqual(result.returncode, 125)
         self.assertIn("no jobgate.toml", result.stderr)
 
-    def test_a_home_that_jobgate_cannot_write_exits_125_with_one_line(self):
+    def test_a_home_where_jobgate_cannot_keep_its_queue_exits_125_with_one_line(self):
         if os.geteuid() == 0:
             self.skipTest("root can write a read-only directory")
         read_only = self.root / "read-only home"
@@ -761,7 +977,7 @@ class ExitCodeTests(JobgateTest):
         for home, failing in ((read_only, read_only / ".cache"), (no_lock, no_lock / ".cache/jobgate/queue.lock")):
             for arguments in (("run", "test", "--", sys.executable, "-c", "pass"), ("status",)):
                 with self.subTest(home=home.name, command=arguments[0]):
-                    result = self.gate(*arguments, env=dict(self.env, HOME=str(home)))
+                    result = self.gate(*arguments, env=dict(self.env, JOBGATE_HOME=str(home)))
                     self.assertEqual(result.returncode, 125, result.stderr)
                     self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
                     self.assertIn("cannot create {}".format(failing), result.stderr)

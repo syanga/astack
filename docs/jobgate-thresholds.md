@@ -56,5 +56,6 @@ at warn would stop a busy but healthy Mac from starting runs for hours, so
 jobgate holds only at critical.
 
 On macOS, the share limits the memory that gated runs state. Runs can use more
-than they state, and other programs use memory too. Nothing on macOS responds to
-either except the pressure hold at critical, which delays new runs.
+than they state, and other programs use memory too. Two checks respond to
+either: the free-memory check and the pressure hold at critical. Both only delay
+new runs.

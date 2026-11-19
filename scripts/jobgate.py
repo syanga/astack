@@ -16,11 +16,11 @@ import errno
 from dataclasses import asdict, dataclass, fields, replace
 import datetime
 import fcntl
-import hashlib
 import json
 import math
 import os
 from pathlib import Path
+import pwd
 import re
 import secrets
 import shlex
@@ -56,6 +56,7 @@ REPORT_SECONDS = 60.0
 RUN_ENV = "JOBGATE_RUN"
 WORKERS_ENV = "JOBGATE_WORKERS"
 MACHINE_ENV = "JOBGATE_MACHINE_FILE"
+HOME_ENV = "JOBGATE_HOME"
 NO_MEMORY_CONTROLLER = 3
 REFUSED = 125
 CANNOT_EXECUTE = 126
@@ -159,6 +160,7 @@ class Run:
     command: str
     arrived: float
     admission: Admission | None = None
+    wait_reason: str | None = None
 
 
 def parse_size(value: object, where: str) -> int:
@@ -226,8 +228,17 @@ def load_profile(path: Path, name: str) -> Profile:
                    parse_size(table["worker_mem"], where("worker_mem")), max_workers, workers_env)
 
 
+def account_home() -> Path:
+    if os.environ.get(HOME_ENV):
+        return Path(os.environ[HOME_ENV])
+    try:
+        return Path(pwd.getpwuid(os.getuid()).pw_dir)
+    except KeyError:
+        return Path.home()
+
+
 def machine_config() -> Path:
-    return Path.home() / ".config/jobgate.toml"
+    return account_home() / ".config/jobgate.toml"
 
 
 def load_memory_share() -> float:
@@ -329,30 +340,84 @@ def pressure() -> Pressure:
         return Pressure("unknown ({})".format(error.strerror or error), False)
 
 
-class Used(NamedTuple):
-    memory: int
+def meminfo_available(text: str) -> int | None:
+    match = re.search(r"^MemAvailable:\s+(\d+) kB", text, re.MULTILINE)
+    return int(match.group(1)) * 1024 if match else None
+
+
+def vm_stat_available(text: str) -> int | None:
+    page = re.search(r"page size of (\d+) bytes", text)
+    counts = {name: re.search(r"^{}:\s+(\d+)\.".format(re.escape(name)), text, re.MULTILINE)
+              for name in ("Pages free", "File-backed pages", "Pages purgeable")}
+    if page is None or None in counts.values():
+        return None
+    return int(page.group(1)) * sum(int(match.group(1)) for match in counts.values())
+
+
+def available_memory() -> int | None:
+    readings = test_readings()
+    if "meminfo" in readings:
+        return meminfo_available(readings["meminfo"])
+    if "vm_stat" in readings:
+        return vm_stat_available(readings["vm_stat"])
+    if sys.platform == "darwin":
+        result = run_captured(["/usr/bin/vm_stat"], 10)
+        return vm_stat_available(result.stdout) if result.returncode == 0 else None
+    try:
+        return meminfo_available(Path("/proc/meminfo").read_text())
+    except OSError:
+        return None
+
+
+class Load(NamedTuple):
+    stated: int
     workers: int
+    available: int | None
+    still_to_use: int
+    in_use: dict[str, int | None]
+
+    def share_left(self, machine: Machine) -> int:
+        return machine.share - self.stated
+
+    def free_memory_left(self) -> int | None:
+        return None if self.available is None else self.available - self.still_to_use
 
 
-def used(running: list[Admission]) -> Used:
-    return Used(sum(admission.memory for admission in running), sum(admission.workers for admission in running))
+def smaller(first: int | None, second: int | None) -> int | None:
+    return None if first is None or second is None else min(first, second)
 
 
-def fit(machine: Machine, running: list[Admission], profile: Profile, limit: int) -> int:
-    taken = used(running)
-    beyond_base = machine.share - taken.memory - profile.base_mem
-    if beyond_base < 0:
+def load_of(queue: Queue, runs: list[Run]) -> Load:
+    running = [run for run in runs if run.admission is not None]
+    table = parents() if running else {}
+    before = {run.id: memory_in_use(queue, run, table) for run in running}
+    available = available_memory()
+    in_use = {run.id: smaller(before[run.id], memory_in_use(queue, run, table)) for run in running}
+    return Load(sum(run.admission.memory for run in running), sum(run.admission.workers for run in running), available,
+                sum(max(0, run.admission.memory - (in_use[run.id] or 0)) for run in running), in_use)
+
+
+def workers_within(memory: int | None, profile: Profile, limit: int) -> int:
+    if memory is None:
+        return limit
+    if memory < profile.base_mem:
         return 0
-    by_memory = limit if profile.worker_mem == 0 else beyond_base // profile.worker_mem
-    return max(0, min(limit, machine.cores - taken.workers, by_memory))
+    return limit if profile.worker_mem == 0 else (memory - profile.base_mem) // profile.worker_mem
 
 
-def shortage(machine: Machine, running: list[Admission], profile: Profile) -> str:
-    taken = used(running)
-    if taken.workers >= machine.cores:
+def fit(machine: Machine, profile: Profile, limit: int, load: Load) -> int:
+    return max(0, min(limit, machine.cores - load.workers, workers_within(load.share_left(machine), profile, limit),
+                      workers_within(load.free_memory_left(), profile, limit)))
+
+
+def shortage(machine: Machine, profile: Profile, load: Load) -> str:
+    if load.workers >= machine.cores:
         return "for a core: gated workers use all {} cores".format(machine.cores)
-    return "for memory: 1 worker needs {}, and {} of the {} share is free".format(
-        size(profile.memory(1)), size(max(0, machine.share - taken.memory)), size(machine.share))
+    if profile.memory(1) > load.share_left(machine):
+        return "for memory: 1 worker needs {}, and {} of the {} share is free".format(
+            size(profile.memory(1)), size(max(0, load.share_left(machine))), size(machine.share))
+    return "for free memory: 1 worker needs {}, and the machine has {} available, of which running runs may still " \
+           "use {}".format(size(profile.memory(1)), size(load.available or 0), size(load.still_to_use))
 
 
 def temporary(path: Path) -> Path:
@@ -382,14 +447,14 @@ class Queue:
 
     @classmethod
     def open(cls) -> Queue:
-        queue = cls(Path.home() / ".cache/jobgate")
+        queue = cls(account_home() / ".cache/jobgate")
         try:
             queue.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             queue.runs.mkdir(mode=0o700, exist_ok=True)
             os.close(os.open(str(queue.lock_file), os.O_RDWR | os.O_CREAT, 0o600))
         except OSError as error:
-            raise Refusal("cannot create {}: {}; jobgate keeps its queue in $HOME/.cache/jobgate".format(
-                error.filename or queue.directory, error.strerror or error)) from None
+            raise Refusal("cannot create {}: {}; jobgate keeps its queue in {}".format(
+                error.filename or queue.directory, error.strerror or error, queue.directory)) from None
         return queue
 
     @contextlib.contextmanager
@@ -486,7 +551,13 @@ class Ticket:
 
     def admit(self, admission: Admission) -> None:
         self.run.admission = admission
+        self.run.wait_reason = None
         self.save()
+
+    def record_wait_reason(self, reason: str) -> None:
+        if reason != self.run.wait_reason:
+            self.run.wait_reason = reason
+            self.save()
 
     def save(self) -> None:
         os.ftruncate(self.fd, 0)
@@ -509,19 +580,20 @@ def wait_for_admission(queue: Queue, ticket: Ticket, share: LiveShare, profile: 
                 refuse_if_never_fits(profile, machine, config)
                 runs = queue.live()
                 ahead = [run for run in runs if run.admission is None and run.seq < ticket.run.seq]
-                running = [run.admission for run in runs if run.admission is not None]
                 if ahead:
                     reason = "behind {}".format(plural(len(ahead), "earlier run"))
                 else:
                     level = pressure()
-                    workers = fit(machine, running, profile, limit)
+                    load = load_of(queue, runs)
+                    workers = fit(machine, profile, limit, load)
                     if level.holding:
                         reason = "for memory pressure to ease: " + level.reading
                     elif workers < 1:
-                        reason = shortage(machine, running, profile)
+                        reason = shortage(machine, profile, load)
                     else:
                         ticket.admit(Admission(workers, profile.memory(workers), time.time()))
                         return ticket.run.admission, time.monotonic() - arrived
+                ticket.record_wait_reason(reason)
         finally:
             share.print_warning()
         now = time.monotonic()
@@ -660,8 +732,43 @@ class PeakSampler:
         self.measure = resident_bytes if sys.platform == "linux" else Libproc.phys_footprint
 
     def sample(self, root: int) -> None:
-        sizes = (self.measure(pid) for pid in process_tree(root, parents()))
-        self.peak = max(self.peak, sum(size for size in sizes if size is not None))
+        self.peak = max(self.peak, tree_total(root, parents(), self.measure))
+
+
+def tree_total(root: int, table: dict[int, int], measure: Callable[[int], int | None]) -> int:
+    sizes = (measure(pid) for pid in process_tree(root, table))
+    return sum(size for size in sizes if size is not None)
+
+
+def proc_bytes(pid: int, name: str, keys: tuple[bytes, ...]) -> int | None:
+    try:
+        with open("/proc/{}/{}".format(pid, name), "rb") as stream:
+            values = dict(line.split(b":", 1) for line in stream if b":" in line)
+        return sum(int(values[key].split()[0]) * 1024 for key in keys)
+    except (OSError, ValueError, KeyError, IndexError):
+        return None
+
+
+def owned_bytes(pid: int) -> int | None:
+    proportional = proc_bytes(pid, "smaps_rollup", (b"Pss_Anon", b"Pss_Shmem"))
+    return proportional if proportional is not None else proc_bytes(pid, "status", (b"RssAnon", b"RssShmem"))
+
+
+def cgroup_memory_in_use(cgroup: Path) -> int:
+    stat = dict(line.split() for line in (cgroup / "memory.stat").read_text().splitlines() if len(line.split()) == 2)
+    cache = sum(int(stat.get(key, 0)) for key in ("active_file", "inactive_file", "slab_reclaimable"))
+    return max(0, int((cgroup / "memory.current").read_text()) - cache)
+
+
+def memory_in_use(queue: Queue, run: Run, table: dict[int, int]) -> int | None:
+    cgroup = read_json(RunFiles.of(queue.runs, run.id).scope).get("cgroup")
+    measure = owned_bytes if sys.platform == "linux" else Libproc.phys_footprint
+    try:
+        if cgroup:
+            return cgroup_memory_in_use(Path(cgroup))
+        return tree_total(run.pid, table, measure)
+    except (OSError, ValueError, AttributeError):
+        return None
 
 
 def exec_failure(command: list[str], env: dict) -> int | None:
@@ -684,22 +791,14 @@ def systemd_version() -> int:
     return int(match.group(1)) if match else 0
 
 
-def home_key() -> str:
-    return hashlib.sha256(os.fsencode(Path.home().resolve())).hexdigest()[:12]
-
-
-def home_slice() -> str:
-    """systemd nests a slice named jobgate-<key>.slice inside jobgate.slice."""
-    return "{}-{}.slice".format(UNIT_PREFIX, home_key())
-
-
-def set_slice_cap(share: int) -> str | None:
+def set_slice_cap(share: int | None) -> str | None:
     if shutil.which("systemd-run") is None:
         return "systemd-run is not installed"
-    for unit, properties in ((SLICE, ["CPUWeight={}".format(CPU_WEIGHT)]), (home_slice(), ["MemoryMax={}".format(share)])):
-        result = run_captured(["systemctl", "--user", "set-property", "--runtime", unit, *properties], 15)
-        if result.returncode != 0:
-            return "no systemd user session: {}".format(last_error(result))
+    cap = [] if share is None else ["MemoryMax={}".format(share)]
+    result = run_captured(["systemctl", "--user", "set-property", "--runtime", SLICE, "CPUWeight={}".format(CPU_WEIGHT),
+                           *cap], 15)
+    if result.returncode != 0:
+        return "no systemd user session: {}".format(last_error(result))
     return None
 
 
@@ -718,17 +817,18 @@ def write_json(path: Path, data: dict) -> None:
 
 def execute(command: list[str], env: dict, share: LiveShare, ticket: Ticket, profile: Profile) -> Measured:
     if sys.platform == "linux":
-        cap = share.read().share
+        with ticket.queue.lock():
+            host = share.read()
+            failure = set_slice_cap(None if share.warned else host.share)
         share.print_warning()
-        failure = set_slice_cap(cap)
         if failure is None:
             version = systemd_version()
             options = ["-p", "OOMPolicy=continue"] if version >= OOM_POLICY_MIN_SYSTEMD else []
             if version >= EXPAND_ENVIRONMENT_MIN_SYSTEMD:
                 options.append("--expand-environment=no")
             repo = os.fsencode(ticket.run.repo).decode(errors="backslashreplace")
-            scope = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--slice=" + home_slice(),
-                     "--unit={}-{}-{}".format(UNIT_PREFIX, home_key(), ticket.run.id),
+            scope = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--slice=" + SLICE,
+                     "--unit={}-{}".format(UNIT_PREFIX, ticket.run.id),
                      "--description=jobgate {} in {}".format(profile.name, repo), *options, "--",
                      sys.executable, str(Path(__file__).resolve()), "_scope", str(ticket.files.scope), "--", *command]
             outcome = supervise(scope, env)
@@ -865,17 +965,15 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
 
 def cap_text() -> str:
     if sys.platform == "darwin":
-        return "none on macOS; the pressure hold delays new runs instead"
-    shown = []
-    for unit, keys in ((home_slice(), ("MemoryMax", "MemoryCurrent")), (SLICE, ("CPUWeight",))):
-        result = run_captured(["systemctl", "--user", "show", unit, *["-p" + key for key in keys]], 15)
-        if result.returncode != 0:
-            return "off: " + last_error(result)
-        values = dict(line.partition("=")[::2] for line in result.stdout.splitlines() if "=" in line)
-        shown.append("{} {}".format(unit, " ".join(
-            "{}={}".format(key, size(int(values[key])) if values.get(key, "").isdigit() and key != "CPUWeight"
-                           else values.get(key, "?")) for key in keys)))
-    return ", ".join(shown)
+        return "none on macOS; the free-memory check and the pressure hold delay new runs instead"
+    keys = ("MemoryMax", "MemoryCurrent", "CPUWeight")
+    result = run_captured(["systemctl", "--user", "show", SLICE, *["-p" + key for key in keys]], 15)
+    if result.returncode != 0:
+        return "off: " + last_error(result)
+    values = dict(line.partition("=")[::2] for line in result.stdout.splitlines() if "=" in line)
+    return "{} {}".format(SLICE, " ".join(
+        "{}={}".format(key, size(int(values[key])) if values.get(key, "").isdigit() and key != "CPUWeight"
+                       else values.get(key, "?")) for key in keys))
 
 
 def status() -> int:
@@ -884,24 +982,30 @@ def status() -> int:
     queue = Queue.open()
     with queue.lock():
         runs = queue.live()
-    taken = used([run.admission for run in runs if run.admission is not None])
+    load = load_of(queue, runs)
     now = time.time()
     source = machine_config() if machine_config().is_file() else "default"
     lines = [
         "share     {} ({:.0%} of {}; {})".format(size(host.share), host.memory_share, size(host.memory), source),
-        "memory    {} of {} stated by running runs".format(size(taken.memory), size(host.share)),
-        "cores     {} of {} used by gated workers".format(taken.workers, host.cores),
+        "memory    {} of {} stated by running runs".format(size(load.stated), size(host.share)),
+        "free      {}".format("unknown" if load.available is None else
+                               "{} available; running runs may still use {}".format(size(load.available),
+                                                                                    size(load.still_to_use))),
+        "cores     {} of {} used by gated workers".format(load.workers, host.cores),
         "pressure  {}{}".format(level.reading, "; new runs wait" if level.holding else ""),
         "cap       {}".format(cap_text()),
     ]
     for run in runs:
         if run.admission is not None:
-            lines.append("running   {} pid {}, {}, {} stated, for {}, in {}: {}".format(
+            lines.append("running   {} pid {}, {}, {} stated, {}for {}, in {}: {}".format(
                 run.profile, run.pid, plural(run.admission.workers, "worker"), size(run.admission.memory),
-                duration(now - run.admission.started), run.repo, run.command))
+                "" if load.in_use.get(run.id) is None else "uses {}, ".format(size(load.in_use[run.id])),
+                duration(now - run.admission.started),
+                run.repo, run.command))
         else:
-            lines.append("waiting   {} pid {}, for {}, in {}: {}".format(
-                run.profile, run.pid, duration(now - run.arrived), run.repo, run.command))
+            lines.append("waiting   {} pid {}, for {}{}, in {}: {}".format(
+                run.profile, run.pid, duration(now - run.arrived),
+                "" if run.wait_reason is None else ", waits " + run.wait_reason, run.repo, run.command))
     sys.stdout.reconfigure(errors="backslashreplace")
     print("\n".join(lines))
     return 0
