@@ -22,11 +22,12 @@ the profile's `workers_env` variable to the worker count, and runs the command.
 Then it prints a result line. `--max-workers N` lowers the profile's
 `max_workers` for one run. A value above `max_workers` has no effect.
 
-`jobgate status` prints the share, the stated memory of running runs, the
-workers that running runs use, and the pressure reading. It also prints the
-available memory and what running runs may still use, the kernel memory cap, and
-one line per running or waiting run. A running run's line gives the memory it
-uses, and a waiting run's line gives why it waits.
+`jobgate status` prints six lines first. They give the share, the stated memory
+of running runs, free memory, the workers that running runs use, the pressure
+reading, and the kernel memory cap. The free memory line gives the available
+memory and what running runs may still use. Then it prints one line per running
+or waiting run. A running run's line gives the memory it uses, and a waiting
+run's line gives why it waits.
 
 ## Repository file
 
@@ -133,54 +134,29 @@ swapping memory in use. jobgate does not read `kern.memorystatus_level`, which
 XNU computes from the active, inactive, free, and speculative pages. That level
 counts memory in active use as available.
 
-At each admission attempt, jobgate measures the memory that each running run
-uses. On Linux in a scope, that is the scope's `memory.current`, less the page
-cache that `memory.stat` lists as `active_file` and `inactive_file`. The
-available memory already counts that cache as free. Elsewhere, jobgate adds up
-the processes in the tree of the run's jobgate process. On Linux, it adds each
-process's `Pss_Anon` and `Pss_Shmem` from `/proc/<pid>/smaps_rollup`. Those
-leave out file pages and split a shared page among the processes that map it.
-Older kernels lack those fields, and a process that is not dumpable hides them.
-jobgate then uses `RssAnon` and `RssShmem` from `/proc/<pid>/status`. Those
-count a shared page once per process. On macOS, it adds each process's
-`phys_footprint`, which also counts a shared page once per process. jobgate
-measures each run just before and just after it reads the available memory. It
-keeps the smaller of the two measurements as the run's M, or 0 when either
-measurement fails.
+At each admission attempt, jobgate computes free memory: the available memory,
+less S − M for each running run. S is the run's stated memory, and M is the
+memory it uses. A run whose M exceeds S subtracts nothing. A run that has just
+started therefore counts with all of its stated memory. Memory that a run
+already uses counts once, through the available memory. jobgate measures M just
+before and just after it reads the available memory, and it keeps the smaller
+measurement. A failed measurement counts as 0.
 
-Free memory is the available memory, less S − M for each running run that states
-S. A run whose M exceeds S subtracts nothing. A run that has just started
-therefore counts with all of its stated memory. Memory that a run already uses
-counts once, through the available memory.
+| Run | How jobgate measures M |
+| --- | --- |
+| Linux, in a scope | The scope's `memory.current`, less the page cache that `memory.stat` lists as `active_file` and `inactive_file` |
+| Linux, without a scope | The sum of `Pss_Anon` and `Pss_Shmem` from `/proc/<pid>/smaps_rollup` over the tree of the run's jobgate process. For a process that does not show those fields, jobgate uses `RssAnon` and `RssShmem` from `/proc/<pid>/status`. |
+| macOS | The sum of `phys_footprint` over the tree of the run's jobgate process |
 
-The bound on free memory is the available memory at the reading, less the stated
-memory that running commands had not used at that moment. Free memory stays
-within the bound under two conditions. Each M counts only memory that its run's
-command used at the reading and that the available memory left out. The M values
-together count each page at most once. When a run's memory only grows or only
-shrinks between its two measurements, their timing cannot break the first
-condition. The conditions fail in these known cases:
+Free memory is an estimate, read one file or process at a time. Runs that
+allocate or free memory during the check, shared pages, and moving page cache
+can each make it wrong in either direction.
 
-- A run frees memory and allocates it again between its two measurements. Its M
-  then counts more than its command used at the reading.
-- A measurement counts a shared page once per process. The `RssAnon` and
-  `RssShmem` fallback and macOS `phys_footprint` measure that way.
-- A nested call queues as a run of its own when the outer run's command removed
-  `JOBGATE_RUN` or `JOBGATE_WORKERS` from the environment. Unless the outer run
-  and the nested call each have a scope, both M values count the nested call's
-  processes.
-- macOS `phys_footprint` counts compressed memory at its size before
-  compression. The available memory leaves out at most its compressed size.
-- On Linux outside a scope, `Pss_Anon` and `RssAnon` count pages that a process
-  released with `MADV_FREE`. The available memory counts those pages as free.
-- In a scope, `memory.current` includes reclaimable kernel slab, which the
-  available memory partly counts as free.
-- M counts the jobgate process that waits for the command, about 13 MiB on
-  Linux. The stated memory covers only the command.
-
-In each case, free memory can exceed the bound by at most the memory that the
-measurements overcount. Memory that ungated commands use is missing from the
-available memory, so ungated work also delays new runs.
+When the estimate is too high, jobgate can admit a run that does not fit. On
+Linux, the `MemoryMax` of `jobgate.slice` still caps all gated runs together.
+[Enforcement and priority](#enforcement-and-priority) describes that cap. On
+macOS, only the pressure hold and the OS respond. Memory that ungated commands
+use is missing from the available memory, so ungated work also delays new runs.
 
 When the reading is unavailable, no run waits for free memory, and
 `jobgate status` shows free memory as unknown.

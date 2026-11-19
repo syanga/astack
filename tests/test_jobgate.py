@@ -721,40 +721,50 @@ class ResultTests(JobgateTest):
 
     @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
     def test_free_memory_keeps_the_smaller_of_two_measurements_around_the_reading(self):
-        self.assert_second_run_waits_while_the_first_measures([str(800 * 2**20).encode(), str(100 * 2**20).encode()])
+        self.assert_second_run_waits_while_the_first_measures([b"%d\n" % (800 * 2**20), b"%d\n" % (100 * 2**20)])
 
     @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
     def test_free_memory_counts_a_run_as_using_nothing_when_one_measurement_fails(self):
-        self.assert_second_run_waits_while_the_first_measures([str(800 * 2**20).encode(), b"unreadable"])
+        self.assert_second_run_waits_while_the_first_measures([b"%d\n" % (800 * 2**20), b"unreadable\n"])
 
-    def assert_second_run_waits_while_the_first_measures(self, readings):
+    def assert_second_run_waits_while_the_first_measures(self, currents):
         env = self.systemd_session("systemd 259", '[ "$1" = --version ] && echo "systemd 259"\nexit 0\n',
                                    SYSTEMD_RUN.format(python=sys.executable, version=259))
         cgroup = self.root / "scope cgroup"
         cgroup.mkdir()
-        for name, text in (("memory.max", "max\n"), ("memory.peak", "0\n"), ("memory.events", "oom_kill 0\n"),
-                           ("memory.stat", "anon 0\nfile 0\nactive_file 0\ninactive_file 0\nshmem 0\n")):
+        for name, text in (("memory.max", "max\n"), ("memory.peak", "0\n"), ("memory.events", "oom_kill 0\n")):
             (cgroup / name).write_text(text)
-        os.mkfifo(str(cgroup / "memory.current"))
+        stat = b"anon 0\nfile 0\nactive_file 0\ninactive_file 0\nshmem 0\n"
+        for name in ("memory.stat", "memory.current"):
+            os.mkfifo(str(cgroup / name))
+        between, outside = meminfo(1300 * 2**20), meminfo(2000 * 2**20)
         stop = threading.Event()
 
         def feed():
-            count = 0
+            served, last = 0, None
             while not stop.is_set():
-                try:
-                    fd = os.open(str(cgroup / "memory.current"), os.O_WRONLY | os.O_NONBLOCK)
-                except OSError:
+                for name in ("memory.stat", "memory.current"):
+                    if name == last:
+                        continue
+                    try:
+                        fd = os.open(str(cgroup / name), os.O_WRONLY | os.O_NONBLOCK)
+                    except OSError:
+                        continue
+                    first_of_pair, measurement = served % 2 == 0, served // 2 % 2
+                    if first_of_pair:
+                        self.set_machine(memory=64 * GIB, cores=16, psi=CALM, cgroup=str(cgroup),
+                                         meminfo=between if measurement == 0 else outside)
+                    os.write(fd, stat if name == "memory.stat" else currents[measurement])
+                    os.close(fd)
+                    served, last = served + 1, name
+                    break
+                else:
                     time.sleep(0.005)
-                    continue
-                os.write(fd, readings[count % 2])
-                os.close(fd)
-                count += 1
-                time.sleep(0.02)
 
         feeder = threading.Thread(target=feed, daemon=True)
         self.addCleanup(feeder.join, 10)
         self.addCleanup(stop.set)
-        self.set_machine(memory=64 * GIB, cores=16, psi=CALM, meminfo=meminfo(1300 * 2**20), cgroup=str(cgroup))
+        self.set_machine(memory=64 * GIB, cores=16, psi=CALM, meminfo=between, cgroup=str(cgroup))
         self.profiles(big=("900M", "100M", 1, "BIG_WORKERS"), small=("400M", "100M", 1, "SMALL_WORKERS"))
         first = self.hold("first", profile="big", variable="BIG_WORKERS", env=env)
         self.assertEqual(first.workers(), 1)
