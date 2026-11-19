@@ -6,10 +6,10 @@ from pathlib import Path
 import pwd
 import re
 import shlex
+import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
 
 from test_claude_router_install import ComponentFixture
 from test_install import InstallerFixture
@@ -23,6 +23,26 @@ import memory_guard
 ROUTER_README = "README.md#install-the-optional-claude-router"
 LINGER = 'sudo loginctl enable-linger "$USER"'
 SETUP = "claude-router setup -account NAME"
+KILLED_AT_BINARY_RENAME = r'''
+import os, runpy, sys
+rename = os.replace
+def replace(source, destination, **options):
+    if os.path.basename(str(destination)) == "claude-router":
+        os._exit(137)
+    rename(source, destination, **options)
+os.replace = replace
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+'''
+PRINT_REMINDERS = r'''
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import astack_reminders, memory_guard
+root = Path(sys.argv[2])
+guard = memory_guard.Host(root / "enabled", root / "min_ttl_ms", root / "astack-memory-guard.conf")
+print("\n".join(astack_reminders.pending(json.loads(sys.argv[3]), astack_reminders.Host(guard, root / "linger"))))
+'''
 
 
 class ReminderTests(unittest.TestCase):
@@ -117,12 +137,27 @@ class ReminderTests(unittest.TestCase):
         self.activate()
         self.assertNotIn("claude-router", self.pending(state))
 
-    def test_installed_launchd_router_names_setup_but_never_linger(self):
-        state = self.installed_router("launchd")
-        output = self.pending(state)
+    def test_only_a_systemd_router_names_linger(self):
+        self.assertIn(LINGER, self.pending(self.installed_router("systemd")))
 
+        output = self.pending(self.installed_router("launchd"))
         self.assertIn(SETUP, output)
         self.assertNotIn(LINGER, output)
+
+    def test_a_router_install_with_pending_writes_names_neither_linger_nor_setup(self):
+        state = self.installed_router("systemd")
+        record = state["components"]["claude-router"]
+        record["pending"] = {str(self.root / "router data/bin/claude-router"): "sha256 of the unfinished write"}
+        output = self.pending(state)
+        self.assertIn("--component claude-router", output)
+        self.assertNotIn(LINGER, output)
+        self.assertNotIn(SETUP, output)
+
+        record["pending"] = {}
+        output = self.pending(state)
+        self.assertNotIn("--component claude-router", output)
+        self.assertIn(LINGER, output)
+        self.assertIn(SETUP, output)
 
     def test_setup_reminder_reuses_the_accounts_that_config_json_lists(self):
         state = self.installed_router("launchd")
@@ -189,20 +224,28 @@ class InstallerReminderTests(InstallerFixture):
         self.assertNotIn("README.md#", result.stdout)
 
 
+    def test_the_guard_command_names_this_checkout_even_when_its_path_has_spaces(self):
+        host_files = self.root / "host files"
+        host_files.mkdir()
+        (host_files / "enabled").write_text("0x0007\n")
+        (host_files / "min_ttl_ms").write_text("0\n")
+        result = subprocess.run([sys.executable, "-c", PRINT_REMINDERS, str(self.repo / "scripts"), str(host_files),
+                                 json.dumps({"targets": {}})], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        commands = [shlex.split(line) for line in result.stdout.splitlines() if "memory_guard.py" in line]
+        script = (self.repo / "scripts/memory_guard.py").resolve()
+        self.assertEqual(commands, [["sudo", "python3", str(script), "install"]])
+
+
 class InterruptedRouterInstallTests(ComponentFixture):
     def test_an_interrupted_router_install_names_the_install_again_instead_of_setup(self):
-        module = self.module()
-        binary = self.data / "bin/claude-router"
-        real_write = module.files.atomic_write
-
-        def fail_at_the_binary(path, *arguments):
-            if Path(path).parent.name == "bin" and Path(path).name == "claude-router":
-                raise OSError("injected failure at the binary write")
-            return real_write(path, *arguments)
-
-        with patch.object(module.files, "atomic_write", side_effect=fail_at_the_binary), self.assertRaises(OSError):
-            self.run_module(module, {}, "install", "--home", str(self.home), "--component", "claude-router")
-        self.assertFalse(binary.exists())
+        killed = subprocess.run(
+            [sys.executable, "-c", KILLED_AT_BINARY_RENAME, str(self.repo / "scripts/manage.py"),
+             "install", "--home", str(self.home), "--component", "claude-router"],
+            cwd=str(self.root), capture_output=True, text=True, env=self.env)
+        self.assertEqual(killed.returncode, 137, killed.stderr)
+        self.assertFalse((self.data / "bin/claude-router").exists())
 
         output = self.run_installer("--target", "claude", env=self.env).stdout
         commands = [shlex.split(line) for line in output.splitlines() if "--component" in line]
