@@ -277,7 +277,7 @@ class AdmissionTests(JobgateTest):
         lock = os.open(str(self.root / "home/.cache/jobgate/queue.lock"), os.O_RDWR)
         try:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            time.sleep(1.5)
+            time.sleep(2.5)
             self.share(0.2)
             self.set_machine(memory=8 * GIB, cores=16, psi=CALM)
         finally:
