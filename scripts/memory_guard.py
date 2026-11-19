@@ -3,8 +3,9 @@
 
 install sets min_ttl_ms to 1000 to turn on the kernel's thrashing prevention.
 systemd-tmpfiles sets the same value again at each boot.
+install changes nothing when another tmpfiles.d file already sets min_ttl_ms.
 uninstall restores min_ttl_ms to its value from before the first install.
-status reports min_ttl_ms and needs no root.
+status reports min_ttl_ms and the tmpfiles.d file that sets it at boot, and needs no root.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 from typing import Sequence
 
@@ -45,6 +47,12 @@ class Host:
     @property
     def boot_file(self) -> Path:
         return self.root / "etc/tmpfiles.d/astack-memory-guard.conf"
+
+
+@dataclass(frozen=True)
+class BootRule:
+    file: Path
+    value: str
 
 
 @dataclass(frozen=True)
@@ -89,6 +97,29 @@ def status(host: Host) -> Status:
     )
 
 
+def boot_rules(host: Host) -> list[BootRule]:
+    try:
+        result = subprocess.run(["systemd-tmpfiles", "--root={}".format(host.root), "--cat-config", "--no-pager"],
+                                capture_output=True, text=True)
+    except FileNotFoundError:
+        return []
+    if result.returncode != 0:
+        raise GuardError("systemd-tmpfiles --cat-config failed: {}".format(result.stderr.strip()))
+    # --cat-config prints the files in the order systemd-tmpfiles reads them. systemd-tmpfiles applies only the
+    # first rule for a path (tmpfiles.d(5)).
+    rules = []
+    file = None
+    for line in result.stdout.splitlines():
+        header = re.fullmatch(r"# (/.*\.conf)", line)
+        if header:
+            file = Path(header.group(1))
+            continue
+        fields = line.split(None, 6)
+        if file is not None and len(fields) > 1 and not fields[0].startswith("#") and fields[1] == MIN_TTL_MS_PATH:
+            rules.append(BootRule(file, fields[6] if len(fields) == 7 else "-"))
+    return rules
+
+
 def _set_min_ttl_ms(host: Host, value: int, *, dry_run: bool) -> None:
     print("SET {} {}".format(host.min_ttl_ms_file, value))
     if not dry_run:
@@ -99,6 +130,10 @@ def install(host: Host, *, dry_run: bool) -> None:
     current = status(host)
     if not current.available:
         raise GuardError(UNAVAILABLE_REASON + ", so install changed nothing")
+    others = ["{} in {}".format(rule.value, rule.file) for rule in boot_rules(host) if rule.file != host.boot_file]
+    if others:
+        raise GuardError("another tmpfiles.d rule already sets min_ttl_ms at boot ({}), so install changed nothing"
+                         .format(", ".join(others)))
     before = current.min_ttl_ms if current.min_ttl_ms_before_install is None else current.min_ttl_ms_before_install
     print("WRITE {}".format(host.boot_file))
     if not dry_run:
@@ -122,13 +157,15 @@ def uninstall(host: Host, *, dry_run: bool) -> None:
         host.boot_file.unlink()
 
 
-def describe(current: Status) -> str:
+def describe(host: Host, current: Status) -> str:
     if current.available:
         text = "{}: min_ttl_ms {}".format("on" if current.min_ttl_ms else "off", current.min_ttl_ms)
     else:
         text = "unavailable: " + UNAVAILABLE_REASON
-    if current.min_ttl_ms_before_install is not None:
-        text += ", set to {} at boot by astack".format(MIN_TTL_MS)
+    rules = boot_rules(host)
+    if rules:
+        source = "astack" if rules[0].file == host.boot_file else str(rules[0].file)
+        text += ", set to {} at boot by {}".format(rules[0].value, source)
     return "thrashing prevention  " + text
 
 
@@ -146,7 +183,7 @@ def main(argv: Sequence[str] | None = None, host: Host | None = None) -> int:
     host = host or real_host()
     try:
         if args.command == "status":
-            print(describe(status(host)))
+            print(describe(host, status(host)))
         else:
             (install if args.command == "install" else uninstall)(host, dry_run=args.dry_run)
     except (OSError, GuardError) as error:
