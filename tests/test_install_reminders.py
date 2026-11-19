@@ -71,6 +71,17 @@ class ReminderTests(unittest.TestCase):
 
         self.assertIsNone(self.guard_command(self.pending()))
 
+    def test_guard_reminder_stays_until_the_guard_is_on_both_now_and_at_boot(self):
+        self.ttl.write_text("{}\n".format(memory_guard.MIN_TTL_MS))
+        self.assertIsNotNone(self.guard_command(self.pending()))
+
+        with redirect_stdout(io.StringIO()):
+            memory_guard.install(self.guard, dry_run=False)
+        self.assertIsNone(self.guard_command(self.pending()))
+
+        self.ttl.write_text("0\n")
+        self.assertIsNotNone(self.guard_command(self.pending()))
+
     def test_no_guard_reminder_where_the_kernel_has_no_multi_gen_lru(self):
         self.assertIsNotNone(self.guard_command(self.pending()))
 
