@@ -3,6 +3,7 @@ import importlib.util
 import io
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,22 +17,22 @@ spec = importlib.util.spec_from_file_location("memory_guard", SCRIPT)
 memory_guard = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = memory_guard
 spec.loader.exec_module(memory_guard)
+TMPFILES = shutil.which("systemd-tmpfiles")
 
 
 class MemoryGuardTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="astack memory guard ")
         self.addCleanup(temporary.cleanup)
-        root = Path(temporary.name)
-        lru_gen = root / "sys/kernel/mm/lru_gen"
+        self.root = Path(temporary.name)
+        lru_gen = self.root / "sys/kernel/mm/lru_gen"
         lru_gen.mkdir(parents=True)
         self.enabled = lru_gen / "enabled"
         self.enabled.write_text("0x0007\n")
         self.ttl = lru_gen / "min_ttl_ms"
         self.ttl.write_text("0\n")
-        self.boot_file = root / "etc/tmpfiles.d/astack-memory-guard.conf"
-        self.host = memory_guard.Host(lru_gen_enabled_file=self.enabled, min_ttl_ms_file=self.ttl,
-                                      boot_file=self.boot_file)
+        self.host = memory_guard.Host(self.root)
+        self.boot_file = self.host.boot_file
 
     def run_main(self, *argv, platform="linux", uid=0):
         output, error = io.StringIO(), io.StringIO()
@@ -43,13 +44,13 @@ class MemoryGuardTests(unittest.TestCase):
     def ttl_now(self):
         return self.ttl.read_text().strip()
 
-    def ttl_at_boot(self):
-        if not self.boot_file.exists():
-            return None
-        for line in self.boot_file.read_text().splitlines():
-            if line.startswith("w {} ".format(self.ttl)):
-                return line.split()[-1]
-        return None
+    def ttl_after_reboot(self):
+        if TMPFILES is None:
+            self.skipTest("needs systemd-tmpfiles")
+        self.ttl.write_text("0\n")
+        subprocess.run([TMPFILES, "--root={}".format(self.root), "--boot", "--create",
+                        "--prefix=" + memory_guard.MIN_TTL_MS_PATH], check=True, capture_output=True, timeout=30)
+        return self.ttl_now()
 
     def has_preview(self, output, verb, path, value=None):
         return any(line.startswith(verb + " ") and str(path) in line and value in (None, line.split()[-1])
@@ -59,7 +60,7 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertEqual(self.run_main("install")[0], 0)
 
         self.assertEqual(self.ttl_now(), "1000")
-        self.assertEqual(self.ttl_at_boot(), "1000")
+        self.assertEqual(self.ttl_after_reboot(), "1000")
 
     def test_uninstall_restores_the_previous_min_ttl_ms_and_deletes_the_boot_file(self):
         self.ttl.write_text("250\n")
@@ -144,7 +145,7 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertTrue(self.has_preview(output, "SET", self.ttl, "0"), output)
         self.assertTrue(self.has_preview(output, "REMOVE", self.boot_file), output)
         self.assertEqual(self.ttl_now(), "1000")
-        self.assertEqual(self.ttl_at_boot(), "1000")
+        self.assertTrue(self.boot_file.exists())
 
     def test_status_reports_the_setting_now_and_at_boot(self):
         before = self.run_main("status", uid=1000)[1]
@@ -160,7 +161,7 @@ class MemoryGuardTests(unittest.TestCase):
 
     def test_status_reports_a_boot_file_without_the_previous_value_as_an_error(self):
         self.boot_file.parent.mkdir(parents=True)
-        self.boot_file.write_text("w {} - - - - 1000\n".format(self.ttl))
+        self.boot_file.write_text("w {} - - - - 1000\n".format(memory_guard.MIN_TTL_MS_PATH))
 
         code, _, error = self.run_main("status", uid=1000)
         self.assertEqual(code, 1)

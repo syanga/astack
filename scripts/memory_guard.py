@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import astack_files as files
 
 MIN_TTL_MS = 1000
+MIN_TTL_MS_PATH = "/sys/kernel/mm/lru_gen/min_ttl_ms"
 BEFORE_INSTALL_PREFIX = "# min_ttl_ms before install: "
 UNAVAILABLE_REASON = "the kernel's multi-gen LRU is missing or off"
 
@@ -31,9 +32,19 @@ class GuardError(Exception):
 
 @dataclass(frozen=True)
 class Host:
-    lru_gen_enabled_file: Path
-    min_ttl_ms_file: Path
-    boot_file: Path
+    root: Path
+
+    @property
+    def lru_gen_enabled_file(self) -> Path:
+        return self.root / "sys/kernel/mm/lru_gen/enabled"
+
+    @property
+    def min_ttl_ms_file(self) -> Path:
+        return self.root / MIN_TTL_MS_PATH.lstrip("/")
+
+    @property
+    def boot_file(self) -> Path:
+        return self.root / "etc/tmpfiles.d/astack-memory-guard.conf"
 
 
 @dataclass(frozen=True)
@@ -48,11 +59,7 @@ class Status:
 
 
 def real_host() -> Host:
-    return Host(
-        lru_gen_enabled_file=Path("/sys/kernel/mm/lru_gen/enabled"),
-        min_ttl_ms_file=Path("/sys/kernel/mm/lru_gen/min_ttl_ms"),
-        boot_file=Path("/etc/tmpfiles.d/astack-memory-guard.conf"),
-    )
+    return Host(Path("/"))
 
 
 def _read(path: Path) -> str | None:
@@ -99,7 +106,7 @@ def install(host: Host, *, dry_run: bool) -> None:
             "# Written by astack scripts/memory_guard.py. Its uninstall restores min_ttl_ms and deletes this file.\n"
             "{}{}\n"
             "w {} - - - - {}\n"
-        ).format(BEFORE_INSTALL_PREFIX, before, host.min_ttl_ms_file, MIN_TTL_MS).encode())
+        ).format(BEFORE_INSTALL_PREFIX, before, MIN_TTL_MS_PATH, MIN_TTL_MS).encode())
     _set_min_ttl_ms(host, MIN_TTL_MS, dry_run=dry_run)
 
 
