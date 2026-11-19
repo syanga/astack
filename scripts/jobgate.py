@@ -902,7 +902,6 @@ def report(queue: Queue, entries: list[tuple[str, object]]) -> None:
     line = " ".join("{}={}".format(key, logfmt(value)) for key, value in entries)
     say(line)
     try:
-        queue.results.parent.mkdir(parents=True, exist_ok=True)
         with open(queue.results, "a", errors="backslashreplace") as stream:
             stream.write(line + "\n")
     except OSError as error:

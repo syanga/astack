@@ -55,8 +55,8 @@ the count as a flag, expand the variable in `sh -c`:
 Write `"$TEST_WORKERS"` inside the single quotes. Outside them, the calling
 shell expands it before jobgate sets it.
 
-vitest 4.0.0 is the first release that reads `VITEST_MAX_WORKERS`. It applies
-the variable after its command-line options and its config file, so a
+vitest 4.0.0 is the first stable release that reads `VITEST_MAX_WORKERS`. It
+applies the variable after its command-line options and its config file, so a
 `--maxWorkers` flag cannot override jobgate's count. Releases 3.x and older do
 not read it. For those, use `TEST_WORKERS` and
 `sh -c 'vitest run --maxWorkers="$TEST_WORKERS"'`.
@@ -76,9 +76,9 @@ test:
 	fi
 ```
 
-For a command in an npm script, first set `workers_env = "VITEST_MAX_WORKERS"`
-in the `[test]` profile of `jobgate.toml`. Then copy this pattern into
-`package.json`:
+For a command in an npm script that runs vitest 4.0.0 or newer, first set
+`workers_env = "VITEST_MAX_WORKERS"` in the `[test]` profile of `jobgate.toml`.
+Then copy this pattern into `package.json`:
 
 ```json
 {

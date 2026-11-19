@@ -89,10 +89,10 @@ A run is admitted when all of these are true:
   it is not, new runs wait. This wait is the pressure hold. Runs that already
   started keep going under pressure.
 
-An admitted run takes as many workers as fit both the share and free memory, up
-to `max_workers` or `--max-workers`. It keeps that count until it ends. Its
-stated memory and its workers are its reservation until then. The core count is
-the process's CPU affinity on Linux and the logical CPU count on macOS.
+An admitted run takes as many workers as fit the share, free memory, and the
+free cores, up to `max_workers` or `--max-workers`. It keeps that count until it
+ends. Its stated memory and its workers are its reservation until then. The core
+count is the process's CPU affinity on Linux and the logical CPU count on macOS.
 
 All of a user's runs share one queue, one share, and the cores, under every
 `HOME`.
@@ -132,7 +132,7 @@ call goes through admission like any other run.
 
 The macOS sum counts free pages, file cache, and purgeable pages. A new process
 can get that memory without compressing or swapping memory in use.
-[macOS free memory counts free, file-backed, and purgeable pages](jobgate-thresholds.md#macos-free-memory-counts-free-file-backed-and-purgeable-pages)
+[macOS available memory counts free, file-backed, and purgeable pages](jobgate-thresholds.md#macos-available-memory-counts-free-file-backed-and-purgeable-pages)
 says why jobgate does not use `kern.memorystatus_level`.
 
 At each admission attempt, jobgate measures the memory that each running run
@@ -151,13 +151,21 @@ subtracts that from the available memory. A run that has just started therefore
 counts with all of its stated memory. Memory that a run already uses counts
 once, through the available memory. jobgate measures each run just before and
 just after it reads the available memory, and it keeps the smaller of the two
-measurements. If each run's memory only grows or only shrinks between its two
-measurements, the free memory that admission counts is at most what is left. The
-check misses one case: a run that frees memory and allocates it again between
-its two measurements. The available memory then includes memory that the run
-still uses, and admission is looser by that amount. Memory that ungated commands
-use is missing from the available memory too, so ungated work also delays new
-runs.
+measurements.
+
+The counted free memory is then at most the available memory at the reading,
+less what running runs stated but did not use then. That holds under two
+conditions. First, each run's memory only grows or only shrinks between its two
+measurements. Second, no measurement exceeds the memory that the run holds and
+that the available memory leaves out. Admission is looser in these cases:
+
+- A run frees memory and allocates it again between its two measurements. The available memory then includes memory that the run still uses.
+- A measurement counts a shared page once per process. That happens with the `RssAnon` and `RssShmem` fallback and with macOS `phys_footprint`.
+- In a scope, `memory.current` includes reclaimable kernel slab, which the available memory partly counts as free.
+
+In each case, admission is looser by the amount that a measurement exceeds that
+memory. Memory that ungated commands use is missing from the available memory,
+so ungated work also delays new runs.
 
 When the reading is unavailable, no run waits for free memory, and
 `jobgate status` shows free memory as unknown.
@@ -222,14 +230,15 @@ reaches the command from the terminal, and jobgate waits for the command to
 exit.
 
 When jobgate alone is killed with SIGKILL, the OS releases its reservation, and
-its command keeps running. Later runs are admitted as if that command had ended.
-On Linux with the kernel memory cap on, the command stays in `jobgate.slice`,
-whose `MemoryMax` still caps the command together with later runs. Its memory
-also counts in the available memory, so the free-memory check delays new runs
-while it uses memory. `jobgate status` no longer lists the command. On Linux
-with the kernel memory cap on, `systemctl --user list-units 'jobgate-*.scope'`
-lists the scope that still contains it. Otherwise, find it by its command line,
-for example with `pgrep -fl`.
+its command keeps running. Later runs no longer count its reservation. On Linux
+with the kernel memory cap on, the command stays in `jobgate.slice`, whose
+`MemoryMax` still caps the command together with later runs. Its memory is still
+missing from the available memory, so the free-memory check delays new runs
+while the command uses memory. `jobgate status` no longer lists the command. On
+Linux with the kernel memory cap on,
+`systemctl --user list-units 'jobgate-*.scope'` lists the scope that still
+contains it. Otherwise, find it by its command line, for example with
+`pgrep -fl`.
 
 ## Results
 
