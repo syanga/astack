@@ -302,13 +302,13 @@
    "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue185-run2/evidence",
    "result": "pass: 17 of 17 rows, superseded",
    "finding": "An outside review of the second run's record found two problems. The readers row claimed that digest.go and account.go parse the first event after the restart. Their output cannot show that, because the first event is always model_catalog. Several other checks were also weaker than their row names.",
-   "fixed_in": "lane.py. The readers row names what it checks and requires an exact count. The new conversation row requires the place decision and the answer. The resume row requires the first account on every request. The identity row requires the SDK version from go.mod. The paid overflow rows require both account IDs in status. A new row compares the daily router's process before and after the run."
+   "fixed_in": "lane.py. The readers row names what it checks and requires an exact count. The new conversation row requires the place decision and the answer. The resume row requires the first account on every request. The lane code row requires the SDK version from go.mod. The paid overflow rows require both account IDs in status. A new row compares the daily router's process before and after the run."
   },
   {
    "run": "third lane run at 6358e4e",
    "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue185-run3/evidence",
    "result": "pass: 18 of 18 rows, superseded",
-   "finding": "A review found that the third run's readers row no longer required the first new line to decode into claude.Event, as both readers decode each line. The third run's readers.json shows that the decode succeeded, but the row did not depend on it.",
+   "finding": "A review found that the third run's readers row no longer required the first new line to decode into claude.Event, the way both readers decode each line. The third run's readers.json shows that the decode succeeded, but the row did not depend on it.",
    "fixed_in": "lane.py. The readers row requires that decode again. The fourth run's rows replaced the third run's."
   }
  ],
@@ -332,5 +332,5 @@
    "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/journal-tests.log"
   ]
  },
- "written": "2026-11-19T01:42:29.057262+00:00"
+ "written": "2026-11-19T01:47:44.561361+00:00"
 }
