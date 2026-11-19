@@ -90,7 +90,12 @@ class MemoryGuardTests(unittest.TestCase):
                  ("etc/tmpfiles.d", "mglru-glob.conf", w_line(2000, directory_glob), False),
                  ("etc/tmpfiles.d", "00-base64.conf", "w~ {} - - - - MjAwMA==".format(memory_guard.MIN_TTL_MS_PATH),
                   False),
-                 ("usr/lib/tmpfiles.d", "00-boot-only.conf", w_line(2000).replace("w-", "w!"), False))
+                 ("usr/lib/tmpfiles.d", "00-boot-only.conf", w_line(2000).replace("w-", "w!"), False),
+                 ("usr/lib/tmpfiles.d", "00-owned.conf",
+                  "w {} - mglru-service - - 2000".format(memory_guard.MIN_TTL_MS_PATH), False))
+        (self.root / "etc").mkdir()
+        (self.root / "etc/passwd").write_text("mglru-service:x:999:999::/:/usr/sbin/nologin\n")
+        (self.root / "etc/group").write_text("mglru-service:x:999:\n")
         with patch.dict(os.environ, {"SYSTEMD_COLORS": "1"}):
             for directory, name, line, through_symlink in cases:
                 with self.subTest(name=name):
@@ -232,6 +237,24 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertIn("set to 2000 at boot by another tmpfiles.d rule", output)
         self.assertNotIn("by astack", output)
         self.assertEqual(self.ttl_after_reboot(), "2000")
+
+        not_utf8 = "w~ {} - - - - /w==".format(memory_guard.MIN_TTL_MS_PATH)
+        self.write_rule("usr/lib/tmpfiles.d", "00-bytes.conf", not_utf8)
+        code, output, _ = self.run_main("status", uid=1000)
+        self.assertEqual(code, 0)
+        self.assertIn("at boot by another tmpfiles.d rule", output)
+
+    @unittest.skipIf(TMPFILES is None, "needs systemd-tmpfiles")
+    @unittest.skipIf(os.geteuid() == 0, "root can read a file with mode 000")
+    def test_status_reports_the_live_value_when_it_cannot_read_a_rule(self):
+        rule = self.write_rule("etc/tmpfiles.d", "private.conf", "d /var/lib/private-example 0700 - - -")
+        rule.chmod(0)
+        code, output, _ = self.run_main("status", uid=1000)
+        self.assertEqual(code, 0)
+        self.assertIn("off: min_ttl_ms 0, boot value unknown", output)
+
+        rule.chmod(0o644)
+        self.assertNotIn("unknown", self.run_main("status", uid=1000)[1])
 
     @unittest.skipIf(TMPFILES is None, "needs systemd-tmpfiles")
     def test_status_claims_a_boot_value_only_while_min_ttl_ms_exists(self):

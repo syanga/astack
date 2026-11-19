@@ -11,10 +11,12 @@ status reports min_ttl_ms and the value systemd-tmpfiles sets at boot, and needs
 from __future__ import annotations
 
 import argparse
+import contextlib
 from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -106,16 +108,22 @@ def _tmpfiles(*arguments: str, config: str | None = None) -> subprocess.Complete
                           env={**os.environ, "SYSTEMD_COLORS": "0"})
 
 
-def _value_at_boot(config: str) -> str | None:
+def _value_at_boot(host: Host, config: str) -> str | None:
     with tempfile.TemporaryDirectory(prefix="astack-memory-guard-") as scratch:
-        target = Host(Path(scratch)).min_ttl_ms_file
-        target.parent.mkdir(parents=True)
-        target.touch()
+        replay = Host(Path(scratch))
+        replay.min_ttl_ms_file.parent.mkdir(parents=True)
+        replay.min_ttl_ms_file.touch()
+        # Under --root, systemd-tmpfiles resolves the user and group names in rules from the root's /etc/passwd and
+        # /etc/group, and it drops a rule whose names it cannot resolve.
+        (replay.root / "etc").mkdir()
+        for name in ("etc/passwd", "etc/group"):
+            with contextlib.suppress(FileNotFoundError):
+                shutil.copyfile(host.root / name, replay.root / name)
         result = _tmpfiles("--root=" + scratch, "--boot", "--create", "--prefix=/sys", "-", config=config)
         # systemd-tmpfiles exits with EX_DATAERR or EX_CANTCREAT when some lines fail, and boot skips those lines too.
         if result.returncode not in (0, os.EX_DATAERR, os.EX_CANTCREAT):
             raise GuardError("systemd-tmpfiles --create failed: " + result.stderr.strip())
-        return target.read_text().strip() or None
+        return replay.min_ttl_ms_file.read_bytes().decode(errors="replace").strip() or None
 
 
 def at_boot(host: Host) -> AtBoot:
@@ -129,15 +137,15 @@ def at_boot(host: Host) -> AtBoot:
     try:
         astack = "# {}\n{}".format(host.boot_file, host.boot_file.read_text())
     except FileNotFoundError:
-        value = _value_at_boot(config)
+        value = _value_at_boot(host, config)
         return AtBoot(value=value, by_astack=False, value_without_astack=value)
     if astack not in config or BOOT_RULE.format(MIN_TTL_MS) not in astack:
         raise GuardError("systemd-tmpfiles --cat-config does not list the rule in {}".format(host.boot_file))
-    without = _value_at_boot(config.replace(astack, "", 1))
+    without = _value_at_boot(host, config.replace(astack, "", 1))
     # A w line does not truncate the file it writes, so a later, shorter value can leave digits of astack's value.
     # A marker longer than any min_ttl_ms value shows whether astack's write is the last one.
     marked = astack.replace(BOOT_RULE.format(MIN_TTL_MS), BOOT_RULE.format(ASTACK_MARKER))
-    by_astack = _value_at_boot(config.replace(astack, marked, 1)) == ASTACK_MARKER
+    by_astack = _value_at_boot(host, config.replace(astack, marked, 1)) == ASTACK_MARKER
     return AtBoot(value=str(MIN_TTL_MS) if by_astack else without, by_astack=by_astack, value_without_astack=without)
 
 
@@ -184,16 +192,25 @@ def describe(host: Host) -> str:
         text = "{}: min_ttl_ms {}".format("on" if current.min_ttl_ms else "off", current.min_ttl_ms)
     else:
         text = "unavailable: " + UNAVAILABLE_REASON
-    boot = at_boot(host) if current.min_ttl_ms is not None else None
-    if boot is not None and boot.value is not None:
-        if not boot.by_astack:
-            source = "another tmpfiles.d rule"
-        elif boot.value_without_astack is None:
-            source = "astack"
-        else:
-            source = "astack, over another tmpfiles.d rule"
-        text += ", set to {} at boot by {}".format(boot.value, source)
+    if current.min_ttl_ms is not None:
+        text += _describe_boot(host)
     return "thrashing prevention  " + text
+
+
+def _describe_boot(host: Host) -> str:
+    try:
+        boot = at_boot(host)
+    except GuardError as error:
+        return ", boot value unknown: {}".format(error)
+    if boot.value is None:
+        return ""
+    if not boot.by_astack:
+        source = "another tmpfiles.d rule"
+    elif boot.value_without_astack is None:
+        source = "astack"
+    else:
+        source = "astack, over another tmpfiles.d rule"
+    return ", set to {} at boot by {}".format(boot.value, source)
 
 
 def main(argv: Sequence[str] | None = None, host: Host | None = None) -> int:
