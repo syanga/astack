@@ -314,6 +314,7 @@ const sdkRefreshWait = 3 * time.Second
 
 var (
 	errRefreshFailed  = errors.New("the last refresh of the credential failed; the SDK retries it on its own schedule")
+	errRefreshRefused = errors.New("the token endpoint refused the credential's refresh token; the account needs login")
 	errRefreshPending = errors.New("the SDK's refresh of the credential did not finish in time")
 )
 
@@ -338,7 +339,7 @@ func (o *overageReader) renew(ctx context.Context, account router.AccountID, aut
 		return cur, false, nil
 	}
 	if o.refreshFailed(account, cur, reason) {
-		return nil, false, errRefreshFailed
+		return nil, false, o.runError(account, authID)
 	}
 	if cur.NextRefreshAfter.After(time.Now()) {
 		landed, failed := o.awaitSDKRefresh(ctx, authID, cur)
@@ -348,7 +349,7 @@ func (o *overageReader) renew(ctx context.Context, account router.AccountID, aut
 			return landed, false, nil
 		case failed:
 			o.failRun(account, observed, Event{Reason: reason, Detail: "sdk refresh"})
-			return nil, false, errRefreshFailed
+			return nil, false, o.runError(account, authID)
 		default:
 			return nil, false, errRefreshPending
 		}
@@ -372,14 +373,33 @@ func (o *overageReader) renew(ctx context.Context, account router.AccountID, aut
 			return cur, false, nil
 		}
 		o.failRun(account, observed, Event{Reason: reason, Detail: "sdk refresh"})
-		return nil, false, errRefreshFailed
+		return nil, false, o.runError(account, authID)
 	}
 	if err != nil || auth == nil {
 		o.failRun(account, observed, Event{Reason: reason, DurationMS: &dur})
+		if o.requireLoginIfRefused(account, authID) {
+			return nil, false, errRefreshRefused
+		}
 		return nil, false, errors.New("the SDK could not refresh the credential")
 	}
 	o.s.events.emit(Event{Kind: "credential_refresh", Account: account, Reason: reason, Outcome: "refreshed", DurationMS: &dur})
 	return auth, true, nil
+}
+
+func (o *overageReader) runError(account router.AccountID, authID string) error {
+	if o.requireLoginIfRefused(account, authID) {
+		return errRefreshRefused
+	}
+	return errRefreshFailed
+}
+
+func (o *overageReader) requireLoginIfRefused(account router.AccountID, authID string) bool {
+	cur, ok := o.s.core.GetByID(authID)
+	if !ok || cur == nil || !o.s.guard.refused(cur) {
+		return false
+	}
+	o.s.requireLogin(account)
+	return true
 }
 
 // refreshFailed reports whether the account is in a failure run for auth's

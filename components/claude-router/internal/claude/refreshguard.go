@@ -3,9 +3,11 @@ package claude
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sync"
 
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -28,9 +30,10 @@ var errRefreshDeclined = fmt.Errorf("the router declined its refresh: the creden
 type refreshGuard struct {
 	coreauth.ProviderExecutor
 
-	mu       sync.Mutex
-	exchange func(context.Context, *coreauth.Auth) (*coreauth.Auth, error)
-	spent    map[string][]spentToken
+	mu        sync.Mutex
+	exchange  func(context.Context, *coreauth.Auth) (*coreauth.Auth, error)
+	spent     map[string][]spentToken
+	onRefused func(authID string)
 }
 
 // spentToken is a refresh token an exchange sent and did not get back.
@@ -39,9 +42,10 @@ type refreshGuard struct {
 // when the exchange may have run on the executor the guard replaced, so the
 // guard did not see how it ended.
 type spentToken struct {
-	hash   [sha256.Size]byte
-	failed bool
-	unseen bool
+	hash    [sha256.Size]byte
+	failed  bool
+	refused bool
+	unseen  bool
 }
 
 type routerRefreshKey struct{}
@@ -65,12 +69,12 @@ func routerRefreshOf(ctx context.Context) (string, bool) {
 // The SDK's auto-refresh job sets NextRefreshAfter 60 s ahead when it is
 // queued and changes it only when the job finishes, so an exchange that
 // outlives the 60 s leaves an expired marker that is still set.
-func installRefreshGuard(core *coreauth.Manager, authIDs []string) (*refreshGuard, error) {
+func installRefreshGuard(core *coreauth.Manager, authIDs []string, onRefused func(authID string)) (*refreshGuard, error) {
 	inner, ok := core.Executor("claude")
 	if !ok {
 		return nil, errors.New("the SDK has no claude executor")
 	}
-	g := &refreshGuard{ProviderExecutor: inner, exchange: inner.Refresh, spent: map[string][]spentToken{}}
+	g := &refreshGuard{ProviderExecutor: inner, exchange: inner.Refresh, spent: map[string][]spentToken{}, onRefused: onRefused}
 	core.RegisterExecutor(g)
 	for _, id := range authIDs {
 		a, ok := core.GetByID(id)
@@ -80,7 +84,9 @@ func installRefreshGuard(core *coreauth.Manager, authIDs []string) (*refreshGuar
 		if a.LastError != nil || !a.NextRefreshAfter.IsZero() {
 			g.mu.Lock()
 			g.spendLocked(id, refreshToken(a), a.LastError != nil)
-			g.findLocked(id, refreshToken(a)).unseen = a.LastError == nil
+			s := g.findLocked(id, refreshToken(a))
+			s.unseen = a.LastError == nil
+			s.refused = a.LastError != nil && refusedRefresh(a.LastError.Message)
 			g.mu.Unlock()
 		}
 	}
@@ -102,13 +108,20 @@ func (g *refreshGuard) Refresh(ctx context.Context, a *coreauth.Auth) (*coreauth
 
 	b, err := exchange(ctx, a)
 
+	refused := err != nil && refusedRefresh(err.Error())
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	switch {
 	case err != nil:
 		g.spendLocked(id, rt, true)
+		if refused {
+			g.findLocked(id, rt).refused = true
+		}
 	case b == nil || refreshToken(b) == rt:
 		g.forgetLocked(id, rt)
+	}
+	g.mu.Unlock()
+	if refused && g.onRefused != nil {
+		g.onRefused(id)
 	}
 	return b, err
 }
@@ -124,6 +137,33 @@ func (g *refreshGuard) failed(a *coreauth.Auth) bool {
 	defer g.mu.Unlock()
 	s := g.findLocked(a.ID, refreshToken(a))
 	return s != nil && (s.failed || s.unseen && a.LastError != nil)
+}
+
+// For an exchange the guard did not see, the SDK's failure record on the
+// credential stands in, as in failed.
+func (g *refreshGuard) refused(a *coreauth.Auth) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	s := g.findLocked(a.ID, refreshToken(a))
+	return s != nil && (s.refused || s.unseen && a.LastError != nil && refusedRefresh(a.LastError.Message))
+}
+
+// tokenRefusal matches the error of the SDK's Claude token exchange for a
+// 400 or 401 answer, which ends with the answer's body
+// (internal/auth/claude/anthropic_auth.go, refreshHTTPError).
+var tokenRefusal = regexp.MustCompile(`(?s)token refresh failed with status (?:400|401): (.*)$`)
+
+// RFC 6749 section 5.2 gives invalid_grant for a grant that is invalid,
+// expired, or revoked.
+func refusedRefresh(text string) bool {
+	m := tokenRefusal.FindStringSubmatch(text)
+	if m == nil {
+		return false
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	return json.Unmarshal([]byte(m[1]), &body) == nil && body.Error == "invalid_grant"
 }
 
 func (g *refreshGuard) findLocked(id, rt string) *spentToken {

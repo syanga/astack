@@ -490,6 +490,22 @@ func (r *Router) Admit(now Instant, account AccountID, model string) Reason {
 	return admissionBar(r.cfg, now, r.expiry.Stamp, r.accounts[idx], model)
 }
 
+// RequireLogin excludes an account from new placement until Relogin, as an
+// auth failure does, when its credential can no longer be renewed. at is
+// when the caller learned it. It reports whether the account needed no
+// login before; for an account that already needs login it changes nothing.
+func (r *Router) RequireLogin(account AccountID, at time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	idx, ok := r.index[account]
+	if !ok || r.accounts[idx].needsLogin {
+		return false
+	}
+	r.accounts[idx].needsLogin, r.accounts[idx].needsLoginAt = true, at
+	r.persist()
+	return true
+}
+
 // Relogin marks an account as logged in again.
 func (r *Router) Relogin(account AccountID) error {
 	r.commitMu.Lock()

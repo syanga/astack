@@ -29,6 +29,7 @@ type tokenExchange struct {
 	delay   time.Duration
 	accept  bool
 	fail    bool
+	failErr error
 	hold    chan struct{}
 
 	mu       sync.Mutex
@@ -58,7 +59,7 @@ func (x *tokenExchange) Refresh(ctx context.Context, a *coreauth.Auth) (*coreaut
 		x.resent++
 	}
 	x.active++
-	delay, fail, accept, hold := x.delay, x.fail, x.accept, x.hold
+	delay, fail, failErr, accept, hold := x.delay, x.fail, x.failErr, x.accept, x.hold
 	x.mu.Unlock()
 	defer x.set(func(x *tokenExchange) { x.active-- })
 	time.Sleep(delay)
@@ -72,6 +73,9 @@ func (x *tokenExchange) Refresh(ctx context.Context, a *coreauth.Auth) (*coreaut
 		}
 		x.failedRT[rt] = true
 		x.mu.Unlock()
+		if failErr != nil {
+			return nil, failErr
+		}
 		return nil, errors.New("token exchange failed")
 	}
 	old := accessToken(a)

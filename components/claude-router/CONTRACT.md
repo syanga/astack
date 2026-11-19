@@ -525,6 +525,7 @@ calls the same `Router`; it has no second placement algorithm.
 | `Router.Commit(now, Request, Decision) (Decision, error)` | Makes a `place` or `migrate` durable. It decides again under the commit lock and commits that fresh decision, which it returns. |
 | `Router.Route(now, Request) (Decision, error)` | `Decide`, then `Commit`, before dispatch, in a loop of at most 3 attempts. PR3 calls this. |
 | `Router.Report(Failure) Class` | Records a failure before output and returns the class the policy acts on. |
+| `Router.RequireLogin(account, at) bool` | Marks the account as needing login from `at`, as an `auth` failure does, unless it already needs login. It reports whether it set the mark. PR3 calls it when the token endpoint refuses the account's refresh token. |
 | `Router.Observe(account, attemptStart, Observation)` | Records the quota headers of one response. |
 | `Router.ObserveWeeklyUsage(account, WeeklyUsage)` | Keeps the newest valid account-wide weekly usage in memory without changing rejection evidence. |
 | `Router.ObserveUsage(account, start, kind, used)` | Records one account-wide five-hour or weekly window from a usage read that started at `start`. A `used` fraction from 0 up to but not including 1 counts as a report that the window is not rejected. Any other value changes nothing. |
@@ -1577,6 +1578,30 @@ most one refresh per failure run, the one that starts it, and none when the
 SDK's refresh failed first. An inference error the SDK records on the
 credential does not start a run.
 
+**A refresh token that the token endpoint refuses makes the account need
+login.** The token endpoint refuses a refresh token with a 400 or 401 answer
+whose OAuth `error` is `invalid_grant`. RFC 6749 section 5.2 gives that
+error for a grant that is invalid, expired, or revoked, so only a new login
+replaces the credential. The SDK's error for a failed exchange ends with the
+answer's status and body (`refreshHTTPError` in the SDK's
+`internal/auth/claude/anthropic_auth.go`), and the guard classifies that
+text. For an exchange it sees, the SDK's or the router's, the guard marks
+the account at once through `Router.RequireLogin`, whether or not a read
+waits for the refresh. For a refresh that began before the guard, the SDK's
+failure record (`LastError`) carries the same text, and the next read of the
+account marks it. A read during the failure run of a refused refresh token
+fails with `the token endpoint refused the credential's refresh token; the
+account needs login`. Every other failed exchange, such as a transport
+error, a timeout, a 429, a 5xx, or a 400 with another OAuth error, starts a
+failure run as before and leaves the login requirement unchanged. Setting
+the mark records a `login_required` event with reason `refresh_refused`. The
+mark survives a restart and clears as an `auth` failure's mark does (Login
+and manual movement)
+(`TestSDKRefreshRefusedForAnExpiredRefreshTokenMarksTheAccountAsNeedingLogin`,
+`TestOnlyARefusedRefreshTokenMarksTheAccountAsNeedingLogin`,
+`TestRefusalOfAnSDKRefreshThatBeganBeforeTheGuardMarksTheAccountAsNeedingLogin`,
+`TestAnAccountWhoseRefreshTokenWasRefusedNeedsLoginAfterARestartUntilItSignsInAgain`).
+
 The rule has one cost. When an access token is refused (usage 401) before it
 is due, and a refresh of it fails or ends unknown, the router's or the
 SDK's, nothing refreshes it until the token enters the SDK's 4-hour lead:
@@ -1947,7 +1972,7 @@ For every client, the SDK sets `X-Stainless-Package-Version` and
 `served`, `served_mark_failed`, `paid_use_observed`, `overage_read`,
 `stamp_bounded`, `credential_refresh`, `client_auth_rejected`,
 `request_rejected`, `started`, `stopped`, `test_upstream_in_use`,
-`refresh_guard_replaced`, `model_catalog`, and, since PR4,
+`refresh_guard_replaced`, `model_catalog`, `login_required`, and, since PR4,
 `login_confirmed`. The journal adds three events:
 
 - `journal_failed`: `detail` holds the error of the failed write or sync.
@@ -2233,8 +2258,9 @@ behavior is the client's own continuation turn.
 
 ### Login and manual movement
 
-An `auth` failure marks the account as needing login. New conversations
-skip it. A conversation that has been served on it gets 503 naming
+An `auth` failure marks the account as needing login, and so does a refresh
+token that the token endpoint refuses (Paid-overflow reading). New
+conversations skip it. A conversation that has been served on it gets 503 naming
 `claude-router login -account ID`, never 401, and keeps its assignment. An
 idle one moves instead when another account is eligible (Idle conversations
 are placed again). One that never served moves (PR2). That move rests on a
@@ -2244,8 +2270,8 @@ by:
 - `claude-router login`, which clears it in the saved account state while
   it holds the state directory, so it applies at the next start;
 - a settings read with the account's credential that began after the
-  failed attempt and succeeded, which shows that the credential works
-  (`login_confirmed` event). This covers a 401 that a refresh resolved.
+  failure that set the mark and succeeded, which shows that the credential
+  works (`login_confirmed` event). This covers a 401 that a refresh resolved.
 
 `POST /claude-router/move` moves a conversation explicitly, whatever the
 account's state (`TestRevokedLoginKeepsAssignmentsAcrossRestartUntilMovedOrConfirmed`,

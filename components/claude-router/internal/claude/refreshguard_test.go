@@ -152,7 +152,7 @@ func (e *env) startWithSDKRefreshBeforeTheGuard(account string, x *tokenExchange
 
 func (e *env) registerGuard() {
 	e.t.Helper()
-	g, err := installRefreshGuard(e.svc.core, slices.Collect(maps.Values(e.svc.authIDs)))
+	g, err := installRefreshGuard(e.svc.core, slices.Collect(maps.Values(e.svc.authIDs)), e.svc.refreshRefused)
 	if err != nil {
 		e.t.Fatal(err)
 	}
