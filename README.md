@@ -178,8 +178,8 @@ OOM score, usually the largest process. If that process's unit keeps systemd's
 default `OOMPolicy=stop`, systemd then stops the whole unit. On systemd 253 or
 newer, scope units also have `OOMPolicy=`, so a kill in a terminal tab's scope
 ends the tab and every agent in it. jobgate gives each run's scope
-`OOMPolicy=continue` on those versions, so a kill inside a jobgate run ends only
-one process.
+`OOMPolicy=continue` on those versions, so systemd does not stop a jobgate run
+after a kill inside it.
 
 To check the machine, preview the change, and make it:
 
