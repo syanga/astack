@@ -165,14 +165,18 @@ code of running programs. The desktop then freezes until the OOM killer ends a
 process. [scripts/memory_guard.py](scripts/memory_guard.py) turns on the
 kernel's
 [thrashing prevention](https://docs.kernel.org/admin-guide/mm/multigen_lru.html#thrashing-prevention)
-by setting `/sys/kernel/mm/lru_gen/min_ttl_ms` to 1000. The kernel then ends a
-process instead of evicting pages used in the last second. At each boot,
+by setting `/sys/kernel/mm/lru_gen/min_ttl_ms` to 1000. When the whole machine
+runs short of memory, the kernel then ends a process instead of evicting pages
+used in the last second. The setting does not apply when a cgroup reaches its
+own `memory.max`, such as jobgate's kernel memory cap. At each boot,
 `systemd-tmpfiles` sets the value again from
 `/etc/tmpfiles.d/astack-memory-guard.conf`. The script needs the kernel's
 multi-gen LRU. On macOS, the script changes nothing.
 
 When thrashing prevention acts, the kernel ends the process with the highest
-OOM score. That is usually the largest process, which can be an agent session.
+OOM score, usually the largest process. Under systemd's default
+`OOMPolicy=stop`, systemd then stops the whole unit that held that process. If
+that unit is a terminal tab's scope, the tab and every agent in it end.
 
 To check the machine, preview the change, and make it:
 
