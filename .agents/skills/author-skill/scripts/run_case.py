@@ -12,10 +12,10 @@ Sessions run in this checkout and may use only Read, Grep, Glob, Skill, and the
 shell commands Claude Code treats as read-only. Every other tool call is denied,
 so an attempt to edit, post, or merge appears in the report as a denied call
 instead of happening. Sessions skip local settings
-(.claude/settings.local.json), so allow rules saved there do not apply. The
-report lists each run's skills, actions, and answers, then how many runs used
-each skill and had each tool denied. The script exits 1 when any run times out
-or fails.
+(.claude/settings.local.json), so allow rules saved there do not apply. Allow
+rules in a committed .claude/settings.json still apply. The report lists each
+run's skills, actions, and answers, then how many runs used each skill and had
+each tool denied. The script exits 1 when any run times out or fails.
 """
 
 import argparse
