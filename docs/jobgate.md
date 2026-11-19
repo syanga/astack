@@ -148,8 +148,11 @@ a machine without swap, the kernel reclaims page cache and then OOM-kills a
 process in the `HOME` slice. Its victim can belong to any run under that `HOME`,
 not only to the run that went over. With swap, the slice can swap first, because
 jobgate does not set `MemorySwapMax`. On systemd 253 or newer, each scope has
-`OOMPolicy=continue`. A kernel OOM kill inside the `HOME` slice then ends one
-process instead of the whole run. On systemd 254 or newer, jobgate passes
+`OOMPolicy=continue`. When the kernel OOM-kills a process inside the `HOME`
+slice, systemd does not stop the rest of that process's run. jobgate exits with
+code 137 when the kernel kills either the command or the `jobgate.py _scope`
+process that waits for it. The command, or processes that it started, can keep
+running in the run's scope. On systemd 254 or newer, jobgate passes
 `--expand-environment=no`, so the command receives `$` in its arguments
 unchanged. Earlier versions never expand a scope's arguments. `jobgate status`
 prints the `HOME` slice's `MemoryMax` and `MemoryCurrent`, and the `CPUWeight`
