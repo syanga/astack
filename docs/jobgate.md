@@ -303,6 +303,13 @@ to one log in the order they end. jobgate runs dirty worktrees like clean ones.
 | 127 | The command was not found. |
 | 128+N | jobgate received signal N, such as SIGTERM, SIGHUP, or SIGINT from Ctrl-C, before the command started. |
 
+On Linux in a scope, the `jobgate.py _scope` process starts the command and
+waits for it. SIGTERM, SIGHUP, and SIGINT do not kill the `jobgate.py _scope`
+process during that wait. When another signal N, such as SIGKILL, kills it
+during that wait, jobgate also returns 128+N. The command can keep running in
+the run's scope. When the kernel OOM-kills the `jobgate.py _scope` process
+during that wait, jobgate returns 137, because the kernel sends SIGKILL.
+
 On macOS, `taskpolicy` starts the command. When it cannot start an executable
 file, such as a script whose interpreter is missing, jobgate returns the exit
 code of `taskpolicy`.
