@@ -121,8 +121,8 @@ def boot_rules(host: Host) -> list[BootRule]:
             file = Path(header.group(1))
             continue
         fields = line.split(None, 6)
-        if file is not None and len(fields) > 1 and not fields[0].startswith("#") and _names_min_ttl_ms(fields[1]):
-            rules.append(BootRule(file, fields[6] if len(fields) == 7 else "-"))
+        if file is not None and len(fields) == 7 and fields[0].startswith("w") and _names_min_ttl_ms(fields[1]):
+            rules.append(BootRule(file, fields[6]))
     return rules
 
 
@@ -164,11 +164,13 @@ def uninstall(host: Host, *, dry_run: bool) -> None:
         host.boot_file.unlink()
 
 
-def describe(host: Host, current: Status) -> str:
-    if not current.available:
-        return "thrashing prevention  unavailable: " + UNAVAILABLE_REASON
-    text = "{}: min_ttl_ms {}".format("on" if current.min_ttl_ms else "off", current.min_ttl_ms)
-    rules = boot_rules(host)
+def describe(host: Host) -> str:
+    current = status(host)
+    if current.available:
+        text = "{}: min_ttl_ms {}".format("on" if current.min_ttl_ms else "off", current.min_ttl_ms)
+    else:
+        text = "unavailable: " + UNAVAILABLE_REASON
+    rules = [] if current.min_ttl_ms is None else boot_rules(host)
     if rules:
         source = "astack" if rules[0].file == host.boot_file else str(rules[0].file)
         text += ", set to {} at boot by {}".format(rules[0].value, source)
@@ -189,7 +191,7 @@ def main(argv: Sequence[str] | None = None, host: Host | None = None) -> int:
     host = host or real_host()
     try:
         if args.command == "status":
-            print(describe(host, status(host)))
+            print(describe(host))
         else:
             (install if args.command == "install" else uninstall)(host, dry_run=args.dry_run)
     except (OSError, GuardError) as error:

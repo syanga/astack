@@ -187,9 +187,16 @@ class MemoryGuardTests(unittest.TestCase):
 
         self.run_main("install")
         self.assertIn("set to 1000 at boot by astack", self.run_main("status", uid=1000)[1])
+        mode = self.root / "usr/lib/tmpfiles.d/00-mode.conf"
+        mode.parent.mkdir(parents=True, exist_ok=True)
+        mode.write_text("z {} 0644 - - - -\n".format(memory_guard.MIN_TTL_MS_PATH))
         self.enabled.write_text("0x0000\n")
+        self.assertIn("set to 1000 at boot by astack", self.run_main("status", uid=1000)[1])
+        self.assertEqual(self.ttl_after_reboot(), "1000")
+        self.ttl.unlink()
         self.assertNotIn("at boot", self.run_main("status", uid=1000)[1])
         self.enabled.write_text("0x0007\n")
+        self.ttl.write_text("1000\n")
 
         rule = self.write_rule("usr/lib/tmpfiles.d", "00-distro.conf", 2000, '"//sys/kernel/mm//lru_gen/min_ttl_ms"')
         output = self.run_main("status", uid=1000)[1]
