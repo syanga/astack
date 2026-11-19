@@ -10,7 +10,7 @@
   "claude_code": "2.1.327"
  },
  "result": "pass",
- "scope": "Issues 185, 193, and 194. A foreground lane router on port 18797 ran this code on Linux 7.0 x86_64, with its state on the machine's ext4 disk. It used the real accounts through copies of the dobby and work logins (lane.py, lane-config.json). The daily router kept running beside the lane, unchanged. A real claude -p request for claude-haiku-5-5 started a conversation. A lane restart over an events.jsonl that ended in a newline added no blank line. lane.py then stopped the lane and appended the first half of the last event line, as a short write leaves it. After the next restart, the first new event, model_catalog, began on a line of its own and parsed. A resume of the first conversation stayed on its account and kept its content, and digest.go's readDigest and account.go's requestsSince counted its request. The helper's platform note and activate's flags send no request. tests/test_claude_router_activate.py checks the platform note text and runs activate without the removed --agent-sdk flag. record.py built the record. Unchanged historical scenarios are references and were not rerun.",
+ "scope": "Issues 185, 193, and 194. A foreground lane router on port 18797 ran this code on Linux 7.0 x86_64, with its state on the machine's ext4 disk. It used the real accounts through copies of the dobby and work logins (lane.py, lane-config.json). The daily router kept running beside the lane, unchanged. A real claude -p request for claude-haiku-5-5 started a conversation. A lane restart over an events.jsonl that ended in a newline added no blank line. lane.py then stopped the lane and appended the first half of the last event line, as a short write leaves it. After the next restart, the first new event, model_catalog, began on a line of its own and parsed. A resume of the first conversation stayed on its account and kept its content, and digest.go's readDigest and account.go's requestsSince counted its request. The changes to the platform note and to activate's flags send no request. tests/test_claude_router_activate.py checks the platform note text and runs activate without the removed --agent-sdk flag. record.py built the record. Unchanged historical scenarios are references and were not rerun.",
  "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence",
  "matrix": [
   {
@@ -182,7 +182,7 @@
      "lane_readers_test.go",
      "events-after-restart.jsonl"
     ],
-    "method": "lane_readers_test.go, added only to a temporary copy of the checkout, called readDigest (digest.go) and requestsSince (account.go) on the lane's events.jsonl after the restart, with the restart time as the window start. It also decoded the first line after the partial line with json.Unmarshal into claude.Event, the step with which both readers decode each line (digest.go:108, account.go:339). digest.go acts only on request and migrated events, and account.go only on request events. Their output therefore cannot show that they read the first new line, model_catalog, so that decode is as far as a live run can show it."
+    "method": "lane_readers_test.go, added only to a temporary copy of the checkout, called readDigest (digest.go) and requestsSince (account.go) on the lane's events.jsonl after the restart, with the restart time as the window start. It also decoded the first new line with json.Unmarshal into claude.Event. Both readers decode each line the same way (digest.go:108, account.go:339). digest.go acts only on request and migrated events. account.go acts only on request events. Neither acts on the first new line, a model_catalog event, so a live run cannot show more than that decode."
    }
   },
   {
@@ -302,13 +302,13 @@
    "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue185-run2/evidence",
    "result": "pass: 17 of 17 rows, superseded",
    "finding": "An outside review of the second run's record found two problems. The readers row claimed that digest.go and account.go parse the first event after the restart. Their output cannot show that, because the first event is always model_catalog. Several other checks were also weaker than their row names.",
-   "fixed_in": "lane.py. The readers row names what it checks and requires an exact count. The other rows require the place decision and the answer on the new conversation, the first account on every resume request, the SDK version from go.mod, and both account IDs in status at start and end. A new row compares the daily router's process before and after the run."
+   "fixed_in": "lane.py. The readers row names what it checks and requires an exact count. The new conversation row requires the place decision and the answer. The resume row requires the first account on every request. The identity row requires the SDK version from go.mod. The paid overflow rows require both account IDs in status. A new row compares the daily router's process before and after the run."
   },
   {
    "run": "third lane run at 6358e4e",
    "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue185-run3/evidence",
    "result": "pass: 18 of 18 rows, superseded",
-   "finding": "A review found that the third run's readers row no longer required the first new line to decode into claude.Event, the readers' own decode step. Its readers.json shows that decode succeeded, but the row did not depend on it.",
+   "finding": "A review found that the third run's readers row no longer required the first new line to decode into claude.Event, as both readers decode each line. The third run's readers.json shows that the decode succeeded, but the row did not depend on it.",
    "fixed_in": "lane.py. The readers row requires that decode again. The fourth run's rows replaced the third run's."
   }
  ],
@@ -332,5 +332,5 @@
    "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/journal-tests.log"
   ]
  },
- "written": "2026-11-19T01:33:58.545620+00:00"
+ "written": "2026-11-19T01:42:29.057262+00:00"
 }
