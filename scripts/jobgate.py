@@ -521,10 +521,9 @@ def wait_for_admission(queue: Queue, ticket: Ticket, share: LiveShare, profile: 
                         reason = shortage(machine, running, profile)
                     else:
                         ticket.admit(Admission(workers, profile.memory(workers), time.time()))
+                        return ticket.run.admission, time.monotonic() - arrived
         finally:
             share.print_warning()
-        if ticket.run.admission is not None:
-            return ticket.run.admission, time.monotonic() - arrived
         now = time.monotonic()
         if now >= next_report:
             say("{} waits {}; waited {}".format(profile.name, reason, duration(now - arrived)))

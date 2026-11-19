@@ -60,12 +60,12 @@ memory_share = 0.6
 ```
 
 `memory_share` is a number above 0 and at most 1. Without the file, it is 0.5.
-jobgate reads `memory_share` when a run arrives, about once a second while it
-waits, and before it sets the kernel memory cap. A change therefore also applies
-to runs that already wait. jobgate exits with code 125 when the file is invalid
-at arrival. When the file turns invalid while a run waits, jobgate prints one
-warning and keeps the last valid value. Inside a container, jobgate reads the
-host's physical memory, not the container's memory limit.
+jobgate reads `memory_share` when a run arrives, about once a second while the
+run waits, and before it sets the kernel memory cap. A change therefore also
+applies to runs that already wait. jobgate exits with code 125 when the file is
+invalid at arrival. When the file turns invalid while a run waits, jobgate
+prints one warning and keeps the last valid value. Inside a container, jobgate
+reads the host's physical memory, not the container's memory limit.
 
 ## Admission
 
