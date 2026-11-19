@@ -149,11 +149,15 @@ count a shared page once per process. On macOS, it adds each process's
 states S and uses U may still use S − U, or nothing once U exceeds S. Admission
 subtracts that from the available memory. A run that has just started therefore
 counts with all of its stated memory. Memory that a run already uses counts
-once, through the available memory. jobgate reads the available memory just
-before and just after it measures the runs, and it uses the smaller reading.
-Memory that a run allocates or frees during the measurement then makes admission
-stricter, not looser. Memory that ungated commands use is missing from the
-available memory too, so ungated work also delays new runs.
+once, through the available memory. jobgate measures each run just before and
+just after it reads the available memory, and it keeps the smaller of the two
+measurements. If each run's memory only grows or only shrinks between its two
+measurements, the free memory that admission counts is at most what is left. The
+check misses one case: a run that frees memory and allocates it again between
+its two measurements. The available memory then includes memory that the run
+still uses, and admission is looser by that amount. Memory that ungated commands
+use is missing from the available memory too, so ungated work also delays new
+runs.
 
 When the reading is unavailable, no run waits for free memory, and
 `jobgate status` shows free memory as unknown.

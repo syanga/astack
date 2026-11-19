@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -710,6 +711,48 @@ class ResultTests(JobgateTest):
         held.workers()
         wait_for(lambda: "uses 200M" in self.gate("status").stdout)
         self.assertEqual(held.release(), 0)
+
+    @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
+    def test_free_memory_keeps_the_smaller_of_two_measurements_around_the_reading(self):
+        env = self.systemd_session("systemd 259", '[ "$1" = --version ] && echo "systemd 259"\nexit 0\n',
+                                   SYSTEMD_RUN.format(python=sys.executable, version=259))
+        cgroup = self.root / "scope cgroup"
+        cgroup.mkdir()
+        for name, text in (("memory.max", "max\n"), ("memory.peak", "0\n"), ("memory.events", "oom_kill 0\n"),
+                           ("memory.stat", "anon 0\nfile 0\nactive_file 0\ninactive_file 0\nshmem 0\n")):
+            (cgroup / name).write_text(text)
+        os.mkfifo(str(cgroup / "memory.current"))
+        stop = threading.Event()
+
+        def feed():
+            readings = [str(800 * 2**20).encode(), str(100 * 2**20).encode()]
+            count = 0
+            while not stop.is_set():
+                try:
+                    fd = os.open(str(cgroup / "memory.current"), os.O_WRONLY | os.O_NONBLOCK)
+                except OSError:
+                    time.sleep(0.005)
+                    continue
+                os.write(fd, readings[count % 2])
+                os.close(fd)
+                count += 1
+                time.sleep(0.02)
+
+        feeder = threading.Thread(target=feed, daemon=True)
+        self.addCleanup(feeder.join, 10)
+        self.addCleanup(stop.set)
+        self.set_machine(memory=64 * GIB, cores=16, psi=CALM, meminfo=meminfo(1300 * 2**20), cgroup=str(cgroup))
+        self.profiles(big=("900M", "100M", 1, "BIG_WORKERS"), small=("400M", "100M", 1, "SMALL_WORKERS"))
+        first = self.hold("first", profile="big", variable="BIG_WORKERS", env=env)
+        self.assertEqual(first.workers(), 1)
+        feeder.start()
+        second = self.hold("second", profile="small", variable="SMALL_WORKERS", env=env)
+        self.assertIn("waits for free memory", second.wait_message("waits"))
+        time.sleep(2.5)
+        self.assertFalse(second.started.exists())
+        self.assertEqual(first.release(), 0)
+        self.assertEqual(second.workers(), 1)
+        self.assertEqual(second.release(), 0)
 
     def test_peak_above_the_stated_memory_names_the_number_to_raise(self):
         self.profiles(test=("1M", "1M", 1, "TEST_WORKERS"))
