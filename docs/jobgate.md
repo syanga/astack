@@ -22,11 +22,11 @@ the profile's `workers_env` variable to the worker count, and runs the command.
 Then it prints a result line. `--max-workers N` lowers the profile's
 `max_workers` for one run. A value above `max_workers` has no effect.
 
-`jobgate status` prints the share, the stated memory of running runs, the free
-memory, the workers that running runs use, and the pressure reading. It also
-prints the kernel memory cap and one line per running or waiting run. A running
-run's line gives the memory it uses, and a waiting run's line gives why it
-waits.
+`jobgate status` prints the share, the stated memory of running runs, the
+workers that running runs use, and the pressure reading. It also prints the
+available memory and what running runs may still use, the kernel memory cap, and
+one line per running or waiting run. A running run's line gives the memory it
+uses, and a waiting run's line gives why it waits.
 
 ## Repository file
 
@@ -151,21 +151,18 @@ measurement fails.
 Free memory is the available memory, less S − M for each running run that states
 S. A run whose M exceeds S subtracts nothing. A run that has just started
 therefore counts with all of its stated memory. Memory that a run already uses
-counts once, through the available memory. M also counts the jobgate process
-that waits for the command, about 13 MiB on Linux, while the stated memory
-covers only the command. Free memory can therefore be up to that much too high
-for each running run.
+counts once, through the available memory.
 
-The bound on free memory is the available memory at the reading, less what
-running runs stated but did not use at that moment. Free memory stays within the
-bound under two conditions. Each M counts only memory that its run used at the
-reading and that the available memory left out. The M values together count each
-page at most once. An M meets the first condition when the run's memory only
-grows or only shrinks between its two measurements. The conditions fail in these
-known cases:
+The bound on free memory is the available memory at the reading, less the stated
+memory that running commands had not used at that moment. Free memory stays
+within the bound under two conditions. Each M counts only memory that its run's
+command used at the reading and that the available memory left out. The M values
+together count each page at most once. When a run's memory only grows or only
+shrinks between its two measurements, their timing cannot break the first
+condition. The conditions fail in these known cases:
 
 - A run frees memory and allocates it again between its two measurements. Its M
-  then counts more than the run used at the reading.
+  then counts more than its command used at the reading.
 - A measurement counts a shared page once per process. The `RssAnon` and
   `RssShmem` fallback and macOS `phys_footprint` measure that way.
 - A nested call queues as a run of its own when the outer run's command removed
@@ -178,6 +175,8 @@ known cases:
   released with `MADV_FREE`. The available memory counts those pages as free.
 - In a scope, `memory.current` includes reclaimable kernel slab, which the
   available memory partly counts as free.
+- M counts the jobgate process that waits for the command, about 13 MiB on
+  Linux. The stated memory covers only the command.
 
 In each case, free memory can exceed the bound by at most the memory that the
 measurements overcount. Memory that ungated commands use is missing from the
