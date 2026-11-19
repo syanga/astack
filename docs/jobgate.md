@@ -148,12 +148,13 @@ a machine without swap, the kernel reclaims page cache and then OOM-kills a
 process in the `HOME` slice. Its victim can belong to any run under that `HOME`,
 not only to the run that went over. With swap, the slice can swap first, because
 jobgate does not set `MemorySwapMax`. On systemd 253 or newer, each scope has
-`OOMPolicy=continue`. A kernel OOM kill inside the `HOME` slice then ends one
-process instead of the whole run. On systemd 254 or newer, jobgate passes
-`--expand-environment=no`, so the command receives `$` in its arguments
-unchanged. Earlier versions never expand a scope's arguments. `jobgate status`
-prints the `HOME` slice's `MemoryMax` and `MemoryCurrent`, and the `CPUWeight`
-of `jobgate.slice`.
+`OOMPolicy=continue`. When the kernel OOM-kills a process inside the `HOME`
+slice, systemd leaves the run's other processes running. The run still ends
+when the killed process is the command's main process. On systemd 254 or newer,
+jobgate passes `--expand-environment=no`, so the command receives `$` in its
+arguments unchanged. Earlier versions never expand a scope's arguments.
+`jobgate status` prints the `HOME` slice's `MemoryMax` and `MemoryCurrent`, and
+the `CPUWeight` of `jobgate.slice`.
 
 On Linux without a systemd user session, as in containers and some WSL setups,
 jobgate prints one line saying the kernel memory cap is off. It then applies
