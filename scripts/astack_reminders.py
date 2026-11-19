@@ -9,7 +9,7 @@ from typing import Callable
 import claude_router
 import memory_guard
 
-INSTALL = Path(__file__).resolve().parent.parent / "install.sh"
+INSTALLER = Path(__file__).resolve().parent.parent / "install.sh"
 GUARD_README = "README.md#keep-a-linux-machine-responsive-when-memory-runs-out"
 ROUTER_README = "README.md#install-the-optional-claude-router"
 
@@ -59,7 +59,7 @@ def router_steps(state: dict, host: Host) -> list[str]:
     if not layout:
         return ["OPTIONAL claude-router is not installed ({})".format(ROUTER_README)]
     if record.get("pending"):
-        command = "{} --component {}".format(shlex.quote(str(INSTALL)), claude_router.NAME)
+        command = "{} --component {}".format(shlex.quote(str(INSTALLER)), claude_router.NAME)
         return todo("claude-router install", ROUTER_README, command)
     return best_effort(lambda: linger_step(layout, host)) + best_effort(lambda: setup_step(layout))
 

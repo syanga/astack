@@ -9,7 +9,9 @@ import shlex
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
+from test_claude_router_install import ComponentFixture
 from test_install import InstallerFixture
 
 SOURCE = Path(__file__).resolve().parent.parent
@@ -63,8 +65,7 @@ class ReminderTests(unittest.TestCase):
 
     def test_guard_reminder_gives_the_install_command_until_the_guard_is_installed(self):
         command = self.guard_command(self.pending())
-        self.assertEqual(command[:2] + command[3:], ["sudo", "python3", "install"])
-        self.assertTrue(Path(command[2]).samefile(SOURCE / "scripts/memory_guard.py"))
+        self.assertEqual(command, ["sudo", "python3", str(SOURCE / "scripts/memory_guard.py"), "install"])
 
         with redirect_stdout(io.StringIO()):
             memory_guard.install(self.guard, dry_run=False)
@@ -115,22 +116,6 @@ class ReminderTests(unittest.TestCase):
 
         self.activate()
         self.assertNotIn("claude-router", self.pending(state))
-
-    def test_an_interrupted_router_install_names_the_install_again_instead_of_setup(self):
-        state = self.installed_router("systemd")
-        binary = self.root / "router data/bin/claude-router"
-        state["components"]["claude-router"]["pending"] = {str(binary): "sha256 of the binary it was writing"}
-        output = self.pending(state)
-
-        command = [shlex.split(line) for line in output.splitlines() if "--component" in line]
-        self.assertEqual(len(command), 1)
-        self.assertTrue(Path(command[0][0]).samefile(SOURCE / "install.sh"))
-        self.assertEqual(command[0][1:], ["--component", "claude-router"])
-        self.assertIsNone(self.setup_command(output))
-        self.assertNotIn(LINGER, output)
-
-        state["components"]["claude-router"]["pending"] = {}
-        self.assertEqual(self.setup_command(self.pending(state)), SETUP)
 
     def test_installed_launchd_router_names_setup_but_never_linger(self):
         state = self.installed_router("launchd")
@@ -202,6 +187,32 @@ class InstallerReminderTests(InstallerFixture):
         result = self.run_installer("--target", "claude", command="uninstall")
         self.assertIn("Uninstall complete for claude.", result.stdout)
         self.assertNotIn("README.md#", result.stdout)
+
+
+class InterruptedRouterInstallTests(ComponentFixture):
+    def test_an_interrupted_router_install_names_the_install_again_instead_of_setup(self):
+        module = self.module()
+        binary = self.data / "bin/claude-router"
+        real_write = module.files.atomic_write
+
+        def fail_at_the_binary(path, *arguments):
+            if Path(path).parent.name == "bin" and Path(path).name == "claude-router":
+                raise OSError("injected failure at the binary write")
+            return real_write(path, *arguments)
+
+        with patch.object(module.files, "atomic_write", side_effect=fail_at_the_binary), self.assertRaises(OSError):
+            self.run_module(module, {}, "install", "--home", str(self.home), "--component", "claude-router")
+        self.assertFalse(binary.exists())
+
+        output = self.run_installer("--target", "claude", env=self.env).stdout
+        commands = [shlex.split(line) for line in output.splitlines() if "--component" in line]
+        self.assertEqual(commands, [[str((self.repo / "install.sh").resolve()), "--component", "claude-router"]])
+        self.assertNotIn("claude-router setup", output)
+
+        self.component()
+        output = self.run_installer("--target", "claude", env=self.env).stdout
+        self.assertIn(SETUP, output)
+        self.assertNotIn("--component", output)
 
 
 if __name__ == "__main__":
