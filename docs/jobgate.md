@@ -340,8 +340,12 @@ runs share these files under every `HOME`.
 ## Install and remove
 
 `./install.sh` installs jobgate by default, as the `jobgate` target. The
-installer needs Python 3.10 or newer as `python3`, while jobgate itself runs on
-Python 3.9. A stock Mac's `python3` is 3.9, which cannot run the installer.
+astack-update skill installs it on every update, even after
+`./uninstall.sh --target jobgate`. The update leaves jobgate out when the user
+names targets without it, or when the home's manifest has no jobgate and a file
+that astack does not manage is at one of jobgate's paths. The installer needs
+Python 3.10 or newer as `python3`, while jobgate itself runs on Python 3.9. A
+stock Mac's `python3` is 3.9, which cannot run the installer.
 
 The installer writes `~/.local/bin/jobgate`, a shell wrapper that runs `python3`
 on the script in `~/.local/share/astack/jobgate/`. When `XDG_DATA_HOME` is set,

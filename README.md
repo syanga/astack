@@ -258,7 +258,9 @@ Conflicting local edits stop installation. To back up and replace conflicts,
 preview with `--force --dry-run` before running with `--force`.
 
 astack-help offers this update when any agent's installed commit differs from
-`main` on the checkout's `origin`.
+`main` on the checkout's `origin`. The astack-update skill that it runs also
+installs `jobgate`, as [Install and remove](docs/jobgate.md#install-and-remove)
+describes.
 
 To remove an installation, use the same targets with `./uninstall.sh`.
 Preview removal with `--dry-run`. Uninstall preserves unrelated files and
