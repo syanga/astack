@@ -20,6 +20,10 @@ spec.loader.exec_module(memory_guard)
 TMPFILES = shutil.which("systemd-tmpfiles")
 
 
+def w_line(value, path=memory_guard.MIN_TTL_MS_PATH):
+    return "w- {} - - - - {}".format(path, value)
+
+
 class MemoryGuardTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="astack memory guard ")
@@ -49,13 +53,17 @@ class MemoryGuardTests(unittest.TestCase):
             self.skipTest("needs systemd-tmpfiles")
         self.ttl.write_text("0\n")
         subprocess.run([TMPFILES, "--root={}".format(self.root), "--boot", "--create",
-                        "--prefix=" + memory_guard.MIN_TTL_MS_PATH], check=True, capture_output=True, timeout=30)
+                        "--prefix=/sys/kernel/mm/lru_gen"], capture_output=True, timeout=30)
         return self.ttl_now()
 
-    def write_rule(self, directory, name, value, path=memory_guard.MIN_TTL_MS_PATH):
+    def write_rule(self, directory, name, line, *, through_symlink=False):
         rule = self.root / directory / name
         rule.parent.mkdir(parents=True, exist_ok=True)
-        rule.write_text("w- {} - - - - {}\n".format(path, value))
+        target = self.root / "opt" / rule.stem if through_symlink else rule
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(line + "\n")
+        if through_symlink:
+            rule.symlink_to(os.path.relpath(target, rule.parent))
         return rule
 
     def has_preview(self, output, verb, path, value=None):
@@ -71,15 +79,26 @@ class MemoryGuardTests(unittest.TestCase):
     @unittest.skipIf(TMPFILES is None, "needs systemd-tmpfiles")
     def test_install_refuses_when_another_file_sets_min_ttl_ms_at_boot(self):
         self.ttl.write_text("250\n")
-        for directory, name in (("usr/lib/tmpfiles.d", "00-distro.conf"), ("etc/tmpfiles.d", "mglru.conf")):
-            with self.subTest(name=name):
-                rule = self.write_rule(directory, name, 2000)
-                code, _, error = self.run_main("install")
-                rule.unlink()
-                self.assertEqual(code, 1)
-                self.assertIn("2000 in {}".format(rule), error)
-                self.assertEqual(self.ttl_now(), "250")
-                self.assertFalse(self.boot_file.exists())
+        escaped = memory_guard.MIN_TTL_MS_PATH.replace("/min_", "/\\x6din_")
+        glob = memory_guard.MIN_TTL_MS_PATH.replace("_ms", "*")
+        cases = (("usr/lib/tmpfiles.d", "00-distro.conf", w_line(2000), False),
+                 ("etc/tmpfiles.d", "mglru.conf", w_line(2000), False),
+                 ("etc/tmpfiles.d", "00-linked.conf", w_line(2000), True),
+                 ("usr/lib/tmpfiles.d", "00-escaped.conf", w_line(2000, escaped), False),
+                 ("etc/tmpfiles.d", "zz-glob.conf", w_line(2000, glob), False),
+                 ("etc/tmpfiles.d", "00-base64.conf", "w~ {} - - - - MjAwMA==".format(memory_guard.MIN_TTL_MS_PATH),
+                  False),
+                 ("usr/lib/tmpfiles.d", "00-boot-only.conf", w_line(2000).replace("w-", "w!"), False))
+        with patch.dict(os.environ, {"SYSTEMD_COLORS": "1"}):
+            for directory, name, line, through_symlink in cases:
+                with self.subTest(name=name):
+                    rule = self.write_rule(directory, name, line, through_symlink=through_symlink)
+                    code, _, error = self.run_main("install")
+                    rule.unlink()
+                    self.assertEqual(code, 1)
+                    self.assertIn("min_ttl_ms to 2000 at boot", error)
+                    self.assertEqual(self.ttl_now(), "250")
+                    self.assertFalse(self.boot_file.exists())
 
         self.assertEqual(self.run_main("install")[0], 0)
         self.assertEqual(self.ttl_after_reboot(), "1000")
@@ -179,30 +198,42 @@ class MemoryGuardTests(unittest.TestCase):
         self.assertIn("unavailable", self.run_main("status", uid=1000)[1])
 
     @unittest.skipIf(TMPFILES is None, "needs systemd-tmpfiles")
-    def test_status_names_the_file_whose_rule_sets_min_ttl_ms_at_boot(self):
+    @patch.dict(os.environ, {"SYSTEMD_COLORS": "1"})
+    def test_status_reports_the_value_boot_sets_and_whose_rule_sets_it(self):
         self.assertNotIn("at boot", self.run_main("status", uid=1000)[1])
-        rule = self.write_rule("etc/tmpfiles.d", "mglru.conf", 300)
-        self.assertIn("set to 300 at boot by {}".format(rule), self.run_main("status", uid=1000)[1])
+        rule = self.write_rule("etc/tmpfiles.d", "mglru.conf", w_line(300))
+        self.assertIn("set to 300 at boot by another tmpfiles.d rule", self.run_main("status", uid=1000)[1])
+        self.assertEqual(self.ttl_after_reboot(), "300")
         rule.unlink()
 
         self.run_main("install")
-        self.assertIn("set to 1000 at boot by astack", self.run_main("status", uid=1000)[1])
-        mode = self.root / "usr/lib/tmpfiles.d/00-mode.conf"
-        mode.parent.mkdir(parents=True, exist_ok=True)
-        mode.write_text("z {} 0644 - - - -\n".format(memory_guard.MIN_TTL_MS_PATH))
+        self.write_rule("usr/lib/tmpfiles.d", "00-mode.conf", "z {} 0644 - - - -".format(memory_guard.MIN_TTL_MS_PATH))
+        self.write_rule("usr/lib/tmpfiles.d", "00-empty.conf", w_line("-"))
+        self.assertIn("set to 1000 at boot by astack\n", self.run_main("status", uid=1000)[1])
+        self.assertEqual(self.ttl_after_reboot(), "1000")
+
+        rule = self.write_rule("etc/tmpfiles.d", "mglru.conf", w_line(300))
+        self.assertIn("set to 1000 at boot by astack, over another tmpfiles.d rule",
+                      self.run_main("status", uid=1000)[1])
+        self.assertEqual(self.ttl_after_reboot(), "1000")
+        rule.unlink()
+
+        quoted = w_line(2000, '"//sys/kernel/mm//lru_gen/min_ttl_ms"')
+        self.write_rule("usr/lib/tmpfiles.d", "00-distro.conf", quoted)
+        output = self.run_main("status", uid=1000)[1]
+        self.assertIn("set to 2000 at boot by another tmpfiles.d rule", output)
+        self.assertNotIn("by astack", output)
+        self.assertEqual(self.ttl_after_reboot(), "2000")
+
+    @unittest.skipIf(TMPFILES is None, "needs systemd-tmpfiles")
+    def test_status_claims_a_boot_value_only_while_min_ttl_ms_exists(self):
+        self.run_main("install")
         self.enabled.write_text("0x0000\n")
         self.assertIn("set to 1000 at boot by astack", self.run_main("status", uid=1000)[1])
         self.assertEqual(self.ttl_after_reboot(), "1000")
+
         self.ttl.unlink()
         self.assertNotIn("at boot", self.run_main("status", uid=1000)[1])
-        self.enabled.write_text("0x0007\n")
-        self.ttl.write_text("1000\n")
-
-        rule = self.write_rule("usr/lib/tmpfiles.d", "00-distro.conf", 2000, '"//sys/kernel/mm//lru_gen/min_ttl_ms"')
-        output = self.run_main("status", uid=1000)[1]
-        self.assertIn("set to 2000 at boot by {}".format(rule), output)
-        self.assertNotIn("by astack", output)
-        self.assertEqual(self.ttl_after_reboot(), "2000")
 
     def test_status_reports_a_boot_file_without_the_previous_value_as_an_error(self):
         self.boot_file.parent.mkdir(parents=True)

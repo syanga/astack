@@ -3,9 +3,9 @@
 
 install sets min_ttl_ms to 1000 to turn on the kernel's thrashing prevention.
 systemd-tmpfiles sets the same value again at each boot.
-install changes nothing when another tmpfiles.d file already sets min_ttl_ms.
+install changes nothing when another tmpfiles.d rule already sets min_ttl_ms at boot.
 uninstall restores min_ttl_ms to its value from before the first install.
-status reports min_ttl_ms and the tmpfiles.d rule that sets it at boot, and needs no root.
+status reports min_ttl_ms and the value systemd-tmpfiles sets at boot, and needs no root.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import posixpath
 import re
 import subprocess
 import sys
+import tempfile
 from typing import Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -51,9 +52,9 @@ class Host:
 
 
 @dataclass(frozen=True)
-class BootRule:
-    file: Path
-    value: str
+class AtBoot:
+    value: str | None
+    without_astack: str | None
 
 
 @dataclass(frozen=True)
@@ -98,32 +99,40 @@ def status(host: Host) -> Status:
     )
 
 
-def _names_min_ttl_ms(path: str) -> bool:
-    # systemd-tmpfiles unquotes and simplifies a rule's path before it compares paths.
-    return posixpath.normpath(re.sub("/+", "/", path.strip("\"'"))) == MIN_TTL_MS_PATH
+def _tmpfiles(*arguments: str, config: str | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(["systemd-tmpfiles", *arguments], input=config, capture_output=True, text=True,
+                          env={**os.environ, "SYSTEMD_COLORS": "0"})
 
 
-def boot_rules(host: Host) -> list[BootRule]:
+def _value_at_boot(config: str) -> str | None:
+    with tempfile.TemporaryDirectory(prefix="astack-memory-guard-") as scratch:
+        target = Path(scratch) / MIN_TTL_MS_PATH.lstrip("/")
+        target.parent.mkdir(parents=True)
+        target.touch()
+        result = _tmpfiles("--root=" + scratch, "--boot", "--create", "--prefix=" + posixpath.dirname(MIN_TTL_MS_PATH),
+                           "-", config=config)
+        # systemd-tmpfiles exits with EX_DATAERR or EX_CANTCREAT when some lines fail, and boot skips those lines too.
+        if result.returncode not in (0, os.EX_DATAERR, os.EX_CANTCREAT):
+            raise GuardError("systemd-tmpfiles --create failed: " + result.stderr.strip())
+        return target.read_text().strip() or None
+
+
+def at_boot(host: Host) -> AtBoot:
     try:
-        result = subprocess.run(["systemd-tmpfiles", "--root={}".format(host.root), "--cat-config", "--no-pager"],
-                                capture_output=True, text=True)
+        result = _tmpfiles("--root={}".format(host.root), "--cat-config", "--no-pager")
     except FileNotFoundError:
-        return []
+        return AtBoot(value=None, without_astack=None)
     if result.returncode != 0:
-        raise GuardError("systemd-tmpfiles --cat-config failed: {}".format(result.stderr.strip()))
-    # --cat-config prints the files in the order systemd-tmpfiles reads them. systemd-tmpfiles applies only the
-    # first rule for a path (tmpfiles.d(5)).
-    rules = []
-    file = None
-    for line in result.stdout.splitlines():
-        header = re.fullmatch(r"# (/.*\.conf)", line)
-        if header:
-            file = Path(header.group(1))
-            continue
-        fields = line.split(None, 6)
-        if file is not None and len(fields) == 7 and fields[0].startswith("w") and _names_min_ttl_ms(fields[1]):
-            rules.append(BootRule(file, fields[6]))
-    return rules
+        raise GuardError("systemd-tmpfiles --cat-config failed: " + result.stderr.strip())
+    config = result.stdout
+    value = _value_at_boot(config)
+    try:
+        astack = "# {}\n{}".format(host.boot_file, host.boot_file.read_text())
+    except FileNotFoundError:
+        return AtBoot(value=value, without_astack=value)
+    if astack not in config:
+        raise GuardError("systemd-tmpfiles --cat-config does not list {}".format(host.boot_file))
+    return AtBoot(value=value, without_astack=_value_at_boot(config.replace(astack, "", 1)))
 
 
 def _set_min_ttl_ms(host: Host, value: int, *, dry_run: bool) -> None:
@@ -136,11 +145,10 @@ def install(host: Host, *, dry_run: bool) -> None:
     current = status(host)
     if not current.available:
         raise GuardError(UNAVAILABLE_REASON + ", so install changed nothing")
-    rules = boot_rules(host)
-    if any(rule.file != host.boot_file for rule in rules):
-        raise GuardError("another tmpfiles.d file already sets min_ttl_ms at boot, so install changed nothing. "
-                         "At boot, systemd-tmpfiles applies the first of these rules: {}".format(
-                             ", ".join("{} in {}".format(rule.value, rule.file) for rule in rules)))
+    other = at_boot(host).without_astack
+    if other is not None:
+        raise GuardError("another tmpfiles.d rule sets min_ttl_ms to {} at boot, so install changed nothing. "
+                         "systemd-tmpfiles --cat-config lists the rules".format(other))
     before = current.min_ttl_ms if current.min_ttl_ms_before_install is None else current.min_ttl_ms_before_install
     print("WRITE {}".format(host.boot_file))
     if not dry_run:
@@ -170,10 +178,15 @@ def describe(host: Host) -> str:
         text = "{}: min_ttl_ms {}".format("on" if current.min_ttl_ms else "off", current.min_ttl_ms)
     else:
         text = "unavailable: " + UNAVAILABLE_REASON
-    rules = [] if current.min_ttl_ms is None else boot_rules(host)
-    if rules:
-        source = "astack" if rules[0].file == host.boot_file else str(rules[0].file)
-        text += ", set to {} at boot by {}".format(rules[0].value, source)
+    boot = at_boot(host) if current.min_ttl_ms is not None else AtBoot(value=None, without_astack=None)
+    if boot.value is not None:
+        if boot.without_astack is None:
+            source = "astack"
+        elif boot.without_astack == boot.value:
+            source = "another tmpfiles.d rule"
+        else:
+            source = "astack, over another tmpfiles.d rule"
+        text += ", set to {} at boot by {}".format(boot.value, source)
     return "thrashing prevention  " + text
 
 
