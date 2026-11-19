@@ -68,7 +68,9 @@ for call, tool in (("t3", "Edit"), ("t4", "Write")):
         {"type": "tool_result", "tool_use_id": call, "is_error": True, "content": denial}]}})
 if mode == "hang":
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(45)"])
-    Path(os.environ["FAKE_LOG"] + ".child").write_text(str(child.pid))
+    record = Path(os.environ["FAKE_LOG"] + ".child")
+    Path(str(record) + ".tmp").write_text(str(child.pid))
+    os.replace(str(record) + ".tmp", record)
     time.sleep(60)
 session = argv[argv.index("--resume") + 1] if "--resume" in argv else "session-%d" % os.getpid()
 emit({"type": "result", "subtype": "success", "is_error": False, "session_id": session,
@@ -100,6 +102,18 @@ class RunCaseTests(unittest.TestCase):
         self.log = self.temp / "log.jsonl"
         self.env = dict(os.environ, PATH="{}{}{}".format(bin_dir, os.pathsep, os.environ["PATH"]),
                         CLAUDE_CONFIG_DIR=str(self.user_config), FAKE_LOG=str(self.log), CLAUDECODE="1")
+
+    def recorded_child_exits(self):
+        record = Path(str(self.log) + ".child")
+        pid = int(record.read_text())
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return True
+            time.sleep(0.05)
+        return False
 
     def kill_recorded_child(self):
         record = Path(str(self.log) + ".child")
@@ -149,31 +163,48 @@ class RunCaseTests(unittest.TestCase):
         self.assertNotIn("Read README.md", report)
         self.assertIn("Answered 'Add a feature' in session-", report)
         self.assertIn("Skills: tdd 2/2\n", report)
-        self.assertNotIn("missing-skill", report)
+        self.assertIn("Skill missing-skill (failed: Unknown skill: missing-skill)", report)
         self.assertIn("Denied: Edit 2/2, Write 2/2\n", report)
         self.assertIn("$0.50", report)
         self.assertIn(str(self.temp / "out"), report)
         self.assertEqual(len(list((self.temp / "out").glob("*.jsonl"))), 2)
 
-    def test_refuses_to_run_when_committed_project_settings_allow_more_than_reading(self):
+    def test_refuses_to_run_when_the_checkout_could_approve_more_than_reading(self):
         checkout = self.temp / "checkout"
-        for name in ("skills", "scripts", "instructions"):
-            shutil.copytree(REPO / name, checkout / name)
-        shutil.copy(REPO / "harnesses.json", checkout / "harnesses.json")
+        shutil.copytree(REPO, checkout, ignore=shutil.ignore_patterns(".git", "__pycache__", "node_modules"))
         script = checkout / SCRIPT.relative_to(REPO)
-        script.parent.mkdir(parents=True)
-        shutil.copy(SCRIPT, script)
         settings = checkout / ".claude/settings.json"
         settings.parent.mkdir()
+        skill = checkout / "skills/tdd/SKILL.md"
+        original_skill = skill.read_text()
+        loosening = {
+            "an allow rule": (json.dumps({"permissions": {"allow": ["Write"]}}), None, "permissions.allow"),
+            "a hook": (json.dumps({"hooks": {"PreToolUse": []}}), None, "hooks"),
+            "a sandbox": (json.dumps({"sandbox": {"enabled": True}}), None, "sandbox"),
+            "malformed settings": ("{not json", None, "not a JSON object"),
+            "a project command": ("{}", ".claude/commands/ship.md", ".claude/commands"),
+            "a skill's allowed-tools": ("{}", "skills/tdd/SKILL.md", "skills/tdd/SKILL.md"),
+        }
+        for case, (contents, extra, named) in loosening.items():
+            with self.subTest(case):
+                settings.write_text(contents)
+                if extra == "skills/tdd/SKILL.md":
+                    skill.write_text(original_skill.replace("description:", "allowed-tools: Write\ndescription:", 1))
+                elif extra:
+                    (checkout / extra).parent.mkdir(parents=True, exist_ok=True)
+                    (checkout / extra).write_text("ship it")
+                self.log.unlink(missing_ok=True)
+                refused, sessions = self.run_case("--runs", "1", "Add a feature", script=script)
 
-        settings.write_text(json.dumps({"permissions": {"allow": ["Read", "Write"]}}))
-        refused, sessions = self.run_case("--runs", "1", "Add a feature", script=script)
+                self.assertNotEqual(refused.returncode, 0)
+                self.assertIn(named, refused.stderr)
+                self.assertNotIn("Traceback", refused.stderr)
+                self.assertEqual(sessions, [])
+                skill.write_text(original_skill)
+                shutil.rmtree(checkout / ".claude/commands", ignore_errors=True)
 
-        self.assertNotEqual(refused.returncode, 0)
-        self.assertIn("Write", refused.stderr)
-        self.assertEqual(sessions, [])
-
-        settings.write_text(json.dumps({"permissions": {"allow": ["Read", "Grep(*.md)"]}}))
+        settings.write_text(json.dumps({"permissions": {"deny": ["WebFetch"], "ask": ["Bash(rm:*)"]}}))
+        self.log.unlink(missing_ok=True)
         allowed, sessions = self.run_case("--runs", "1", "Add a feature", script=script)
 
         self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
@@ -199,6 +230,24 @@ class RunCaseTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("timed out after 1 s", result.stdout)
         self.assertIn("Edit skills/tdd/SKILL.md (denied)", result.stdout)
+        self.assertTrue(self.recorded_child_exits())
+
+    def test_terminating_the_script_stops_every_session(self):
+        self.addCleanup(self.kill_recorded_child)
+        script = subprocess.Popen(
+            [sys.executable, str(SCRIPT), "--out", str(self.temp / "out"), "--runs", "1", "Add a feature"],
+            env=dict(self.env, FAKE_MODE="hang"), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        record = Path(str(self.log) + ".child")
+        deadline = time.monotonic() + 30
+        while not record.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+
+        script.send_signal(signal.SIGTERM)
+        script.communicate(timeout=30)
+
+        self.assertNotEqual(script.returncode, 0)
+        self.assertTrue(self.recorded_child_exits())
 
     def test_signed_out_session_is_reported_and_fails_the_command(self):
         result, _ = self.run_case("--runs", "1", "Add a feature", mode="signed-out")

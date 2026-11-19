@@ -12,11 +12,13 @@ Sessions run in this checkout and may use only Read, Grep, Glob, Skill, and the
 shell commands Claude Code treats as read-only. Every other tool call is denied,
 so an attempt to edit, post, or merge appears in the report as a denied call
 instead of happening. Sessions skip local settings
-(.claude/settings.local.json), so allow rules saved there do not apply. The
-script refuses to start when a committed .claude/settings.json allows any other
-tool. The report lists each run's skills, actions, and answers, then how many
-runs used each skill and had each tool denied. The script exits 1 when any run
-times out or fails.
+(.claude/settings.local.json). The script refuses to start when anything else
+in the checkout could approve a call: a committed .claude/settings.json with
+more than deny and ask rules, any other file under .claude/, or a skill that
+declares allowed-tools. The report lists each run's skills, actions, and
+answers, then how many runs used each skill and had each tool denied. The
+script exits 1 when any run times out or fails, and stops every session when
+it is interrupted or terminated.
 """
 
 import argparse
@@ -27,9 +29,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 
 REPO = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(REPO / "scripts"))
@@ -37,13 +41,22 @@ import manage
 
 ALLOWED = ("Read", "Grep", "Glob", "Skill")
 CONTEXT_TOOLS = set(ALLOWED) | {"ToolSearch", "TodoWrite"}
-GRACE_SECONDS = 5
+DRAIN_SECONDS = 5
+PROJECT_CONFIG = REPO / ".claude"
+PROJECT_SETTINGS = PROJECT_CONFIG / "settings.json"
+SKIPPED_SETTINGS = PROJECT_CONFIG / "settings.local.json"
+NARROWING_RULES = {"deny", "ask"}
 USER_SETTINGS = ("apiKeyHelper", "env", "model", "autoMemoryEnabled")
 PARENT_SESSION = (
     "CLAUDECODE", "CLAUDE_PID", "CLAUDE_AGENT_SDK_VERSION", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH",
     "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_CHILD_NOTES_DIR",
     "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
 )
+
+
+live_sessions: set[subprocess.Popen] = set()
+sessions_lock = threading.Lock()
+stopping = threading.Event()
 
 
 @dataclass
@@ -71,11 +84,46 @@ def build_config(root):
     return destination.parent
 
 
-def loosening_rules():
-    path = REPO / ".claude/settings.json"
-    settings = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    rules = settings.get("permissions", {}).get("allow", [])
-    return [rule for rule in rules if rule.split("(", 1)[0] not in ALLOWED]
+def settings_problems():
+    if not PROJECT_SETTINGS.exists():
+        return []
+    try:
+        settings = json.loads(PROJECT_SETTINGS.read_text(encoding="utf-8"))
+    except ValueError:
+        settings = None
+    if not isinstance(settings, dict) or not isinstance(settings.get("permissions", {}), dict):
+        return ["{} is not a JSON object of deny and ask rules".format(PROJECT_SETTINGS)]
+    keys = ["permissions." + key for key in settings.get("permissions", {}) if key not in NARROWING_RULES]
+    keys += [key for key in settings if key != "permissions"]
+    return ["{} sets {}".format(PROJECT_SETTINGS, ", ".join(sorted(keys)))] if keys else []
+
+
+def loosening():
+    problems = settings_problems()
+    if PROJECT_CONFIG.is_dir():
+        problems += ["{} exists".format(path) for path in sorted(PROJECT_CONFIG.iterdir())
+                     if path not in (PROJECT_SETTINGS, SKIPPED_SETTINGS)]
+    for relative, data, _ in manage.skill_files():
+        parts = data.decode("utf-8").split("---", 2) if relative.name == "SKILL.md" else []
+        frontmatter = parts[1] if len(parts) == 3 else ""
+        if any(line.startswith("allowed-tools") for line in frontmatter.splitlines()):
+            problems.append("skills/{} declares allowed-tools".format(relative))
+    return problems
+
+
+def stop(process):
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def stop_all(signum, frame):
+    stopping.set()
+    with sessions_lock:
+        for process in live_sessions:
+            stop(process)
+    raise SystemExit(128 + signum)
 
 
 def command(prompt, args, session):
@@ -120,20 +168,27 @@ def run(index, prompts, config, args):
         turn = Turn(prompt)
         turns.append(turn)
         log = args.out / "run-{}-turn-{}.jsonl".format(index, number)
-        with log.open("w", encoding="utf-8") as stdout:
+        with log.open("w", encoding="utf-8") as stdout, sessions_lock:
+            if stopping.is_set():
+                turn.problem = "stopped"
+                break
             process = subprocess.Popen(command(prompt, args, session), cwd=REPO, env=env, stdin=subprocess.DEVNULL,
-                                       stdout=stdout, stderr=subprocess.PIPE, text=True)
+                                       stdout=stdout, stderr=subprocess.PIPE, text=True, start_new_session=True)
+            live_sessions.add(process)
+        try:
+            _, stderr = process.communicate(timeout=args.timeout)
+        except subprocess.TimeoutExpired:
+            stop(process)
+            turn.problem = "timed out after {:g} s".format(args.timeout)
             try:
-                _, stderr = process.communicate(timeout=args.timeout)
+                _, stderr = process.communicate(timeout=DRAIN_SECONDS)
             except subprocess.TimeoutExpired:
-                process.kill()
-                turn.problem = "timed out after {:g} s".format(args.timeout)
-                try:
-                    _, stderr = process.communicate(timeout=GRACE_SECONDS)
-                except subprocess.TimeoutExpired:
-                    process.stderr.close()
-                    process.wait()
-                    stderr = ""
+                process.stderr.close()
+                process.wait()
+                stderr = ""
+        finally:
+            with sessions_lock:
+                live_sessions.discard(process)
         read_events(log.read_text(encoding="utf-8"), turn)
         result = turn.result or {}
         if turn.problem is None and process.returncode != 0:
@@ -160,15 +215,17 @@ def call_summary(call):
         return str(path.relative_to(REPO)) if path.is_relative_to(REPO) else str(path)
     if "description" in data:
         return str(data["description"])
+    if "skill" in data:
+        return str(data["skill"])
     return json.dumps(data)[:160]
 
 
 def actions(turns):
     for turn in turns:
         for call in turn.calls:
-            if call["name"] in CONTEXT_TOOLS:
-                continue
             denied = call["id"] in turn.denied
+            if call["name"] in CONTEXT_TOOLS and not denied and call["id"] not in turn.errors:
+                continue
             outcome = ""
             if denied:
                 outcome = " (denied)"
@@ -231,10 +288,11 @@ def main():
     parser.add_argument("--timeout", type=float, default=900, help="seconds allowed per message (default 900)")
     parser.add_argument("--out", type=Path, help="directory for transcripts (default: a new temporary directory)")
     args = parser.parse_args()
-    loosening = loosening_rules()
-    if loosening:
-        parser.error("{} allows {}, so sessions would not be read-only".format(
-            REPO / ".claude/settings.json", ", ".join(loosening)))
+    problems = loosening()
+    if problems:
+        parser.error("sessions would not be read-only: " + "; ".join(problems))
+    for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(signum, stop_all)
     args.out = args.out or Path(tempfile.mkdtemp(prefix="run-case-"))
     args.out.mkdir(parents=True, exist_ok=True)
     configs = Path(tempfile.mkdtemp(prefix="run-case-config-"))
