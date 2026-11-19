@@ -21,8 +21,8 @@ import (
 // lock, auth state, and file store, and through the guard. A successful
 // exchange revokes the old access token at the fake upstream, as the token
 // endpoint does, and rotates the refresh token. The new access token is
-// accepted only with accept set. With fail or failErr set, an exchange fails.
-// With hold set, an exchange waits until hold is closed.
+// accepted only with accept set. With hold set, an exchange waits until hold
+// is closed.
 type tokenExchange struct {
 	up      *fakeUpstream
 	account string

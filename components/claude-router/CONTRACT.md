@@ -1595,15 +1595,16 @@ account needs login`. Any other failed exchange starts a failure run and
 leaves the login requirement unchanged. That covers a transport error, a
 timeout, a 429, a 5xx, and a 400 with another OAuth error. Setting the mark
 records a `login_required` event with reason `refresh_refused`. The mark
-survives a restart and clears as an `auth` failure's mark does, as Login and
-manual movement describes. A settings read can succeed after a refusal only
-with an access token that is not due and that the usage endpoint accepts.
-When that token comes due, the SDK's refresh is refused again, and the
-guard marks the account again
+survives a restart
 (`TestSDKRefreshRefusedForAnExpiredRefreshTokenMarksTheAccountAsNeedingLogin`,
 `TestOnlyARefusedRefreshTokenMarksTheAccountAsNeedingLogin`,
 `TestRefusalOfAnSDKRefreshThatBeganBeforeTheGuardMarksTheAccountAsNeedingLogin`,
 `TestAnAccountWhoseRefreshTokenWasRefusedNeedsLoginAfterARestartUntilItSignsInAgain`).
+It clears as an `auth` failure's mark does, as Login and manual movement
+describes. A settings read can succeed after a refusal only with an access
+token that is not due and that the usage endpoint accepts. When that token
+comes due, the token endpoint refuses its refresh again, and the router
+marks the account again.
 
 The rule has one cost. When an access token is refused (usage 401) before it
 is due, and a refresh of it fails or ends unknown, the router's or the
@@ -2263,7 +2264,8 @@ behavior is the client's own continuation turn.
 
 An `auth` failure marks the account as needing login. A refresh token that
 the token endpoint refuses marks the account too (Paid-overflow reading).
-New conversations skip an account that needs login. A conversation that has been served on it gets 503 naming
+New conversations skip an account that needs login. A conversation that
+has been served on it gets 503 naming
 `claude-router login -account ID`, never 401, and keeps its assignment. An
 idle one moves instead when another account is eligible (Idle conversations
 are placed again). One that never served moves (PR2). That move rests on a

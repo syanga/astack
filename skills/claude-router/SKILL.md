@@ -75,8 +75,8 @@ for it.
 `check` prints one line per check, then `check passed` or `check failed`, then
 a `next` line after a failure. Each line starts with `ok`, `warn`, `fail`, or
 `skip`. A `skip` line follows a failure or a stopped router and needs no step.
-A `warn` line names accounts that are not signed in while another account is,
-and the check can still pass. Follow the `NAMES not signed in` row for those
+A `warn` line names accounts that are not signed in while another account is
+signed in, and the check can still pass. Follow the `NAMES not signed in` row for those
 accounts.
 
 | Text after `fail` | Step |
