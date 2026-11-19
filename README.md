@@ -174,9 +174,11 @@ own `memory.max`, such as jobgate's kernel memory cap. At each boot,
 multi-gen LRU. On macOS, the script changes nothing.
 
 When thrashing prevention acts, the kernel ends the process with the highest
-OOM score, usually the largest process. Under systemd's default
-`OOMPolicy=stop`, systemd then stops the whole unit that held that process. If
-that unit is a terminal tab's scope, the tab and every agent in it end.
+OOM score, usually the largest process. If that process's unit keeps systemd's
+default `OOMPolicy=stop`, systemd then stops the whole unit. When that unit is
+a terminal tab's scope, the tab and every agent in it end. A jobgate run's
+scope sets `OOMPolicy=continue` on systemd 253 or newer, so a kill there ends
+only one process.
 
 To check the machine, preview the change, and make it:
 
