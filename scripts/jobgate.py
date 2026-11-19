@@ -383,10 +383,16 @@ class Load(NamedTuple):
         return None if self.available is None else self.available - self.still_to_use
 
 
-def load_of(queue: Queue, runs: list[Run], available: int | None) -> Load:
+def smaller(first: int | None, second: int | None) -> int | None:
+    return second if first is None else first if second is None else min(first, second)
+
+
+def load_of(queue: Queue, runs: list[Run]) -> Load:
     running = [run for run in runs if run.admission is not None]
     table = parents() if running else {}
-    in_use = {run.id: memory_in_use(queue, run, table) for run in running}
+    before = {run.id: memory_in_use(queue, run, table) for run in running}
+    available = available_memory()
+    in_use = {run.id: smaller(before[run.id], memory_in_use(queue, run, table)) for run in running}
     return Load(sum(run.admission.memory for run in running), sum(run.admission.workers for run in running), available,
                 sum(max(0, run.admission.memory - (in_use[run.id] or 0)) for run in running), in_use)
 
@@ -578,7 +584,7 @@ def wait_for_admission(queue: Queue, ticket: Ticket, share: LiveShare, profile: 
                     reason = "behind {}".format(plural(len(ahead), "earlier run"))
                 else:
                     level = pressure()
-                    load = load_of(queue, runs, available_memory())
+                    load = load_of(queue, runs)
                     workers = fit(machine, profile, limit, load)
                     if level.holding:
                         reason = "for memory pressure to ease: " + level.reading
@@ -726,17 +732,26 @@ class PeakSampler:
         self.measure = resident_bytes if sys.platform == "linux" else Libproc.phys_footprint
 
     def sample(self, root: int) -> None:
-        sizes = (self.measure(pid) for pid in process_tree(root, parents()))
-        self.peak = max(self.peak, sum(size for size in sizes if size is not None))
+        self.peak = max(self.peak, tree_total(root, parents(), self.measure))
 
 
-def private_bytes(pid: int) -> int | None:
+def tree_total(root: int, table: dict[int, int], measure: Callable[[int], int | None]) -> int:
+    sizes = (measure(pid) for pid in process_tree(root, table))
+    return sum(size for size in sizes if size is not None)
+
+
+def proc_kibibytes(pid: int, name: str, keys: tuple[bytes, ...]) -> int | None:
     try:
-        with open("/proc/{}/status".format(pid), "rb") as stream:
-            fields = dict(line.split(b":", 1) for line in stream if b":" in line)
-        return sum(int(fields[key].split()[0]) * 1024 for key in (b"RssAnon", b"RssShmem"))
+        with open("/proc/{}/{}".format(pid, name), "rb") as stream:
+            values = dict(line.split(b":", 1) for line in stream if b":" in line)
+        return sum(int(values[key].split()[0]) * 1024 for key in keys)
     except (OSError, ValueError, KeyError, IndexError):
         return None
+
+
+def owned_bytes(pid: int) -> int | None:
+    proportional = proc_kibibytes(pid, "smaps_rollup", (b"Pss_Anon", b"Pss_Shmem"))
+    return proportional if proportional is not None else proc_kibibytes(pid, "status", (b"RssAnon", b"RssShmem"))
 
 
 def cgroup_memory_in_use(cgroup: Path) -> int:
@@ -747,12 +762,11 @@ def cgroup_memory_in_use(cgroup: Path) -> int:
 
 def memory_in_use(queue: Queue, run: Run, table: dict[int, int]) -> int | None:
     cgroup = read_json(RunFiles.of(queue.runs, run.id).scope).get("cgroup")
-    measure = private_bytes if sys.platform == "linux" else Libproc.phys_footprint
+    measure = owned_bytes if sys.platform == "linux" else Libproc.phys_footprint
     try:
         if cgroup:
             return cgroup_memory_in_use(Path(cgroup))
-        sizes = (measure(pid) for pid in process_tree(run.pid, table))
-        return sum(size for size in sizes if size is not None)
+        return tree_total(run.pid, table, measure)
     except (OSError, ValueError, AttributeError):
         return None
 
@@ -777,11 +791,12 @@ def systemd_version() -> int:
     return int(match.group(1)) if match else 0
 
 
-def set_slice_cap(share: int) -> str | None:
+def set_slice_cap(share: int | None) -> str | None:
     if shutil.which("systemd-run") is None:
         return "systemd-run is not installed"
+    cap = [] if share is None else ["MemoryMax={}".format(share)]
     result = run_captured(["systemctl", "--user", "set-property", "--runtime", SLICE, "CPUWeight={}".format(CPU_WEIGHT),
-                           "MemoryMax={}".format(share)], 15)
+                           *cap], 15)
     if result.returncode != 0:
         return "no systemd user session: {}".format(last_error(result))
     return None
@@ -803,7 +818,8 @@ def write_json(path: Path, data: dict) -> None:
 def execute(command: list[str], env: dict, share: LiveShare, ticket: Ticket, profile: Profile) -> Measured:
     if sys.platform == "linux":
         with ticket.queue.lock():
-            failure = set_slice_cap(share.read().share)
+            host = share.read()
+            failure = set_slice_cap(None if share.warned else host.share)
         share.print_warning()
         if failure is None:
             version = systemd_version()
@@ -967,7 +983,7 @@ def status() -> int:
     queue = Queue.open()
     with queue.lock():
         runs = queue.live()
-    load = load_of(queue, runs, available_memory())
+    load = load_of(queue, runs)
     now = time.time()
     source = machine_config() if machine_config().is_file() else "default"
     lines = [

@@ -68,8 +68,9 @@ jobgate reads `memory_share` when a run arrives, about once a second while the
 run waits, and before it sets the kernel memory cap. A change therefore also
 applies to runs that already wait. jobgate exits with code 125 when the file is
 invalid at arrival. When the file turns invalid while a run waits, jobgate
-prints one warning and keeps the last valid value. Inside a container, jobgate
-reads the host's physical memory, not the container's memory limit.
+prints one warning and keeps the last valid value. A run that starts while the
+file is invalid leaves the kernel memory cap as it is. Inside a container,
+jobgate reads the host's physical memory, not the container's memory limit.
 
 ## Admission
 
@@ -80,7 +81,10 @@ A run is admitted when all of these are true:
 - At least one worker fits. The stated memory of all running runs, plus this
   run's `base_mem + 1 × worker_mem`, is at most the share. The workers of all
   running runs, plus one, are at most the core count.
-- At least one worker fits in free memory. This run's `base_mem + 1 × worker_mem` is at most the free memory left. That is the machine's available memory, less what running runs stated but do not use yet. [Free memory](#free-memory) defines both.
+- At least one worker fits in free memory. This run's `base_mem + 1 × worker_mem`
+  is at most the free memory left. That is the machine's available memory, less
+  what running runs stated but do not use yet. [Free memory](#free-memory)
+  defines both.
 - The pressure reading is under its threshold in the table that follows. While
   it is not, new runs wait. This wait is the pressure hold. Runs that already
   started keep going under pressure.
@@ -128,7 +132,7 @@ call goes through admission like any other run.
 
 The macOS sum counts free pages, file cache, and purgeable pages. A new process
 can get that memory without compressing or swapping memory in use.
-[Why jobgate holds at these pressure levels](jobgate-thresholds.md#macos-free-memory-counts-free-file-backed-and-purgeable-pages)
+[macOS free memory counts free, file-backed, and purgeable pages](jobgate-thresholds.md#macos-free-memory-counts-free-file-backed-and-purgeable-pages)
 says why jobgate does not use `kern.memorystatus_level`.
 
 At each admission attempt, jobgate measures the memory that each running run
@@ -136,13 +140,20 @@ uses. On Linux in a scope, that is the scope's `memory.current`, less the page
 cache that `memory.stat` lists as `active_file` and `inactive_file`. The
 available memory already counts that cache as free. Elsewhere, jobgate adds up
 the processes in the tree of the run's jobgate process. On Linux, it adds each
-process's `RssAnon` and `RssShmem` from `/proc/<pid>/status`, which leave out
-file pages. On macOS, it adds each process's `phys_footprint`. A run that states
-S and uses U may still use S − U, or nothing once U exceeds S. Admission
-subtracts that from the available memory. A run that has just started therefore
-counts with all of its stated memory. Memory that a run already uses counts
-once, through the available memory. Memory that ungated commands use is missing
-from the available memory too, so ungated work also delays new runs.
+process's `Pss_Anon` and `Pss_Shmem` from `/proc/<pid>/smaps_rollup`. Those
+leave out file pages and split a shared page among the processes that map it. On
+kernels without them, it uses `RssAnon` and `RssShmem` from
+`/proc/<pid>/status`, which count a shared page once per process. On macOS, it
+adds each process's `phys_footprint`, which also counts a shared page once per
+process. A run that states S and uses U may still use S − U, or nothing once U
+exceeds S. Admission subtracts that from the available memory. jobgate measures
+each run just before and just after it reads the available memory, and it uses
+the smaller measurement. A run that allocates or frees memory between the
+readings therefore counts with more of its reservation, not less. A run that has
+just started therefore counts with all of its stated memory. Memory that a run
+already uses counts once, through the available memory. Memory that ungated
+commands use is missing from the available memory too, so ungated work also
+delays new runs.
 
 When the reading is unavailable, no run waits for free memory, and
 `jobgate status` shows free memory as unknown.

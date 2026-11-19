@@ -35,6 +35,21 @@ open(sys.argv[3], "w").close()
 while not os.path.exists(sys.argv[4]):
     time.sleep(0.02)
 '''
+ALLOCATE_AND_FORK = r'''
+import os, sys, time
+block = b"\x01" * (int(sys.argv[1]) << 20)
+children = []
+for _ in range(4):
+    pid = os.fork()
+    if pid == 0:
+        while not os.path.exists(sys.argv[3]):
+            time.sleep(0.05)
+        os._exit(0)
+    children.append(pid)
+open(sys.argv[2], "w").close()
+for pid in children:
+    os.waitpid(pid, 0)
+'''
 PRINT_WORKERS = "import os; print(os.environ['TEST_WORKERS'])"
 NESTED = r'''
 import subprocess, sys
@@ -144,7 +159,7 @@ class JobgateTest(unittest.TestCase):
         systemctl.chmod(0o755)
         self.machine_file = self.root / "machine.json"
         self.set_machine(memory=64 * GIB, cores=8, psi=CALM)
-        self.ledger = self.root / "home/.cache/jobgate"
+        self.queue_dir = self.root / "home/.cache/jobgate"
         self.env = {key: value for key, value in os.environ.items()
                     if not key.startswith(("JOBGATE_", "XDG_", "DBUS_"))}
         self.env.update(
@@ -313,7 +328,7 @@ class AdmissionTests(JobgateTest):
         os.close(write_end)
         self.share(2)
         time.sleep(2.5)
-        lock = os.open(str(self.ledger / "queue.lock"), os.O_RDWR)
+        lock = os.open(str(self.queue_dir / "queue.lock"), os.O_RDWR)
         try:
             deadline = time.monotonic() + 10
             while True:
@@ -338,7 +353,7 @@ class AdmissionTests(JobgateTest):
         self.profiles(test=("1G", "1G", 3, "TEST_WORKERS"))
         waiter = self.hold("waiter")
         waiter.wait_message("waits for memory pressure")
-        lock = os.open(str(self.ledger / "queue.lock"), os.O_RDWR)
+        lock = os.open(str(self.queue_dir / "queue.lock"), os.O_RDWR)
         try:
             fcntl.flock(lock, fcntl.LOCK_EX)
             time.sleep(2.5)
@@ -421,6 +436,27 @@ class AdmissionTests(JobgateTest):
         self.assertIsNone(first.poll())
         self.assertEqual(second.release(), 0)
 
+    @unittest.skipUnless(sys.platform == "linux", "smaps_rollup exists only on Linux")
+    def test_free_memory_splits_pages_that_forked_workers_share(self):
+        if b"Pss_Anon" not in Path("/proc/self/smaps_rollup").read_bytes():
+            self.skipTest("this kernel has no Pss_Anon in smaps_rollup")
+        self.set_machine(memory=64 * GIB, cores=16, psi=CALM, meminfo=meminfo(1100 * 2**20))
+        self.profiles(big=("900M", "100M", 1, "BIG_WORKERS"), small=("400M", "100M", 1, "SMALL_WORKERS"))
+        ready, release = self.root / "ready", self.root / "release"
+        first = subprocess.Popen([sys.executable, str(SCRIPT), "run", "big", "--", sys.executable, "-c",
+                                  ALLOCATE_AND_FORK, "200", str(ready), str(release)],
+                                 cwd=str(self.repo), env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(first.wait, timeout=30)
+        self.addCleanup(release.touch)
+        wait_for(ready.exists)
+        second = self.hold("second", profile="small", variable="SMALL_WORKERS")
+        self.assertIn("waits for free memory", second.wait_message("waits"))
+        time.sleep(2.5)
+        self.assertFalse(second.started.exists())
+        release.touch()
+        self.assertEqual(second.workers(), 1)
+        self.assertEqual(second.release(), 0)
+
     def test_status_reads_free_memory_from_meminfo_or_vm_stat(self):
         vm_stat = ("Mach Virtual Memory Statistics: (page size of 16384 bytes)\n"
                    "Pages free:                               32768.\nPages active:                            500000.\n"
@@ -482,7 +518,7 @@ class AdmissionTests(JobgateTest):
         self.assertEqual(second.release(), 0)
 
     def test_the_next_run_removes_scope_files_that_a_killed_run_left(self):
-        runs = self.ledger / "runs"
+        runs = self.queue_dir / "runs"
         runs.mkdir(parents=True)
         (runs / "7-0a1b2c3d.scope").write_text('{"cgroup": "/gone", "peak": 1}')
         (runs / "8-0a1b2c3e.scope.tmp").write_text('{"cgroup": "/gone"')
@@ -659,7 +695,7 @@ class ResultTests(JobgateTest):
                 self.assertEqual(fields.get("oom_kills"), str(killed) if killed else None)
 
     @unittest.skipUnless(sys.platform == "linux", "systemd scopes exist only on Linux")
-    def test_a_scope_records_its_memory_in_use_without_page_cache(self):
+    def test_status_counts_a_scopes_shmem_but_not_its_page_cache(self):
         env = self.systemd_session("systemd 259", '[ "$1" = --version ] && echo "systemd 259"\nexit 0\n',
                                    SYSTEMD_RUN.format(python=sys.executable, version=259))
         cgroup = self.root / "scope cgroup"
@@ -763,6 +799,26 @@ class ExitCodeTests(JobgateTest):
         caps = [line.rsplit("MemoryMax=", 1)[1] for line in log.read_text().splitlines() if "MemoryMax=" in line]
         self.assertEqual(caps, [str(6 * GIB)])
         self.assertEqual(first.release(), 0)
+        self.assertEqual(second.release(), 0)
+
+    @unittest.skipUnless(sys.platform == "linux", "systemd slices exist only on Linux")
+    def test_a_run_whose_share_file_turned_invalid_leaves_the_cap_alone(self):
+        log = self.root / "systemd.log"
+        recording = self.systemd_session("recording systemd", RECORDING_SYSTEMCTL,
+                                         RECORDING_RUN.format(python=sys.executable))
+        recording["SYSTEMD_LOG"] = str(log)
+        self.set_machine(memory=8 * GIB, cores=16, psi=CALM)
+        self.profiles(test=("1G", "1G", 3, "TEST_WORKERS"))
+        first = self.hold("first")
+        self.assertEqual(first.workers(), 3)
+        second = self.hold("second", env=recording)
+        second.wait_message("waits for memory")
+        self.share(2)
+        second.wait_message("keeping memory_share 0.5")
+        self.assertEqual(first.release(), 0)
+        self.assertEqual(second.workers(), 3)
+        calls = [line for line in log.read_text().splitlines() if line.startswith("--user set-property")]
+        self.assertEqual(calls, ["--user set-property --runtime jobgate.slice CPUWeight=30"])
         self.assertEqual(second.release(), 0)
 
     @unittest.skipUnless(sys.platform == "linux", "systemd slices exist only on Linux")
