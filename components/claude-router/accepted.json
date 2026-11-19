@@ -1,7 +1,7 @@
 {
- "head": "622eec90df6ac069bd88c9d968cba03f317ef364",
- "code_sha256": "aff33a40f5644e7a9dec02a0d65a941ed957a37276ce04dbf43e5c1651dc1136",
- "binary_sha256": "b17dc178b019f63712b9387afdb1d49b2ab52244b8be542f9d759e2c7074f51c",
+ "head": "c7a809d19563be1f4e9b627d33081dcde60b2ded",
+ "code_sha256": "3526b516b1faa78cd932e9b6da3793124157e538a8ef65a68c74df12592eb417",
+ "binary_sha256": "6f137f9eb2a576cb3738d75a7be74d5248270dc14c3d63fd6ae60dde8a5500bf",
  "helpers_sha256": "91ec69daf66a7ac317dcd4261552a269c88f68940a6e638df1149e1e0db7fd98",
  "sdk": "v8.0.11",
  "go": "go1.27.4",
@@ -18,14 +18,14 @@
    "status": "pass",
    "detail": {
     "copied_expires_in_min": {
-     "personal": 442,
-     "work": 444,
-     "dobby": 444,
-     "severus": 472,
-     "real-5": 471
+     "personal": 416,
+     "work": 418,
+     "dobby": 418,
+     "severus": 446,
+     "real-5": 445
     },
     "skipped_expires_in_min": {
-     "real-6": 266
+     "real-6": 240
     },
     "evidence": [
      "results.json",
@@ -34,11 +34,11 @@
    }
   },
   {
-   "scenario": "Lane code, executable, and SDK match the build at 622eec9 and go.mod",
+   "scenario": "Lane code, executable, and SDK match the build at c7a809d and go.mod",
    "status": "pass",
    "detail": {
-    "code_sha256": "aff33a40f5644e7a9dec02a0d65a941ed957a37276ce04dbf43e5c1651dc1136",
-    "binary_sha256": "b17dc178b019f63712b9387afdb1d49b2ab52244b8be542f9d759e2c7074f51c",
+    "code_sha256": "3526b516b1faa78cd932e9b6da3793124157e538a8ef65a68c74df12592eb417",
+    "binary_sha256": "6f137f9eb2a576cb3738d75a7be74d5248270dc14c3d63fd6ae60dde8a5500bf",
     "sdk": "v8.0.11",
     "evidence": [
      "status-start.json"
@@ -70,7 +70,7 @@
      "work": 1,
      "dobby": 1,
      "severus": 1,
-     "real-5": 0.43
+     "real-5": 0.47
     },
     "evidence": [
      "status-start.json"
@@ -82,7 +82,7 @@
    "status": "pass",
    "detail": {
     "needs_login": true,
-    "needs_login_at": "2026-11-19T15:17:55.092472471-08:00",
+    "needs_login_at": "2026-11-19T15:43:33.559283524-08:00",
     "token_endpoint": [
      [
       400,
@@ -115,7 +115,7 @@
      [
       "unknown",
       "the token endpoint refused the credential's refresh token; the account needs login",
-      2
+      3
      ]
     ],
     "evidence": [
@@ -150,7 +150,7 @@
      "ok        paid overflow off on personal, work, dobby, severus, and real-5",
      "ok        Claude Code settings point at the router",
      "ok        code matches the accepted record (linux/amd64)",
-     "ok        test message answered 200 on real-5 in 3.6s",
+     "ok        test message answered 200 on real-5 in 4.3s",
      "check     passed"
     ],
     "evidence": [
@@ -219,7 +219,7 @@
      "ok        paid overflow off on personal, work, dobby, severus, and real-5",
      "ok        Claude Code settings point at the router",
      "ok        code matches the accepted record (linux/amd64)",
-     "ok        test message answered 200 on real-5 in 2.0s",
+     "ok        test message answered 200 on real-5 in 1.8s",
      "check     passed"
     ],
     "requests": [
@@ -277,8 +277,8 @@
    "scenario": "Identity is the same at the start and the end",
    "status": "pass",
    "detail": {
-    "code_sha256": "aff33a40f5644e7a9dec02a0d65a941ed957a37276ce04dbf43e5c1651dc1136",
-    "binary_sha256": "b17dc178b019f63712b9387afdb1d49b2ab52244b8be542f9d759e2c7074f51c",
+    "code_sha256": "3526b516b1faa78cd932e9b6da3793124157e538a8ef65a68c74df12592eb417",
+    "binary_sha256": "6f137f9eb2a576cb3738d75a7be74d5248270dc14c3d63fd6ae60dde8a5500bf",
     "sdk": "v8.0.11",
     "evidence": [
      "status-start.json",
@@ -328,8 +328,8 @@
     "credential_refresh_events": 0,
     "refresh_unchanged": true,
     "token_endpoint_tokens": [
-     "0b6109f8c50a42e1",
-     "bc487ae7267dda54"
+     "67c829a0107bc580",
+     "f8f1a4778ced5593"
     ],
     "evidence": [
      "events.jsonl",
@@ -354,8 +354,8 @@
      200,
      200
     ],
-    "input": 12884,
-    "output": 176,
+    "input": 12882,
+    "output": 158,
     "evidence": [
      "events.jsonl"
     ]
@@ -390,6 +390,13 @@
    "result": "stopped before any message: personal, dobby, and work had no weekly capacity",
    "finding": "lane.py's capacity check stopped the run before it sent a message.",
    "fixed_in": "lane.py copies every daily login outside its refresh lead, which added severus and real-5."
+  },
+  {
+   "run": "third lane run at 622eec9",
+   "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue207-run3/evidence",
+   "result": "pass: 19 of 19 rows, superseded",
+   "finding": "Review renamed and merged the read path's refusal helpers and deleted comments, which changed the router code digest without changing behavior.",
+   "fixed_in": "The fourth run's rows replaced the third run's, at the reviewed code."
   }
  ],
  "prior_acceptance": {
@@ -397,8 +404,8 @@
   "status": "historical reference, not rerun at this code"
  },
  "offline_verification": {
-  "head": "622eec90df6ac069bd88c9d968cba03f317ef364",
-  "note": "The record's head differs from the tested head only in accepted.json, which is not router code.",
+  "head": "c7a809d19563be1f4e9b627d33081dcde60b2ded",
+  "note": "The lane and this run used the same head. Later commits on the branch change only markdown files, a _test.go comment, and accepted.json, none of which is router code.",
   "go_test_race": "pass",
   "go_vet": "pass",
   "tmpdir": "ext4, under the lane directory, so the journal tests ran on the machine's own disk",
@@ -411,5 +418,5 @@
    "/home/alany/.local/state/astack/claude-router-lanes/issue207/evidence/offline/go-race.log"
   ]
  },
- "written": "2026-11-19T23:24:01.844124+00:00"
+ "written": "2026-11-19T23:50:12.539887+00:00"
 }
