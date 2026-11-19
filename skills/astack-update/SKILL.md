@@ -16,7 +16,7 @@ Run `./install.sh` from the updated checkout even when already current. Choose i
 - Without a manifest, pass no `--target`, so the installer installs its default targets.
 - When the user names targets, pass only those, in place of both cases above.
 
-For installer conflicts, use the installer's `--force` option to back up conflicting files and complete the upgrade. Report any backup locations, and any `APPEND`, `SKIP PATH`, or `WARN` line, with the result.
+For a `--home` installation, read that home's `.local/state/astack/manifest.json` instead, and pass the same `--home` to every `./install.sh` call. When a conflict is on a `jobgate` file and the manifest's `targets` has no `jobgate`, rerun without `--target jobgate` and report the conflicting files. For other installer conflicts, use the installer's `--force` option to back up conflicting files and complete the upgrade. Report any backup locations, and any `APPEND`, `SKIP PATH`, or `WARN` line, with the result.
 
 When the manifest lists `claude-router` under `components`, update the router after the harness install succeeds:
 
