@@ -10,13 +10,13 @@ Treat invocation as authorization to update and reinstall astack without another
 
 Fetch astack's upstream, then fast-forward its `main` worktree to remote main when possible. Leave unrelated untracked files and directories in place. If local edits, unpublished commits, or conflicting paths prevent the fast-forward, install from a separate clean worktree at remote main. Preserve the existing work and task branches.
 
-Run `./install.sh` from the updated checkout even when already current. Choose its targets this way:
+Run `./install.sh` from the updated checkout even when already current. The astack manifest is `${XDG_STATE_HOME:-$HOME/.local/state}/astack/manifest.json`. For a `--home` installation, it is that home's `.local/state/astack/manifest.json`, and every `./install.sh` call takes the same `--home`. Choose the targets this way:
 
-- When the astack manifest, `${XDG_STATE_HOME:-$HOME/.local/state}/astack/manifest.json`, exists, pass `--target` for each target under its `targets`. Also pass `--target jobgate`, even when `targets` has no `jobgate`.
+- When the manifest exists, pass `--target` for each target under its `targets`. Also pass `--target jobgate`, even when `targets` has no `jobgate`.
 - Without a manifest, pass no `--target`, so the installer installs its default targets.
 - When the user names targets, pass only those, in place of both cases above.
 
-For a `--home` installation, read that home's `.local/state/astack/manifest.json` instead, and pass the same `--home` to every `./install.sh` call. When a conflict is on a `jobgate` file and the manifest's `targets` has no `jobgate`, rerun without `--target jobgate` and report the conflicting files. For other installer conflicts, use the installer's `--force` option to back up conflicting files and complete the upgrade. Report any backup locations, and any `APPEND`, `SKIP PATH`, or `WARN` line, with the result.
+If you added `--target jobgate` only because `targets` has no `jobgate`, a conflict on a `jobgate` file means that file is not astack's. Rerun without that flag, and report the conflicting files. When no `--target` remains, skip the harness install and continue with the router step. For other installer conflicts, use the installer's `--force` option to back up conflicting files and complete the upgrade. Report any backup locations, and any `APPEND`, `SKIP PATH`, or `WARN` line, with the result.
 
 When the manifest lists `claude-router` under `components`, update the router after the harness install succeeds:
 

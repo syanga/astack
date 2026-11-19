@@ -334,8 +334,9 @@ runs share these files under every `HOME`.
 
 `./install.sh` installs jobgate by default, as the `jobgate` target. The
 astack-update skill installs it on every update, even after
-`./uninstall.sh --target jobgate`. A user who names the update's targets can
-leave out jobgate. The installer needs Python 3.10 or newer as `python3`, while
+`./uninstall.sh --target jobgate`. The update leaves jobgate out when the user
+names targets without it, or when a file that astack does not manage sits at one
+of jobgate's paths. The installer needs Python 3.10 or newer as `python3`, while
 jobgate itself runs on Python 3.9. A stock Mac's `python3` is 3.9, which cannot
 run the installer.
 
