@@ -3,6 +3,8 @@
 import json
 import os
 from pathlib import Path
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -13,7 +15,7 @@ REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / ".agents/skills/author-skill/scripts/run_case.py"
 
 FAKE_CLAUDE = r'''#!/usr/bin/env python3
-import json, os, sys, time
+import json, os, subprocess, sys, time
 from pathlib import Path
 
 config = Path(os.environ["CLAUDE_CONFIG_DIR"])
@@ -47,6 +49,7 @@ if mode == "api-error":
 emit({"type": "assistant", "message": {"content": [
     {"type": "tool_use", "id": "t0", "name": "Skill", "input": {}},
     {"type": "tool_use", "id": "t1", "name": "Skill", "input": {"skill": "tdd"}},
+    {"type": "tool_use", "id": "t7", "name": "Skill", "input": {"skill": "missing-skill"}},
     {"type": "tool_use", "id": "t2", "name": "Read", "input": {"file_path": os.getcwd() + "/README.md"}},
     {"type": "tool_use", "id": "t3", "name": "Edit", "input": {"file_path": os.getcwd() + "/skills/tdd/SKILL.md"}},
     {"type": "tool_use", "id": "t4", "name": "Write", "input": {"file_path": os.getcwd() + "/notes.md"}},
@@ -54,6 +57,7 @@ emit({"type": "assistant", "message": {"content": [
     {"type": "tool_use", "id": "t6", "name": "Bash", "input": {"command": "ls missing"}},
 ]}})
 emit({"type": "user", "message": {"content": [
+    {"type": "tool_result", "tool_use_id": "t7", "is_error": True, "content": "Unknown skill: missing-skill"},
     {"type": "tool_result", "tool_use_id": "t5", "is_error": False, "content": "abc123 subject"},
     {"type": "tool_result", "tool_use_id": "t6", "is_error": True, "content": "Exit code 2\nls: missing: No such file"},
 ]}})
@@ -63,6 +67,8 @@ for call, tool in (("t3", "Edit"), ("t4", "Write")):
     emit({"type": "user", "message": {"content": [
         {"type": "tool_result", "tool_use_id": call, "is_error": True, "content": denial}]}})
 if mode == "hang":
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(45)"])
+    Path(os.environ["FAKE_LOG"] + ".child").write_text(str(child.pid))
     time.sleep(60)
 session = argv[argv.index("--resume") + 1] if "--resume" in argv else "session-%d" % os.getpid()
 emit({"type": "result", "subtype": "success", "is_error": False, "session_id": session,
@@ -95,9 +101,17 @@ class RunCaseTests(unittest.TestCase):
         self.env = dict(os.environ, PATH="{}{}{}".format(bin_dir, os.pathsep, os.environ["PATH"]),
                         CLAUDE_CONFIG_DIR=str(self.user_config), FAKE_LOG=str(self.log), CLAUDECODE="1")
 
-    def run_case(self, *arguments, mode=""):
+    def kill_recorded_child(self):
+        record = Path(str(self.log) + ".child")
+        if record.exists():
+            try:
+                os.kill(int(record.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+    def run_case(self, *arguments, mode="", script=SCRIPT):
         result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--out", str(self.temp / "out"), *arguments],
+            [sys.executable, str(script), "--out", str(self.temp / "out"), *arguments],
             env=dict(self.env, FAKE_MODE=mode), capture_output=True, text=True, timeout=60,
         )
         sessions = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
@@ -134,11 +148,36 @@ class RunCaseTests(unittest.TestCase):
         self.assertIn("Bash ls missing (failed: Exit code 2)", report)
         self.assertNotIn("Read README.md", report)
         self.assertIn("Answered 'Add a feature' in session-", report)
-        self.assertIn("Skills: tdd 2/2", report)
+        self.assertIn("Skills: tdd 2/2\n", report)
+        self.assertNotIn("missing-skill", report)
         self.assertIn("Denied: Edit 2/2, Write 2/2\n", report)
         self.assertIn("$0.50", report)
         self.assertIn(str(self.temp / "out"), report)
         self.assertEqual(len(list((self.temp / "out").glob("*.jsonl"))), 2)
+
+    def test_refuses_to_run_when_committed_project_settings_allow_more_than_reading(self):
+        checkout = self.temp / "checkout"
+        for name in ("skills", "scripts", "instructions"):
+            shutil.copytree(REPO / name, checkout / name)
+        shutil.copy(REPO / "harnesses.json", checkout / "harnesses.json")
+        script = checkout / SCRIPT.relative_to(REPO)
+        script.parent.mkdir(parents=True)
+        shutil.copy(SCRIPT, script)
+        settings = checkout / ".claude/settings.json"
+        settings.parent.mkdir()
+
+        settings.write_text(json.dumps({"permissions": {"allow": ["Read", "Write"]}}))
+        refused, sessions = self.run_case("--runs", "1", "Add a feature", script=script)
+
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("Write", refused.stderr)
+        self.assertEqual(sessions, [])
+
+        settings.write_text(json.dumps({"permissions": {"allow": ["Read", "Grep(*.md)"]}}))
+        allowed, sessions = self.run_case("--runs", "1", "Add a feature", script=script)
+
+        self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
+        self.assertEqual(len(sessions), 1)
 
     def test_followup_turn_resumes_the_same_session(self):
         result, sessions = self.run_case("--runs", "1", "--then", "Yes, do it", "Is the guidance clear?")
@@ -152,6 +191,7 @@ class RunCaseTests(unittest.TestCase):
         self.assertIn("Answered 'Yes, do it' in {}".format(session), result.stdout)
 
     def test_run_that_times_out_keeps_its_actions_and_fails_the_command(self):
+        self.addCleanup(self.kill_recorded_child)
         started = time.monotonic()
         result, _ = self.run_case("--runs", "1", "--timeout", "1", "Add a feature", mode="hang")
 

@@ -12,10 +12,11 @@ Sessions run in this checkout and may use only Read, Grep, Glob, Skill, and the
 shell commands Claude Code treats as read-only. Every other tool call is denied,
 so an attempt to edit, post, or merge appears in the report as a denied call
 instead of happening. Sessions skip local settings
-(.claude/settings.local.json), so allow rules saved there do not apply. Allow
-rules in a committed .claude/settings.json still apply. The report lists each
-run's skills, actions, and answers, then how many runs used each skill and had
-each tool denied. The script exits 1 when any run times out or fails.
+(.claude/settings.local.json), so allow rules saved there do not apply. The
+script refuses to start when a committed .claude/settings.json allows any other
+tool. The report lists each run's skills, actions, and answers, then how many
+runs used each skill and had each tool denied. The script exits 1 when any run
+times out or fails.
 """
 
 import argparse
@@ -36,6 +37,7 @@ import manage
 
 ALLOWED = ("Read", "Grep", "Glob", "Skill")
 CONTEXT_TOOLS = set(ALLOWED) | {"ToolSearch", "TodoWrite"}
+GRACE_SECONDS = 5
 USER_SETTINGS = ("apiKeyHelper", "env", "model", "autoMemoryEnabled")
 PARENT_SESSION = (
     "CLAUDECODE", "CLAUDE_PID", "CLAUDE_AGENT_SDK_VERSION", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH",
@@ -67,6 +69,13 @@ def build_config(root):
     destination = manage.destination(harness["settings"], root, False)
     destination.write_text(json.dumps(copied), encoding="utf-8")
     return destination.parent
+
+
+def loosening_rules():
+    path = REPO / ".claude/settings.json"
+    settings = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    rules = settings.get("permissions", {}).get("allow", [])
+    return [rule for rule in rules if rule.split("(", 1)[0] not in ALLOWED]
 
 
 def command(prompt, args, session):
@@ -118,8 +127,13 @@ def run(index, prompts, config, args):
                 _, stderr = process.communicate(timeout=args.timeout)
             except subprocess.TimeoutExpired:
                 process.kill()
-                _, stderr = process.communicate()
                 turn.problem = "timed out after {:g} s".format(args.timeout)
+                try:
+                    _, stderr = process.communicate(timeout=GRACE_SECONDS)
+                except subprocess.TimeoutExpired:
+                    process.stderr.close()
+                    process.wait()
+                    stderr = ""
         read_events(log.read_text(encoding="utf-8"), turn)
         result = turn.result or {}
         if turn.problem is None and process.returncode != 0:
@@ -164,7 +178,8 @@ def actions(turns):
 
 
 def skills(turns):
-    named = (call["input"].get("skill") for turn in turns for call in turn.calls if call["name"] == "Skill")
+    named = (call["input"].get("skill") for turn in turns for call in turn.calls
+             if call["name"] == "Skill" and call["id"] not in turn.errors)
     return list(dict.fromkeys(str(name) for name in named if name))
 
 
@@ -216,6 +231,10 @@ def main():
     parser.add_argument("--timeout", type=float, default=900, help="seconds allowed per message (default 900)")
     parser.add_argument("--out", type=Path, help="directory for transcripts (default: a new temporary directory)")
     args = parser.parse_args()
+    loosening = loosening_rules()
+    if loosening:
+        parser.error("{} allows {}, so sessions would not be read-only".format(
+            REPO / ".claude/settings.json", ", ".join(loosening)))
     args.out = args.out or Path(tempfile.mkdtemp(prefix="run-case-"))
     args.out.mkdir(parents=True, exist_ok=True)
     configs = Path(tempfile.mkdtemp(prefix="run-case-config-"))
