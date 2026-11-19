@@ -5,7 +5,7 @@ install sets min_ttl_ms to 1000 to turn on the kernel's thrashing prevention.
 systemd-tmpfiles sets the same value again at each boot.
 install changes nothing when another tmpfiles.d file already sets min_ttl_ms.
 uninstall restores min_ttl_ms to its value from before the first install.
-status reports min_ttl_ms and the tmpfiles.d file that sets it at boot, and needs no root.
+status reports min_ttl_ms and the tmpfiles.d rule that sets it at boot, and needs no root.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import argparse
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import posixpath
 import re
 import subprocess
 import sys
@@ -97,6 +98,11 @@ def status(host: Host) -> Status:
     )
 
 
+def _names_min_ttl_ms(path: str) -> bool:
+    # systemd-tmpfiles unquotes and simplifies a rule's path before it compares paths.
+    return posixpath.normpath(re.sub("/+", "/", path.strip("\"'"))) == MIN_TTL_MS_PATH
+
+
 def boot_rules(host: Host) -> list[BootRule]:
     try:
         result = subprocess.run(["systemd-tmpfiles", "--root={}".format(host.root), "--cat-config", "--no-pager"],
@@ -115,7 +121,7 @@ def boot_rules(host: Host) -> list[BootRule]:
             file = Path(header.group(1))
             continue
         fields = line.split(None, 6)
-        if file is not None and len(fields) > 1 and not fields[0].startswith("#") and fields[1] == MIN_TTL_MS_PATH:
+        if file is not None and len(fields) > 1 and not fields[0].startswith("#") and _names_min_ttl_ms(fields[1]):
             rules.append(BootRule(file, fields[6] if len(fields) == 7 else "-"))
     return rules
 
@@ -130,10 +136,11 @@ def install(host: Host, *, dry_run: bool) -> None:
     current = status(host)
     if not current.available:
         raise GuardError(UNAVAILABLE_REASON + ", so install changed nothing")
-    others = ["{} in {}".format(rule.value, rule.file) for rule in boot_rules(host) if rule.file != host.boot_file]
-    if others:
-        raise GuardError("another tmpfiles.d rule already sets min_ttl_ms at boot ({}), so install changed nothing"
-                         .format(", ".join(others)))
+    rules = boot_rules(host)
+    if any(rule.file != host.boot_file for rule in rules):
+        raise GuardError("another tmpfiles.d file already sets min_ttl_ms at boot, so install changed nothing. "
+                         "At boot, systemd-tmpfiles applies the first of these rules: {}".format(
+                             ", ".join("{} in {}".format(rule.value, rule.file) for rule in rules)))
     before = current.min_ttl_ms if current.min_ttl_ms_before_install is None else current.min_ttl_ms_before_install
     print("WRITE {}".format(host.boot_file))
     if not dry_run:
@@ -158,10 +165,9 @@ def uninstall(host: Host, *, dry_run: bool) -> None:
 
 
 def describe(host: Host, current: Status) -> str:
-    if current.available:
-        text = "{}: min_ttl_ms {}".format("on" if current.min_ttl_ms else "off", current.min_ttl_ms)
-    else:
-        text = "unavailable: " + UNAVAILABLE_REASON
+    if not current.available:
+        return "thrashing prevention  unavailable: " + UNAVAILABLE_REASON
+    text = "{}: min_ttl_ms {}".format("on" if current.min_ttl_ms else "off", current.min_ttl_ms)
     rules = boot_rules(host)
     if rules:
         source = "astack" if rules[0].file == host.boot_file else str(rules[0].file)

@@ -200,9 +200,11 @@ sudo python3 scripts/memory_guard.py uninstall
 
 When another file in a `tmpfiles.d` directory already sets `min_ttl_ms`,
 `install` names that file and changes nothing. At boot, `systemd-tmpfiles`
-applies only the rule in the file whose name sorts first and ignores the other.
-To use astack's value, delete the other rule, then run `install` again.
-`status` names the file whose rule sets `min_ttl_ms` at boot.
+applies only the rule in the file whose name sorts first and ignores the rest.
+To use astack's value, delete the other rule. For a file under
+`/usr/lib/tmpfiles.d`, which a package owns, copy the file to `/etc/tmpfiles.d`
+and delete the rule from the copy. Then run `install` again. `status` shows
+which rule sets `min_ttl_ms` at boot.
 
 ### Move `/tmp` from RAM to disk
 
