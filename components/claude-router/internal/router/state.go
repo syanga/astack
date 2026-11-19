@@ -20,13 +20,14 @@ import (
 // stamped before an allowed report is recorded after a restart, which blocks
 // the account longer, never shorter.
 type AccountState struct {
-	ID           AccountID   `json:"id"`
-	NeedsLogin   bool        `json:"needs_login,omitempty"`
-	NeedsLoginAt time.Time   `json:"needs_login_at,omitzero"`
-	Rejections   []Rejection `json:"rejections,omitempty"`
-	Check        Overage     `json:"check,omitempty"`
-	CheckAt      time.Time   `json:"check_at,omitzero"`
-	PaidUseAt    time.Time   `json:"paid_use_at,omitzero"`
+	ID             AccountID   `json:"id"`
+	NeedsLogin     bool        `json:"needs_login,omitempty"`
+	NeedsLoginAt   time.Time   `json:"needs_login_at,omitzero"`
+	RefreshRefused bool        `json:"refresh_refused,omitempty"`
+	Rejections     []Rejection `json:"rejections,omitempty"`
+	Check          Overage     `json:"check,omitempty"`
+	CheckAt        time.Time   `json:"check_at,omitzero"`
+	PaidUseAt      time.Time   `json:"paid_use_at,omitzero"`
 }
 
 // Rejection is a rejected quota window and the time it was observed.
@@ -43,7 +44,7 @@ const checkPersistEvery = time.Minute
 const accountsName = "accounts.json"
 
 func (a accountView) state(expiry Instant) AccountState {
-	st := AccountState{ID: a.ID, NeedsLogin: a.needsLogin, NeedsLoginAt: a.needsLoginAt,
+	st := AccountState{ID: a.ID, NeedsLogin: a.needsLogin, NeedsLoginAt: a.needsLoginAt, RefreshRefused: a.refreshRefused,
 		Check: a.check, CheckAt: a.checkAt, PaidUseAt: a.paidUseAt}
 	for _, rj := range a.rejections {
 		st.Rejections = append(st.Rejections, Rejection{Window: rj.Window, At: rj.at})
@@ -68,7 +69,7 @@ func needsWrite(saved, cur AccountState) bool {
 	if !advanced && !cur.CheckAt.Equal(saved.CheckAt) {
 		return true
 	}
-	return saved.NeedsLogin != cur.NeedsLogin || !saved.NeedsLoginAt.Equal(cur.NeedsLoginAt) ||
+	return saved.NeedsLogin != cur.NeedsLogin || !saved.NeedsLoginAt.Equal(cur.NeedsLoginAt) || saved.RefreshRefused != cur.RefreshRefused ||
 		saved.Check != cur.Check || !saved.PaidUseAt.Equal(cur.PaidUseAt) ||
 		!slices.EqualFunc(saved.Rejections, cur.Rejections, func(x, y Rejection) bool {
 			return (x.At.Equal(y.At) || !x.ResetsAt.IsZero()) && x.Kind == y.Kind && x.Rejected == y.Rejected &&
@@ -98,7 +99,7 @@ func Open(cfg Config, accounts []Account, store *Store, now time.Time) (*Router,
 			continue
 		}
 		a := &r.accounts[idx]
-		a.needsLogin, a.needsLoginAt = st.NeedsLogin, clamp(st.NeedsLoginAt, now)
+		a.needsLogin, a.needsLoginAt, a.refreshRefused = st.NeedsLogin, clamp(st.NeedsLoginAt, now), st.RefreshRefused
 		a.check, a.checkAt = st.Check, st.CheckAt
 		if a.checkAt.After(now) {
 			if a.check == OverageDisabled {
@@ -247,7 +248,7 @@ func (s *Store) ClearNeedsLogin(account AccountID) error {
 	if i < 0 || !states[i].NeedsLogin {
 		return nil
 	}
-	states[i].NeedsLogin, states[i].NeedsLoginAt = false, time.Time{}
+	states[i].NeedsLogin, states[i].NeedsLoginAt, states[i].RefreshRefused = false, time.Time{}, false
 	return s.saveAccounts(states)
 }
 

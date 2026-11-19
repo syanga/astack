@@ -146,22 +146,23 @@ func (g *refreshGuard) refused(a *coreauth.Auth) bool {
 	return s != nil && (s.refused || s.unseen && a.LastError != nil && invalidGrant(a.LastError.Message))
 }
 
-// tokenRefusal matches the error of the SDK's Claude token exchange for a
-// 400 or 401 answer, which ends with the answer's body
-// (internal/auth/claude/anthropic_auth.go, refreshHTTPError).
-var tokenRefusal = regexp.MustCompile(`(?s)token refresh failed with status (?:400|401): (.*)$`)
+// tokenAnswer matches the error of the SDK's Claude token exchange for an
+// answer other than 200, which names its status and ends with its body
+// (internal/auth/claude/anthropic_auth.go, refreshHTTPError). The body can
+// hold the same phrase, so only the leftmost match is the SDK's.
+var tokenAnswer = regexp.MustCompile(`(?s)token refresh failed with status (\d{3}): (.*)$`)
 
 // RFC 6749 section 5.2 gives invalid_grant for a grant that is invalid,
 // expired, or revoked.
 func invalidGrant(text string) bool {
-	m := tokenRefusal.FindStringSubmatch(text)
-	if m == nil {
+	m := tokenAnswer.FindStringSubmatch(text)
+	if m == nil || m[1] != "400" && m[1] != "401" {
 		return false
 	}
 	var body struct {
 		Error string `json:"error"`
 	}
-	return json.Unmarshal([]byte(m[1]), &body) == nil && body.Error == "invalid_grant"
+	return json.Unmarshal([]byte(m[2]), &body) == nil && body.Error == "invalid_grant"
 }
 
 func (g *refreshGuard) findLocked(id, rt string) *spentToken {

@@ -490,20 +490,27 @@ func (r *Router) Admit(now Instant, account AccountID, model string) Reason {
 	return admissionBar(r.cfg, now, r.expiry.Stamp, r.accounts[idx], model)
 }
 
-// RequireLogin excludes an account from new placement until Relogin, as an
-// auth failure does, when its credential can no longer be renewed. at is
-// when the caller learned it. It reports whether the account needed no
-// login before; for an account that already needs login it changes nothing.
+// RequireLogin excludes an account from new placement until Relogin when the
+// token endpoint refused its refresh token. Unlike an auth failure's mark,
+// LoginConfirmed does not clear it, because the access token can still work
+// while no refresh can replace it. at is when the caller learned of the
+// refusal; an account that already needs login keeps its time. It reports
+// whether the account needed no login before.
 func (r *Router) RequireLogin(account AccountID, at time.Time) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	idx, ok := r.index[account]
-	if !ok || r.accounts[idx].needsLogin {
+	if !ok {
 		return false
 	}
-	r.accounts[idx].needsLogin, r.accounts[idx].needsLoginAt = true, at
+	a := &r.accounts[idx]
+	set := !a.needsLogin
+	if set {
+		a.needsLogin, a.needsLoginAt = true, at
+	}
+	a.refreshRefused = true
 	r.persist()
-	return true
+	return set
 }
 
 // Relogin marks an account as logged in again.
@@ -516,7 +523,7 @@ func (r *Router) Relogin(account AccountID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if idx, ok := r.index[account]; ok {
-		r.accounts[idx].needsLogin = false
+		r.accounts[idx].needsLogin, r.accounts[idx].refreshRefused = false, false
 		r.persist()
 	}
 	return r.store.Err()
@@ -532,7 +539,7 @@ func (r *Router) LoginConfirmed(account AccountID, start time.Time) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	idx, ok := r.index[account]
-	if !ok || !r.accounts[idx].needsLogin || !start.After(r.accounts[idx].needsLoginAt) {
+	if !ok || !r.accounts[idx].needsLogin || r.accounts[idx].refreshRefused || !start.After(r.accounts[idx].needsLoginAt) {
 		return false
 	}
 	r.accounts[idx].needsLogin = false

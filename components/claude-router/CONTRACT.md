@@ -525,7 +525,7 @@ calls the same `Router`; it has no second placement algorithm.
 | `Router.Commit(now, Request, Decision) (Decision, error)` | Makes a `place` or `migrate` durable. It decides again under the commit lock and commits that fresh decision, which it returns. |
 | `Router.Route(now, Request) (Decision, error)` | `Decide`, then `Commit`, before dispatch, in a loop of at most 3 attempts. PR3 calls this. |
 | `Router.Report(Failure) Class` | Records a failure before output and returns the class the policy acts on. |
-| `Router.RequireLogin(account, at) bool` | Marks the account as needing login from `at`, as an `auth` failure does, unless it already needs login. It reports whether it set the mark. PR3 calls it when the token endpoint refuses the account's refresh token. |
+| `Router.RequireLogin(account, at) bool` | Marks the account as needing login from `at`, unless it already needs login, and records that the mark came from a refused refresh token, which only `Relogin` clears. It reports whether it set the mark. PR3 calls it when the token endpoint refuses the account's refresh token. |
 | `Router.Observe(account, attemptStart, Observation)` | Records the quota headers of one response. |
 | `Router.ObserveWeeklyUsage(account, WeeklyUsage)` | Keeps the newest valid account-wide weekly usage in memory without changing rejection evidence. |
 | `Router.ObserveUsage(account, start, kind, used)` | Records one account-wide five-hour or weekly window from a usage read that started at `start`. A `used` fraction from 0 up to but not including 1 counts as a report that the window is not rejected. Any other value changes nothing. |
@@ -1600,11 +1600,13 @@ survives a restart
 `TestOnlyARefusedRefreshTokenMarksTheAccountAsNeedingLogin`,
 `TestRefusalOfAnSDKRefreshThatBeganBeforeTheGuardMarksTheAccountAsNeedingLogin`,
 `TestAnAccountWhoseRefreshTokenWasRefusedNeedsLoginAfterARestartUntilItSignsInAgain`).
-It clears as an `auth` failure's mark does, as Login and manual movement
-describes. A settings read can succeed after a refusal only with an access
-token that is not due and that the usage endpoint accepts. When that token
-comes due, the token endpoint refuses its refresh again, and the router
-marks the account again.
+Only `claude-router login` clears it. A settings read that succeeds
+afterwards does not, because the access token can still work while no
+refresh can replace it
+(`TestASettingsReadThatSucceedsAfterARefusalKeepsTheAccountNeedingLogin`).
+The SDK's error text is the only evidence of the answer's status. The guard
+reads the leftmost status in it, the SDK's own, so a body that quotes a
+refusal does not count as one.
 
 The rule has one cost. When an access token is refused (usage 401) before it
 is due, and a refresh of it fails or ends unknown, the router's or the
@@ -2276,7 +2278,8 @@ by:
   it holds the state directory, so it applies at the next start;
 - a successful settings read with the account's credential that began after
   the failure that set the mark, which shows that the credential works
-  (`login_confirmed` event). This covers a 401 that a refresh resolved.
+  (`login_confirmed` event). This covers a 401 that a refresh resolved. It
+  does not clear a mark that a refused refresh token set.
 
 `POST /claude-router/move` moves a conversation explicitly, whatever the
 account's state (`TestRevokedLoginKeepsAssignmentsAcrossRestartUntilMovedOrConfirmed`,
@@ -2290,7 +2293,8 @@ commit that starts after it decides with the login requirement cleared.
 
 ### Durable account state
 
-`router.Open` keeps each account's login requirement, known rejections,
+`router.Open` keeps each account's login requirement and whether a refused
+refresh token set it, known rejections,
 latest paid-overflow check, and latest paid use in `accounts.json` beside
 the journal. Every change is written before the call that made it returns:
 a temporary file is synced and renamed, and the directory is synced. A

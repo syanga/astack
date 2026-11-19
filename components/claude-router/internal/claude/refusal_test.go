@@ -74,6 +74,8 @@ func TestOnlyARefusedRefreshTokenMarksTheAccountAsNeedingLogin(t *testing.T) {
 			`token refresh failed after 3 attempts: token refresh failed with status 401: {"error":"invalid_grant","error_description":"Refresh token revoked"}`, true},
 		{"server error",
 			`token refresh failed after 3 attempts: token refresh failed with status 503: {"error":"overloaded"}`, false},
+		{"server error whose body quotes a refusal",
+			`token refresh failed after 3 attempts: token refresh failed with status 503: upstream said token refresh failed with status 400: {"error":"invalid_grant"}`, false},
 		{"rate limit",
 			`token refresh failed after 3 attempts: token refresh failed with status 429: refresh temporarily blocked until 2026-11-19T17:00:00Z`, false},
 		{"transport error",
@@ -137,6 +139,43 @@ func TestRefusalOfAnSDKRefreshThatBeganBeforeTheGuardMarksTheAccountAsNeedingLog
 				t.Fatalf("login_required events for acct-a %d, want 1", n)
 			}
 		})
+	}
+}
+
+func TestASettingsReadThatSucceedsAfterARefusalKeepsTheAccountNeedingLogin(t *testing.T) {
+	e := newEnv(t, "acct-a", "acct-b")
+	e.clock.set(time.Now())
+	e.startWith(Options{ReadRetryBase: time.Hour})
+	e.replaceTokenExchange(&tokenExchange{up: e.upstream, account: "acct-a", failErr: errors.New(sdkErrorForExpiredRefreshToken)})
+	e.refuseAccessToken("acct-a")
+	e.recheckNow(31 * time.Minute)
+	e.send(msg{Session: sessionID(1)})
+	marked := e.needsLogin("acct-a")
+	e.upstream.bind(e.tokens["acct-a"], "acct-a")
+	before := len(e.upstream.usageReads())
+
+	e.recheckNow(31 * time.Minute)
+	r := e.send(msg{Session: sessionID(2)})
+	e.restart()
+	afterRestart := e.needsLogin("acct-a")
+	restarted := e.send(msg{Session: sessionID(3)})
+
+	accepted := 0
+	for _, u := range e.upstream.usageReads()[before:] {
+		if u.Account == "acct-a" {
+			accepted++
+		}
+	}
+	if !marked || accepted == 0 {
+		t.Fatalf("needs login %t after the refusal and %d accepted settings reads of acct-a after, want true and at least 1", marked, accepted)
+	}
+	for i, r := range []result{r, restarted} {
+		if r.Status != 200 || r.Text != served("acct-b") {
+			t.Fatalf("send %d got %d %q, want 200 from acct-b", i+2, r.Status, r.Text)
+		}
+	}
+	if !afterRestart || e.eventCount("login_confirmed") != 0 {
+		t.Fatalf("needs login %t after a restart with %d login_confirmed events, want true and none", afterRestart, e.eventCount("login_confirmed"))
 	}
 }
 
