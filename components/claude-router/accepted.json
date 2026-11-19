@@ -1,7 +1,7 @@
 {
- "head": "7d048b47296b9e34ed76ed2fd55be16587eb12a6",
+ "head": "6358e4eeb8fadaa93fab4ed2cfc1e208385587e6",
  "code_sha256": "d90e26f044865b2dab1109f654672f8dc81487cb85ab3d81a2b1b2949faab4a1",
- "binary_sha256": "967184953c6ed4ff49f58a97a97c589dd46df36d3ca8fc34e356e7883d0506ab",
+ "binary_sha256": "797a4605b2fa523ee7e7fc40e1b053ba9de2912fdafd8b463e8052b73f076fb0",
  "helpers_sha256": "081c437f8bd6ff145cde0dc2ef1afd0766a80a1897f85860767bf8f19fd33e59",
  "sdk": "v8.0.11",
  "go": "go1.27.4",
@@ -10,14 +10,14 @@
   "claude_code": "2.1.327"
  },
  "result": "pass",
- "scope": "Issues 185, 193, and 194. A foreground lane router on port 18797 ran this code on Linux 7.0 x86_64, with its state on the machine's ext4 disk. It used the real accounts through copies of the dobby and work logins (lane.py, lane-config.json). The daily router kept running beside the lane, unchanged. A real claude -p request for claude-haiku-5-5 started a conversation. A lane restart over an events.jsonl that ended in a newline added no blank line. lane.py then stopped the lane and appended the first half of the last event line, as a short write leaves it. After the next restart, the first new event, model_catalog, began on a line of its own and parsed. A resume of the first conversation stayed on its account and kept its content, and digest.go's readDigest and account.go's requestsSince counted its request. The helper changes, the platform note text and the removed activate --agent-sdk flag, send no request; tests/test_claude_router_activate.py covers them. record.py built the record. Unchanged historical scenarios are references and were not rerun.",
+ "scope": "Issues 185, 193, and 194. A foreground lane router on port 18797 ran this code on Linux 7.0 x86_64, with its state on the machine's ext4 disk. It used the real accounts through copies of the dobby and work logins (lane.py, lane-config.json). The daily router kept running beside the lane, unchanged. A real claude -p request for claude-haiku-5-5 started a conversation. A lane restart over an events.jsonl that ended in a newline added no blank line. lane.py then stopped the lane and appended the first half of the last event line, as a short write leaves it. After the next restart, the first new event, model_catalog, began on a line of its own and parsed. A resume of the first conversation stayed on its account and kept its content, and digest.go's readDigest and account.go's requestsSince counted its request. The two helper changes send no request. tests/test_claude_router_activate.py checks the platform note text and runs activate without the removed --agent-sdk flag. record.py built the record. Unchanged historical scenarios are references and were not rerun.",
  "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence",
  "matrix": [
   {
    "scenario": "dobby token expires more than 4.5 h from now, outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 382,
+    "expires_in_min": 332,
     "evidence": [
      "results.json",
      "lane.py"
@@ -28,7 +28,7 @@
    "scenario": "work token expires more than 4.5 h from now, outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 382,
+    "expires_in_min": 332,
     "evidence": [
      "results.json",
      "lane.py"
@@ -36,11 +36,11 @@
    }
   },
   {
-   "scenario": "Lane code and executable match the build at 7d048b4",
+   "scenario": "Lane code, executable, and SDK match the build at 6358e4e and go.mod",
    "status": "pass",
    "detail": {
     "code_sha256": "d90e26f044865b2dab1109f654672f8dc81487cb85ab3d81a2b1b2949faab4a1",
-    "binary_sha256": "967184953c6ed4ff49f58a97a97c589dd46df36d3ca8fc34e356e7883d0506ab",
+    "binary_sha256": "797a4605b2fa523ee7e7fc40e1b053ba9de2912fdafd8b463e8052b73f076fb0",
     "sdk": "v8.0.11",
     "evidence": [
      "status-start.json"
@@ -84,14 +84,14 @@
     "requests": [
      {
       "account": "work",
-      "decision": "place",
-      "reason": "reset_preference",
+      "decision": "dispatch",
+      "reason": "assigned",
       "status": 200
      },
      {
       "account": "work",
-      "decision": "dispatch",
-      "reason": "assigned",
+      "decision": "place",
+      "reason": "reset_preference",
       "status": 200
      }
     ],
@@ -106,7 +106,7 @@
    "scenario": "A restart over an events.jsonl that ends in a newline adds no blank line",
    "status": "pass",
    "detail": {
-    "size_before": 1854,
+    "size_before": 1499,
     "byte_after": "{",
     "first_kind": "model_catalog",
     "evidence": [
@@ -119,8 +119,8 @@
    "scenario": "Before the restart, events.jsonl ends mid-line with the first half of its last event",
    "status": "pass",
    "detail": {
-    "partial_bytes": 29,
-    "size": 2438,
+    "partial_bytes": 30,
+    "size": 2086,
     "evidence": [
      "partial-line.json"
     ]
@@ -131,7 +131,7 @@
    "status": "pass",
    "detail": {
     "byte_after_partial": "\n",
-    "first_new_line": "{\"at\":\"2026-11-18T16:19:41.142241996-08:00\",\"kind\":\"model_catalog\",\"outcome\":\"read\",\"detail\":\"claude-fable-5-2 claude-haiku-5-5\"}",
+    "first_new_line": "{\"at\":\"2026-11-18T17:10:07.697434261-08:00\",\"kind\":\"model_catalog\",\"outcome\":\"read\",\"detail\":\"claude-fable-5-2 claude-haiku-5-5\"}",
     "first_kind": "model_catalog",
     "partial_line_kept": true,
     "evidence": [
@@ -163,12 +163,12 @@
    }
   },
   {
-   "scenario": "digest.go and account.go read the events after the restart, including the first new event's line",
+   "scenario": "After the restart, digest.go and account.go read past the partial line and count the resumed request",
    "status": "pass",
    "detail": {
     "go_test_exit": 0,
     "read": {
-     "digest_conversation_last": "2026-11-18T16:19:44.97503308-08:00",
+     "digest_conversation_last": "2026-11-18T17:10:10.313739546-08:00",
      "digest_requests_since_restart": 1,
      "first_new_kind": "model_catalog",
      "first_new_parses": true,
@@ -182,7 +182,7 @@
      "lane_readers_test.go",
      "events-after-restart.jsonl"
     ],
-    "method": "lane_readers_test.go, added only to a temporary copy of the checkout, called readDigest (digest.go) and requestsSince (account.go) on the lane's events.jsonl after the restart, with the restart time as the window start. It decoded the first line after the partial line into claude.Event, the type both readers decode."
+    "method": "lane_readers_test.go, added only to a temporary copy of the checkout, called readDigest (digest.go) and requestsSince (account.go) on the lane's events.jsonl after the restart, with the restart time as the window start. It also decoded the first line after the partial line into claude.Event (first_new_kind). Both readers decode every line but act only on request and migrated events, so their output cannot show that they read the first new line, model_catalog. The row that shows it starts its own line and parses is the one before the resume."
    }
   },
   {
@@ -200,7 +200,7 @@
    "status": "pass",
    "detail": {
     "code_sha256": "d90e26f044865b2dab1109f654672f8dc81487cb85ab3d81a2b1b2949faab4a1",
-    "binary_sha256": "967184953c6ed4ff49f58a97a97c589dd46df36d3ca8fc34e356e7883d0506ab",
+    "binary_sha256": "797a4605b2fa523ee7e7fc40e1b053ba9de2912fdafd8b463e8052b73f076fb0",
     "sdk": "v8.0.11",
     "evidence": [
      "status-start.json",
@@ -216,6 +216,27 @@
     "work": "disabled",
     "evidence": [
      "status-end.json"
+    ]
+   }
+  },
+  {
+   "scenario": "The daily router kept running in the same process during the lane run",
+   "status": "pass",
+   "detail": {
+    "before": {
+     "ActiveState": "active",
+     "ActiveEnterTimestamp": "Wed 2026-11-18 15:50:42 PST",
+     "MainPID": "3412178",
+     "NRestarts": "0"
+    },
+    "after": {
+     "ActiveState": "active",
+     "ActiveEnterTimestamp": "Wed 2026-11-18 15:50:42 PST",
+     "MainPID": "3412178",
+     "NRestarts": "0"
+    },
+    "evidence": [
+     "daily-router.json"
     ]
    }
   },
@@ -255,7 +276,7 @@
    "scenario": "Evidence contains no copied access token",
    "status": "pass",
    "detail": {
-    "files_scanned": 19,
+    "files_scanned": 27,
     "hits": [],
     "method": "Exact client token and the tokens in the lane's login copies, plus sk-ant-, JWT, and Bearer patterns, before the copies were deleted.",
     "evidence": [
@@ -273,8 +294,15 @@
    "run": "first lane run at 7d048b4",
    "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue185-run1/evidence",
    "result": "fail: 14 of 17 rows passed",
-   "finding": "lane.py expected the first event after a start to be started, but the service writes model_catalog first, then the overage reads, then started. The three rows that named started failed. The router met their intent: after the restart over the partial line, the next byte was a newline and the first new line, model_catalog, parsed.",
+   "finding": "lane.py expected the first event after a start to have kind \"started\", but the service writes the model_catalog event first, then the overage_read events, then the started event. The three rows that expected a started event failed. The router met their intent: after the restart over the partial line, the next byte was a newline and the first new line, model_catalog, parsed.",
    "fixed_in": "lane.py: those rows check that the first new line parses and record its kind"
+  },
+  {
+   "run": "second lane run at 7d048b4",
+   "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/issue185-run2/evidence",
+   "result": "pass: 17 of 17 rows, superseded",
+   "finding": "An outside review of the record found that the readers row claimed digest.go and account.go parse the first new event, which their output cannot show, and that several checks were weaker than their row names. lane.py now names that row for what it checks, requires the place decision and answer on the new conversation, every resume request on the first account, the pinned SDK, both accounts at start and end, an exact reader count, and the daily router's same process before and after the run. This run's rows replaced the second run's.",
+   "fixed_in": "lane.py"
   }
  ],
  "prior_acceptance": {
@@ -283,10 +311,12 @@
  },
  "offline_verification": {
   "head": "7d048b47296b9e34ed76ed2fd55be16587eb12a6",
+  "note": "the record's head differs from it only in CONTRACT.md and accepted.json, which are outside the router code",
   "go_test_race": "pass",
   "go_vet": "pass",
   "tmpdir": "ext4, under the lane directory, so the journal tests, including the kill -9 test, ran on the machine's own disk",
   "evidence": [
+   "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/go-command.txt",
    "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/head.txt",
    "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/env.txt",
    "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/gofmt.txt",
@@ -295,5 +325,5 @@
    "/home/alany/.local/state/astack/claude-router-lanes/issue185/evidence/offline/journal-tests.log"
   ]
  },
- "written": "2026-11-19T00:39:01.077410+00:00"
+ "written": "2026-11-19T01:12:33.712319+00:00"
 }
