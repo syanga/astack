@@ -55,10 +55,10 @@ the count as a flag, expand the variable in `sh -c`:
 Write `"$TEST_WORKERS"` inside the single quotes. Outside them, the calling
 shell expands it before jobgate sets it.
 
-vitest 4.0.0 is the first release that reads `VITEST_MAX_WORKERS`. vitest
-applies it after its command-line options and its config file, so a
-`--maxWorkers` flag cannot override jobgate's count. vitest 3 and older do not
-read it. For those, use `TEST_WORKERS` and
+vitest 4.0.0 is the first release that reads `VITEST_MAX_WORKERS`. It applies
+the variable after its command-line options and its config file, so a
+`--maxWorkers` flag cannot override jobgate's count. Releases 3.x and older do
+not read it. For those, use `TEST_WORKERS` and
 `sh -c 'vitest run --maxWorkers="$TEST_WORKERS"'`.
 
 ## Fall back when jobgate is missing
@@ -96,8 +96,9 @@ jobgate. make reports a nonzero code as `Error N`.
 
 ## Follow a run
 
-1. Run `jobgate status`. A waiting run shows how long it has waited. A running
-   run shows its worker count, its stated memory, and how long it has run.
+1. Run `jobgate status`. A waiting run shows how long it has waited and why. A
+   running run shows its worker count, its stated memory, the memory it uses,
+   and how long it has run.
 2. Read the result line that jobgate prints when the run ends.
 3. To find that line later, search `~/.cache/jobgate/results.log` for its
    `time` and `repo` fields. Other runs' lines can follow it there.
