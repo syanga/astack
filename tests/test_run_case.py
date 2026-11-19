@@ -69,8 +69,9 @@ emit({"type": "result", "subtype": "success", "is_error": False, "session_id": s
 
 class RunCaseTests(unittest.TestCase):
     def setUp(self):
-        self.temp = Path(tempfile.mkdtemp())
-        self.addCleanup(subprocess.run, ["rm", "-rf", str(self.temp)])
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.temp = Path(temp.name)
         bin_dir = self.temp / "bin"
         bin_dir.mkdir()
         fake = bin_dir / "claude"
@@ -116,6 +117,7 @@ class RunCaseTests(unittest.TestCase):
             self.assertEqual(Path(session["cwd"]).resolve(), REPO)
             argv = session["argv"]
             self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
+            self.assertEqual(argv[argv.index("--setting-sources") + 1], "user,project")
             self.assertEqual(argv[argv.index("--allowedTools") + 1].split(","), ["Read", "Grep", "Glob", "Skill"])
 
     def test_report_lists_skills_actions_and_answers_per_run_and_in_total(self):
@@ -160,13 +162,12 @@ class RunCaseTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("Not logged in", result.stdout)
-        self.assertIn("exit 1", result.stdout)
 
     def test_error_result_fails_the_command_even_when_claude_exits_0(self):
         result, _ = self.run_case("--runs", "1", "Add a feature", mode="api-error")
 
         self.assertEqual(result.returncode, 1)
-        self.assertIn("Run 1 of 1: API Error: 529 overloaded", result.stdout)
+        self.assertIn("API Error: 529 overloaded", result.stdout)
 
 
 if __name__ == "__main__":

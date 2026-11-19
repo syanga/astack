@@ -11,12 +11,14 @@ CLAUDE_CODE_OAUTH_TOKEN.
 Sessions run in this checkout and may use only Read, Grep, Glob, Skill, and the
 shell commands Claude Code treats as read-only. Every other tool call is denied,
 so an attempt to edit, post, or merge appears in the report as a denied call
-instead of happening. The report lists each run's skills, actions, and answers,
+instead of happening. Sessions skip local settings (.claude/settings.local.json),
+so allow rules saved there cannot loosen this. The report lists each run's skills, actions, and answers,
 then how many runs used each skill and had each tool denied. The script exits 1
 when any run times out or fails.
 """
 
 import argparse
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import json
@@ -45,9 +47,9 @@ PARENT_SESSION = (
 @dataclass
 class Turn:
     prompt: str
-    calls: list = field(default_factory=list)
-    errors: dict = field(default_factory=dict)
-    denied: set = field(default_factory=set)
+    calls: list[dict] = field(default_factory=list)
+    errors: dict[str, object] = field(default_factory=dict)
+    denied: set[str] = field(default_factory=set)
     result: Optional[dict] = None
     problem: Optional[str] = None
 
@@ -59,17 +61,18 @@ def build_config(root):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
         path.chmod(mode)
-    config = root / ".claude"
-    source = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "settings.json"
+    source = manage.destination(harness["settings"], Path.home(), True)
     settings = json.loads(source.read_text(encoding="utf-8")) if source.exists() else {}
     copied = {key: settings[key] for key in USER_SETTINGS if key in settings}
-    (config / "settings.json").write_text(json.dumps(copied), encoding="utf-8")
-    return config
+    destination = manage.destination(harness["settings"], root, False)
+    destination.write_text(json.dumps(copied), encoding="utf-8")
+    return destination.parent
 
 
 def command(prompt, args, session):
     result = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
-              "--permission-mode", "dontAsk", "--allowedTools", ",".join(ALLOWED),
+              "--permission-mode", "dontAsk", "--setting-sources", "user,project",
+              "--allowedTools", ",".join(ALLOWED),
               "--max-turns", str(args.max_turns)]
     if args.model:
         result += ["--model", args.model]
@@ -134,7 +137,7 @@ def first_line(text, limit):
     return (str(text).splitlines() or [""])[0][:limit]
 
 
-def target(call):
+def call_summary(call):
     data = call.get("input") or {}
     if "command" in data:
         return first_line(data["command"], 160)
@@ -157,7 +160,7 @@ def actions(turns):
                 outcome = " (denied)"
             elif call["id"] in turn.errors:
                 outcome = " (failed: {})".format(first_line(turn.errors[call["id"]], 120))
-            yield call["name"], denied, "{} {}{}".format(call["name"], target(call), outcome)
+            yield call["name"], denied, "{} {}{}".format(call["name"], call_summary(call), outcome)
 
 
 def skills(turns):
@@ -165,14 +168,19 @@ def skills(turns):
     return list(dict.fromkeys(str(name) for name in named if name))
 
 
+def tally(counts, runs):
+    return ", ".join("{} {}/{}".format(name, count, runs) for name, count in sorted(counts.items())) or "none"
+
+
 def report(results, args):
-    total, counts = 0.0, {}
+    total, fired, refused = 0.0, Counter(), Counter()
     for index, turns in enumerate(results, 1):
         cost = sum((turn.result or {}).get("total_cost_usd") or 0 for turn in turns)
         total += cost
         problem = next((turn.problem for turn in turns if turn.problem), None)
         print("Run {} of {}: {}, ${:.2f}".format(index, len(results), problem or "finished", cost))
-        print("  Skills: {}".format(", ".join(skills(turns)) or "none"))
+        run_skills = skills(turns)
+        print("  Skills: {}".format(", ".join(run_skills) or "none"))
         denied = set()
         listed = list(actions(turns))
         print("  Actions:" + ("" if listed else " none"))
@@ -180,21 +188,17 @@ def report(results, args):
             if was_denied:
                 denied.add(name)
             print("    " + line)
-        for name in denied | {"Skill " + skill for skill in skills(turns)}:
-            counts[name] = counts.get(name, 0) + 1
+        fired.update(run_skills)
+        refused.update(denied)
         for number, turn in enumerate(turns, 1):
             answer = (turn.result or {}).get("result") or "(none)"
             print("  Turn {} answer:".format(number))
             print("\n".join("    " + line for line in answer.splitlines()))
     runs = len(results)
     unfinished = [str(index) for index, turns in enumerate(results, 1) if any(turn.problem for turn in turns)]
-    fired = ", ".join("{} {}/{}".format(name[6:], count, runs) for name, count in sorted(counts.items())
-                      if name.startswith("Skill "))
-    refused = ", ".join("{} {}/{}".format(name, count, runs) for name, count in sorted(counts.items())
-                      if not name.startswith("Skill "))
     print("Summary of {} runs".format(runs))
-    print("  Skills: {}".format(fired or "none"))
-    print("  Denied: {}".format(refused or "none"))
+    print("  Skills: {}".format(tally(fired, runs)))
+    print("  Denied: {}".format(tally(refused, runs)))
     print("  Unfinished runs: {}".format(", ".join(unfinished) or "none"))
     print("  Cost: ${:.2f} at API prices".format(total))
     print("  Transcripts: {}".format(args.out))
