@@ -175,10 +175,11 @@ multi-gen LRU. On macOS, the script changes nothing.
 
 When thrashing prevention acts, the kernel ends the process with the highest
 OOM score, usually the largest process. If that process's unit keeps systemd's
-default `OOMPolicy=stop`, systemd then stops the whole unit. When that unit is
-a terminal tab's scope, the tab and every agent in it end. A jobgate run's
-scope sets `OOMPolicy=continue` on systemd 253 or newer, so a kill there ends
-only one process.
+default `OOMPolicy=stop`, systemd then stops the whole unit. On systemd 253 or
+newer, scope units also have `OOMPolicy=`, so a kill in a terminal tab's scope
+ends the tab and every agent in it. jobgate gives each run's scope
+`OOMPolicy=continue` on those versions, so a kill inside a jobgate run ends only
+one process.
 
 To check the machine, preview the change, and make it:
 
