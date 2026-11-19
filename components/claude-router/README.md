@@ -55,8 +55,9 @@ on Linux. It never changes client settings. From the repository root:
 ./install.sh --component claude-router
 ```
 
-Linux is tested on a real kernel in a Debian 13 arm64 container with systemd
-257 and fake accounts, not yet with real accounts on a Linux machine.
+The systemd service's lifecycle is tested on a real kernel in a Debian 13
+arm64 container with systemd 257 and fake accounts. The test covers install,
+restart, linger, stop and start, the crash-loop limit, and uninstall.
 
 | Path | Contents |
 | --- | --- |
@@ -275,16 +276,16 @@ ok        router running on 127.0.0.1:18787 (launchd)
 ok        work, alumni, personal ready
 ok        paid overflow off on all 3 accounts
 ok        Claude Code settings point at the router
-ok        code matches the accepted record (darwin/arm64)
+ok        code matches the accepted record (<record platform>)
 ok        test message answered 200 on alumni in 6.2s
 check     passed
 ```
 
 On Linux, the first line ends with `(systemd)`. The fifth line names the
-record's platform, so it reads `(darwin/arm64)` on Linux too. When the record's
-platform differs from this machine's, activation and `setup` also print a
-`note` line that says `not yet tested on real Linux`. That text predates the
-Linux container run in [Install the service](#install-the-service).
+record's platform. When the record's platform differs from this machine's,
+activation and `setup` also print a `note` line that names both platforms. On
+Linux, the note ends with `not yet tested on real Linux`. That text predates
+the acceptance runs on Linux.
 
 When a check fails, `check` skips the test message, exits 1, and prints the
 next step. With the router stopped, it marks the checks that need the router

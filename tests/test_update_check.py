@@ -47,7 +47,7 @@ class UpdateCheckTests(InstallerFixture):
         self.assertEqual(self.check(), "up to date: " + installed[:12])
 
         latest = self.publish_change()
-        self.assertEqual(self.check(), "update available: claude at {0}, codex at {0}, main {1}".format(
+        self.assertEqual(self.check(), "update available: claude at {0}, codex at {0}, jobgate at {0}, main {1}".format(
             installed[:12], latest[:12]))
 
         self.run_installer(env=self.env)
@@ -65,7 +65,7 @@ class UpdateCheckTests(InstallerFixture):
 
     def test_skips_install_without_git_checkout(self):
         self.run_installer(env=self.env)
-        self.assertEqual(self.check(), "check skipped: the manifest records no installed commit for claude, codex. "
+        self.assertEqual(self.check(), "check skipped: the manifest records no installed commit for claude, codex, jobgate. "
                                        "Rerun ./install.sh from a Git checkout with an origin remote.")
 
     def test_skips_remote_without_main(self):

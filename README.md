@@ -19,6 +19,8 @@ astack provides:
   restoration of managed settings to their original values.
 - An optional [Gitleaks pre-push hook](skills/open-pr/scripts/git_hooks.py)
   to scan commits for secrets. Install and remove it separately from agent configuration.
+- [jobgate](docs/jobgate.md), a command that makes concurrent test suites,
+  builds, and renders wait until they fit the machine's memory and cores.
 
 ## Install
 
@@ -33,8 +35,9 @@ cd astack
 ./install.sh
 ```
 
-Use `--help` to see supported targets and defaults. To choose agents, pass
-`--target <name>` for each one, or `--target all` for every supported agent.
+Use `--help` to see supported targets and defaults. The targets are the agents
+and `jobgate`. To choose targets, pass `--target <name>` for each one, or
+`--target all` for all of them.
 Use the same targets for the preview and installation.
 Installation needs network access to install and refresh the plugins listed in
 [settings/plugins.json](settings/plugins.json) through each agent's plugin CLI.
@@ -109,11 +112,11 @@ To install and activate the router:
    claude-router setup -account work -account alumni
    ```
 
-   Activation points Claude Code's settings at the router. `setup` ends with
-   `activated Claude Code routes through the router`. If it refuses because
-   an account has paid overflow on, turn paid overflow off on claude.ai, run
-   `claude-router stop`, and run `setup` again. For any other refusal, follow
-   its `next` line.
+   Activation points Claude Code's settings at the router. When `setup`
+   succeeds, it prints `activated Claude Code routes through the router`. If
+   it refuses because an account has paid overflow on, turn paid overflow off
+   on claude.ai, run `claude-router stop`, and run `setup` again. For any
+   other refusal, follow its `next` line.
 7. Start a new Claude Code session, because a session reads its settings when
    it starts.
 8. Check the router. It sends one short test message and ends with
@@ -145,6 +148,15 @@ new Claude Code session. If `direct` prints
 `claude-router setup` activates the router again.
 `./uninstall.sh --component claude-router` removes it. `direct` and uninstall
 keep logins and assignments.
+
+## Gate heavy commands with jobgate
+
+The default install puts `jobgate` in `~/.local/bin` and, for zsh and bash, on
+`PATH`. To make a repository's test suite
+or build wait for room on the machine, follow
+[Gate a repository's commands with jobgate](docs/jobgate-setup.md). The
+[jobgate reference](docs/jobgate.md) covers admission, the kernel memory cap on
+Linux, macOS priority, and the result log.
 
 ## Keep a Linux machine responsive when memory runs out
 

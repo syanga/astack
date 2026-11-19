@@ -5,10 +5,12 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
 SOURCE = Path(__file__).resolve().parent.parent
+JOBGATE_PATH = os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"])
 
 
 class InstallerFixture(unittest.TestCase):
@@ -59,7 +61,7 @@ class InstallerTests(InstallerFixture):
                              (self.skill / "SKILL.md").read_bytes())
             self.assertTrue(os.access(self.home / skills / "test-skill/scripts/helper.sh", os.X_OK))
         self.assertFalse(list(self.home.rglob("replace-with-skill-name")))
-        self.assertEqual(len(self.manifest()["targets"]), 2)
+        self.assertEqual(set(self.manifest()["targets"]), {"claude", "codex", "jobgate"})
 
     def test_dependency_cache_is_not_installed_or_validated_as_skill_source(self):
         cache = self.skill / "scripts/node_modules"
@@ -85,7 +87,7 @@ class InstallerTests(InstallerFixture):
         result = self.run_installer()
         self.assertNotIn("WRITE", result.stdout)
         self.assertEqual(installed.stat().st_mtime_ns, previous_mtime)
-        self.assertEqual(set(self.manifest()["targets"]), {"claude", "codex"})
+        self.assertEqual(set(self.manifest()["targets"]), {"claude", "codex", "jobgate"})
 
     def test_shared_and_specific_instruction_updates(self):
         self.run_installer()
@@ -218,6 +220,114 @@ class InstallerTests(InstallerFixture):
         self.run_installer("--target", "all", env=env)
         self.assertFalse(outside.exists())
         self.assertTrue((self.home / ".codex/AGENTS.md").exists())
+
+    def jobgate_status_env(self):
+        fake_bin = self.root / "fake bin"
+        fake_bin.mkdir()
+        (fake_bin / "systemctl").write_text("#!/bin/sh\nexit 1\n")
+        (fake_bin / "systemctl").chmod(0o755)
+        machine = self.root / "machine.json"
+        machine.write_text('{"memory": 8589934592, "cores": 4, "psi": "full avg10=0.00"}')
+        return dict(os.environ, SHELL="/bin/zsh", PATH=os.pathsep.join([str(fake_bin), JOBGATE_PATH]),
+                    JOBGATE_MACHINE_FILE=str(machine))
+
+    def test_jobgate_goes_on_path_and_uninstall_removes_what_it_added(self):
+        env = self.jobgate_status_env()
+        self.run_installer("--target", "jobgate", env=env)
+        jobgate = self.home / ".local/bin/jobgate"
+        startup = self.home / ".zshrc"
+        shell_env = dict(env, HOME=str(self.home))
+        result = subprocess.run(["sh", "-c", '. "$1"; command -v jobgate; jobgate status', "sh", str(startup)],
+                                capture_output=True, text=True, cwd=str(self.root), env=shell_env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[0], str(jobgate.resolve()))
+        self.assertIn("4.0G", result.stdout)
+        login = self.home / ".zprofile"
+        self.assertIn(str(jobgate.parent), login.read_text())
+
+        self.run_installer("--target", "jobgate", command="uninstall", env=env)
+        self.assertFalse(jobgate.exists())
+        self.assertFalse((self.home / ".local/share/astack").exists())
+        self.assertFalse(startup.exists())
+        self.assertFalse(login.exists())
+
+    def test_jobgate_adds_a_path_line_only_when_the_directory_is_missing_from_path(self):
+        jobgate = self.home / ".local/bin/jobgate"
+        env = dict(os.environ, SHELL="/bin/zsh", PATH=os.pathsep.join([str(jobgate.parent), JOBGATE_PATH]))
+        self.run_installer("--target", "jobgate", env=env)
+        self.assertTrue(jobgate.exists())
+        self.assertFalse((self.home / ".zshrc").exists())
+        self.run_installer("--target", "jobgate", command="uninstall", env=env)
+        self.run_installer("--target", "jobgate", env=dict(env, PATH=JOBGATE_PATH))
+        self.assertIn(str(jobgate.parent), (self.home / ".zshrc").read_text())
+
+    def test_installed_jobgate_reads_toml_with_its_vendored_copy(self):
+        env = self.jobgate_status_env()
+        self.run_installer("--target", "jobgate", env=env)
+        without_tomllib = self.root / "no stdlib tomllib"
+        without_tomllib.mkdir()
+        (without_tomllib / "tomllib.py").write_text("raise ModuleNotFoundError(\"No module named 'tomllib'\")\n")
+        (self.home / ".config").mkdir(parents=True)
+        (self.home / ".config/jobgate.toml").write_text("memory_share = 0.25\n")
+        result = subprocess.run([str(self.home / ".local/bin/jobgate"), "status"], capture_output=True, text=True,
+                                cwd=str(self.root), env=dict(env, HOME=str(self.home), PYTHONPATH=str(without_tomllib)))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("2.0G (25% of 8.0G", result.stdout)
+
+    def test_bash_login_shell_that_skips_bashrc_finds_jobgate(self):
+        env = dict(os.environ, SHELL="/bin/bash", PATH=JOBGATE_PATH)
+        self.home.mkdir(parents=True)
+        profile = self.home / ".bash_profile"
+        profile.write_text("export EDITOR=vi\n")
+        self.run_installer("--target", "jobgate", env=env)
+        jobgate = str((self.home / ".local/bin/jobgate").resolve())
+        for flags in (["--login"], ["-i"]):
+            with self.subTest(flags=flags):
+                found = subprocess.run(["bash", *flags, "-c", "command -v jobgate"], capture_output=True, text=True,
+                                       stdin=subprocess.DEVNULL, env=dict(env, HOME=str(self.home)))
+                self.assertEqual(found.stdout.strip().splitlines()[-1:], [jobgate], found.stderr)
+        self.run_installer("--target", "jobgate", command="uninstall", env=env)
+        self.assertEqual(profile.read_text(), "export EDITOR=vi\n")
+        self.assertFalse((self.home / ".bashrc").exists())
+
+    def test_jobgate_uninstall_keeps_a_marked_block_it_did_not_write(self):
+        env = dict(os.environ, SHELL="/bin/zsh", PATH=JOBGATE_PATH)
+        self.home.mkdir(parents=True)
+        own = '# astack: jobgate on PATH\nexport PATH="{}:$PATH"\nexport EDITOR=vi\n'.format(self.home / ".local/bin")
+        startup = self.home / ".zshrc"
+        startup.write_text(own)
+        self.run_installer("--target", "jobgate", env=env)
+        self.assertEqual(startup.read_text().count("# astack: jobgate on PATH"), 2)
+        self.run_installer("--target", "jobgate", command="uninstall", env=env)
+        self.assertEqual(startup.read_text(), own)
+
+    def test_jobgate_uninstall_after_an_interruption_keeps_a_marked_block_it_did_not_write(self):
+        env = dict(os.environ, SHELL="/bin/zsh", PATH=JOBGATE_PATH)
+        self.home.mkdir(parents=True)
+        own = '# astack: jobgate on PATH\nexport PATH="{}:$PATH"\nexport EDITOR=vi\n'.format(self.home / ".local/bin")
+        startup = self.home / ".zshrc"
+        startup.write_text(own)
+        self.run_installer("--target", "jobgate", env=env)
+        startup.write_text(own)
+        self.run_installer("--target", "jobgate", command="uninstall", env=env)
+        self.assertEqual(startup.read_text(), own)
+
+    def test_jobgate_uninstall_removes_the_path_line_after_a_failed_removal(self):
+        if os.geteuid() == 0:
+            self.skipTest("root can rewrite a read-only home")
+        env = dict(os.environ, SHELL="/bin/zsh", PATH=JOBGATE_PATH)
+        startup = self.home / ".zshrc"
+        self.home.mkdir(parents=True)
+        startup.write_text("alias ll='ls -l'\n")
+        self.run_installer("--target", "jobgate", env=env)
+        self.home.chmod(0o555)
+        try:
+            self.run_installer("--target", "jobgate", command="uninstall", env=env)
+        finally:
+            self.home.chmod(0o755)
+        self.assertIn(".local/bin:$PATH", startup.read_text())
+        self.run_installer("--target", "jobgate", command="uninstall", env=env)
+        self.assertEqual(startup.read_text(), "alias ll='ls -l'\n")
 
     def test_destination_directory_is_not_replaced(self):
         blocker = self.home / ".codex/AGENTS.md"

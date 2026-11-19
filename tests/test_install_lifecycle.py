@@ -5,6 +5,7 @@ import errno
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import stat
 import subprocess
@@ -151,6 +152,73 @@ class InstallerLifecycleTests(InstallerFixture):
         self.run_with_config(module, env, "uninstall", "--target", "all")
         self.assertTrue(all(not path.exists() for path in expected))
         self.assertEqual(json.loads(state.read_text())["targets"], {})
+
+    def test_jobgate_uninstall_prunes_the_folder_it_installed_into(self):
+        module = self.manager()
+        first, second = self.root / "first data", self.root / "second data"
+        (second / "astack").mkdir(parents=True)
+        env = {"XDG_DATA_HOME": str(first), "SHELL": "/bin/zsh", "PATH": "/usr/bin:/bin"}
+        self.run_with_config(module, env, "install", "--target", "jobgate")
+        self.assertTrue((first / "astack/jobgate/jobgate.py").is_file())
+        self.run_with_config(module, dict(env, XDG_DATA_HOME=str(second)), "uninstall", "--target", "jobgate")
+        self.assertFalse((first / "astack").exists())
+        self.assertTrue((second / "astack").is_dir())
+
+    def test_jobgate_reinstall_to_another_data_folder_prunes_the_old_one(self):
+        module = self.manager()
+        first, second = self.root / "first data", self.root / "second data"
+        env = {"XDG_DATA_HOME": str(first), "SHELL": "/bin/zsh", "PATH": "/usr/bin:/bin"}
+        self.run_with_config(module, env, "install", "--target", "jobgate")
+        self.run_with_config(module, dict(env, XDG_DATA_HOME=str(second)), "install", "--target", "jobgate")
+        self.assertFalse((first / "astack").exists())
+        self.assertTrue((second / "astack/jobgate/jobgate.py").is_file())
+        self.run_with_config(module, dict(env, XDG_DATA_HOME=str(second)), "uninstall", "--target", "jobgate")
+        self.assertFalse((second / "astack").exists())
+
+    def test_jobgate_uninstall_after_an_interrupted_one_still_prunes(self):
+        module = self.manager()
+        data = self.root / "data"
+        env = {"XDG_DATA_HOME": str(data), "SHELL": "/bin/zsh", "PATH": "/usr/bin:/bin"}
+        self.run_with_config(module, env, "install", "--target", "jobgate")
+        manifest = self.home / ".local/state/astack/manifest.json"
+        state = json.loads(manifest.read_text())
+        for filename in list(state["targets"]["jobgate"]):
+            if not filename.endswith("/.local/bin/jobgate"):
+                Path(filename).unlink()
+                del state["targets"]["jobgate"][filename]
+        manifest.write_text(json.dumps(state))
+        self.run_with_config(module, env, "uninstall", "--target", "jobgate")
+        self.assertFalse((data / "astack").exists())
+
+    def test_jobgate_uninstall_prunes_when_the_install_never_recorded_its_folder(self):
+        module = self.manager()
+        data = self.root / "data"
+        env = {"XDG_DATA_HOME": str(data), "SHELL": "/bin/zsh", "PATH": "/usr/bin:/bin"}
+        self.run_with_config(module, env, "install", "--target", "jobgate")
+        manifest = self.home / ".local/state/astack/manifest.json"
+        state = json.loads(manifest.read_text())
+        del state["jobgate"]["lib"]
+        manifest.write_text(json.dumps(state))
+        self.run_with_config(module, env, "uninstall", "--target", "jobgate")
+        self.assertFalse((data / "astack").exists())
+
+    def test_jobgate_relative_zdotdir_uninstalls_from_another_folder(self):
+        module = self.manager()
+        (self.root / "dotfiles").mkdir()
+        env = {"SHELL": "/bin/zsh", "PATH": "/usr/bin:/bin", "ZDOTDIR": "dotfiles"}
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        start = os.getcwd()
+        try:
+            os.chdir(str(self.root))
+            self.run_with_config(module, env, "install", "--target", "jobgate")
+            self.assertIn("jobgate on PATH", (self.root / "dotfiles/.zshrc").read_text())
+            os.chdir(str(elsewhere))
+            self.run_with_config(module, env, "uninstall", "--target", "jobgate")
+        finally:
+            os.chdir(start)
+        self.assertFalse((self.root / "dotfiles/.zshrc").exists())
+        self.assertFalse((self.root / "dotfiles/.zprofile").exists())
 
     def test_changed_config_requires_uninstall_then_reinstall(self):
         module = self.manager()
