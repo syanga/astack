@@ -10,7 +10,13 @@ Treat invocation as authorization to update and reinstall astack without another
 
 Fetch astack's upstream, then fast-forward its `main` worktree to remote main when possible. Leave unrelated untracked files and directories in place. If local edits, unpublished commits, or conflicting paths prevent the fast-forward, install from a separate clean worktree at remote main. Preserve the existing work and task branches.
 
-Run `./install.sh` from the updated checkout even when already current. Pass `--target` for each target under `targets` in the astack manifest, `${XDG_STATE_HOME:-$HOME/.local/state}/astack/manifest.json`. Also pass `--target jobgate`, even when the manifest has no `jobgate` target. Without a manifest, pass no `--target`, so the installer installs its default targets. When the user names targets, pass only those. For installer conflicts, use the installer's `--force` option to back up conflicting files and complete the upgrade. Report any backup locations, and any `APPEND`, `SKIP PATH`, or `WARN` line, with the result.
+Run `./install.sh` from the updated checkout even when already current. Choose its targets this way:
+
+- When the astack manifest, `${XDG_STATE_HOME:-$HOME/.local/state}/astack/manifest.json`, exists, pass `--target` for each target under its `targets`. Also pass `--target jobgate`, even when `targets` has no `jobgate`.
+- Without a manifest, pass no `--target`, so the installer installs its default targets.
+- When the user names targets, pass only those, in place of both cases above.
+
+For installer conflicts, use the installer's `--force` option to back up conflicting files and complete the upgrade. Report any backup locations, and any `APPEND`, `SKIP PATH`, or `WARN` line, with the result.
 
 When the manifest lists `claude-router` under `components`, update the router after the harness install succeeds:
 
