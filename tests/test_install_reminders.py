@@ -6,6 +6,7 @@ from pathlib import Path
 import pwd
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -40,9 +41,7 @@ from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 import astack_reminders, memory_guard
 root = Path(sys.argv[2])
-guard = memory_guard.Host(lru_gen_enabled_file=root / "enabled", min_ttl_ms_file=root / "min_ttl_ms",
-                          boot_file=root / "astack-memory-guard.conf")
-host = astack_reminders.Host(guard=guard, linger_dir=root / "linger")
+host = astack_reminders.Host(guard=memory_guard.Host(root), linger_dir=root / "linger")
 print("\n".join(astack_reminders.pending(json.loads(sys.argv[3]), host)))
 '''
 
@@ -58,8 +57,7 @@ class ReminderTests(unittest.TestCase):
         self.enabled.write_text("0x0007\n")
         self.ttl = lru_gen / "min_ttl_ms"
         self.ttl.write_text("0\n")
-        self.guard = memory_guard.Host(lru_gen_enabled_file=self.enabled, min_ttl_ms_file=self.ttl,
-                                       boot_file=self.root / "etc/tmpfiles.d/astack-memory-guard.conf")
+        self.guard = memory_guard.Host(self.root)
         linger_dir = self.root / "var/lib/systemd/linger"
         self.linger = linger_dir / pwd.getpwuid(os.getuid()).pw_name
         self.host = astack_reminders.Host(guard=self.guard, linger_dir=linger_dir)
@@ -106,6 +104,17 @@ class ReminderTests(unittest.TestCase):
         self.assertIsNone(self.guard_command(self.pending()))
 
         self.ttl.write_text("0\n")
+        self.assertIsNotNone(self.guard_command(self.pending()))
+
+    @unittest.skipIf(shutil.which("systemd-tmpfiles") is None, "needs systemd-tmpfiles")
+    def test_no_guard_reminder_while_another_tmpfiles_d_rule_sets_min_ttl_ms_at_boot(self):
+        rule = self.root / "etc/tmpfiles.d/mglru.conf"
+        rule.parent.mkdir(parents=True)
+        rule.write_text("w- {} - - - - 1000\n".format(memory_guard.MIN_TTL_MS_PATH))
+        self.ttl.write_text("1000\n")
+        self.assertIsNone(self.guard_command(self.pending()))
+
+        rule.unlink()
         self.assertIsNotNone(self.guard_command(self.pending()))
 
     def test_no_guard_reminder_where_the_kernel_has_no_multi_gen_lru(self):
@@ -185,7 +194,7 @@ class ReminderTests(unittest.TestCase):
 
     def test_a_reminder_that_cannot_read_its_state_leaves_the_others(self):
         self.guard.boot_file.parent.mkdir(parents=True)
-        self.guard.boot_file.write_text("w {} - - - - 1000\n".format(self.ttl))
+        self.guard.boot_file.write_text("w {} - - - - 1000\n".format(memory_guard.MIN_TTL_MS_PATH))
         (self.router_state / "config.json").write_text("[]")
         output = self.pending(self.installed_router("systemd"))
 
@@ -227,9 +236,10 @@ class InstallerReminderTests(InstallerFixture):
 
     def test_the_guard_command_names_this_checkout_even_when_its_path_has_spaces(self):
         host_files = self.root / "host files"
-        host_files.mkdir()
-        (host_files / "enabled").write_text("0x0007\n")
-        (host_files / "min_ttl_ms").write_text("0\n")
+        lru_gen = host_files / "sys/kernel/mm/lru_gen"
+        lru_gen.mkdir(parents=True)
+        (lru_gen / "enabled").write_text("0x0007\n")
+        (lru_gen / "min_ttl_ms").write_text("0\n")
         result = subprocess.run([sys.executable, "-c", PRINT_REMINDERS, str(self.repo / "scripts"), str(host_files),
                                  json.dumps({"targets": {}})], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
