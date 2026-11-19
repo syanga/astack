@@ -1,17 +1,16 @@
-from contextlib import suppress
 from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
 import pwd
 import shlex
+from typing import Callable
 
 import claude_router
 import memory_guard
 
 GUARD_README = "README.md#keep-a-linux-machine-responsive-when-memory-runs-out"
 ROUTER_README = "README.md#install-the-optional-claude-router"
-UNREADABLE = (OSError, ValueError, KeyError, AttributeError, memory_guard.GuardError)
 
 
 @dataclass(frozen=True)
@@ -53,16 +52,20 @@ def setup_step(layout: dict) -> list[str]:
                 "claude-router setup" if enrolled else "claude-router setup -account NAME")
 
 
+def router_steps(state: dict, host: Host) -> list[str]:
+    layout = state.get("components", {}).get(claude_router.NAME, {}).get("layout")
+    if not layout:
+        return ["OPTIONAL claude-router is not installed ({})".format(ROUTER_README)]
+    return best_effort(linger_step, layout, host) + best_effort(setup_step, layout)
+
+
+def best_effort(step: Callable[..., list[str]], *arguments) -> list[str]:
+    try:
+        return step(*arguments)
+    except Exception:
+        return []
+
+
 def pending(state: dict, host: Host | None = None) -> list[str]:
     host = host or real_host()
-    layout = state.get("components", {}).get(claude_router.NAME, {}).get("layout")
-    steps = [lambda: guard_step(host)]
-    if layout:
-        steps += [lambda: linger_step(layout, host), lambda: setup_step(layout)]
-    lines = []
-    for step in steps:
-        with suppress(*UNREADABLE):
-            lines += step()
-    if not layout:
-        lines.append("OPTIONAL claude-router is not installed ({})".format(ROUTER_README))
-    return lines
+    return best_effort(guard_step, host) + best_effort(router_steps, state, host)

@@ -112,8 +112,9 @@ class ReminderTests(unittest.TestCase):
     def test_setup_reminder_reuses_the_accounts_that_config_json_lists(self):
         state = self.installed_router("launchd")
         config = self.router_state / "config.json"
-        config.write_text(json.dumps({"accounts": []}))
-        self.assertEqual(self.setup_command(self.pending(state)), SETUP)
+        for text in ("{}", json.dumps({"accounts": []})):
+            config.write_text(text)
+            self.assertEqual(self.setup_command(self.pending(state)), SETUP)
 
         config.write_text(json.dumps({"accounts": [{"id": "work", "capacity": 1}]}))
         self.assertEqual(self.setup_command(self.pending(state)), "claude-router setup")
@@ -139,6 +140,11 @@ class ReminderTests(unittest.TestCase):
         self.assertIsNone(self.guard_command(output))
         self.assertIsNone(self.setup_command(output))
         self.assertIn(LINGER, output)
+
+    def test_a_malformed_router_record_leaves_the_guard_reminder(self):
+        for components in (None, {"claude-router": {"layout": "x"}}, {"claude-router": {"layout": {}}}):
+            output = self.pending({"targets": {}, "components": components})
+            self.assertIsNotNone(self.guard_command(output), components)
 
     def test_every_readme_link_names_a_readme_section(self):
         output = self.pending() + "\n" + self.pending(self.installed_router("systemd"))
