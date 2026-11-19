@@ -47,9 +47,9 @@ Report Backlog items as implementation proposals. File them to a tracker only wh
 For each approved Accepted item, follow the Routing field exactly:
 
 - Trivial existing-skill edit (a one-line bullet, a tightened sentence, a stale fact corrected): parent does directly.
-- Substantive existing-skill edit (a new section, a new pattern table, more than ~10 lines): follow `writing-for-agents`, then exercise a representative case when the edit changes behavior.
-- `tune description: <skill path>` (the skill exists but didn't trigger when it should have): follow `writing-for-agents` and check the description against representative requests.
-- `new skill: <source path>`: follow `writing-for-agents` and its skill-mechanics reference in the owning repository's skill source location. Exercise a representative task before delivery.
+- Substantive existing-skill edit (a new section, a new pattern table, more than ~10 lines): follow `writing-for-agents`. For a behavior change, also follow its [Test a behavior change](../writing-for-agents/SKILL.md#test-a-behavior-change).
+- `tune description: <skill path>` (the skill exists but didn't trigger when it should have): follow `writing-for-agents` and test the description as its [Test a behavior change](../writing-for-agents/SKILL.md#test-a-behavior-change) describes.
+- `new skill: <source path>`: follow `writing-for-agents` and its skill-mechanics reference in the owning repository's skill source location. Test it as writing-for-agents' [Test a behavior change](../writing-for-agents/SKILL.md#test-a-behavior-change) describes.
 - `instructions: <source path>`: update the owning instruction source under `writing-for-agents`.
 
 If your environment ships a SKILL.md validator, run it on every touched skill before declaring done. Skip this step if it doesn't.
