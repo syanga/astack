@@ -158,6 +158,85 @@ or build wait for room on the machine, follow
 [jobgate reference](docs/jobgate.md) covers admission, the kernel memory cap on
 Linux, macOS priority, and the result log.
 
+## Keep a Linux machine responsive when memory runs out
+
+When agents and test suites fill a Linux machine's RAM, the kernel evicts the
+code of running programs. The desktop then freezes until the OOM killer ends a
+process. [scripts/memory_guard.py](scripts/memory_guard.py) turns on the
+kernel's
+[thrashing prevention](https://docs.kernel.org/admin-guide/mm/multigen_lru.html#thrashing-prevention)
+by setting `/sys/kernel/mm/lru_gen/min_ttl_ms` to 1000. When the whole machine
+runs short of memory, the kernel then ends a process instead of evicting pages
+used in the last second. The setting does not apply when a cgroup reaches its
+own `memory.max`, such as jobgate's kernel memory cap. At each boot,
+`systemd-tmpfiles` sets the value again from
+`/etc/tmpfiles.d/astack-memory-guard.conf`. The script needs the kernel's
+multi-gen LRU. On macOS, the script changes nothing.
+
+When thrashing prevention acts, the kernel ends the process with the highest
+OOM score, usually the largest process. If that process's unit keeps systemd's
+default `OOMPolicy=stop`, systemd then stops the whole unit. On systemd 253 or
+newer, scope units also have `OOMPolicy=`, so a kill in a terminal tab's scope
+ends the tab and every agent in it. jobgate gives each run's scope
+`OOMPolicy=continue` on those versions, so systemd does not stop a jobgate run
+after a kill inside it.
+
+To check the machine, preview the change, and make it:
+
+```sh
+python3 scripts/memory_guard.py status
+python3 scripts/memory_guard.py install --dry-run
+sudo python3 scripts/memory_guard.py install
+```
+
+To preview and revert the change:
+
+```sh
+python3 scripts/memory_guard.py uninstall --dry-run
+sudo python3 scripts/memory_guard.py uninstall
+```
+
+`uninstall` restores the value that `min_ttl_ms` had before the first `install`.
+
+### Move `/tmp` from RAM to disk
+
+A tmpfs `/tmp` keeps its files in RAM, and the kernel can free that memory only
+by writing the files to swap. A `/tmp` on disk keeps its files on disk. The
+kernel caches those files in RAM. When memory runs short, the kernel can write
+the cache back to disk and free it. `findmnt /tmp` shows `tmpfs` in the
+`FSTYPE` column when `/tmp` is in RAM.
+
+Never leave `tmp.mount` masked while `/etc/fstab` mounts `/tmp`. The next boot
+then skips `local-fs.target`, so the other file systems in `/etc/fstab` can
+stay unmounted and the root file system can stay read-only.
+
+These steps move `/tmp` to disk:
+
+1. Run `sudo findmnt --fstab --types tmpfs --mountpoint /tmp`. If it prints a
+   `/tmp` line, use `sudoedit /etc/fstab` to comment out the line that mounts a
+   tmpfs on `/tmp`. Then repeat this step. If it prints nothing, go to step 2.
+   If it prints an error, stop here.
+2. Run `sudo findmnt --fstab --mountpoint /tmp`. If it prints a `/tmp` line, go
+   to step 4, because `/etc/fstab` mounts another file system on `/tmp`. If it
+   prints nothing, go to step 3. If it prints an error, stop here.
+3. Run `sudo systemctl mask tmp.mount`. The mask stops a packaged `tmp.mount`,
+   such as the one in Ubuntu 26.04, from mounting a tmpfs on `/tmp`. If
+   `systemctl mask` reports that `/etc/systemd/system/tmp.mount` already
+   exists, stop here. These steps do not cover that file.
+4. Reboot. `findmnt /tmp` then prints nothing, or shows an `FSTYPE` other than
+   `tmpfs`.
+
+On disk, `/tmp` keeps files until `systemd-tmpfiles` deletes them.
+`systemd-tmpfiles-clean.timer` starts `systemd-tmpfiles` once a day.
+`/usr/lib/tmpfiles.d/tmp.conf` sets the age limit, which is 10 days on Ubuntu
+26.04.
+
+These steps move `/tmp` back to RAM:
+
+1. Run `sudo systemctl unmask tmp.mount`.
+2. Restore any `/etc/fstab` line that you commented out.
+3. Reboot.
+
 ## Find a skill
 
 Ask [astack-help](skills/astack-help/SKILL.md) which skills fit the current task.
