@@ -3,9 +3,9 @@
 
 Each run gets its own configuration directory. It holds the CLAUDE.md and skills
 that `scripts/manage.py install` would deploy from this checkout for Claude
-Code. Its settings copy apiKeyHelper, env, model, and autoMemoryEnabled from
-your Claude Code settings. A session signed in only through /login cannot sign
-in here. Create a token with `claude setup-token` and export it as
+Code. Its settings.json copies apiKeyHelper, env, model, and autoMemoryEnabled
+from your Claude Code settings. A session signed in only through /login cannot
+sign in here. Create a token with `claude setup-token` and export it as
 CLAUDE_CODE_OAUTH_TOKEN.
 
 Sessions run in this checkout and may use only Read, Grep, Glob, Skill, and the
@@ -13,9 +13,9 @@ shell commands Claude Code treats as read-only. Every other tool call is denied,
 so an attempt to edit, post, or merge appears in the report as a denied call
 instead of happening. Sessions skip local settings
 (.claude/settings.local.json). The script refuses to start when anything else
-in the checkout could approve a call: a committed .claude/settings.json with
-more than deny and ask rules, any other entry under .claude/ except Claude
-Code's worktrees, or a skill that declares allowed-tools.
+in the checkout could approve a call. It accepts a .claude/settings.json with
+only deny and ask rules, and .claude/worktrees/. It refuses any other entry in
+a .claude/ folder at any depth, and a skill that declares allowed-tools.
 
 The report lists each run's skills, actions, and answers, then how many runs
 used each skill and had each tool denied. The script exits 1 when any run times
@@ -104,6 +104,11 @@ def read_only_problems():
     if PROJECT_CONFIG.is_dir():
         problems += ["{} exists".format(path) for path in sorted(PROJECT_CONFIG.iterdir())
                      if path not in ACCEPTED_ENTRIES]
+    for folder, children, _ in os.walk(REPO):
+        children[:] = sorted(child for child in children if child not in (".git", "node_modules"))
+        nested = Path(folder) / ".claude"
+        if ".claude" in children and nested != PROJECT_CONFIG:
+            problems.append("{} exists".format(nested))
     for relative, data, _ in manage.skill_files():
         parts = data.decode("utf-8").split("---", 2) if relative.name == "SKILL.md" else []
         frontmatter = parts[1] if len(parts) == 3 else ""

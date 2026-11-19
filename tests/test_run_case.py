@@ -88,7 +88,7 @@ class RunCaseTests(unittest.TestCase):
         shutil.copytree(REPO, cls.checkout, ignore=UNCOPIED)
 
     def copy_checkout(self):
-        checkout = self.temp / "checkout"
+        checkout = Path(tempfile.mkdtemp(dir=self.temp)) / "checkout"
         shutil.copytree(self.checkout, checkout)
         return checkout
 
@@ -192,6 +192,10 @@ class RunCaseTests(unittest.TestCase):
             "a sandbox": ({".claude/settings.json": json.dumps({"sandbox": {"enabled": True}})}, "sandbox"),
             "malformed settings": ({".claude/settings.json": "{not json"}, "not a JSON object"),
             "a project command": ({".claude/commands/ship.md": "ship it"}, ".claude/commands"),
+            "a nested project skill": ({"components/demo/.claude/skills/ship/SKILL.md": "ship it"},
+                                       "components/demo/.claude"),
+            "a project skill in a worktree": ({".claude/worktrees/probe/.claude/skills/ship/SKILL.md": "ship it"},
+                                              ".claude/worktrees/probe/.claude"),
             "a skill's allowed-tools": (
                 {"skills/tdd/SKILL.md": tdd.replace("description:", "allowed-tools: Write\ndescription:", 1)},
                 "skills/tdd/SKILL.md"),
@@ -202,8 +206,8 @@ class RunCaseTests(unittest.TestCase):
                 for path, contents in files.items():
                     (checkout / path).parent.mkdir(parents=True, exist_ok=True)
                     (checkout / path).write_text(contents)
+                self.log.unlink(missing_ok=True)
                 refused, sessions = self.run_case("--runs", "1", "Add a feature", checkout=checkout)
-                shutil.rmtree(checkout)
 
                 self.assertNotEqual(refused.returncode, 0)
                 self.assertIn(named, refused.stderr)
@@ -215,6 +219,7 @@ class RunCaseTests(unittest.TestCase):
         (checkout / ".claude/worktrees/probe").mkdir(parents=True)
         (checkout / ".claude/settings.json").write_text(json.dumps(narrowing))
         (checkout / ".claude/settings.local.json").write_text(json.dumps({"permissions": {"allow": ["Write"]}}))
+        self.log.unlink(missing_ok=True)
         allowed, sessions = self.run_case("--runs", "1", "Add a feature", checkout=checkout)
 
         self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
