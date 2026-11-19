@@ -59,9 +59,9 @@ emit({"type": "assistant", "message": {"content": [
     {"type": "tool_use", "id": "t6", "name": "Bash", "input": {"command": "ls missing"}},
 ]}})
 emit({"type": "user", "message": {"content": [
-    {"type": "tool_result", "tool_use_id": "t1", "is_error": False, "content": "Launching skill: tdd"},
+    {"type": "tool_result", "tool_use_id": "t1", "content": "Launching skill: tdd"},
     {"type": "tool_result", "tool_use_id": "t7", "is_error": True, "content": "Unknown skill: missing-skill"},
-    {"type": "tool_result", "tool_use_id": "t5", "is_error": False, "content": "abc123 subject"},
+    {"type": "tool_result", "tool_use_id": "t5", "content": "abc123 subject"},
     {"type": "tool_result", "tool_use_id": "t6", "is_error": True, "content": "Exit code 2\nls: missing: No such file"},
 ]}})
 emit({"type": "system", "subtype": "permission_denied", "tool_name": "Skill", "tool_use_id": "t8",
@@ -192,32 +192,59 @@ class RunCaseTests(unittest.TestCase):
 
     def test_refuses_to_run_when_the_checkout_could_approve_more_than_reading(self):
         tdd = (self.checkout / "skills/tdd/SKILL.md").read_text()
+        allow = json.dumps({"permissions": {"allow": ["Write"]}})
+
+        def write(path, text):
+            def setup(checkout):
+                (checkout / path).parent.mkdir(parents=True, exist_ok=True)
+                (checkout / path).write_text(text)
+            return setup
+
+        def link_claude(folder):
+            def setup(checkout):
+                target = checkout.parent / "linked"
+                (target / "skills/ship").mkdir(parents=True)
+                (target / "skills/ship/SKILL.md").write_text("ship it")
+                (checkout / folder).mkdir(parents=True, exist_ok=True)
+                (checkout / folder / ".claude").symlink_to(target)
+            return setup
+
+        def unreadable(checkout):
+            folder = checkout / "components/demo/.claude"
+            (folder / "skills/ship").mkdir(parents=True)
+            folder.chmod(0o111)
+            self.addCleanup(folder.chmod, 0o755)
+
+        def skill_frontmatter(lines):
+            return write("skills/tdd/SKILL.md", tdd.replace("description:", lines + "\ndescription:", 1))
+
         loosening = {
-            "an allow rule": ({".claude/settings.json": json.dumps({"permissions": {"allow": ["Write"]}})},
-                              "permissions.allow"),
-            "a hook": ({".claude/settings.json": json.dumps({"hooks": {"PreToolUse": []}})}, "hooks"),
-            "a sandbox": ({".claude/settings.json": json.dumps({"sandbox": {"enabled": True}})}, "sandbox"),
-            "malformed settings": ({".claude/settings.json": "{not json"}, "not a JSON object"),
-            "a project command": ({".claude/commands/ship.md": "ship it"}, ".claude/commands"),
-            "a nested project skill": ({"components/demo/.claude/skills/ship/SKILL.md": "ship it"},
-                                       "components/demo/.claude"),
-            "a project skill in a worktree": ({".claude/worktrees/probe/.claude/skills/ship/SKILL.md": "ship it"},
-                                              ".claude/worktrees/probe/.claude"),
-            "a project skill in node_modules": ({"node_modules/pkg/.claude/skills/ship/SKILL.md": "ship it"},
-                                                "node_modules/pkg/.claude"),
-            "a quoted allowed-tools key": (
-                {"skills/tdd/SKILL.md": tdd.replace("description:", '"allowed-tools": Write\ndescription:', 1)},
-                "skills/tdd/SKILL.md"),
-            "a skill's allowed-tools": (
-                {"skills/tdd/SKILL.md": tdd.replace("description:", "allowed-tools: Write\ndescription:", 1)},
-                "skills/tdd/SKILL.md"),
+            "an allow rule": (write(".claude/settings.json", allow), "permissions.allow"),
+            "a hook": (write(".claude/settings.json", json.dumps({"hooks": {"PreToolUse": []}})), "hooks"),
+            "a sandbox": (write(".claude/settings.json", json.dumps({"sandbox": {"enabled": True}})), "sandbox"),
+            "malformed settings": (write(".claude/settings.json", "{not json"), "not a JSON object"),
+            "a project command": (write(".claude/commands/ship.md", "ship it"), ".claude/commands"),
+            "a nested project skill": (write("components/demo/.claude/skills/ship/SKILL.md", "ship it"),
+                                       "components/demo/.claude/skills"),
+            "a nested settings.json that allows": (write("components/demo/.claude/settings.json", allow),
+                                                   "components/demo/.claude/settings.json"),
+            "a project skill in a worktree": (write(".claude/worktrees/probe/.claude/skills/ship/SKILL.md", "ship it"),
+                                              ".claude/worktrees/probe/.claude/skills"),
+            "a project skill in node_modules": (write("node_modules/pkg/.claude/skills/ship/SKILL.md", "ship it"),
+                                                "node_modules/pkg/.claude/skills"),
+            "a symlinked .claude": (link_claude("."), ".claude is a symlink"),
+            "a symlinked nested .claude": (link_claude("components/demo"), "components/demo/.claude is a symlink"),
+            "an unreadable nested .claude": (unreadable, "components/demo/.claude"),
+            "a skill's allowed-tools": (skill_frontmatter("allowed-tools: Write"), "skills/tdd/SKILL.md"),
+            "a quoted allowed-tools key": (skill_frontmatter('"allowed-tools": Write'), "skills/tdd/SKILL.md"),
+            "an escaped allowed-tools key": (skill_frontmatter('"allowed\\x2dtools": Write'), "skills/tdd/SKILL.md"),
+            "allowed-tools after a dashed value": (skill_frontmatter("argument-hint: a --- b\nallowed-tools: Write"),
+                                                   "skills/tdd/SKILL.md"),
         }
-        for case, (files, named) in loosening.items():
+        for case, (setup, named) in loosening.items():
             with self.subTest(case):
                 checkout = self.copy_checkout()
-                for path, contents in files.items():
-                    (checkout / path).parent.mkdir(parents=True, exist_ok=True)
-                    (checkout / path).write_text(contents)
+                setup(checkout)
                 self.log.unlink(missing_ok=True)
                 refused, sessions = self.run_case("--runs", "1", "Add a feature", checkout=checkout)
 

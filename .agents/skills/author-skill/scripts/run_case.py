@@ -13,11 +13,14 @@ shell commands Claude Code treats as read-only. Every other tool call is denied,
 so an attempt to edit, post, or merge appears in the report as a denied call
 instead of happening. Sessions skip local settings
 (.claude/settings.local.json). The script refuses to start when anything else
-in the checkout could approve a call. Every .claude/ folder in the checkout may
-hold only settings.json, settings.local.json, and worktrees/, and the top-level
-settings.json may hold only deny and ask rules. The script also refuses a skill
-whose frontmatter mentions allowed-tools, and an output directory that already
-holds transcripts.
+in the checkout could approve a call:
+
+- a .claude/ entry anywhere in the checkout that is a symlink or cannot be read
+- an entry in a .claude/ folder other than settings.json, settings.local.json,
+  and worktrees/
+- a .claude/settings.json with anything but deny and ask rules
+- a skill whose frontmatter declares a key other than name, description,
+  disable-model-invocation, and argument-hint, such as allowed-tools
 
 The report lists each run's skills, actions, and answers, then how many runs
 used each skill and had each tool denied. The script exits 1 when any run times
@@ -45,10 +48,9 @@ import manage
 ALLOWED = ("Read", "Grep", "Glob", "Skill")
 CONTEXT_TOOLS = set(ALLOWED) | {"ToolSearch", "TodoWrite"}
 DRAIN_SECONDS = 5
-PROJECT_CONFIG = REPO / ".claude"
-PROJECT_SETTINGS = PROJECT_CONFIG / "settings.json"
 ACCEPTED_ENTRIES = {"settings.json", "settings.local.json", "worktrees"}
 NARROWING_RULES = {"deny", "ask"}
+FRONTMATTER_KEYS = {"name", "description", "disable-model-invocation", "argument-hint"}
 USER_SETTINGS = ("apiKeyHelper", "env", "model", "autoMemoryEnabled")
 PARENT_SESSION_VARIABLES = (
     "CLAUDECODE", "CLAUDE_PID", "CLAUDE_AGENT_SDK_VERSION", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH",
@@ -67,7 +69,7 @@ class Turn:
     prompt: str
     calls: list[dict] = field(default_factory=list)
     errors: dict[str, object] = field(default_factory=dict)
-    completed: set[str] = field(default_factory=set)
+    succeeded: set[str] = field(default_factory=set)
     denied: set[str] = field(default_factory=set)
     result: dict | None = None
     problem: str | None = None
@@ -88,31 +90,58 @@ def build_config(root):
     return destination.parent
 
 
-def settings_problems():
-    if not PROJECT_SETTINGS.exists():
-        return []
+def settings_problems(path):
     try:
-        settings = json.loads(PROJECT_SETTINGS.read_text(encoding="utf-8"))
-    except ValueError:
+        settings = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         settings = None
     if not isinstance(settings, dict) or not isinstance(settings.get("permissions", {}), dict):
-        return ["{} is not a JSON object of deny and ask rules".format(PROJECT_SETTINGS)]
+        return ["{} is not a JSON object of deny and ask rules".format(path)]
     keys = ["permissions." + key for key in settings.get("permissions", {}) if key not in NARROWING_RULES]
     keys += [key for key in settings if key != "permissions"]
-    return ["{} sets {}".format(PROJECT_SETTINGS, ", ".join(sorted(keys)))] if keys else []
+    return ["{} sets {}".format(path, ", ".join(sorted(keys)))] if keys else []
+
+
+def config_problems():
+    problems = []
+    for folder, children, files in os.walk(REPO, onerror=lambda error: problems.append(
+            "{} cannot be read".format(error.filename))):
+        children[:] = sorted(child for child in children if child != ".git")
+        here = Path(folder)
+        problems += ["{} is a symlink".format(here / entry) for entry in sorted(children + files)
+                     if entry.lower() == ".claude" and (here / entry).is_symlink()]
+        if here.name.lower() != ".claude":
+            continue
+        for entry in sorted(children + files):
+            path = here / entry
+            if entry not in ACCEPTED_ENTRIES or path.is_symlink():
+                problems.append("{} exists".format(path))
+            elif entry == "settings.json":
+                problems += settings_problems(path)
+    return problems
+
+
+def frontmatter_keys(text):
+    lines = text.splitlines()
+    if not lines or lines[0].rstrip() != "---":
+        return []
+    keys = []
+    for line in lines[1:]:
+        if line.rstrip() == "---":
+            return keys
+        if line and not line[0].isspace() and not line.startswith(("#", "-")):
+            keys.append(line.split(":", 1)[0].strip())
+    return []
 
 
 def read_only_problems():
-    problems = settings_problems()
-    for folder, children, files in os.walk(REPO):
-        children[:] = sorted(child for child in children if child != ".git")
-        if Path(folder).name == ".claude":
-            problems += ["{} exists".format(Path(folder) / entry) for entry in sorted(children + files)
-                         if entry not in ACCEPTED_ENTRIES]
+    problems = config_problems()
     for relative, data, _ in manage.skill_files():
-        parts = data.decode("utf-8").split("---", 2) if relative.name == "SKILL.md" else []
-        if len(parts) == 3 and "allowed-tools" in parts[1]:
-            problems.append("skills/{} declares allowed-tools".format(relative))
+        if relative.name != "SKILL.md":
+            continue
+        unknown = [key for key in frontmatter_keys(data.decode("utf-8")) if key not in FRONTMATTER_KEYS]
+        if unknown:
+            problems.append("skills/{} declares {}".format(relative, ", ".join(unknown)))
     return problems
 
 
@@ -164,7 +193,7 @@ def read_events(text, turn):
                 if block.get("is_error"):
                     turn.errors[block.get("tool_use_id")] = block.get("content")
                 else:
-                    turn.completed.add(block.get("tool_use_id"))
+                    turn.succeeded.add(block.get("tool_use_id"))
         elif event.get("type") == "result":
             turn.result = event
 
@@ -177,7 +206,7 @@ def run(index, prompts, config, args):
         turn = Turn(prompt)
         turns.append(turn)
         log = args.out / "run-{}-turn-{}.jsonl".format(index, number)
-        with log.open("w", encoding="utf-8") as stdout, sessions_lock:
+        with log.open("x", encoding="utf-8") as stdout, sessions_lock:
             if stopping.is_set():
                 turn.problem = "stopped"
                 break
@@ -245,7 +274,7 @@ def actions(turns):
 
 def skills(turns):
     named = (call["input"].get("skill") for turn in turns for call in turn.calls
-             if call["name"] == "Skill" and call["id"] in turn.completed)
+             if call["name"] == "Skill" and call["id"] in turn.succeeded)
     return list(dict.fromkeys(str(name) for name in named if name))
 
 
@@ -295,9 +324,13 @@ def main():
     parser.add_argument("--model", help="model for every session (default: your settings or account default)")
     parser.add_argument("--max-turns", type=int, default=30, help="agent turns allowed per message (default 30)")
     parser.add_argument("--timeout", type=float, default=900, help="seconds allowed per message (default 900)")
-    parser.add_argument("--out", type=Path, help="directory for transcripts (default: a new temporary directory)")
+    parser.add_argument("--out", type=Path, help="directory for transcripts, which must not already hold any "
+                        "(default: a new temporary directory)")
     args = parser.parse_args()
-    problems = read_only_problems()
+    try:
+        problems = read_only_problems()
+    except ValueError as error:
+        parser.error(str(error))
     if problems:
         parser.error("sessions would not be read-only: " + "; ".join(problems))
     for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
