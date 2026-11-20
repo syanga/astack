@@ -47,6 +47,9 @@ if mode == "api-error":
     emit({"type": "result", "subtype": "error_during_execution", "is_error": True, "result": "",
           "errors": ["API Error: 529 overloaded"], "total_cost_usd": 0})
     sys.exit(0)
+if mode == "garbled-stderr":
+    sys.stderr.buffer.write(b"warning: \xff\xfe\n")
+    sys.stderr.buffer.flush()
 emit({"type": "assistant", "message": {"content": [
     {"type": "tool_use", "id": "t0", "name": "Skill", "input": {}},
     {"type": "tool_use", "id": "t1", "name": "Skill", "input": {"skill": "tdd"}},
@@ -74,7 +77,7 @@ for call, tool in (("t3", "Edit"), ("t4", "Write")):
 if mode == "hang":
     emit({"type": "assistant", "message": {"content": [
         {"type": "tool_use", "id": "t9", "name": "Skill", "input": {"skill": "interrupted-skill"}}]}})
-    sys.stdout.buffer.write('{"type": "assistant", "message": "✓'.encode()[:-1])
+    sys.stdout.buffer.write(b'{"type": "assistant", "message": "\xe2\x9c')
     sys.stdout.buffer.flush()
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(45)"])
     record = Path(os.environ["FAKE_LOG"] + ".child")
@@ -82,6 +85,11 @@ if mode == "hang":
     os.replace(str(record) + ".tmp", record)
     time.sleep(60)
 session = argv[argv.index("--resume") + 1] if "--resume" in argv else "session-%d" % os.getpid()
+if mode == "line-separator":
+    answer = {"type": "result", "subtype": "success", "is_error": False, "session_id": session,
+              "result": "First line\u2028second line", "total_cost_usd": 0.25}
+    sys.stdout.buffer.write((json.dumps(answer, ensure_ascii=False) + "\n").encode())
+    sys.exit(0)
 emit({"type": "result", "subtype": "success", "is_error": False, "session_id": session,
       "result": "Answered %r in %s" % (prompt, session), "total_cost_usd": 0.25})
 '''
@@ -367,9 +375,9 @@ class RunCaseTests(unittest.TestCase):
         self.assertIn("run-1-turn-1.jsonl", result.stderr)
         self.assertEqual(sessions, [])
 
-    def test_refuses_counts_and_limits_out_of_range(self):
+    def test_refuses_counts_and_limits_out_of_range_and_accepts_a_one_day_timeout(self):
         for option, value in (("--runs", "0"), ("--max-turns", "0"), ("--timeout", "-1"), ("--timeout", "inf"),
-                              ("--timeout", "1e300")):
+                              ("--timeout", "86401")):
             with self.subTest(option, value=value):
                 result, sessions = self.run_case(option, value, "Add a feature", out=self.temp / (option + value))
 
@@ -377,6 +385,11 @@ class RunCaseTests(unittest.TestCase):
                 self.assertIn("argument {}:".format(option), result.stderr)
                 self.assertNotIn("Traceback", result.stderr)
                 self.assertEqual(sessions, [])
+
+        accepted, sessions = self.run_case("--runs", "1", "--timeout", "86400", "Add a feature")
+
+        self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+        self.assertEqual(len(sessions), 1)
 
     def test_runs_started_together_into_one_output_directory_leave_one_running(self):
         scripts = [self.start("--runs", "1", "Add a feature") for _ in range(3)]
@@ -401,7 +414,7 @@ class RunCaseTests(unittest.TestCase):
         self.assertEqual(case["prompts"], ["Is the guidance clear?", "Yes, do it"])
         self.assertEqual(case["runs"], 1)
 
-    def test_run_that_times_out_keeps_its_actions_and_fails_the_command(self):
+    def test_run_cut_off_mid_character_by_its_timeout_keeps_its_actions_and_fails_the_command(self):
         self.addCleanup(self.kill_recorded_child)
         started = time.monotonic()
         result, _ = self.run_case("--runs", "1", "--timeout", "1", "Add a feature", mode="hang")
@@ -437,6 +450,19 @@ class RunCaseTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("fatal: config unreadable", result.stdout)
+
+    def test_stderr_that_is_not_utf8_keeps_the_report(self):
+        result, _ = self.run_case("--runs", "1", "Add a feature", mode="garbled-stderr")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Answered 'Add a feature' in session-", result.stdout)
+
+    def test_answer_with_a_raw_line_separator_is_reported(self):
+        result, _ = self.run_case("--runs", "1", "Add a feature", mode="line-separator")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("First line", result.stdout)
+        self.assertIn("second line", result.stdout)
 
     def test_error_result_fails_the_command_even_when_claude_exits_0(self):
         result, _ = self.run_case("--runs", "1", "Add a feature", mode="api-error")

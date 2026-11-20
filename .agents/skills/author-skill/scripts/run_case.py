@@ -62,7 +62,7 @@ import manage
 ALLOWED = ("Read", "Grep", "Glob", "Skill")
 CONTEXT_TOOLS = set(ALLOWED) | {"ToolSearch", "TodoWrite"}
 DRAIN_SECONDS = 5
-MAX_TIMEOUT = 86400
+MAX_TIMEOUT_SECONDS = 86400
 ACCEPTED_ENTRIES = {"settings.json", "settings.local.json", "worktrees"}
 NARROWING_RULES = {"deny", "ask"}
 FRONTMATTER_KEYS = {"name", "description", "disable-model-invocation", "argument-hint"}
@@ -226,7 +226,7 @@ def command(prompt, args, session):
 
 
 def read_events(text, turn):
-    for line in text.splitlines():
+    for line in text.split("\n"):
         try:
             event = json.loads(line)
         except ValueError:
@@ -264,7 +264,8 @@ def run(index, prompts, config, args):
                 turn.problem = "stopped"
                 break
             process = subprocess.Popen(command(prompt, args, session), cwd=REPO, env=env, stdin=subprocess.DEVNULL,
-                                       stdout=stdout, stderr=subprocess.PIPE, text=True, start_new_session=True)
+                                       stdout=stdout, stderr=subprocess.PIPE, encoding="utf-8", errors="replace",
+                                       start_new_session=True)
             live_sessions.add(process)
         try:
             _, stderr = process.communicate(timeout=args.timeout)
@@ -405,8 +406,8 @@ def main():
     parser.add_argument("--model", help="model for every session (default: your settings or account default)")
     parser.add_argument("--max-turns", type=positive(int), default=30,
                         help="agent turns allowed per message (default 30)")
-    parser.add_argument("--timeout", type=positive(float, MAX_TIMEOUT), default=900,
-                        help="seconds allowed per message, at most {} (default 900)".format(MAX_TIMEOUT))
+    parser.add_argument("--timeout", type=positive(float, MAX_TIMEOUT_SECONDS), default=900,
+                        help="seconds allowed per message, at most {} (default 900)".format(MAX_TIMEOUT_SECONDS))
     parser.add_argument("--out", type=Path, help="a new or empty directory to hold the transcripts and case.json, "
                         "which records the prompts and options (default: a new temporary directory)")
     args = parser.parse_args()
