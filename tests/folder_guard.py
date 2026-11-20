@@ -8,7 +8,8 @@ signal.signal(signal.SIGTERM, signal.SIG_IGN)
 folder = os.fsdecode(sys.stdin.buffer.read())
 fifo_fds = []
 for parent, _, names in os.walk(folder):
-    for path in (os.path.join(parent, name) for name in names):
+    for name in names:
+        path = os.path.join(parent, name)
         try:
             if stat.S_ISFIFO(os.lstat(path).st_mode):
                 fifo_fds.append(os.open(path, os.O_RDWR | os.O_NONBLOCK))
