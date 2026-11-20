@@ -368,6 +368,33 @@ class RunCaseTests(unittest.TestCase):
         self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
         self.assertEqual(len(sessions), 1)
 
+    def test_refuses_a_skill_in_the_main_checkout_that_a_linked_worktree_loads(self):
+        main = self.copy_checkout()
+        git = ["git", "-C", str(main), "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+               "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false"]
+        for arguments in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "checkout"],
+                          ["worktree", "add", "-q", "--detach", str(main.parent / "lane")]):
+            subprocess.run([*git, *arguments], check=True, capture_output=True)
+        (main / ".claude").mkdir()
+        (main / ".claude/settings.local.json").write_text("{}")
+
+        allowed, sessions = self.run_case("--runs", "1", "Add a feature", checkout=main.parent / "lane")
+
+        self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
+        self.assertEqual(len(sessions), 1)
+
+        (main / ".claude/skills/ship").mkdir(parents=True)
+        (main / ".claude/skills/ship/SKILL.md").write_text("ship it")
+        self.log.unlink()
+
+        refused, sessions = self.run_case("--runs", "1", "Add a feature", checkout=main.parent / "lane",
+                                          out=main.parent / "refused")
+
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("checkout/.claude/skills exists", refused.stderr)
+        self.assertNotIn("Traceback", refused.stderr)
+        self.assertEqual(sessions, [])
+
     def test_refuses_an_unreadable_settings_json_only_as_unreadable(self):
         checkout = self.copy_checkout()
         settings = checkout / ".claude/settings.json"

@@ -23,13 +23,17 @@ in the checkout could approve a call:
 - a .claude/settings.json that sets anything but $schema, deny rules, and ask
   rules
 - a skill whose SKILL.md does not open with frontmatter between two --- lines,
-  or whose frontmatter has a line break other than LF or CRLF. A --- line may
-  end in spaces or tabs.
+  which may end in spaces or tabs, or whose frontmatter has a line break other
+  than LF or CRLF
 - a skill frontmatter key other than name, description,
   disable-model-invocation, and argument-hint, such as allowed-tools
 
 A broken symlink, one that loops or whose target is missing, does not count as
 a file or folder the script cannot read.
+
+When this checkout is a linked Git worktree, the .claude/ checks also cover the
+main checkout's .claude/ folder. Claude Code loads skills, commands, and agents
+from there when the worktree has none of its own.
 
 These checks catch a checkout you trust that loosens sessions by accident. They
 do not stop a checkout written to get past them, which could as easily edit
@@ -37,8 +41,8 @@ this script.
 
 The report lists each run's skills, actions, and answers, then how many runs
 used each skill and how many had each tool denied. The script exits 1 when any
-run times out or fails. It stops every session when it is interrupted or
-terminated.
+run times out or fails. When the script is interrupted or terminated, it stops
+every session.
 """
 
 import argparse
@@ -178,6 +182,23 @@ def checkout_problems():
     return sorted(set(problems))
 
 
+def main_checkout():
+    found = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=REPO, capture_output=True, text=True)
+    if found.returncode != 0:
+        return None
+    common = (REPO / found.stdout.strip()).resolve()
+    return common.parent if common.name == ".git" else common
+
+
+def main_checkout_problems():
+    main = main_checkout()
+    if main is None or main == REPO or not (main / ".claude").is_dir():
+        return []
+    if exists_but_unreadable(main / ".claude", os.R_OK | os.X_OK):
+        return [unreadable_problem(main / ".claude")]
+    return claude_folder_problems(main / ".claude")
+
+
 def frontmatter_problem(text):
     lines = text.replace("\r\n", "\n").split("\n")
     closing = next((index for index, line in enumerate(lines[1:], 1) if DELIMITER.fullmatch(line)), None)
@@ -193,7 +214,7 @@ def frontmatter_problem(text):
 
 
 def read_only_problems():
-    problems = checkout_problems()
+    problems = checkout_problems() + main_checkout_problems()
     if problems:
         return problems
     for relative, data, _ in manage.skill_files():

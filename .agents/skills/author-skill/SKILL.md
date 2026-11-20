@@ -28,9 +28,9 @@ description: Create, import, or modify skills in the astack repository. Use for 
      skills, unnecessary rules, excessive prose, and misplaced guidance.
    - Behavior: check the request against the skill and its callers. Trace changed
      invocation, stopping conditions, invalidated acceptance results, and external
-     writes through linked workflows. For changed behavior, check that the before
-     and after runs cover the changed branches. Run any branch they miss with
-     run_case.py.
+     writes through linked workflows. For a behavior change, check that the
+     before and after runs cover the changed branches. Run any branch they miss
+     with run_case.py.
 
    Give both reviewers the request, diff, repository rules, and referenced files
    without suggested conclusions. Reviewers report concrete findings without
