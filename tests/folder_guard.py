@@ -6,12 +6,12 @@ GUARD = r'''
 import os, shutil, signal, stat, sys, time
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
 folder = os.fsdecode(sys.stdin.buffer.read())
-fifos = []
+fifo_fds = []
 for parent, _, names in os.walk(folder):
-    for name in names:
+    for path in (os.path.join(parent, name) for name in names):
         try:
-            if stat.S_ISFIFO(os.lstat(os.path.join(parent, name)).st_mode):
-                fifos.append(os.open(os.path.join(parent, name), os.O_RDWR | os.O_NONBLOCK))
+            if stat.S_ISFIFO(os.lstat(path).st_mode):
+                fifo_fds.append(os.open(path, os.O_RDWR | os.O_NONBLOCK))
         except OSError:
             pass
 for _ in range(50):
@@ -19,7 +19,7 @@ for _ in range(50):
     if not os.path.lexists(folder):
         break
     time.sleep(0.1)
-for fd in fifos:
+for fd in fifo_fds:
     os.close(fd)
 '''
 
