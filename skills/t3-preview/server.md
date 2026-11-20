@@ -6,11 +6,13 @@ In T3 Code, `preview_open` opens a URL in a preview tab. The tab's browser runs 
 2. Hand off the page:
    - In T3 Code, take these steps:
      1. If you have the `preview_*` tools, open the page in a preview tab with `preview_open`. Verify loading and interactions in that tab. Reset any `preview_resize` or `preview_set_appearance` override. Then point the user to the tab.
-     2. Give the URL for T3's browser panel. The user needs it when no preview tab is open, as after T3 closes a tab that had no viewer. Use this text. Fill in `<URL>`. Replace `<environment>` with the `label` from `t3_environment_read`. If you lack that tool, use the machine's friendly name (`scutil --get ComputerName` on macOS, `hostnamectl --pretty` on Linux), or `hostname` if it has none:
+     2. The user needs the URL when no preview tab is open, for example after T3 closes a tab that had no viewer. Give the URL for T3's browser panel in this text:
 
         ```text
-        To open the page, paste `<URL>` into T3's browser panel. In the desktop app, then choose **Open in <environment>'s browser**.
+        To open the page, paste `<URL>` into T3's browser panel. If the page doesn't load in the desktop app, choose **Open in <environment>'s browser**.
         ```
+
+        Replace `<URL>` with the page's URL. Replace `<environment>` with the `label` from `t3_environment_read`. If you lack that tool, use the agent machine's friendly name from `scutil --get ComputerName` on macOS or `hostnamectl --pretty` on Linux. If the agent machine has no friendly name, use `hostname`.
    - Outside T3 Code, give the `localhost` URL.
 
    If the user asks for a public link, follow [Create a public link](#create-a-public-link).
