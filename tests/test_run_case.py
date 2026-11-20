@@ -150,7 +150,12 @@ class RunCaseTests(unittest.TestCase):
 
     def run_case(self, *arguments, **options):
         script = self.start(*arguments, **options)
-        stdout, stderr = script.communicate(timeout=60)
+        try:
+            stdout, stderr = script.communicate(timeout=60)
+        except subprocess.TimeoutExpired:
+            script.kill()
+            script.communicate()
+            raise
         result = subprocess.CompletedProcess(script.args, script.returncode, stdout, stderr)
         sessions = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
         return result, sessions
@@ -204,15 +209,6 @@ class RunCaseTests(unittest.TestCase):
                 (checkout / path).write_text(text)
             return setup
 
-        def link_claude(folder):
-            def setup(checkout):
-                target = checkout.parent / "linked"
-                (target / "skills/ship").mkdir(parents=True)
-                (target / "skills/ship/SKILL.md").write_text("ship it")
-                (checkout / folder).mkdir(parents=True, exist_ok=True)
-                (checkout / folder / ".claude").symlink_to(target)
-            return setup
-
         def unreadable(checkout):
             folder = checkout / "components/demo/.claude"
             (folder / "skills/ship").mkdir(parents=True)
@@ -260,8 +256,9 @@ class RunCaseTests(unittest.TestCase):
                                               ".claude/worktrees/probe/.claude/skills"),
             "a project skill in node_modules": (write("node_modules/pkg/.claude/skills/ship/SKILL.md", "ship it"),
                                                 "node_modules/pkg/.claude/skills"),
-            "a symlinked .claude": (link_claude("."), ".claude is a symlink"),
-            "a symlinked nested .claude": (link_claude("components/demo"), "components/demo/.claude is a symlink"),
+            "a symlinked .claude": (link_inside(".claude", "../linked"), ".claude is a symlink"),
+            "a symlinked nested .claude": (link_inside("components/demo/.claude", "../linked"),
+                                           "components/demo/.claude is a symlink"),
             "a .claude under a symlinked folder": (link_parent, "components/linked/.claude/skills"),
             "a nested .claude symlinked to a folder in the checkout": (
                 link_inside("services/api/.claude", "common/claude"), "services/api/.claude is a symlink"),
@@ -334,7 +331,7 @@ class RunCaseTests(unittest.TestCase):
             self.assertNotIn("Traceback", stderr)
         self.assertEqual(len(self.log.read_text().splitlines()), 1)
 
-    def test_followup_turn_resumes_the_same_session(self):
+    def test_followup_turn_resumes_the_same_session_and_case_json_records_both_prompts(self):
         result, sessions = self.run_case("--runs", "1", "--then", "Yes, do it", "Is the guidance clear?")
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

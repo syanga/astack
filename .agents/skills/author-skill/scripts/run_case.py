@@ -16,14 +16,14 @@ instead of happening. Sessions skip local settings
 in the checkout could approve a call:
 
 - a .claude/ folder anywhere in the checkout, including under symlinked
-  folders, that is a symlink, cannot be read, or holds a symlink
-- an entry in a .claude/ folder other than settings.json, settings.local.json,
-  and worktrees/
+  folders, that is a symlink or cannot be read
+- an entry directly in a .claude/ folder that is a symlink or is not
+  settings.json, settings.local.json, or worktrees/
 - a .claude/settings.json with anything but deny and ask rules
-- a skill whose frontmatter does not sit between two lines of exactly ---, or
-  has a line break other than LF or CRLF
-- a skill whose frontmatter declares a key other than name, description,
-  disable-model-invocation, and argument-hint. allowed-tools is one such key.
+- a skill whose SKILL.md does not open with frontmatter between two lines of
+  exactly ---, or whose frontmatter has a line break other than LF or CRLF
+- a skill frontmatter key other than name, description,
+  disable-model-invocation, and argument-hint, such as allowed-tools
 
 These checks catch a checkout you trust that loosens sessions by accident. They
 do not stop a checkout written to get past them, which could as easily edit
@@ -117,10 +117,8 @@ def claude_folder_problems(folder):
         return ["{} is a symlink".format(folder)]
     try:
         entries = sorted(os.listdir(folder))
-    except NotADirectoryError:
-        return []
     except OSError:
-        return ["{} cannot be read".format(folder)]
+        return []
     problems = []
     for entry in entries:
         path = folder / entry
@@ -154,7 +152,7 @@ def config_problems():
                 seen.add((info.st_dev, info.st_ino))
                 unseen.append(child)
         children[:] = unseen
-    return list(dict.fromkeys(problems))
+    return problems
 
 
 def frontmatter_problem(text):
