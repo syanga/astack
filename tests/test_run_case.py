@@ -482,7 +482,7 @@ class RunCaseTests(unittest.TestCase):
         result, _ = self.run_case("--runs", "1", "Add a feature", mode="dashed-answer")
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Tests pass ? done", result.stdout)
+        self.assertRegex(result.stdout, "Tests pass .+ done")
         self.assertIn("Summary of 1 runs", result.stdout)
 
     def test_error_result_fails_the_command_even_when_claude_exits_0(self):

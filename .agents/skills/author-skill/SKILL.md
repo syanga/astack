@@ -21,7 +21,7 @@ description: Create, import, or modify skills in the astack repository. Use for 
    Apply [technical-writing](../../../skills/technical-writing/SKILL.md) and
    [unslop](../../../skills/unslop/SKILL.md) to the diff. For a behavior change,
    take the after runs. Revise until the edit works as Test a behavior change
-   defines. If it cannot, report the runs to the user and stop.
+   defines. If no revision works, report the runs to the user and stop.
 5. After writing or modifying the skill, run two independent subagent reviews:
 
    - Writing: apply the linked writing guidance. Check for redundancy across

@@ -5,8 +5,8 @@ Each run gets its own configuration directory. It holds the CLAUDE.md and skills
 that `scripts/manage.py install` would deploy from this checkout for Claude
 Code. The script copies apiKeyHelper, env, model, and autoMemoryEnabled from
 your Claude Code settings into the directory's settings.json. A session signed
-in only through /login cannot sign in here. Create a token with
-`claude setup-token` and export it as CLAUDE_CODE_OAUTH_TOKEN.
+in only through /login cannot sign in here. Export a CLAUDE_CODE_OAUTH_TOKEN
+from `claude setup-token`.
 
 Sessions run in this checkout and may use only Read, Grep, Glob, Skill, and the
 shell commands Claude Code treats as read-only. Every other tool call is denied,
