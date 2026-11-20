@@ -119,12 +119,12 @@ class RunCaseTests(unittest.TestCase):
             "hooks": {"PreToolUse": []},
         }))
         self.log = self.temp / "log.jsonl"
+        self.child_record = Path(str(self.log) + ".child")
         self.env = dict(os.environ, PATH="{}{}{}".format(bin_dir, os.pathsep, os.environ["PATH"]),
                         CLAUDE_CONFIG_DIR=str(self.user_config), FAKE_LOG=str(self.log), CLAUDECODE="1")
 
     def recorded_child_exits(self):
-        record = Path(str(self.log) + ".child")
-        pid = int(record.read_text())
+        pid = int(self.child_record.read_text())
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             try:
@@ -135,20 +135,23 @@ class RunCaseTests(unittest.TestCase):
         return False
 
     def kill_recorded_child(self):
-        record = Path(str(self.log) + ".child")
-        if record.exists():
+        if self.child_record.exists():
             try:
-                os.kill(int(record.read_text()), signal.SIGKILL)
+                os.kill(int(self.child_record.read_text()), signal.SIGKILL)
             except ProcessLookupError:
                 pass
 
-    def run_case(self, *arguments, mode="", checkout=None, out=None):
+    def start(self, *arguments, mode="", checkout=None, out=None):
         script = (checkout or self.checkout) / SCRIPT_PATH
         out = out or (checkout.parent / "out" if checkout else self.temp / "out")
-        result = subprocess.run(
-            [sys.executable, str(script), "--out", str(out), *arguments],
-            env=dict(self.env, FAKE_MODE=mode), capture_output=True, text=True, timeout=60,
-        )
+        return subprocess.Popen([sys.executable, str(script), "--out", str(out), *arguments],
+                                env=dict(self.env, FAKE_MODE=mode), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True)
+
+    def run_case(self, *arguments, **options):
+        script = self.start(*arguments, **options)
+        stdout, stderr = script.communicate(timeout=60)
+        result = subprocess.CompletedProcess(script.args, script.returncode, stdout, stderr)
         sessions = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
         return result, sessions
 
@@ -223,6 +226,14 @@ class RunCaseTests(unittest.TestCase):
             (checkout / "components").mkdir(exist_ok=True)
             (checkout / "components/linked").symlink_to(target)
 
+        def link_inside(link, target):
+            def setup(checkout):
+                (checkout / target / "commands").mkdir(parents=True)
+                (checkout / target / "commands/ship.md").write_text("ship it")
+                (checkout / link).parent.mkdir(parents=True, exist_ok=True)
+                (checkout / link).symlink_to(os.path.relpath(checkout / target, (checkout / link).parent))
+            return setup
+
         def link_settings(checkout):
             (checkout / "allow.json").write_text(allow)
             (checkout / ".claude").mkdir(exist_ok=True)
@@ -252,7 +263,11 @@ class RunCaseTests(unittest.TestCase):
             "a symlinked .claude": (link_claude("."), ".claude is a symlink"),
             "a symlinked nested .claude": (link_claude("components/demo"), "components/demo/.claude is a symlink"),
             "a .claude under a symlinked folder": (link_parent, "components/linked/.claude/skills"),
-            "a symlinked settings.json": (link_settings, ".claude/settings.json exists"),
+            "a nested .claude symlinked to a folder in the checkout": (
+                link_inside("services/api/.claude", "common/claude"), "services/api/.claude is a symlink"),
+            "a .claude first reached through a symlink": (
+                link_inside("claude-config", "packages/app/.claude"), "packages/app/.claude/commands exists"),
+            "a symlinked settings.json": (link_settings, ".claude/settings.json is a symlink"),
             "an unreadable nested .claude": (unreadable, "components/demo/.claude cannot be read"),
             "a skill's allowed-tools": (skill_frontmatter("allowed-tools: Write"), "skills/tdd/SKILL.md"),
             "a quoted allowed-tools key": (skill_frontmatter('"allowed-tools": Write'), "skills/tdd/SKILL.md"),
@@ -311,11 +326,7 @@ class RunCaseTests(unittest.TestCase):
                 self.assertEqual(sessions, [])
 
     def test_runs_started_together_into_one_output_directory_leave_one_running(self):
-        scripts = [subprocess.Popen(
-            [sys.executable, str(self.checkout / SCRIPT_PATH), "--out", str(self.temp / "out"), "--runs", "1",
-             "Add a feature"],
-            env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        ) for _ in range(3)]
+        scripts = [self.start("--runs", "1", "Add a feature") for _ in range(3)]
         outputs = [script.communicate(timeout=60) for script in scripts]
 
         self.assertEqual(sorted(script.returncode != 0 for script in scripts), [False, True, True], outputs)
@@ -333,6 +344,9 @@ class RunCaseTests(unittest.TestCase):
         self.assertEqual(second["argv"][second["argv"].index("-p") + 1], "Yes, do it")
         self.assertIn("Answered 'Is the guidance clear?' in {}".format(session), result.stdout)
         self.assertIn("Answered 'Yes, do it' in {}".format(session), result.stdout)
+        case = json.loads((self.temp / "out/case.json").read_text())
+        self.assertEqual(case["prompts"], ["Is the guidance clear?", "Yes, do it"])
+        self.assertEqual(case["runs"], 1)
 
     def test_run_that_times_out_keeps_its_actions_and_fails_the_command(self):
         self.addCleanup(self.kill_recorded_child)
@@ -348,14 +362,9 @@ class RunCaseTests(unittest.TestCase):
 
     def test_terminating_the_script_stops_every_session(self):
         self.addCleanup(self.kill_recorded_child)
-        script = subprocess.Popen(
-            [sys.executable, str(self.checkout / SCRIPT_PATH), "--out", str(self.temp / "out"), "--runs", "1",
-             "Add a feature"],
-            env=dict(self.env, FAKE_MODE="hang"), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        )
-        record = Path(str(self.log) + ".child")
+        script = self.start("--runs", "1", "Add a feature", mode="hang")
         deadline = time.monotonic() + 30
-        while not record.exists() and time.monotonic() < deadline:
+        while not self.child_record.exists() and time.monotonic() < deadline:
             time.sleep(0.05)
 
         script.send_signal(signal.SIGTERM)

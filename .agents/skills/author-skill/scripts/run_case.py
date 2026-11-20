@@ -15,15 +15,15 @@ instead of happening. Sessions skip local settings
 (.claude/settings.local.json). The script refuses to start when anything else
 in the checkout could approve a call:
 
-- a .claude/ entry anywhere in the checkout, including under symlinked
-  folders, that is a symlink or cannot be read
+- a .claude/ folder anywhere in the checkout, including under symlinked
+  folders, that is a symlink, cannot be read, or holds a symlink
 - an entry in a .claude/ folder other than settings.json, settings.local.json,
   and worktrees/
 - a .claude/settings.json with anything but deny and ask rules
-- a skill whose frontmatter does not open on the first line and close with a
-  line of exactly ---, has a line break other than LF or CRLF, or declares a
-  key other than name, description, disable-model-invocation, and
-  argument-hint, such as allowed-tools
+- a skill whose frontmatter does not sit between two lines of exactly ---, or
+  has a line break other than LF or CRLF
+- a skill whose frontmatter declares a key other than name, description,
+  disable-model-invocation, and argument-hint. allowed-tools is one such key.
 
 These checks catch a checkout you trust that loosens sessions by accident. They
 do not stop a checkout written to get past them, which could as easily edit
@@ -112,6 +112,27 @@ def settings_problems(path):
     return ["{} sets {}".format(path, ", ".join(sorted(keys)))] if keys else []
 
 
+def claude_folder_problems(folder):
+    if folder.is_symlink():
+        return ["{} is a symlink".format(folder)]
+    try:
+        entries = sorted(os.listdir(folder))
+    except NotADirectoryError:
+        return []
+    except OSError:
+        return ["{} cannot be read".format(folder)]
+    problems = []
+    for entry in entries:
+        path = folder / entry
+        if path.is_symlink():
+            problems.append("{} is a symlink".format(path))
+        elif entry not in ACCEPTED_ENTRIES:
+            problems.append("{} exists".format(path))
+        elif entry == "settings.json":
+            problems += settings_problems(path)
+    return problems
+
+
 def config_problems():
     problems = []
     info = REPO.stat()
@@ -119,6 +140,9 @@ def config_problems():
     for folder, children, files in os.walk(REPO, followlinks=True, onerror=lambda error: problems.append(
             "{} cannot be read".format(error.filename))):
         here = Path(folder)
+        for entry in sorted(children + files):
+            if entry.lower() == ".claude":
+                problems += claude_folder_problems(here / entry)
         unseen = []
         for child in sorted(child for child in children if child != ".git"):
             try:
@@ -130,17 +154,7 @@ def config_problems():
                 seen.add((info.st_dev, info.st_ino))
                 unseen.append(child)
         children[:] = unseen
-        problems += ["{} is a symlink".format(here / entry) for entry in sorted(children + files)
-                     if entry.lower() == ".claude" and (here / entry).is_symlink()]
-        if here.name.lower() != ".claude":
-            continue
-        for entry in sorted(children + files):
-            path = here / entry
-            if entry not in ACCEPTED_ENTRIES or path.is_symlink():
-                problems.append("{} exists".format(path))
-            elif entry == "settings.json":
-                problems += settings_problems(path)
-    return problems
+    return list(dict.fromkeys(problems))
 
 
 def frontmatter_problem(text):
@@ -303,7 +317,7 @@ def tally(counts, runs):
     return ", ".join("{} {}/{}".format(name, count, runs) for name, count in sorted(counts.items())) or "none"
 
 
-def report(results, args):
+def report(results, out):
     total, skill_runs, denied_runs = 0.0, Counter(), Counter()
     for index, turns in enumerate(results, 1):
         cost = sum((turn.result or {}).get("total_cost_usd") or 0 for turn in turns)
@@ -332,19 +346,18 @@ def report(results, args):
     print("  Denied: {}".format(tally(denied_runs, runs)))
     print("  Unfinished runs: {}".format(", ".join(unfinished) or "none"))
     print("  Cost: ${:.2f} at API prices".format(total))
-    print("  Transcripts: {}".format(args.out))
+    print("  Transcripts: {}".format(out))
     return 1 if unfinished else 0
 
 
-def claim(out, args):
+def claim(out, case):
     try:
         out.mkdir(parents=True, exist_ok=True)
         held = sorted(path.name for path in out.iterdir())
         if held:
             return "{} already holds {}".format(out, held[0])
         with (out / "case.json").open("x", encoding="utf-8") as record:
-            json.dump({"prompts": [args.prompt, *args.then], "runs": args.runs, "model": args.model,
-                       "max_turns": args.max_turns, "timeout": args.timeout}, record, indent=2)
+            json.dump(case, record, indent=2)
     except FileExistsError as error:
         return "{} already exists".format(error.filename)
     except OSError as error:
@@ -374,8 +387,8 @@ def main():
                         help="agent turns allowed per message (default 30)")
     parser.add_argument("--timeout", type=positive(float), default=900,
                         help="seconds allowed per message (default 900)")
-    parser.add_argument("--out", type=Path, help="a new or empty directory for case.json, which records the "
-                        "prompts and options, and the transcripts (default: a new temporary directory)")
+    parser.add_argument("--out", type=Path, help="a new or empty directory to hold the transcripts and case.json, "
+                        "which records the prompts and options (default: a new temporary directory)")
     args = parser.parse_args()
     try:
         problems = read_only_problems()
@@ -386,18 +399,20 @@ def main():
     for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(signum, stop_all)
     args.out = args.out or Path(tempfile.mkdtemp(prefix="run-case-"))
-    problem = claim(args.out, args)
+    prompts = [args.prompt, *args.then]
+    problem = claim(args.out, {"prompts": prompts, "runs": args.runs, "model": args.model,
+                               "max_turns": args.max_turns, "timeout": args.timeout})
     if problem:
         parser.error(problem)
     configs = Path(tempfile.mkdtemp(prefix="run-case-config-"))
     try:
         roots = [build_config(configs / str(index)) for index in range(1, args.runs + 1)]
         with ThreadPoolExecutor(args.runs) as pool:
-            results = list(pool.map(lambda index: run(index, [args.prompt, *args.then], roots[index - 1], args),
+            results = list(pool.map(lambda index: run(index, prompts, roots[index - 1], args),
                                     range(1, args.runs + 1)))
     finally:
         shutil.rmtree(configs, ignore_errors=True)
-    return report(results, args)
+    return report(results, args.out)
 
 
 if __name__ == "__main__":
