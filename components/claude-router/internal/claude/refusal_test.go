@@ -142,7 +142,7 @@ func TestRefusalOfAnSDKRefreshThatBeganBeforeTheGuardMarksTheAccountAsNeedingLog
 	}
 }
 
-func (e *env) refuseRefreshOfAcctA() result {
+func (e *env) startAndRefuseRefreshOfAcctA() result {
 	e.t.Helper()
 	e.clock.set(time.Now())
 	e.startWith(Options{ReadRetryBase: time.Hour})
@@ -154,7 +154,7 @@ func (e *env) refuseRefreshOfAcctA() result {
 
 func TestASettingsReadThatSucceedsAfterARefusalKeepsTheAccountNeedingLogin(t *testing.T) {
 	e := newEnv(t, "acct-a", "acct-b")
-	e.refuseRefreshOfAcctA()
+	e.startAndRefuseRefreshOfAcctA()
 	marked := e.needsLogin("acct-a")
 	e.upstream.bind(e.tokens["acct-a"], "acct-a")
 	before := len(e.upstream.usageReads())
@@ -186,7 +186,7 @@ func TestASettingsReadThatSucceedsAfterARefusalKeepsTheAccountNeedingLogin(t *te
 
 func TestAnAccountWhoseRefreshTokenWasRefusedNeedsLoginAfterARestartUntilItSignsInAgain(t *testing.T) {
 	e := newEnv(t, "acct-a", "acct-b")
-	refused := e.refuseRefreshOfAcctA()
+	refused := e.startAndRefuseRefreshOfAcctA()
 
 	e.restart()
 	afterRestart := e.needsLogin("acct-a")

@@ -2297,9 +2297,9 @@ commit that starts after it decides with the login requirement cleared.
 (`refresh_refused`), known rejections, latest paid-overflow check, and
 latest paid use in `accounts.json` beside the journal. Every change is
 written before the call that made it returns: a temporary file is synced
-and renamed, and the directory is synced. A
-disabled check that only advanced by less than a minute, and a rejection
-with a known reset that was observed again, are not rewritten; the saved
+and renamed, and the directory is synced. A disabled check that only
+advanced by less than a minute, and a rejection with a known reset that was
+observed again, are not rewritten; the saved
 copy is older and therefore more conservative. A failed write stops the
 store, like a failed journal write, and recovery writes the in-memory
 account state to the file (see "Assignment journal" under PR2). The file holds no `disabled` check
