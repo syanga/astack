@@ -50,3 +50,8 @@ A thread you launched is one whose first message names your thread as the sender
   3. close its lane with worktree-cleanup, keeping its branch, and keeping its worktree if the branch gets a new owner
   4. report to your thread
 * After a stopped thread reports, launch its branch's new owner in its worktree with `existing_worktree`.
+* In these cases, read `full-send/RELAY.md` from the installed skills:
+  - before you ask another thread to run full-send
+  - when another thread asks you whether to run full-send
+  - when a thread running full-send asks you anything
+* In a message to another thread, write each skill name bare, as in `full-send`, even inside a quote. A `/` or currency-symbol prefix, such as `$` or `€`, can invoke the skill. The one exception is the `$full-send` that opens a brief written as `full-send/RELAY.md` describes.
