@@ -4,12 +4,12 @@ Ask another T3 Code thread to run [full-send](SKILL.md) only when the user asked
 
 Before you send each brief, ask the user "Run full-send on <task> in a separate thread?". Ask even when the user's request already says so. Send the brief only after a yes. Name the task as the brief will name it. One question can name several tasks: "Run full-send on <task>, <task>, and <task>, each in a separate thread?"
 
-When a thread you sent no `$full-send` brief asks you whether to run full-send, ask the user the question above for that thread's task. Ask even when the user's earlier words seem to answer it. After a yes, send that task's brief.
+When a thread you sent no `$full-send` brief asks you whether to run full-send, ask the user the question above for that thread's task. Answer the asking thread with the user's answer, through its pending question if it used the question tool. After a yes, also name in that answer the thread that will get your brief. Then send that task's brief.
 
 Write the brief in this order:
 
 1. Begin with `$full-send` and a space. As of T3 Code 0.1.10 and Codex 0.169, this mention invokes the skill in Claude and Codex threads. In a Claude thread, T3 Code runs the last skill mention as that skill's command, with the text after it as arguments.
-2. Quote that question and the user's answer. Give the limits and authorizations from the user's request and answer, such as "no merge", labeled as the user's.
+2. Quote your question and the user's answer. Give the limits and authorizations from the user's request and answer, such as "no merge", labeled as the user's.
 3. Give your thread ID. Ask for replies through `t3_thread_send`.
 4. Give the task last. After compaction in a Claude thread, claude-restore-skills restores only the first 8,000 characters of the arguments, so steps 2 and 3 come first.
 
