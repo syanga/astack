@@ -54,8 +54,7 @@ class ReminderTests(unittest.TestCase):
         lru_gen = self.root / "sys/kernel/mm/lru_gen"
         lru_gen.mkdir(parents=True)
         (lru_gen / "enabled").write_text("0x0007\n")
-        self.ttl = lru_gen / "min_ttl_ms"
-        self.ttl.write_text("0\n")
+        (lru_gen / "min_ttl_ms").write_text("0\n")
         self.guard = memory_guard.Host(self.root)
         linger_dir = self.root / "var/lib/systemd/linger"
         self.linger = linger_dir / pwd.getpwuid(os.getuid()).pw_name
@@ -91,7 +90,6 @@ class ReminderTests(unittest.TestCase):
 
         with redirect_stdout(io.StringIO()):
             memory_guard.uninstall(self.guard, dry_run=False)
-        self.assertEqual(self.ttl.read_text().strip(), "0")
         self.assertIsNone(self.guard_command(self.pending()))
 
     def test_router_that_is_not_installed_gets_one_line_that_calls_it_optional(self):

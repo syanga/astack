@@ -168,17 +168,13 @@ tmpfs `/tmp` keeps agent scratch files in RAM, so
 
 ### Remove the memory guard
 
-The `install` command of earlier versions of
-[scripts/memory_guard.py](scripts/memory_guard.py) set
-`/sys/kernel/mm/lru_gen/min_ttl_ms` to 1000, which turns on the kernel's
+Earlier versions of [scripts/memory_guard.py](scripts/memory_guard.py) had an
+`install` command. It set `/sys/kernel/mm/lru_gen/min_ttl_ms` to 1000 to turn
+on the kernel's
 [thrashing prevention](https://docs.kernel.org/admin-guide/mm/multigen_lru.html#thrashing-prevention).
-With that setting, kswapd OOM-kills a process whenever it reclaims memory
-while the oldest pages it could evict are less than a second old in every
-cgroup. It does not check how much memory is free. A fast write to a slow USB
-drive fills the page cache with dirty pages, which kswapd cannot evict until
-the drive stores them. kswapd moves those pages to a younger generation
-instead, so the generations turn over in less than a second. kswapd then keeps
-killing processes, the desktop included, until the writer exits.
+At that value, kswapd keeps OOM-killing processes while its page generations
+turn over within a second, even with gigabytes of memory free. A fast write to
+a slow USB drive can set off dozens of kills, the desktop included.
 
 To check for the guard and remove it:
 

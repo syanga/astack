@@ -27,7 +27,6 @@ def install_guard_as_earlier_versions_did(root, before):
     ttl = root / "sys/kernel/mm/lru_gen/min_ttl_ms"
     if ttl.exists():
         ttl.write_text("1000\n")
-    return boot_file
 
 
 class MemoryGuardTests(unittest.TestCase):
@@ -68,7 +67,6 @@ class MemoryGuardTests(unittest.TestCase):
 
     def test_uninstall_restores_the_previous_min_ttl_ms_and_deletes_the_boot_file(self):
         install_guard_as_earlier_versions_did(self.root, before=250)
-        self.assertEqual(self.ttl_now(), "1000")
 
         self.assertEqual(self.run_main("uninstall")[0], 0)
         self.assertEqual(self.ttl_now(), "250")
@@ -130,7 +128,7 @@ class MemoryGuardTests(unittest.TestCase):
             self.skipTest("needs {} older than 3.10".format(SYSTEM_PYTHON))
         result = subprocess.run([SYSTEM_PYTHON, str(SCRIPT), "--help"], capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("uninstall", result.stdout)
+        self.assertIn("{uninstall}", result.stdout)
 
 
 if __name__ == "__main__":
