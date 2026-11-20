@@ -331,7 +331,8 @@ class RunCaseTests(unittest.TestCase):
                 self.assertEqual(sessions, [])
 
         checkout = self.copy_checkout()
-        narrowing = {"permissions": {"deny": ["WebFetch"], "ask": ["Bash(rm:*)"]}}
+        narrowing = {"$schema": "https://json.schemastore.org/claude-code-settings.json",
+                     "permissions": {"deny": ["WebFetch"], "ask": ["Bash(rm:*)"]}}
         (checkout / ".claude/worktrees/probe/.claude").mkdir(parents=True)
         (checkout / ".claude/worktrees/probe/.claude/settings.local.json").write_text("{}")
         (checkout / ".claude/settings.json").write_text(json.dumps(narrowing))

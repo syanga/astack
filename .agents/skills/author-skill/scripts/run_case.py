@@ -20,7 +20,8 @@ in the checkout could approve a call:
 - a symlinked .claude/ folder anywhere in the checkout
 - a symlink directly in a .claude/ folder, or an entry there other than
   settings.json, settings.local.json, or worktrees/
-- a .claude/settings.json with anything but deny and ask rules
+- a .claude/settings.json that sets anything but $schema, deny rules, and ask
+  rules
 - a skill whose SKILL.md does not open with frontmatter between two lines of
   exactly ---, or whose frontmatter has a line break other than LF or CRLF
 - a skill frontmatter key other than name, description,
@@ -65,6 +66,7 @@ DRAIN_SECONDS = 5
 MAX_TIMEOUT_SECONDS = 86400
 ACCEPTED_ENTRIES = {"settings.json", "settings.local.json", "worktrees"}
 NARROWING_RULES = {"deny", "ask"}
+SETTINGS_KEYS = {"$schema", "permissions"}
 FRONTMATTER_KEYS = {"name", "description", "disable-model-invocation", "argument-hint"}
 OTHER_LINE_BREAKS = re.compile("[\r\x0b\x0c\x1c-\x1e\x85\u2028\u2029]")
 BROKEN_LINK_ERRORS = {errno.ENOENT, errno.ENOTDIR, errno.ELOOP}
@@ -121,7 +123,7 @@ def settings_problems(path):
     if not isinstance(settings, dict) or not isinstance(settings.get("permissions", {}), dict):
         return ["{} is not a JSON object of deny and ask rules".format(path)]
     keys = ["permissions." + key for key in settings.get("permissions", {}) if key not in NARROWING_RULES]
-    keys += [key for key in settings if key != "permissions"]
+    keys += [key for key in settings if key not in SETTINGS_KEYS]
     return ["{} sets {}".format(path, ", ".join(sorted(keys)))] if keys else []
 
 
