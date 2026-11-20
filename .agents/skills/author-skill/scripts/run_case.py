@@ -15,12 +15,19 @@ instead of happening. Sessions skip local settings
 (.claude/settings.local.json). The script refuses to start when anything else
 in the checkout could approve a call:
 
-- a .claude/ entry anywhere in the checkout that is a symlink or cannot be read
+- a .claude/ entry anywhere in the checkout, including under symlinked
+  folders, that is a symlink or cannot be read
 - an entry in a .claude/ folder other than settings.json, settings.local.json,
   and worktrees/
 - a .claude/settings.json with anything but deny and ask rules
-- a skill whose frontmatter declares a key other than name, description,
-  disable-model-invocation, and argument-hint, such as allowed-tools
+- a skill whose frontmatter does not open on the first line and close with a
+  line of exactly ---, has a line break other than LF or CRLF, or declares a
+  key other than name, description, disable-model-invocation, and
+  argument-hint, such as allowed-tools
+
+These checks catch a checkout you trust that loosens sessions by accident. They
+do not stop a checkout written to get past them, which could as easily edit
+this script.
 
 The report lists each run's skills, actions, and answers, then how many runs
 used each skill and had each tool denied. The script exits 1 when any run times
@@ -32,8 +39,10 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import json
+import math
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -51,6 +60,7 @@ DRAIN_SECONDS = 5
 ACCEPTED_ENTRIES = {"settings.json", "settings.local.json", "worktrees"}
 NARROWING_RULES = {"deny", "ask"}
 FRONTMATTER_KEYS = {"name", "description", "disable-model-invocation", "argument-hint"}
+OTHER_LINE_BREAKS = re.compile("[\r\x0b\x0c\x1c-\x1e\x85\u2028\u2029]")
 USER_SETTINGS = ("apiKeyHelper", "env", "model", "autoMemoryEnabled")
 PARENT_SESSION_VARIABLES = (
     "CLAUDECODE", "CLAUDE_PID", "CLAUDE_AGENT_SDK_VERSION", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH",
@@ -104,10 +114,22 @@ def settings_problems(path):
 
 def config_problems():
     problems = []
-    for folder, children, files in os.walk(REPO, onerror=lambda error: problems.append(
+    info = REPO.stat()
+    seen = {(info.st_dev, info.st_ino)}
+    for folder, children, files in os.walk(REPO, followlinks=True, onerror=lambda error: problems.append(
             "{} cannot be read".format(error.filename))):
-        children[:] = sorted(child for child in children if child != ".git")
         here = Path(folder)
+        unseen = []
+        for child in sorted(child for child in children if child != ".git"):
+            try:
+                info = (here / child).stat()
+            except OSError:
+                problems.append("{} cannot be read".format(here / child))
+                continue
+            if (info.st_dev, info.st_ino) not in seen:
+                seen.add((info.st_dev, info.st_ino))
+                unseen.append(child)
+        children[:] = unseen
         problems += ["{} is a symlink".format(here / entry) for entry in sorted(children + files)
                      if entry.lower() == ".claude" and (here / entry).is_symlink()]
         if here.name.lower() != ".claude":
@@ -121,27 +143,26 @@ def config_problems():
     return problems
 
 
-def frontmatter_keys(text):
-    lines = text.splitlines()
-    if not lines or lines[0].rstrip() != "---":
-        return []
-    keys = []
-    for line in lines[1:]:
-        if line.rstrip() == "---":
-            return keys
-        if line and not line[0].isspace() and not line.startswith(("#", "-")):
-            keys.append(line.split(":", 1)[0].strip())
-    return []
+def frontmatter_problem(text):
+    lines = text.replace("\r\n", "\n").split("\n")
+    if lines[0] != "---" or "---" not in lines[1:]:
+        return "has no frontmatter between two lines of exactly ---"
+    block = lines[1:lines.index("---", 1)]
+    if any(OTHER_LINE_BREAKS.search(line) for line in block):
+        return "has a line break other than LF or CRLF in its frontmatter"
+    keys = [line.split(":", 1)[0].strip() for line in block
+            if line and not line.startswith((" ", "\t", "#", "- ")) and line != "-"]
+    unknown = [key for key in keys if key not in FRONTMATTER_KEYS]
+    return "declares {}".format(", ".join(unknown)) if unknown else None
 
 
 def read_only_problems():
     problems = config_problems()
     for relative, data, _ in manage.skill_files():
-        if relative.name != "SKILL.md":
-            continue
-        unknown = [key for key in frontmatter_keys(data.decode("utf-8")) if key not in FRONTMATTER_KEYS]
-        if unknown:
-            problems.append("skills/{} declares {}".format(relative, ", ".join(unknown)))
+        if len(relative.parts) == 2 and relative.name == "SKILL.md":
+            problem = frontmatter_problem(data.decode("utf-8"))
+            if problem:
+                problems.append("skills/{} {}".format(relative, problem))
     return problems
 
 
@@ -315,17 +336,46 @@ def report(results, args):
     return 1 if unfinished else 0
 
 
+def claim(out, args):
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+        held = sorted(path.name for path in out.iterdir())
+        if held:
+            return "{} already holds {}".format(out, held[0])
+        with (out / "case.json").open("x", encoding="utf-8") as record:
+            json.dump({"prompts": [args.prompt, *args.then], "runs": args.runs, "model": args.model,
+                       "max_turns": args.max_turns, "timeout": args.timeout}, record, indent=2)
+    except FileExistsError as error:
+        return "{} already exists".format(error.filename)
+    except OSError as error:
+        return "cannot write to {}: {}".format(out, error.strerror)
+    return None
+
+
+def positive(kind):
+    def parse(text):
+        value = kind(text)
+        if not 0 < value < math.inf:
+            raise argparse.ArgumentTypeError("must be greater than 0 and finite")
+        return value
+    parse.__name__ = kind.__name__
+    return parse
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("prompt", help="the first user message")
     parser.add_argument("--then", action="append", default=[], metavar="PROMPT",
                         help="a later user message in the same session. Repeat for more turns.")
-    parser.add_argument("--runs", type=int, default=3, help="independent sessions to run in parallel (default 3)")
+    parser.add_argument("--runs", type=positive(int), default=3,
+                        help="independent sessions to run in parallel (default 3)")
     parser.add_argument("--model", help="model for every session (default: your settings or account default)")
-    parser.add_argument("--max-turns", type=int, default=30, help="agent turns allowed per message (default 30)")
-    parser.add_argument("--timeout", type=float, default=900, help="seconds allowed per message (default 900)")
-    parser.add_argument("--out", type=Path, help="directory for transcripts, which must not already hold any "
-                        "(default: a new temporary directory)")
+    parser.add_argument("--max-turns", type=positive(int), default=30,
+                        help="agent turns allowed per message (default 30)")
+    parser.add_argument("--timeout", type=positive(float), default=900,
+                        help="seconds allowed per message (default 900)")
+    parser.add_argument("--out", type=Path, help="a new or empty directory for case.json, which records the "
+                        "prompts and options, and the transcripts (default: a new temporary directory)")
     args = parser.parse_args()
     try:
         problems = read_only_problems()
@@ -336,10 +386,9 @@ def main():
     for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(signum, stop_all)
     args.out = args.out or Path(tempfile.mkdtemp(prefix="run-case-"))
-    earlier = sorted(args.out.glob("run-*-turn-*.jsonl")) if args.out.is_dir() else []
-    if earlier:
-        parser.error("{} already holds transcripts, such as {}".format(args.out, earlier[0].name))
-    args.out.mkdir(parents=True, exist_ok=True)
+    problem = claim(args.out, args)
+    if problem:
+        parser.error(problem)
     configs = Path(tempfile.mkdtemp(prefix="run-case-config-"))
     try:
         roots = [build_config(configs / str(index)) for index in range(1, args.runs + 1)]

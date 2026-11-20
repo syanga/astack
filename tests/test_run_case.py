@@ -142,10 +142,11 @@ class RunCaseTests(unittest.TestCase):
             except ProcessLookupError:
                 pass
 
-    def run_case(self, *arguments, mode="", checkout=None):
+    def run_case(self, *arguments, mode="", checkout=None, out=None):
         script = (checkout or self.checkout) / SCRIPT_PATH
+        out = out or (checkout.parent / "out" if checkout else self.temp / "out")
         result = subprocess.run(
-            [sys.executable, str(script), "--out", str(self.temp / "out"), *arguments],
+            [sys.executable, str(script), "--out", str(out), *arguments],
             env=dict(self.env, FAKE_MODE=mode), capture_output=True, text=True, timeout=60,
         )
         sessions = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
@@ -215,8 +216,24 @@ class RunCaseTests(unittest.TestCase):
             folder.chmod(0o111)
             self.addCleanup(folder.chmod, 0o755)
 
+        def link_parent(checkout):
+            target = checkout.parent / "outside"
+            (target / ".claude/skills/ship").mkdir(parents=True)
+            (target / ".claude/skills/ship/SKILL.md").write_text("ship it")
+            (checkout / "components").mkdir(exist_ok=True)
+            (checkout / "components/linked").symlink_to(target)
+
+        def link_settings(checkout):
+            (checkout / "allow.json").write_text(allow)
+            (checkout / ".claude").mkdir(exist_ok=True)
+            (checkout / ".claude/settings.json").symlink_to("../allow.json")
+
         def skill_frontmatter(lines):
             return write("skills/tdd/SKILL.md", tdd.replace("description:", lines + "\ndescription:", 1))
+
+        def after_description(lines):
+            closing = tdd.index("\n---\n")
+            return write("skills/tdd/SKILL.md", tdd[:closing] + lines + tdd[closing:])
 
         loosening = {
             "an allow rule": (write(".claude/settings.json", allow), "permissions.allow"),
@@ -234,12 +251,19 @@ class RunCaseTests(unittest.TestCase):
                                                 "node_modules/pkg/.claude/skills"),
             "a symlinked .claude": (link_claude("."), ".claude is a symlink"),
             "a symlinked nested .claude": (link_claude("components/demo"), "components/demo/.claude is a symlink"),
-            "an unreadable nested .claude": (unreadable, "components/demo/.claude"),
+            "a .claude under a symlinked folder": (link_parent, "components/linked/.claude/skills"),
+            "a symlinked settings.json": (link_settings, ".claude/settings.json exists"),
+            "an unreadable nested .claude": (unreadable, "components/demo/.claude cannot be read"),
             "a skill's allowed-tools": (skill_frontmatter("allowed-tools: Write"), "skills/tdd/SKILL.md"),
             "a quoted allowed-tools key": (skill_frontmatter('"allowed-tools": Write'), "skills/tdd/SKILL.md"),
             "an escaped allowed-tools key": (skill_frontmatter('"allowed\\x2dtools": Write'), "skills/tdd/SKILL.md"),
-            "allowed-tools after a dashed value": (skill_frontmatter("argument-hint: a --- b\nallowed-tools: Write"),
+            "allowed-tools after a dashed value": (after_description("\nargument-hint: a --- b\nallowed-tools: Write"),
                                                    "skills/tdd/SKILL.md"),
+            "allowed-tools after a line separator and ---": (after_description("\u2028---\nallowed-tools: Write"),
+                                                             "skills/tdd/SKILL.md"),
+            "allowed-tools in frontmatter closed by ----": (
+                write("skills/tdd/SKILL.md", tdd.replace("\n---\n", "\nallowed-tools: Write\n----\n", 1)),
+                "skills/tdd/SKILL.md"),
         }
         for case, (setup, named) in loosening.items():
             with self.subTest(case):
@@ -259,6 +283,7 @@ class RunCaseTests(unittest.TestCase):
         (checkout / ".claude/worktrees/probe/.claude/settings.local.json").write_text("{}")
         (checkout / ".claude/settings.json").write_text(json.dumps(narrowing))
         (checkout / ".claude/settings.local.json").write_text(json.dumps({"permissions": {"allow": ["Write"]}}))
+        (checkout / "loop").symlink_to(".")
         self.log.unlink(missing_ok=True)
         allowed, sessions = self.run_case("--runs", "1", "Add a feature", checkout=checkout)
 
@@ -274,6 +299,29 @@ class RunCaseTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("run-1-turn-1.jsonl", result.stderr)
         self.assertEqual(sessions, [])
+
+    def test_refuses_counts_and_limits_that_are_not_positive_and_finite(self):
+        for option, value in (("--runs", "0"), ("--max-turns", "0"), ("--timeout", "-1"), ("--timeout", "inf")):
+            with self.subTest(option, value=value):
+                result, sessions = self.run_case(option, value, "Add a feature", out=self.temp / (option + value))
+
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("argument {}:".format(option), result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(sessions, [])
+
+    def test_runs_started_together_into_one_output_directory_leave_one_running(self):
+        scripts = [subprocess.Popen(
+            [sys.executable, str(self.checkout / SCRIPT_PATH), "--out", str(self.temp / "out"), "--runs", "1",
+             "Add a feature"],
+            env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        ) for _ in range(3)]
+        outputs = [script.communicate(timeout=60) for script in scripts]
+
+        self.assertEqual(sorted(script.returncode != 0 for script in scripts), [False, True, True], outputs)
+        for _, stderr in outputs:
+            self.assertNotIn("Traceback", stderr)
+        self.assertEqual(len(self.log.read_text().splitlines()), 1)
 
     def test_followup_turn_resumes_the_same_session(self):
         result, sessions = self.run_case("--runs", "1", "--then", "Yes, do it", "Is the guidance clear?")
