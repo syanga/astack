@@ -27,7 +27,7 @@ in the checkout could approve a call:
   disable-model-invocation, and argument-hint, such as allowed-tools
 
 A broken symlink, one that loops or whose target is missing, does not count as
-a file the script cannot read.
+a file or folder the script cannot read.
 
 These checks catch a checkout you trust that loosens sessions by accident. They
 do not stop a checkout written to get past them, which could as easily edit
@@ -62,6 +62,7 @@ import manage
 ALLOWED = ("Read", "Grep", "Glob", "Skill")
 CONTEXT_TOOLS = set(ALLOWED) | {"ToolSearch", "TodoWrite"}
 DRAIN_SECONDS = 5
+MAX_TIMEOUT = 86400
 ACCEPTED_ENTRIES = {"settings.json", "settings.local.json", "worktrees"}
 NARROWING_RULES = {"deny", "ask"}
 FRONTMATTER_KEYS = {"name", "description", "disable-model-invocation", "argument-hint"}
@@ -153,7 +154,7 @@ def checkout_problems():
     info = REPO.stat()
     seen = {(info.st_dev, info.st_ino)}
     for folder, children, files in os.walk(REPO, followlinks=True,
-                                          onerror=lambda error: problems.append(unreadable_problem(error.filename))):
+                                           onerror=lambda error: problems.append(unreadable_problem(error.filename))):
         here = Path(folder)
         problems += [unreadable_problem(here / name) for name in files if exists_but_unreadable(here / name, os.R_OK)]
         unseen = []
@@ -279,7 +280,7 @@ def run(index, prompts, config, args):
         finally:
             with sessions_lock:
                 live_sessions.discard(process)
-        read_events(log.read_text(encoding="utf-8"), turn)
+        read_events(log.read_text(encoding="utf-8", errors="replace"), turn)
         result = turn.result or {}
         if turn.problem is None and process.returncode != 0:
             turn.problem = "exit {}: {}".format(process.returncode, result.get("result") or stderr.strip()[-300:])
@@ -382,11 +383,13 @@ def claim(out, case):
     return None
 
 
-def positive(kind):
+def positive(kind, limit=math.inf):
+    rule = "must be greater than 0" + (" and at most {:g}".format(limit) if limit < math.inf else "")
+
     def parse(text):
         value = kind(text)
-        if not 0 < value < math.inf:
-            raise argparse.ArgumentTypeError("must be greater than 0 and finite")
+        if not 0 < value <= limit:
+            raise argparse.ArgumentTypeError(rule)
         return value
     parse.__name__ = kind.__name__
     return parse
@@ -402,8 +405,8 @@ def main():
     parser.add_argument("--model", help="model for every session (default: your settings or account default)")
     parser.add_argument("--max-turns", type=positive(int), default=30,
                         help="agent turns allowed per message (default 30)")
-    parser.add_argument("--timeout", type=positive(float), default=900,
-                        help="seconds allowed per message (default 900)")
+    parser.add_argument("--timeout", type=positive(float, MAX_TIMEOUT), default=900,
+                        help="seconds allowed per message, at most {} (default 900)".format(MAX_TIMEOUT))
     parser.add_argument("--out", type=Path, help="a new or empty directory to hold the transcripts and case.json, "
                         "which records the prompts and options (default: a new temporary directory)")
     args = parser.parse_args()

@@ -74,6 +74,8 @@ for call, tool in (("t3", "Edit"), ("t4", "Write")):
 if mode == "hang":
     emit({"type": "assistant", "message": {"content": [
         {"type": "tool_use", "id": "t9", "name": "Skill", "input": {"skill": "interrupted-skill"}}]}})
+    sys.stdout.buffer.write('{"type": "assistant", "message": "✓'.encode()[:-1])
+    sys.stdout.buffer.flush()
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(45)"])
     record = Path(os.environ["FAKE_LOG"] + ".child")
     Path(str(record) + ".tmp").write_text(str(child.pid))
@@ -295,7 +297,8 @@ class RunCaseTests(unittest.TestCase):
             "a .claude that cannot be searched": (unsearchable_claude, "components/demo/.claude cannot be read"),
             "an unreadable folder": (plant_skill_and_restrict("components", 0o000), "components cannot be read"),
             "an unreadable SKILL.md": (unreadable_skill, "skills/tdd/SKILL.md cannot be read"),
-            "a skill folder that cannot be searched": (unsearchable_skill_folder, "skills/tdd/references cannot be read"),
+            "a skill folder that cannot be searched": (unsearchable_skill_folder,
+                                                       "skills/tdd/references cannot be read"),
             "a skill's allowed-tools": (skill_frontmatter("allowed-tools: Write"), "skills/tdd/SKILL.md"),
             "a quoted allowed-tools key": (skill_frontmatter('"allowed-tools": Write'), "skills/tdd/SKILL.md"),
             "an escaped allowed-tools key": (skill_frontmatter('"allowed\\x2dtools": Write'), "skills/tdd/SKILL.md"),
@@ -364,8 +367,9 @@ class RunCaseTests(unittest.TestCase):
         self.assertIn("run-1-turn-1.jsonl", result.stderr)
         self.assertEqual(sessions, [])
 
-    def test_refuses_counts_and_limits_that_are_not_positive_and_finite(self):
-        for option, value in (("--runs", "0"), ("--max-turns", "0"), ("--timeout", "-1"), ("--timeout", "inf")):
+    def test_refuses_counts_and_limits_out_of_range(self):
+        for option, value in (("--runs", "0"), ("--max-turns", "0"), ("--timeout", "-1"), ("--timeout", "inf"),
+                              ("--timeout", "1e300")):
             with self.subTest(option, value=value):
                 result, sessions = self.run_case(option, value, "Add a feature", out=self.temp / (option + value))
 
