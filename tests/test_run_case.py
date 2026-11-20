@@ -417,6 +417,7 @@ class RunCaseTests(unittest.TestCase):
 
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("checkout/.claude/skills exists", refused.stderr)
+        self.assertNotIn("Traceback", refused.stderr)
         self.assertEqual(sessions, [])
 
     def test_refuses_an_unreadable_settings_json_only_as_unreadable(self):

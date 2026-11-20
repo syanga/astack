@@ -194,8 +194,10 @@ def main_checkout():
 
 def main_checkout_problems():
     checkout = main_checkout()
-    folder = None if checkout in (None, REPO) else checkout / ".claude"
-    if folder is None or not folder.is_dir():
+    if checkout in (None, REPO):
+        return []
+    folder = checkout / ".claude"
+    if not folder.is_dir():
         return []
     if exists_but_unreadable(folder, os.R_OK | os.X_OK):
         return [unreadable_problem(folder)]
