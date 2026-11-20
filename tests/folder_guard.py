@@ -3,14 +3,24 @@ import subprocess
 import sys
 
 GUARD = r'''
-import os, shutil, signal, sys, time
+import os, shutil, signal, stat, sys, time
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
 folder = os.fsdecode(sys.stdin.buffer.read())
+fifos = []
+for parent, _, names in os.walk(folder):
+    for name in names:
+        try:
+            if stat.S_ISFIFO(os.lstat(os.path.join(parent, name)).st_mode):
+                fifos.append(os.open(os.path.join(parent, name), os.O_RDWR | os.O_NONBLOCK))
+        except OSError:
+            pass
 for _ in range(50):
     shutil.rmtree(folder, ignore_errors=True)
     if not os.path.lexists(folder):
         break
     time.sleep(0.1)
+for fd in fifos:
+    os.close(fd)
 '''
 
 

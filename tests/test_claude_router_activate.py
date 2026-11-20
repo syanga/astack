@@ -90,7 +90,7 @@ claude_router.cli()
 '''
 
 
-GATE_LIMIT_SECONDS = 600
+WAIT_LIMIT_SECONDS = 600
 
 SIGNAL_SENDER = r'''
 import os, sys, time
@@ -264,13 +264,13 @@ class ActivationFixture(ComponentFixture):
         self.started.append(process)
         return process
 
-    def wait_while(self, condition):
+    def waits_while(self, condition):
         return 'n=0; while {} && [ -d "{}" ] && [ $n -lt {} ]; do sleep 0.05; n=$((n + 1)); done'.format(
-            condition, self.root, GATE_LIMIT_SECONDS * 20)
+            condition, self.root, WAIT_LIMIT_SECONDS * 20)
 
     def waits_for(self, gate):
         self.gates.append(gate)
-        return self.wait_while('[ ! -e "{}" ]'.format(gate))
+        return self.waits_while('[ ! -e "{}" ]'.format(gate))
 
     def end_started(self):
         for gate in self.gates:
@@ -680,7 +680,7 @@ class ActivationTests(ActivationFixture):
             with self.subTest(ending):
                 pidfile = self.root / "child-{}.pid".format(expected_exit)
                 command = "exec > /dev/null 2>&1; sh -c 'echo $$ > \"{}\"; exec sleep 30' & {}; {}".format(
-                    pidfile, self.wait_while('[ ! -s "{}" ]'.format(pidfile)), ending)
+                    pidfile, self.waits_while('[ ! -s "{}" ]'.format(pidfile)), ending)
                 result = self.run_activate(verify=((SESSION, command),))
                 pid = int(pidfile.read_text())
                 self.addCleanup(lambda pid=pid: subprocess.run(["kill", "-9", str(pid)], capture_output=True))
