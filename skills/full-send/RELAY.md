@@ -13,10 +13,10 @@ Write the brief in this order:
 
 Send each brief to a new thread, or to a thread you launched that has never run full-send. Start a new thread with `delegate_task` or `t3_thread_launch`. Send to such a thread with `t3_thread_send` in `queue` mode. Codex ignores a skill mention in a message steered into a running turn.
 
-When a thread that has not yet received your `$full-send` brief asks you whether to run full-send, or asks for your question and the user's answer, take the steps below. A brief that still waits in the thread's queue has not been received.
+When a thread that has not yet received your `$full-send` brief asks you whether to run full-send, or asks for your question and the user's answer, take the steps below. A thread has not received a brief that still waits in its queue.
 
 1. If you have not yet asked the user the question above for that thread's task, ask it.
-2. If that thread asked with the question tool, reply through `t3_pending_request`. Otherwise, reply with `t3_thread_send`. In the reply, give no yes or no. Say that you send any brief yourself, and whether it goes to that thread, to another thread, or nowhere. When it does not go to that thread, add "This thread does not run the task."
+2. If that thread asked with the question tool, reply through `t3_pending_request`. Otherwise, reply with `t3_thread_send`. In the reply, give no yes or no. Say that you send any brief yourself, and whether you send it to that thread, to another thread, or not at all. If you send it to that thread, add "End your turn. The brief starts your next turn." Otherwise, add "This thread does not run full-send on the task."
 3. After a yes, if you have not yet sent that task's brief, send it.
 
 While a thread runs your `$full-send` brief, relay between it and the user:
