@@ -4,12 +4,6 @@ Ask another T3 Code thread to run [full-send](SKILL.md) only when the user asked
 
 Before you send each brief, ask the user "Run full-send on <task> in a separate thread?". Ask even when the user's request already says so. Send the brief only after a yes. Name the task as the brief will name it. One question can name several tasks: "Run full-send on <task>, <task>, and <task>, each in a separate thread?"
 
-When a thread that has not yet received your `$full-send` brief asks you whether to run full-send, or asks for your question and the user's answer, take these steps:
-
-1. If you have not yet asked the user the question above for that thread's task, ask it.
-2. Reply to that thread. If it asked with the question tool, reply through `t3_pending_request`. Otherwise, reply with `t3_thread_send`. Say only whether a brief follows and whether it goes to that thread or to a new one.
-3. After a yes, if you have not yet sent that task's brief, send it.
-
 Write the brief in this order:
 
 1. Begin with `$full-send` and a space. As of T3 Code 0.1.10 and Codex 0.169, this mention invokes the skill in Claude and Codex threads. In a Claude thread, T3 Code runs the last skill mention as that skill's command, with the text after it as arguments.
@@ -19,7 +13,13 @@ Write the brief in this order:
 
 Send each brief to a new thread, or to a thread you launched that has never run full-send. Start a new thread with `delegate_task` or `t3_thread_launch`. Send to such a thread with `t3_thread_send` in `queue` mode. Codex ignores a skill mention in a message steered into a running turn.
 
-While the thread runs, relay between it and the user:
+When a thread that has not yet received your `$full-send` brief asks you whether to run full-send, or asks for your question and the user's answer, take the steps below. A brief that still waits in the thread's queue has not been received.
+
+1. If you have not yet asked the user the question above for that thread's task, ask it.
+2. If that thread asked with the question tool, reply through `t3_pending_request`. Otherwise, reply with `t3_thread_send`. In the reply, give no yes or no. Say that you send any brief yourself, and whether it goes to that thread, to another thread, or nowhere. When it does not go to that thread, add "This thread does not run the task."
+3. After a yes, if you have not yet sent that task's brief, send it.
+
+While a thread runs your `$full-send` brief, relay between it and the user:
 
 - When your harness has push notifications, send the thread's push-notification text as your own push notification.
 - Ask the user each question that the thread needs the user to answer, even when the user's earlier words seem to answer it. Send back each answer, labeled as the user's.
