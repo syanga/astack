@@ -3,8 +3,8 @@
 T3's browser panel loads the agent machine's `localhost` URLs on every device.
 
 1. Serve only the preview directory, a prototype's scratch app, or the task's dev server. Use task-specific logs and record each process in the [cleanup record](cleanup.md). For static files on macOS, use the firewall-approved `/usr/bin/python3`.
-2. If you have the `preview_*` tools, open the page with `preview_open` and `open: false`. Verify that the page loads and that its interactions work. Then close the tab with `t3_preview_close`.
-3. Give the user the page's `localhost` URL as a link. If the user says the link opened their own browser and didn't load, tell them to set T3's **Open links in** setting to **T3 Code**. If the user asks for a public link, follow [Create a public link](#create-a-public-link).
+2. If you have the `preview_*` tools, verify in a [preview tab](SKILL.md#preview-tabs) that the page loads and that its interactions work.
+3. Give the user the page's `localhost` URL as a link. If the user says the link opened their own browser and didn't load, tell them to set T3's **Open links in** setting to **T3 Code** and to click the link without ⌘ or Ctrl. If the user asks for a public link, follow [Create a public link](#create-a-public-link).
 4. Leave the preview processes running while the user inspects.
 
 ## Create a public link
