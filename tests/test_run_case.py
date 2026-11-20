@@ -330,6 +330,9 @@ class RunCaseTests(unittest.TestCase):
         (checkout / "components/note/.claude").write_text("a file, not a folder")
         (checkout / ".venv/bin").mkdir(parents=True)
         (checkout / ".venv/bin/python").symlink_to("../../removed-python/bin/python3")
+        (checkout / "vendor/lib").mkdir(parents=True)
+        (checkout / "vendor/lib/lib").symlink_to("lib")
+        (checkout / "vendor/notes").symlink_to("../README.md/notes")
         self.log.unlink(missing_ok=True)
         allowed, sessions = self.run_case("--runs", "1", "Add a feature", checkout=checkout)
 
@@ -348,7 +351,7 @@ class RunCaseTests(unittest.TestCase):
 
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn(".claude/settings.json cannot be read", refused.stderr)
-        self.assertNotIn("not a JSON object", refused.stderr)
+        self.assertEqual(refused.stderr.count("settings.json"), 1)
         self.assertEqual(sessions, [])
 
     def test_refuses_an_output_directory_that_already_holds_transcripts(self):

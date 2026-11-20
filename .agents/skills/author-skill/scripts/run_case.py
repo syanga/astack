@@ -16,8 +16,7 @@ instead of happening. Sessions skip local settings
 in the checkout could approve a call:
 
 - a file or folder in the checkout, outside .git/ folders, that the script
-  cannot read and so cannot check, including one under a symlinked folder. A
-  broken symlink points to nothing, so the script skips it.
+  cannot read and so cannot check, including one under a symlinked folder
 - a symlinked .claude/ folder anywhere in the checkout
 - a symlink directly in a .claude/ folder, or an entry there other than
   settings.json, settings.local.json, or worktrees/
@@ -26,6 +25,9 @@ in the checkout could approve a call:
   exactly ---, or whose frontmatter has a line break other than LF or CRLF
 - a skill frontmatter key other than name, description,
   disable-model-invocation, and argument-hint, such as allowed-tools
+
+The script skips a broken symlink, one whose target is missing or loops,
+because it points to nothing.
 
 These checks catch a checkout you trust that loosens sessions by accident. They
 do not stop a checkout written to get past them, which could as easily edit
@@ -40,6 +42,7 @@ import argparse
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+import errno
 import json
 import math
 import os
@@ -63,6 +66,7 @@ ACCEPTED_ENTRIES = {"settings.json", "settings.local.json", "worktrees"}
 NARROWING_RULES = {"deny", "ask"}
 FRONTMATTER_KEYS = {"name", "description", "disable-model-invocation", "argument-hint"}
 OTHER_LINE_BREAKS = re.compile("[\r\x0b\x0c\x1c-\x1e\x85\u2028\u2029]")
+BROKEN_LINK_ERRORS = {errno.ENOENT, errno.ENOTDIR, errno.ELOOP}
 USER_SETTINGS = ("apiKeyHelper", "env", "model", "autoMemoryEnabled")
 PARENT_SESSION_VARIABLES = (
     "CLAUDECODE", "CLAUDE_PID", "CLAUDE_AGENT_SDK_VERSION", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH",
@@ -105,7 +109,9 @@ def build_config(root):
 def settings_problems(path):
     try:
         settings = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except OSError:
+        return ["{} cannot be read".format(path)]
+    except ValueError:
         settings = None
     if not isinstance(settings, dict) or not isinstance(settings.get("permissions", {}), dict):
         return ["{} is not a JSON object of deny and ask rules".format(path)]
@@ -123,20 +129,18 @@ def claude_folder_problems(folder):
             problems.append("{} is a symlink".format(path))
         elif path.name not in ACCEPTED_ENTRIES:
             problems.append("{} exists".format(path))
-        elif path.name == "settings.json" and os.access(path, os.R_OK):
+        elif path.name == "settings.json":
             problems += settings_problems(path)
     return problems
 
 
-def cannot_read(path, mode):
+def exists_but_unreadable(path, mode):
     if os.access(path, mode):
         return False
     try:
         os.stat(path)
-    except FileNotFoundError:
-        return False
-    except OSError:
-        pass
+    except OSError as error:
+        return error.errno not in BROKEN_LINK_ERRORS
     return True
 
 
@@ -147,11 +151,12 @@ def checkout_problems():
     for folder, children, files in os.walk(REPO, followlinks=True, onerror=lambda error: problems.append(
             "{} cannot be read".format(error.filename))):
         here = Path(folder)
-        problems += ["{} cannot be read".format(here / name) for name in files if cannot_read(here / name, os.R_OK)]
+        problems += ["{} cannot be read".format(here / name) for name in files
+                     if exists_but_unreadable(here / name, os.R_OK)]
         unseen = []
         for child in sorted(child for child in children if child != ".git"):
             path = here / child
-            if cannot_read(path, os.R_OK | os.X_OK):
+            if exists_but_unreadable(path, os.R_OK | os.X_OK):
                 problems.append("{} cannot be read".format(path))
                 continue
             if child.lower() == ".claude":
