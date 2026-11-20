@@ -22,9 +22,9 @@ in the checkout could approve a call:
   settings.json, settings.local.json, or worktrees/
 - a .claude/settings.json that sets anything but $schema, deny rules, and ask
   rules
-- a skill whose SKILL.md does not open with frontmatter between two --- lines,
-  which may end in spaces or tabs, or whose frontmatter has a line break other
-  than LF or CRLF
+- a skill whose SKILL.md does not open with frontmatter between two --- lines
+  that may end in spaces or tabs
+- a skill whose frontmatter has a line break other than LF or CRLF
 - a skill frontmatter key other than name, description,
   disable-model-invocation, and argument-hint, such as allowed-tools
 
@@ -32,8 +32,8 @@ A broken symlink, one that loops or whose target is missing, does not count as
 a file or folder the script cannot read.
 
 When this checkout is a linked Git worktree, the .claude/ checks also cover the
-main checkout's .claude/ folder. Claude Code loads skills, commands, and agents
-from there when the worktree has none of its own.
+main checkout's .claude/ folder. Claude Code loads a folder such as skills/ or
+commands/ from there when this checkout's .claude/ lacks it.
 
 These checks catch a checkout you trust that loosens sessions by accident. They
 do not stop a checkout written to get past them, which could as easily edit
@@ -75,7 +75,7 @@ NARROWING_RULES = {"deny", "ask"}
 SETTINGS_KEYS = {"$schema", "permissions"}
 FRONTMATTER_KEYS = {"name", "description", "disable-model-invocation", "argument-hint"}
 OTHER_LINE_BREAKS = re.compile("[\r\x0b\x0c\x1c-\x1e\x85\u2028\u2029]")
-DELIMITER = re.compile("---[ \t]*")
+FRONTMATTER_DELIMITER = re.compile("---[ \t]*")
 BROKEN_LINK_ERRORS = {errno.ENOENT, errno.ENOTDIR, errno.ELOOP}
 USER_SETTINGS = ("apiKeyHelper", "env", "model", "autoMemoryEnabled")
 PARENT_SESSION_VARIABLES = (
@@ -183,26 +183,29 @@ def checkout_problems():
 
 
 def main_checkout():
-    found = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=REPO, capture_output=True, text=True)
-    if found.returncode != 0:
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    rev_parse = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=REPO, env=env,
+                               capture_output=True, text=True)
+    if rev_parse.returncode != 0:
         return None
-    common = (REPO / found.stdout.strip()).resolve()
+    common = (REPO / rev_parse.stdout.strip()).resolve()
     return common.parent if common.name == ".git" else common
 
 
 def main_checkout_problems():
-    main = main_checkout()
-    if main is None or main == REPO or not (main / ".claude").is_dir():
+    checkout = main_checkout()
+    folder = None if checkout in (None, REPO) else checkout / ".claude"
+    if folder is None or not folder.is_dir():
         return []
-    if exists_but_unreadable(main / ".claude", os.R_OK | os.X_OK):
-        return [unreadable_problem(main / ".claude")]
-    return claude_folder_problems(main / ".claude")
+    if exists_but_unreadable(folder, os.R_OK | os.X_OK):
+        return [unreadable_problem(folder)]
+    return claude_folder_problems(folder)
 
 
 def frontmatter_problem(text):
     lines = text.replace("\r\n", "\n").split("\n")
-    closing = next((index for index, line in enumerate(lines[1:], 1) if DELIMITER.fullmatch(line)), None)
-    if not DELIMITER.fullmatch(lines[0]) or closing is None:
+    closing = next((index for index, line in enumerate(lines[1:], 1) if FRONTMATTER_DELIMITER.fullmatch(line)), None)
+    if not FRONTMATTER_DELIMITER.fullmatch(lines[0]) or closing is None:
         return "has no frontmatter between two --- lines"
     block = lines[1:closing]
     if any(OTHER_LINE_BREAKS.search(line) for line in block):

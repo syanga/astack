@@ -17,7 +17,7 @@ A **context pointer** is a reference held in the agent's context that names some
 A pointer does two jobs: state what the material is, and list the **branches** that should trigger reaching it (a branch is a distinct case the document handles, so different runs take different paths through it). Every word of an always-loaded pointer costs on every turn, so it earns even harder pruning than the body:
 
 - **Front-load the leading word.** The pointer is where it does its triggering work.
-- **Name the task, not the method.** The agent matches its current task against the catalog, so the naming clause and triggers describe the work as the agent sees it. "Feature work, test first" fires on feature requests that "Test-driven development" missed.
+- **Name the task, not the method.** The agent matches its current task against the catalog. Write the naming clause and triggers to describe the work as the agent sees it. "Feature work, test first" fires on feature requests that "Test-driven development" missed.
 - **One trigger per branch.** Synonyms that rename a single branch are one branch written twice; collapse them and keep only genuinely distinct branches.
 - **Cut identity the body already carries.** The description says when to reach the skill, not what it contains. One clause naming the skill, then the triggers. Every word costs every turn in every session, so a description that reads like a summary of the body has failed.
 

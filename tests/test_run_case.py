@@ -226,6 +226,7 @@ class RunCaseTests(unittest.TestCase):
 
     def test_refuses_to_run_when_the_checkout_could_approve_more_than_reading(self):
         tdd = (self.checkout / "skills/tdd/SKILL.md").read_text(encoding="utf-8")
+        spaced = tdd.replace("---\n", "--- \n", 1).replace("\n---\n", "\n---\t\n", 1)
         allow = json.dumps({"permissions": {"allow": ["Write"]}})
 
         def write(path, text):
@@ -327,8 +328,8 @@ class RunCaseTests(unittest.TestCase):
             "allowed-tools after a line separator and ---": (after_description("\u2028---\nallowed-tools: Write"),
                                                              "skills/tdd/SKILL.md"),
             "allowed-tools in frontmatter between spaced --- lines": (
-                write("skills/tdd/SKILL.md", tdd.replace("---\n", "--- \n", 1).replace(
-                    "\n---\n", "\nallowed-tools: Write\n---\t\n", 1)), "skills/tdd/SKILL.md declares allowed-tools"),
+                write("skills/tdd/SKILL.md", spaced.replace("\n---\t\n", "\nallowed-tools: Write\n---\t\n", 1)),
+                "skills/tdd/SKILL.md declares allowed-tools"),
             "allowed-tools in frontmatter closed by ----": (
                 write("skills/tdd/SKILL.md", tdd.replace("\n---\n", "\nallowed-tools: Write\n----\n", 1)),
                 "skills/tdd/SKILL.md"),
@@ -360,7 +361,6 @@ class RunCaseTests(unittest.TestCase):
         (checkout / "vendor/lib").mkdir(parents=True)
         (checkout / "vendor/lib/lib").symlink_to("lib")
         (checkout / "vendor/notes").symlink_to("../README.md/notes")
-        spaced = tdd.replace("---\n", "--- \n", 1).replace("\n---\n", "\n---\t\n", 1)
         (checkout / "skills/tdd/SKILL.md").write_text(spaced, encoding="utf-8")
         self.log.unlink(missing_ok=True)
         allowed, sessions = self.run_case("--runs", "1", "Add a feature", checkout=checkout)
@@ -368,13 +368,22 @@ class RunCaseTests(unittest.TestCase):
         self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
         self.assertEqual(len(sessions), 1)
 
-    def test_refuses_a_skill_in_the_main_checkout_that_a_linked_worktree_loads(self):
+    def git(self, folder, *arguments):
+        env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+                   GIT_AUTHOR_NAME="Test", GIT_AUTHOR_EMAIL="test@example.com",
+                   GIT_COMMITTER_NAME="Test", GIT_COMMITTER_EMAIL="test@example.com")
+        subprocess.run(["git", "-C", str(folder), *arguments], env=env, check=True, capture_output=True)
+
+    def linked_worktree(self):
         main = self.copy_checkout()
-        git = ["git", "-C", str(main), "-c", "user.name=test", "-c", "user.email=test@example.invalid",
-               "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false"]
         for arguments in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "checkout"],
                           ["worktree", "add", "-q", "--detach", str(main.parent / "lane")]):
-            subprocess.run([*git, *arguments], check=True, capture_output=True)
+            self.git(main, *arguments)
+        return main
+
+    def test_refuses_a_skill_in_the_main_checkout_that_a_linked_worktree_loads(self):
+        main = self.linked_worktree()
         (main / ".claude").mkdir()
         (main / ".claude/settings.local.json").write_text("{}")
 
@@ -393,6 +402,21 @@ class RunCaseTests(unittest.TestCase):
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("checkout/.claude/skills exists", refused.stderr)
         self.assertNotIn("Traceback", refused.stderr)
+        self.assertEqual(sessions, [])
+
+    def test_finds_the_main_checkout_when_git_dir_points_elsewhere(self):
+        main = self.linked_worktree()
+        (main / ".claude/skills/ship").mkdir(parents=True)
+        (main / ".claude/skills/ship/SKILL.md").write_text("ship it")
+        decoy = Path(tempfile.mkdtemp(dir=self.temp)) / "decoy"
+        decoy.mkdir()
+        self.git(decoy, "init", "-q")
+        self.env["GIT_DIR"] = str(decoy / ".git")
+
+        refused, sessions = self.run_case("--runs", "1", "Add a feature", checkout=main.parent / "lane")
+
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("checkout/.claude/skills exists", refused.stderr)
         self.assertEqual(sessions, [])
 
     def test_refuses_an_unreadable_settings_json_only_as_unreadable(self):
