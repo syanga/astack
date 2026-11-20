@@ -148,14 +148,17 @@ class RunCaseTests(unittest.TestCase):
                                 env=dict(self.env, FAKE_MODE=mode), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True)
 
-    def run_case(self, *arguments, **options):
-        script = self.start(*arguments, **options)
+    def finish(self, script, timeout=60):
         try:
-            stdout, stderr = script.communicate(timeout=60)
+            return script.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             script.kill()
             script.communicate()
             raise
+
+    def run_case(self, *arguments, **options):
+        script = self.start(*arguments, **options)
+        stdout, stderr = self.finish(script)
         result = subprocess.CompletedProcess(script.args, script.returncode, stdout, stderr)
         sessions = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
         return result, sessions
@@ -209,11 +212,12 @@ class RunCaseTests(unittest.TestCase):
                 (checkout / path).write_text(text)
             return setup
 
-        def unreadable(checkout):
-            folder = checkout / "components/demo/.claude"
-            (folder / "skills/ship").mkdir(parents=True)
-            folder.chmod(0o111)
-            self.addCleanup(folder.chmod, 0o755)
+        def restrict(folder, mode):
+            def setup(checkout):
+                (checkout / "components/demo/.claude/skills/ship").mkdir(parents=True)
+                (checkout / folder).chmod(mode)
+                self.addCleanup((checkout / folder).chmod, 0o755)
+            return setup
 
         def link_parent(checkout):
             target = checkout.parent / "outside"
@@ -222,7 +226,7 @@ class RunCaseTests(unittest.TestCase):
             (checkout / "components").mkdir(exist_ok=True)
             (checkout / "components/linked").symlink_to(target)
 
-        def link_inside(link, target):
+        def link_folder(link, target):
             def setup(checkout):
                 (checkout / target / "commands").mkdir(parents=True)
                 (checkout / target / "commands/ship.md").write_text("ship it")
@@ -256,16 +260,20 @@ class RunCaseTests(unittest.TestCase):
                                               ".claude/worktrees/probe/.claude/skills"),
             "a project skill in node_modules": (write("node_modules/pkg/.claude/skills/ship/SKILL.md", "ship it"),
                                                 "node_modules/pkg/.claude/skills"),
-            "a symlinked .claude": (link_inside(".claude", "../linked"), ".claude is a symlink"),
-            "a symlinked nested .claude": (link_inside("components/demo/.claude", "../linked"),
+            "a symlinked .claude": (link_folder(".claude", "../linked"), ".claude is a symlink"),
+            "a symlinked nested .claude": (link_folder("components/demo/.claude", "../linked"),
                                            "components/demo/.claude is a symlink"),
             "a .claude under a symlinked folder": (link_parent, "components/linked/.claude/skills"),
             "a nested .claude symlinked to a folder in the checkout": (
-                link_inside("services/api/.claude", "common/claude"), "services/api/.claude is a symlink"),
+                link_folder("services/api/.claude", "common/claude"), "services/api/.claude is a symlink"),
             "a .claude first reached through a symlink": (
-                link_inside("claude-config", "packages/app/.claude"), "packages/app/.claude/commands exists"),
+                link_folder("claude-config", "packages/app/.claude"), "packages/app/.claude/commands exists"),
             "a symlinked settings.json": (link_settings, ".claude/settings.json is a symlink"),
-            "an unreadable nested .claude": (unreadable, "components/demo/.claude cannot be read"),
+            "an unreadable nested .claude": (restrict("components/demo/.claude", 0o111),
+                                             "components/demo/.claude cannot be read"),
+            "a .claude in a folder that cannot be searched": (restrict("components/demo", 0o444),
+                                                              "components/demo/.claude cannot be read"),
+            "an unreadable folder": (restrict("components", 0o000), "components cannot be read"),
             "a skill's allowed-tools": (skill_frontmatter("allowed-tools: Write"), "skills/tdd/SKILL.md"),
             "a quoted allowed-tools key": (skill_frontmatter('"allowed-tools": Write'), "skills/tdd/SKILL.md"),
             "an escaped allowed-tools key": (skill_frontmatter('"allowed\\x2dtools": Write'), "skills/tdd/SKILL.md"),
@@ -324,7 +332,7 @@ class RunCaseTests(unittest.TestCase):
 
     def test_runs_started_together_into_one_output_directory_leave_one_running(self):
         scripts = [self.start("--runs", "1", "Add a feature") for _ in range(3)]
-        outputs = [script.communicate(timeout=60) for script in scripts]
+        outputs = [self.finish(script) for script in scripts]
 
         self.assertEqual(sorted(script.returncode != 0 for script in scripts), [False, True, True], outputs)
         for _, stderr in outputs:
@@ -365,7 +373,7 @@ class RunCaseTests(unittest.TestCase):
             time.sleep(0.05)
 
         script.send_signal(signal.SIGTERM)
-        script.communicate(timeout=30)
+        self.finish(script, timeout=30)
 
         self.assertNotEqual(script.returncode, 0)
         self.assertTrue(self.recorded_child_exits())

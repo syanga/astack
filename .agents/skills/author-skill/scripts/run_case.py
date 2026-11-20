@@ -15,9 +15,10 @@ instead of happening. Sessions skip local settings
 (.claude/settings.local.json). The script refuses to start when anything else
 in the checkout could approve a call:
 
-- a .claude/ folder anywhere in the checkout, including under symlinked
-  folders, that is a symlink or cannot be read
-- an entry directly in a .claude/ folder that is a symlink or is not
+- a folder anywhere in the checkout, including under symlinked folders, that
+  cannot be read, because it could hold a .claude/ folder
+- a .claude/ folder that is a symlink
+- a symlink directly in a .claude/ folder, or an entry there other than
   settings.json, settings.local.json, or worktrees/
 - a .claude/settings.json with anything but deny and ask rules
 - a skill whose SKILL.md does not open with frontmatter between two lines of
@@ -113,22 +114,23 @@ def settings_problems(path):
 
 
 def claude_folder_problems(folder):
-    if folder.is_symlink():
-        return ["{} is a symlink".format(folder)]
     try:
-        entries = sorted(os.listdir(folder))
-    except OSError:
+        if folder.is_symlink():
+            return ["{} is a symlink".format(folder)]
+        problems = []
+        for entry in sorted(os.listdir(folder)):
+            path = folder / entry
+            if path.is_symlink():
+                problems.append("{} is a symlink".format(path))
+            elif entry not in ACCEPTED_ENTRIES:
+                problems.append("{} exists".format(path))
+            elif entry == "settings.json":
+                problems += settings_problems(path)
+        return problems
+    except NotADirectoryError:
         return []
-    problems = []
-    for entry in entries:
-        path = folder / entry
-        if path.is_symlink():
-            problems.append("{} is a symlink".format(path))
-        elif entry not in ACCEPTED_ENTRIES:
-            problems.append("{} exists".format(path))
-        elif entry == "settings.json":
-            problems += settings_problems(path)
-    return problems
+    except OSError:
+        return ["{} cannot be read".format(folder)]
 
 
 def config_problems():
@@ -152,7 +154,7 @@ def config_problems():
                 seen.add((info.st_dev, info.st_ino))
                 unseen.append(child)
         children[:] = unseen
-    return problems
+    return sorted(set(problems))
 
 
 def frontmatter_problem(text):
