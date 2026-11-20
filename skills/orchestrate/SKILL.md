@@ -37,7 +37,7 @@ For a requested pause or transfer to another session, read [handoff](../handoff/
 - `ledger.tsv` is the verification ledger, per Verification.
 - `inbox/` holds completion pointers.
 - `gates.md` holds human decisions. Park each with `orch gate park`. The question states the decision and what the gate blocks, in one plain line. The default is the recommended answer to every part. Silence is not approval.
-- `open-decisions.md` holds the full [decision request](#messages-to-the-user) of each open gate.
+- `open-decisions.md` holds the full [decision request](../decision-requests/SKILL.md) of each open gate.
 - `followups.md` holds findings outside the current scope, one heading each.
 - `decisions.tsv` is the trail maintained through [show-me-your-work](../show-me-your-work/SKILL.md).
 - `status.md` is derived from the unit and verification tables, gates, and latest overview handoff at each checkpoint, never hand-maintained. Regenerate it instead of narrating events into it.
@@ -130,7 +130,7 @@ Publish each completed unit promptly. The worker pushes its branch, and the coor
 
 Honor authorization already given. Send gates in the next drain message or Reply, not one message per gate. Ask the user only for decisions, authorizations, and facts the user alone holds. When a check needs access you lack, ask for read-only access and run the check yourself. Gates include unauthorized irreversible actions (force-push to shared branches, deploys, deletions, closing someone else's PR), genuine product or preference calls no experiment settles, a standing order that contradicts observed reality, a program-level dead end that survived a replan, and a [review-pr](../review-pr/SKILL.md) run that stopped at its pass limit. Park each as a `gates.md` entry before asking, and route work around it.
 
-Write the gate's decision request to `open-decisions.md` when you park it. Park a gate that arrives in a track rollup in your own store. When new evidence changes the request, update it there. Re-park the gate under the same ID if its options or default changed. When the user answers, resolve the gate with `orch gate resolve`. Move its request, with the answer, to `reports/gate-<id>.md`.
+Write the gate's decision request to `open-decisions.md` when you park it. Park a gate that arrives in a track rollup in your own store. Re-park the gate under the same ID if its options or default changed. When the user answers, resolve the gate with `orch gate resolve`. Move its request, with the answer, to `reports/gate-<id>.md`.
 
 Handle routine frontier updates, restacks, retries, CI failures, review threads, and formatting within the authorized scope. Refuse work the brief excludes and continue the assigned work. Record these decisions without asking whether to keep going.
 
@@ -142,27 +142,14 @@ In every message, name each unit and gate by what it is, with its ID in parenthe
 
 Before a message reports a PR's state, read that state live with [`pr.py status`](../harden-pr/pr-work.md), not from a worker's report or the saved frontier. A merge is final, so skip the read for a PR that your own live read or the saved frontier showed merged.
 
-**Decision request.** Write each open gate's request so it stands without earlier messages:
+Write, track, and report each gate's decision request as [decision-requests](../decision-requests/SKILL.md) describes. Save every artifact a request depends on in the store.
 
-- What is being decided and why it needs the user, in plain words.
-- What the gate blocks and what work continues meanwhile.
-- What the user must read and what they may skip.
-- Each option with its consequence.
-- A recommendation with a one-line reason, for each part of the decision.
-- Every artifact the decision depends on, saved in the store and given as an absolute path or URL. Publish mocks, screenshots, and tables over 100 columns with [t3-preview](../t3-preview/SKILL.md) when it is available, because a path does not render them in chat.
-- The shortest sufficient reply, such as "approve all".
-- What happens next and who acts.
+**Drain message.** Report only what changed since the previous message to the user. Besides what decision-requests asks for, the message has these parts and no others:
 
-**Drain message.** Report only what changed since the previous message to the user. The message has these parts and no others:
-
-- The full request of each gate that opened.
-- For a request that new evidence changed, only the change, in at most 300 words.
-- For an answered gate, one line that confirms the recorded answer.
 - One line per unit whose state changed, or one line that says no unit changed state.
 - Anything new that stops dispatch or puts the done predicate at risk.
-- While gates are open, a last line with the number of open gates and the absolute path of `open-decisions.md`.
 
-Without the first two parts, the message has at most 60 words. Running work and unchanged units live in `status.md`. Evidence detail lives in `reports/`.
+Without a new or changed request, the message has at most 60 words. Running work and unchanged units live in `status.md`. Evidence detail lives in `reports/`.
 
 **Reply.** Send a Reply in these cases:
 
