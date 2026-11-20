@@ -3,10 +3,14 @@ import subprocess
 import sys
 
 GUARD = r'''
-import os, shutil, signal, sys
-for number in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
-    signal.signal(number, signal.SIG_IGN)
-shutil.rmtree(os.fsdecode(sys.stdin.buffer.read()), ignore_errors=True)
+import os, shutil, signal, sys, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+folder = os.fsdecode(sys.stdin.buffer.read())
+for _ in range(50):
+    shutil.rmtree(folder, ignore_errors=True)
+    if not os.path.lexists(folder):
+        break
+    time.sleep(0.1)
 '''
 
 

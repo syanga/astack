@@ -23,7 +23,8 @@ BUSY = "some avg10=45.00 avg60=30.00 avg300=12.00 total=1\nfull avg10=2.00 avg60
 HELPER_LIMIT_SECONDS = 600
 UNTIL = r'''
 import os, sys, time
-def until(path, deadline=time.monotonic() + {}):
+deadline = time.monotonic() + {}
+def until(path):
     while not os.path.exists(path):
         if not os.path.isdir(os.path.dirname(path)) or time.monotonic() > deadline:
             sys.exit("gave up waiting for " + path)
