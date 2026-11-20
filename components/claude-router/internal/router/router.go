@@ -490,13 +490,13 @@ func (r *Router) Admit(now Instant, account AccountID, model string) Reason {
 	return admissionBar(r.cfg, now, r.expiry.Stamp, r.accounts[idx], model)
 }
 
-// RequireLogin excludes an account from new placement until Relogin when the
-// token endpoint refused its refresh token. Unlike an auth failure's mark,
-// LoginConfirmed does not clear it, because the access token can still work
-// while no refresh can replace it. at is when the caller learned of the
-// refusal; an account that already needs login keeps its time. It reports
-// whether the account needed no login before.
-func (r *Router) RequireLogin(account AccountID, at time.Time) bool {
+// RefreshRefused records that the token endpoint refused the account's
+// refresh token. It marks the account as needing login from at, unless it
+// already needs login, which keeps its time. Either way, only Relogin clears
+// the requirement afterwards: LoginConfirmed does not, because the access
+// token can still work while no refresh can replace it. It reports whether
+// the account needed no login before.
+func (r *Router) RefreshRefused(account AccountID, at time.Time) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	idx, ok := r.index[account]
@@ -531,8 +531,9 @@ func (r *Router) Relogin(account AccountID) error {
 
 // LoginConfirmed clears an account's login requirement when a request with
 // its credential that started at start succeeded after the failure that set
-// it: the credential works, so the account needs no browser login. It
-// reports whether it cleared the requirement.
+// it: the credential works, so the account needs no browser login. It leaves
+// a requirement that RefreshRefused recorded. It reports whether it cleared
+// the requirement.
 func (r *Router) LoginConfirmed(account AccountID, start time.Time) bool {
 	r.commitMu.Lock()
 	defer r.commitMu.Unlock()

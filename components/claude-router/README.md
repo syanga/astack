@@ -504,6 +504,9 @@ Feed the router what it cannot see:
 - `Served` after the first successful response on an assignment.
 - `Relogin` after a browser login, `LoginConfirmed` after a request that
   began after an auth failure succeeded, and `Move` for a manual override.
+  `LoginConfirmed` leaves a login requirement that `RefreshRefused` set.
+- `RefreshRefused` when the token endpoint refuses an account's refresh
+  token.
 
 CONTRACT.md's PR2 section gives the placement rule, the defaults, and the
 journal rules.

@@ -162,6 +162,46 @@ func TestClearNeedsLoginAppliesAtTheNextStart(t *testing.T) {
 	}
 }
 
+func TestARefusedRefreshTokenKeepsTheLoginRequirementUntilLogin(t *testing.T) {
+	h := newDurable(t, accts(a, 1.0)...)
+	h.r.ObserveOverage(a, OverageDisabled, t0)
+	if _, err := h.r.CommitAssignment(t0, "conv", a, ReasonCapacity); err != nil {
+		t.Fatal(err)
+	}
+	h.report(t0, a, "claude-sonnet-4-5", ClassAuth)
+	setAgain := h.r.RefreshRefused(a, t0.Add(time.Minute))
+	confirmed := h.r.LoginConfirmed(a, t0.Add(2*time.Minute))
+	h.restartDurable(t0.Add(3 * time.Minute))
+	confirmedAfterRestart := h.r.LoginConfirmed(a, t0.Add(4*time.Minute))
+	if err := h.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	login, err := OpenStore(h.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := login.ClearNeedsLogin(a); err != nil {
+		t.Fatal(err)
+	}
+	login.Close()
+	h.openDurable(t0.Add(5 * time.Minute))
+	h.report(t0.Add(6*time.Minute), a, "claude-sonnet-4-5", ClassAuth)
+	confirmedAfterLogin := h.r.LoginConfirmed(a, t0.Add(7*time.Minute))
+
+	if setAgain {
+		t.Fatal("RefreshRefused reported setting a login requirement that the auth failure had already set")
+	}
+	if confirmed || confirmedAfterRestart {
+		t.Fatalf("a later success cleared the requirement that a refused refresh token set (before restart %t, after %t)", confirmed, confirmedAfterRestart)
+	}
+	if !confirmedAfterLogin {
+		t.Fatal("after the login, a later success did not clear a new auth failure's requirement")
+	}
+	if d := h.decide(t0.Add(7*time.Minute), "conv"); d.Kind != Dispatch || d.Account != a {
+		t.Fatalf("after the login and the confirmed success: %+v, want dispatch on acct-a", d)
+	}
+}
+
 func TestOnlyASuccessStartedAfterTheAuthFailureConfirmsTheLogin(t *testing.T) {
 	h := newDurable(t, accts(a, 1.0)...)
 	h.r.ObserveOverage(a, OverageDisabled, t0)

@@ -525,7 +525,7 @@ calls the same `Router`; it has no second placement algorithm.
 | `Router.Commit(now, Request, Decision) (Decision, error)` | Makes a `place` or `migrate` durable. It decides again under the commit lock and commits that fresh decision, which it returns. |
 | `Router.Route(now, Request) (Decision, error)` | `Decide`, then `Commit`, before dispatch, in a loop of at most 3 attempts. PR3 calls this. |
 | `Router.Report(Failure) Class` | Records a failure before output and returns the class the policy acts on. |
-| `Router.RequireLogin(account, at) bool` | Marks the account as needing login from `at`, unless it already needs login, and records that the mark came from a refused refresh token, which only `Relogin` clears. It reports whether it set the mark. PR3 calls it when the token endpoint refuses the account's refresh token. |
+| `Router.RefreshRefused(account, at) bool` | Records that the token endpoint refused the account's refresh token. It marks the account as needing login from `at`, unless the account already needs login. It records the refusal in both cases, and afterwards only `Relogin` clears the requirement. It reports whether it set the mark. |
 | `Router.Observe(account, attemptStart, Observation)` | Records the quota headers of one response. |
 | `Router.ObserveWeeklyUsage(account, WeeklyUsage)` | Keeps the newest valid account-wide weekly usage in memory without changing rejection evidence. |
 | `Router.ObserveUsage(account, start, kind, used)` | Records one account-wide five-hour or weekly window from a usage read that started at `start`. A `used` fraction from 0 up to but not including 1 counts as a report that the window is not rejected. Any other value changes nothing. |
@@ -1586,7 +1586,7 @@ replaces the credential. The SDK's error for a failed exchange ends with the
 answer's status and body (`refreshHTTPError` in the SDK's
 `internal/auth/claude/anthropic_auth.go`). The guard classifies that text.
 For an exchange it sees, the SDK's or the router's, the guard marks the
-account at once through `Router.RequireLogin`, whether or not a read waits
+account at once through `Router.RefreshRefused`, whether or not a read waits
 for the refresh. For a refresh that began before the guard, the SDK's
 failure record (`LastError`) carries the same text, and the next read of the
 account marks it. A read during the failure run of a refused refresh token
@@ -2293,11 +2293,11 @@ commit that starts after it decides with the login requirement cleared.
 
 ### Durable account state
 
-`router.Open` keeps each account's login requirement and whether a refused
-refresh token set it, known rejections,
-latest paid-overflow check, and latest paid use in `accounts.json` beside
-the journal. Every change is written before the call that made it returns:
-a temporary file is synced and renamed, and the directory is synced. A
+`router.Open` keeps each account's login requirement, its refusal record
+(`refresh_refused`), known rejections, latest paid-overflow check, and
+latest paid use in `accounts.json` beside the journal. Every change is
+written before the call that made it returns: a temporary file is synced
+and renamed, and the directory is synced. A
 disabled check that only advanced by less than a minute, and a rejection
 with a known reset that was observed again, are not rewritten; the saved
 copy is older and therefore more conservative. A failed write stops the

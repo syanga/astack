@@ -276,7 +276,7 @@ func (s *Service) refreshRefused(authID string) {
 }
 
 func (s *Service) requireLogin(account router.AccountID) {
-	if s.router.RequireLogin(account, s.now()) {
+	if s.router.RefreshRefused(account, s.now()) {
 		s.events.emit(Event{Kind: "login_required", Account: account, Reason: "refresh_refused"})
 	}
 }
