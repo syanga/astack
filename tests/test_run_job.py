@@ -31,6 +31,7 @@ write_pid(sys.argv[1], child.pid)
 '''
 ZOMBIE_MEMBER = 'import os, subprocess, sys, time\n' + WRITE_PID + '''
 group = os.getpgid(0)
+deadline = time.monotonic() + 60
 holder = os.fork()
 if holder == 0:
     null = os.open(os.devnull, os.O_WRONLY)
@@ -43,11 +44,13 @@ if holder == 0:
         os._exit(0)
     while not subprocess.run(['ps', '-o', 'stat=', '-p', str(member)],
                              capture_output=True, text=True).stdout.strip().startswith('Z'):
+        if time.monotonic() > deadline:
+            os._exit(1)
         time.sleep(0.01)
     write_pid(sys.argv[1], os.getpid())
     time.sleep(60)
     os._exit(0)
-while not os.path.exists(sys.argv[1]):
+while not os.path.exists(sys.argv[1]) and time.monotonic() < deadline:
     time.sleep(0.01)
 '''
 

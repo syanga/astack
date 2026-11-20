@@ -17,6 +17,7 @@ import time
 from unittest.mock import patch
 import warnings
 
+from folder_guard import remove_folder_when_test_ends
 from test_claude_router_install import ComponentFixture
 
 COMMIT = "4b1f0c2d9e8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c"
@@ -88,6 +89,8 @@ sys.argv = ["claude_router.py"] + sys.argv[1:]
 claude_router.cli()
 '''
 
+
+WAIT_LIMIT_SECONDS = 600
 
 SIGNAL_SENDER = r'''
 import os, sys, time
@@ -196,6 +199,7 @@ class ActivationFixture(ComponentFixture):
 
     def setUp(self):
         super().setUp()
+        remove_folder_when_test_ends(self, self.root)
         self.addCleanup(self.assert_no_process_outlives_the_test)
         self.gates, self.started = [], []
         self.addCleanup(self.end_started)
@@ -260,9 +264,13 @@ class ActivationFixture(ComponentFixture):
         self.started.append(process)
         return process
 
+    def waits_while(self, condition):
+        return 'n=0; while {} && [ -d "{}" ] && [ $n -lt {} ]; do sleep 0.05; n=$((n + 1)); done'.format(
+            condition, self.root, WAIT_LIMIT_SECONDS * 20)
+
     def waits_for(self, gate):
         self.gates.append(gate)
-        return 'while [ ! -e "{}" ] && [ -d "{}" ]; do sleep 0.05; done'.format(gate, self.root)
+        return self.waits_while('[ ! -e "{}" ]'.format(gate))
 
     def end_started(self):
         for gate in self.gates:
@@ -671,8 +679,8 @@ class ActivationTests(ActivationFixture):
         for ending, expected_exit in (("exit 5", 1), ("fake-client {}".format(SESSION), 0)):
             with self.subTest(ending):
                 pidfile = self.root / "child-{}.pid".format(expected_exit)
-                command = ("exec > /dev/null 2>&1; sh -c 'echo $$ > \"{0}\"; exec sleep 30' & "
-                           "while [ ! -s \"{0}\" ] && [ -d \"{2}\" ]; do sleep 0.05; done; {1}".format(pidfile, ending, self.root))
+                command = "exec > /dev/null 2>&1; sh -c 'echo $$ > \"{}\"; exec sleep 30' & {}; {}".format(
+                    pidfile, self.waits_while('[ ! -s "{}" ]'.format(pidfile)), ending)
                 result = self.run_activate(verify=((SESSION, command),))
                 pid = int(pidfile.read_text())
                 self.addCleanup(lambda pid=pid: subprocess.run(["kill", "-9", str(pid)], capture_output=True))

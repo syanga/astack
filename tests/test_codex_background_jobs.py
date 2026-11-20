@@ -1,4 +1,3 @@
-import contextlib
 import json
 from datetime import datetime
 import os
@@ -19,6 +18,11 @@ SKILLS = Path(__file__).resolve().parents[1] / 'skills'
 SCRIPT = SKILLS / 'codex-background-jobs/scripts/run.py'
 THREAD = '01234567-89ab-4def-8123-456789abcdef'
 LARGE = 1 << 20
+WAIT_FOR_RELEASE = '''import os, sys, time
+deadline = time.monotonic() + 120
+while not os.path.exists({!r}) and time.monotonic() < deadline:
+    time.sleep(0.02)
+'''
 UNVERIFIABLE_CLEANUP = '''
 import runpy, sys
 sys.path.insert(0, sys.argv[1])
@@ -51,17 +55,17 @@ with Path(os.environ['QUEUE_RECORD']).open('a') as stream:
 if os.environ.get('LARGE_OUTPUT'):
     sys.exit(0)
 if os.environ.get('CANCEL_QUEUE'):
-    import signal
+    import signal, time
     os.kill(os.getppid(), getattr(signal, os.environ['CANCEL_QUEUE']))
-    signal.pause()
+    time.sleep(120)
 if os.environ.get('INVALID_QUEUE_OUTPUT'):
     os.write(1, b'accepted \\xff\\n')
     os.write(2, b'diagnostic \\xfe\\n')
     sys.exit(0)
 if os.environ.get('HANG_QUEUE'):
-    import signal
+    import time
     print('accepted', flush=True)
-    signal.pause()
+    time.sleep(120)
 print('accepted' if os.environ.get('QUEUE_EXIT', '0') == '0' else 'queue unavailable')
 sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
 ''', encoding='utf-8')
@@ -172,9 +176,8 @@ sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
 
     def test_result_write_failure_still_delivers_completed_job_status(self):
         release = self.root / 'release'
-        os.mkfifo(release)
         process = subprocess.Popen(self.argv(
-            'import sys; open("release").read(); print("finished once"); sys.exit(7)'),
+            WAIT_FOR_RELEASE.format('release') + 'print("finished once")\nsys.exit(7)\n'),
             cwd=self.root, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             receipt = json.loads(process.stdout.readline())
@@ -232,9 +235,7 @@ sys.exit(int(os.environ.get('QUEUE_EXIT', '0')))
                 (self.root / 'queued.jsonl').unlink(missing_ok=True)
                 release = self.root / f'release-{code}'
                 pidfile = self.root / f'leftover-{code}.pid'
-                os.mkfifo(release)
-                job = 'import os, subprocess, sys\n' + WRITE_PID + f'''
-open({str(release)!r}).read()
+                job = WAIT_FOR_RELEASE.format(str(release)) + 'import subprocess\n' + WRITE_PID + f'''
 leftover = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
 write_pid(sys.argv[1], leftover.pid)
 print("finished after host loss")
@@ -265,10 +266,7 @@ sys.exit({code})
                     self.assertEqual(len(queued), 1)
                     self.assertIn(f'Status: completed; exit code: {code}', queued[0][4])
                 finally:
-                    with contextlib.suppress(OSError):
-                        fd = os.open(release, os.O_WRONLY | os.O_NONBLOCK)
-                        os.write(fd, b'go')
-                        os.close(fd)
+                    release.touch()
                     if launcher.poll() is None:
                         launcher.kill()
                     launcher.communicate()
@@ -289,7 +287,7 @@ sys.exit({code})
         self.assertEqual(len(self.queued()), 1)
 
     def test_timeout_stops_job_and_queues_failure(self):
-        completed, _, result = self.run_job('import signal; signal.pause()', limit=('--timeout', '0.2'))
+        completed, _, result = self.run_job('import time; time.sleep(120)', limit=('--timeout', '0.2'))
         self.assertEqual(completed.returncode, 124, completed.stderr)
         self.assertEqual(result['status'], 'timed_out')
         self.assertEqual(result['notification'], 'queued')
@@ -339,7 +337,7 @@ sys.exit({code})
 
     def test_deadline_and_a_job_exiting_124_are_reported_differently(self):
         for limit, code, status in [('5', 'import sys; sys.exit(124)', 'completed'),
-                                    ('0.2', 'import signal; signal.pause()', 'timed_out')]:
+                                    ('0.2', 'import time; time.sleep(120)', 'timed_out')]:
             with self.subTest(status=status):
                 (self.root / 'queued.jsonl').unlink(missing_ok=True)
                 completed, _, result = self.run_job(code, limit=('--timeout', limit))

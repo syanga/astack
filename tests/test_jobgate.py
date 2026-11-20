@@ -12,6 +12,7 @@ import threading
 import time
 import unittest
 
+from folder_guard import remove_folder_when_test_ends
 from test_run_job import SYSTEM_PYTHON, system_python_before_3_10
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/jobgate.py"
@@ -19,32 +20,35 @@ GIB = 2**30
 CALM = "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n"
 THRASHING = "some avg10=92.10 avg60=80.00 avg300=40.00 total=1\nfull avg10=35.40 avg60=30.00 avg300=12.00 total=1\n"
 BUSY = "some avg10=45.00 avg60=30.00 avg300=12.00 total=1\nfull avg10=2.00 avg60=1.50 avg300=0.50 total=1\n"
-HOLD = r'''
+HELPER_LIMIT_SECONDS = 600
+UNTIL = r'''
 import os, sys, time
+deadline = time.monotonic() + {}
+def until(path):
+    while not os.path.exists(path):
+        if not os.path.isdir(os.path.dirname(path)) or time.monotonic() > deadline:
+            sys.exit("gave up waiting for " + path)
+        time.sleep(0.02)
+'''.format(HELPER_LIMIT_SECONDS)
+HOLD = UNTIL + r'''
 with open(sys.argv[1] + ".tmp", "w") as stream:
     stream.write(os.environ[sys.argv[3]])
 os.replace(sys.argv[1] + ".tmp", sys.argv[1])
-while not os.path.exists(sys.argv[2]):
-    time.sleep(0.02)
+until(sys.argv[2])
 '''
-ALLOCATE_ON_SIGNAL = r'''
-import os, sys, time
-while not os.path.exists(sys.argv[1]):
-    time.sleep(0.02)
+ALLOCATE_ON_SIGNAL = UNTIL + r'''
+until(sys.argv[1])
 block = b"\x01" * (int(sys.argv[2]) << 20)
 open(sys.argv[3], "w").close()
-while not os.path.exists(sys.argv[4]):
-    time.sleep(0.02)
+until(sys.argv[4])
 '''
-ALLOCATE_AND_FORK = r'''
-import os, sys, time
+ALLOCATE_AND_FORK = UNTIL + r'''
 block = b"\x01" * (int(sys.argv[1]) << 20)
 children = []
 for _ in range(4):
     pid = os.fork()
     if pid == 0:
-        while not os.path.exists(sys.argv[3]):
-            time.sleep(0.05)
+        until(sys.argv[3])
         os._exit(0)
     children.append(pid)
 open(sys.argv[2], "w").close()
@@ -151,6 +155,7 @@ class JobgateTest(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="jobgate test ")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
+        remove_folder_when_test_ends(self, self.root)
         self.repo = self.root / "repo"
         self.repo.mkdir()
         fake_bin = self.root / "bin"
