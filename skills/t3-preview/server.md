@@ -1,22 +1,11 @@
 # Server previews
 
-In T3 Code, `preview_open` opens a URL in a preview tab. The tab's browser runs on the agent machine, so it loads `localhost` URLs. T3 streams the tab to the user's device. On web and mobile, T3's browser panel also loads URLs on the agent machine. In the desktop app connected to another machine, a tab the user opens in the browser panel loads on the user's device. **Open in `<environment>`'s browser** moves that tab to the agent machine. By default, a `localhost` link in chat opens in the user's own browser. That browser can't reach the server when the user is on another device.
+T3's browser loads the agent machine's `localhost` URLs on every device.
 
 1. Serve only the preview directory, a prototype's scratch app, or the task's dev server. Use task-specific logs and record each process in the [cleanup record](cleanup.md). For static files on macOS, use the firewall-approved `/usr/bin/python3`.
-2. Hand off the page:
-   - In T3 Code, take these steps:
-     1. If you have the `preview_*` tools, open the page in a preview tab with `preview_open`. Verify loading and interactions in that tab. Reset any `preview_resize` or `preview_set_appearance` override. Then point the user to the tab.
-     2. The user needs the URL when no preview tab is open, for example after T3 closes a tab that had no viewer. Give the URL for T3's browser panel in this text:
-
-        ```text
-        To open the page, paste `<URL>` into T3's browser panel. If the page doesn't load in the desktop app, choose **Open in <environment>'s browser**.
-        ```
-
-        Replace `<URL>` with the page's URL. Replace `<environment>` with the `label` from `t3_environment_read`. If you lack that tool, use the agent machine's friendly name from `scutil --get ComputerName` on macOS or `hostnamectl --pretty` on Linux. If the agent machine has no friendly name, use `hostname`.
-   - Outside T3 Code, give the `localhost` URL.
-
-   If the user asks for a public link, follow [Create a public link](#create-a-public-link).
-3. Leave the preview processes running, and any preview tab open, while the user inspects.
+2. If you have the `preview_*` tools, verify loading and interactions in a preview tab with `preview_open`. Then reset any `preview_resize` or `preview_set_appearance` override.
+3. Give the user the page's `localhost` URL as a link. If the user asks for a public link, follow [Create a public link](#create-a-public-link).
+4. Leave the preview processes running while the user inspects.
 
 ## Create a public link
 
