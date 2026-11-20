@@ -6,7 +6,6 @@ from pathlib import Path
 import pwd
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,6 +13,7 @@ import unittest
 
 from test_claude_router_install import ComponentFixture
 from test_install import InstallerFixture
+from test_memory_guard import install_guard_as_earlier_versions_did
 
 SOURCE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOURCE / "scripts"))
@@ -53,10 +53,8 @@ class ReminderTests(unittest.TestCase):
         self.root = Path(temporary.name)
         lru_gen = self.root / "sys/kernel/mm/lru_gen"
         lru_gen.mkdir(parents=True)
-        self.enabled = lru_gen / "enabled"
-        self.enabled.write_text("0x0007\n")
-        self.ttl = lru_gen / "min_ttl_ms"
-        self.ttl.write_text("0\n")
+        (lru_gen / "enabled").write_text("0x0007\n")
+        (lru_gen / "min_ttl_ms").write_text("0\n")
         self.guard = memory_guard.Host(self.root)
         linger_dir = self.root / "var/lib/systemd/linger"
         self.linger = linger_dir / pwd.getpwuid(os.getuid()).pw_name
@@ -83,48 +81,15 @@ class ReminderTests(unittest.TestCase):
     def activate(self):
         claude_router.write_journal(self.router_state, {"phase": "active", "settings": str(self.root / "settings.json")})
 
-    def test_guard_reminder_gives_the_install_command_until_the_guard_is_installed(self):
+    def test_guard_reminder_gives_the_uninstall_command_while_the_guard_is_installed(self):
+        self.assertIsNone(self.guard_command(self.pending()))
+
+        install_guard_as_earlier_versions_did(self.root, before=0)
         command = self.guard_command(self.pending())
-        self.assertEqual(command, ["sudo", "python3", str(SOURCE / "scripts/memory_guard.py"), "install"])
+        self.assertEqual(command, ["sudo", "python3", str(SOURCE / "scripts/memory_guard.py"), "uninstall"])
 
         with redirect_stdout(io.StringIO()):
-            memory_guard.install(self.guard, dry_run=False)
-
-        self.assertIsNone(self.guard_command(self.pending()))
-
-    def test_guard_reminder_stays_until_the_guard_is_on_both_now_and_at_boot(self):
-        self.ttl.write_text("{}\n".format(memory_guard.MIN_TTL_MS))
-        self.assertIsNotNone(self.guard_command(self.pending()))
-
-        with redirect_stdout(io.StringIO()):
-            memory_guard.install(self.guard, dry_run=False)
-        self.assertIsNone(self.guard_command(self.pending()))
-
-        self.ttl.write_text("2000\n")
-        self.assertIsNone(self.guard_command(self.pending()))
-
-        self.ttl.write_text("0\n")
-        self.assertIsNotNone(self.guard_command(self.pending()))
-
-    @unittest.skipIf(shutil.which("systemd-tmpfiles") is None, "needs systemd-tmpfiles")
-    def test_no_guard_reminder_while_another_tmpfiles_d_rule_sets_min_ttl_ms_at_boot(self):
-        rule = self.root / "etc/tmpfiles.d/mglru.conf"
-        rule.parent.mkdir(parents=True)
-        rule.write_text("w- {} - - - - 1000\n".format(memory_guard.MIN_TTL_MS_PATH))
-        self.ttl.write_text("1000\n")
-        self.assertIsNone(self.guard_command(self.pending()))
-
-        rule.unlink()
-        self.assertIsNotNone(self.guard_command(self.pending()))
-
-    def test_no_guard_reminder_where_the_kernel_has_no_multi_gen_lru(self):
-        self.assertIsNotNone(self.guard_command(self.pending()))
-
-        self.enabled.write_text("0x0000\n")
-        self.assertIsNone(self.guard_command(self.pending()))
-
-        self.enabled.unlink()
-        self.ttl.unlink()
+            memory_guard.uninstall(self.guard, dry_run=False)
         self.assertIsNone(self.guard_command(self.pending()))
 
     def test_router_that_is_not_installed_gets_one_line_that_calls_it_optional(self):
@@ -184,8 +149,6 @@ class ReminderTests(unittest.TestCase):
         state = self.installed_router("systemd")
         self.assertNotEqual(self.pending(state), "")
 
-        with redirect_stdout(io.StringIO()):
-            memory_guard.install(self.guard, dry_run=False)
         self.linger.parent.mkdir(parents=True)
         self.linger.touch()
         self.activate()
@@ -193,13 +156,12 @@ class ReminderTests(unittest.TestCase):
         self.assertEqual(astack_reminders.pending(state, self.host), [])
 
     def test_a_reminder_that_cannot_read_its_state_leaves_the_others(self):
-        self.guard.boot_file.parent.mkdir(parents=True)
-        self.guard.boot_file.write_text("w {} - - - - 1000\n".format(memory_guard.MIN_TTL_MS_PATH))
+        install_guard_as_earlier_versions_did(self.root, before=0)
         (self.router_state / "config.json").write_text("[]")
         output = self.pending(self.installed_router("systemd"))
 
-        self.assertIsNone(self.guard_command(output))
         self.assertIsNone(self.setup_command(output))
+        self.assertIsNotNone(self.guard_command(output))
         self.assertIn(LINGER, output)
 
     def test_a_linger_check_that_cannot_read_the_layout_leaves_the_setup_reminder(self):
@@ -209,11 +171,13 @@ class ReminderTests(unittest.TestCase):
         self.assertEqual(self.setup_command(output), SETUP)
 
     def test_a_malformed_router_record_leaves_the_guard_reminder(self):
+        install_guard_as_earlier_versions_did(self.root, before=0)
         for components in (None, {"claude-router": {"layout": "x"}}):
             output = self.pending({"targets": {}, "components": components})
             self.assertIsNotNone(self.guard_command(output), components)
 
     def test_every_readme_link_names_a_readme_section(self):
+        install_guard_as_earlier_versions_did(self.root, before=0)
         output = self.pending() + "\n" + self.pending(self.installed_router("systemd"))
         headings = re.findall(r"^#+ (.+)$", (SOURCE / "README.md").read_text(encoding="utf-8"), re.MULTILINE)
         anchors = {re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-") for heading in headings}
@@ -236,17 +200,14 @@ class InstallerReminderTests(InstallerFixture):
 
     def test_the_guard_command_names_this_checkout_even_when_its_path_has_spaces(self):
         host_files = self.root / "host files"
-        lru_gen = host_files / "sys/kernel/mm/lru_gen"
-        lru_gen.mkdir(parents=True)
-        (lru_gen / "enabled").write_text("0x0007\n")
-        (lru_gen / "min_ttl_ms").write_text("0\n")
+        install_guard_as_earlier_versions_did(host_files, before=0)
         result = subprocess.run([sys.executable, "-c", PRINT_REMINDERS, str(self.repo / "scripts"), str(host_files),
                                  json.dumps({"targets": {}})], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
         commands = [shlex.split(line) for line in result.stdout.splitlines() if "memory_guard.py" in line]
         script = (self.repo / "scripts/memory_guard.py").resolve()
-        self.assertEqual(commands, [["sudo", "python3", str(script), "install"]])
+        self.assertEqual(commands, [["sudo", "python3", str(script), "uninstall"]])
 
 
 class InterruptedRouterInstallTests(ComponentFixture):
