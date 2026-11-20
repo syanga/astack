@@ -11,14 +11,15 @@ Write the brief in this order:
 3. Give your thread ID. Ask for replies through `t3_thread_send`.
 4. Give the task last. After compaction in a Claude thread, claude-restore-skills restores only the first 8,000 characters of the arguments, so steps 2 and 3 come first.
 
-Send the brief with `delegate_task` or `t3_thread_launch`, or with `t3_thread_send` in `queue` mode. Codex ignores a skill mention in a message steered into a running turn.
+Send each brief to a new thread or to a thread with no full-send task in progress. Use `delegate_task` or `t3_thread_launch`, or `t3_thread_send` in `queue` mode. Codex ignores a skill mention in a message steered into a running turn.
 
 While the thread runs, relay between it and the user:
 
 - When your harness has push notifications, send the thread's push-notification text as your own push notification.
 - Ask the user each question that the thread needs the user to answer, even when the user's earlier words seem to answer it. Send back each answer, labeled as the user's.
 - When the thread asks for your question and the user's answer, check that your question is the one above and that it names the thread's task. If either check fails, first ask the user that question for the thread's task. Then send the thread your question and the user's answer. If the thread still refuses them, give the user its reason.
-- Send the thread each message from the user that steers its work, labeled as the user's, with `t3_thread_send` in `auto` mode. When the user changes the thread's task, tell the thread that the user stopped its task, and send the new task to a new thread.
+- Send the thread each message from the user that steers its work, labeled as the user's, with `t3_thread_send` in `auto` mode.
+- When the user changes the thread's task, stop the thread as the global instructions describe, with the user's reason. Send the new task's brief to a new thread.
 - When the thread sends its final report, give the user the report's outcome and what remains.
 
 In everything you write, name the thread's store directory, not its `assumed-decisions.md` path. Otherwise claude-full-send-guard can mistake that store for yours.
