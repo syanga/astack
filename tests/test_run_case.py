@@ -231,6 +231,13 @@ class RunCaseTests(unittest.TestCase):
             (checkout / "skills/tdd/SKILL.md").chmod(0o000)
             self.addCleanup((checkout / "skills/tdd/SKILL.md").chmod, 0o644)
 
+        def unsearchable_skill_folder(checkout):
+            folder = checkout / "skills/tdd/references"
+            folder.mkdir()
+            (folder / "notes.md").write_text("notes")
+            folder.chmod(0o444)
+            self.addCleanup(folder.chmod, 0o755)
+
         def link_parent(checkout):
             target = checkout.parent / "outside"
             (target / ".claude/skills/ship").mkdir(parents=True)
@@ -284,10 +291,11 @@ class RunCaseTests(unittest.TestCase):
             "an unreadable nested .claude": (plant_skill_and_restrict("components/demo/.claude", 0o111),
                                              "components/demo/.claude cannot be read"),
             "a .claude in a folder that cannot be searched": (plant_skill_and_restrict("components/demo", 0o444),
-                                                              "components/demo/.claude cannot be read"),
+                                                              "components/demo cannot be read"),
             "a .claude that cannot be searched": (unsearchable_claude, "components/demo/.claude cannot be read"),
             "an unreadable folder": (plant_skill_and_restrict("components", 0o000), "components cannot be read"),
-            "an unreadable SKILL.md": (unreadable_skill, "skills/tdd/SKILL.md"),
+            "an unreadable SKILL.md": (unreadable_skill, "skills/tdd/SKILL.md cannot be read"),
+            "a skill folder that cannot be searched": (unsearchable_skill_folder, "skills/tdd/references cannot be read"),
             "a skill's allowed-tools": (skill_frontmatter("allowed-tools: Write"), "skills/tdd/SKILL.md"),
             "a quoted allowed-tools key": (skill_frontmatter('"allowed-tools": Write'), "skills/tdd/SKILL.md"),
             "an escaped allowed-tools key": (skill_frontmatter('"allowed\\x2dtools": Write'), "skills/tdd/SKILL.md"),

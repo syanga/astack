@@ -15,13 +15,12 @@ instead of happening. Sessions skip local settings
 (.claude/settings.local.json). The script refuses to start when anything else
 in the checkout could approve a call:
 
-- a folder anywhere in the checkout, including under symlinked folders, that
-  cannot be read, because it could hold a .claude/ folder
-- a .claude/ folder anywhere in the checkout that is a symlink
+- a file or folder in the checkout outside .git/, including under symlinked
+  folders, that the script cannot read and so cannot check
+- a symlinked .claude/ folder anywhere in the checkout
 - a symlink directly in a .claude/ folder, or an entry there other than
   settings.json, settings.local.json, or worktrees/
 - a .claude/settings.json with anything but deny and ask rules
-- a skill file that cannot be read
 - a skill whose SKILL.md does not open with frontmatter between two lines of
   exactly ---, or whose frontmatter has a line break other than LF or CRLF
 - a skill frontmatter key other than name, description,
@@ -47,7 +46,6 @@ from pathlib import Path
 import re
 import shutil
 import signal
-import stat
 import subprocess
 import sys
 import tempfile
@@ -115,28 +113,18 @@ def settings_problems(path):
     return ["{} sets {}".format(path, ", ".join(sorted(keys)))] if keys else []
 
 
-def is_symlink(path):
-    return stat.S_ISLNK(os.lstat(path).st_mode)
-
-
 def claude_folder_problems(folder):
-    try:
-        if is_symlink(folder):
-            return ["{} is a symlink".format(folder)]
-        problems = []
-        for entry in sorted(os.listdir(folder)):
-            path = folder / entry
-            if is_symlink(path):
-                problems.append("{} is a symlink".format(path))
-            elif entry not in ACCEPTED_ENTRIES:
-                problems.append("{} exists".format(path))
-            elif entry == "settings.json":
-                problems += settings_problems(path)
-        return problems
-    except NotADirectoryError:
-        return []
-    except OSError:
-        return ["{} cannot be read".format(folder)]
+    if folder.is_symlink():
+        return ["{} is a symlink".format(folder)]
+    problems = []
+    for path in sorted(folder.iterdir()):
+        if path.is_symlink():
+            problems.append("{} is a symlink".format(path))
+        elif path.name not in ACCEPTED_ENTRIES:
+            problems.append("{} exists".format(path))
+        elif path.name == "settings.json":
+            problems += settings_problems(path)
+    return problems
 
 
 def config_problems():
@@ -146,16 +134,16 @@ def config_problems():
     for folder, children, files in os.walk(REPO, followlinks=True, onerror=lambda error: problems.append(
             "{} cannot be read".format(error.filename))):
         here = Path(folder)
-        for entry in sorted(children + files):
-            if entry.lower() == ".claude":
-                problems += claude_folder_problems(here / entry)
+        problems += ["{} cannot be read".format(here / name) for name in files if not os.access(here / name, os.R_OK)]
         unseen = []
         for child in sorted(child for child in children if child != ".git"):
-            try:
-                info = (here / child).stat()
-            except OSError:
-                problems.append("{} cannot be read".format(here / child))
+            path = here / child
+            if not os.access(path, os.R_OK | os.X_OK):
+                problems.append("{} cannot be read".format(path))
                 continue
+            if child.lower() == ".claude":
+                problems += claude_folder_problems(path)
+            info = path.stat()
             if (info.st_dev, info.st_ino) not in seen:
                 seen.add((info.st_dev, info.st_ino))
                 unseen.append(child)
@@ -178,6 +166,8 @@ def frontmatter_problem(text):
 
 def read_only_problems():
     problems = config_problems()
+    if problems:
+        return problems
     for relative, data, _ in manage.skill_files():
         if len(relative.parts) == 2 and relative.name == "SKILL.md":
             problem = frontmatter_problem(data.decode("utf-8"))
