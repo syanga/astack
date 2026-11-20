@@ -75,10 +75,10 @@ def main(argv: Sequence[str] | None = None, host: Host | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="show the changes without making them")
     args = parser.parse_args(argv)
     host = host or real_host()
-    if installed(host) and not args.dry_run and os.geteuid() != 0:
-        print("memory_guard: uninstall needs root; run it with sudo", file=sys.stderr)
-        return 1
     try:
+        if installed(host) and not args.dry_run and os.geteuid() != 0:
+            print("memory_guard: uninstall needs root; run it with sudo", file=sys.stderr)
+            return 1
         uninstall(host, dry_run=args.dry_run)
     except (OSError, GuardError) as error:
         print("memory_guard: {}".format(error), file=sys.stderr)

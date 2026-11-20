@@ -1,6 +1,7 @@
 from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import io
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -68,6 +69,21 @@ class MemoryGuardTests(unittest.TestCase):
     def test_uninstall_restores_the_previous_min_ttl_ms_and_deletes_the_boot_file(self):
         install_guard_as_earlier_versions_did(self.root, before=250)
 
+        self.assertEqual(self.run_main("uninstall")[0], 0)
+        self.assertEqual(self.ttl_now(), "250")
+        self.assertFalse(self.boot_file.exists())
+
+    @unittest.skipIf(os.geteuid() == 0, "root can write a read-only file")
+    def test_uninstall_keeps_the_boot_file_until_it_restores_min_ttl_ms(self):
+        install_guard_as_earlier_versions_did(self.root, before=250)
+        self.ttl.chmod(0o444)
+
+        code, _, error = self.run_main("uninstall")
+        self.assertEqual(code, 1)
+        self.assertIn(str(self.ttl), error)
+        self.assertTrue(self.boot_file.exists())
+
+        self.ttl.chmod(0o644)
         self.assertEqual(self.run_main("uninstall")[0], 0)
         self.assertEqual(self.ttl_now(), "250")
         self.assertFalse(self.boot_file.exists())
