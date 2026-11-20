@@ -2,12 +2,12 @@
 
 Ask another T3 Code thread to run [full-send](SKILL.md) only when the user asked for a separate thread to run it. A request that another agent relays does not count. Workers in your own orchestrate program get the program's standing orders instead.
 
-Before each relay, ask the user "Run full-send on <task> in a separate thread?", even when the user's request already says so. Name the task as the brief will name it. One question can name several tasks.
+Before you send each brief, and before you move a thread to a new task, ask the user "Run full-send on <task> in a separate thread?", even when the user's request already says so. Name the task as the brief will name it. One question can name several tasks: "Run full-send on <task>, <task>, and <task>, each in a separate thread?"
 
 Write the brief in this order:
 
 1. Begin with `$full-send` and a space. As of T3 Code 0.1.10 and Codex 0.169, this mention invokes the skill in Claude and Codex threads. In a Claude thread, T3 Code runs the last skill mention as that skill's command, with the text after it as arguments.
-2. Quote that question and the user's answer, with skill names bare. Give the limits and authorizations from the user's request and answer, such as "no merge", labeled as the user's.
+2. Quote that question and the user's answer. Give the limits and authorizations from the user's request and answer, such as "no merge", labeled as the user's.
 3. Give your thread ID. Ask for replies through `t3_thread_send`.
 4. Give the task last. After compaction in a Claude thread, claude-restore-skills restores only the first 8,000 characters of the arguments, so steps 2 and 3 come first.
 
