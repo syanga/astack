@@ -328,11 +328,28 @@ class RunCaseTests(unittest.TestCase):
         (checkout / "loop").symlink_to(".")
         (checkout / "components/note").mkdir(parents=True)
         (checkout / "components/note/.claude").write_text("a file, not a folder")
+        (checkout / ".venv/bin").mkdir(parents=True)
+        (checkout / ".venv/bin/python").symlink_to("../../removed-python/bin/python3")
         self.log.unlink(missing_ok=True)
         allowed, sessions = self.run_case("--runs", "1", "Add a feature", checkout=checkout)
 
         self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
         self.assertEqual(len(sessions), 1)
+
+    def test_refuses_an_unreadable_settings_json_only_as_unreadable(self):
+        checkout = self.copy_checkout()
+        settings = checkout / ".claude/settings.json"
+        settings.parent.mkdir()
+        settings.write_text(json.dumps({"permissions": {"deny": ["WebFetch"]}}))
+        settings.chmod(0o000)
+        self.addCleanup(settings.chmod, 0o644)
+
+        refused, sessions = self.run_case("--runs", "1", "Add a feature", checkout=checkout)
+
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn(".claude/settings.json cannot be read", refused.stderr)
+        self.assertNotIn("not a JSON object", refused.stderr)
+        self.assertEqual(sessions, [])
 
     def test_refuses_an_output_directory_that_already_holds_transcripts(self):
         (self.temp / "out").mkdir()

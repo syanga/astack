@@ -15,8 +15,9 @@ instead of happening. Sessions skip local settings
 (.claude/settings.local.json). The script refuses to start when anything else
 in the checkout could approve a call:
 
-- a file or folder in the checkout outside .git/, including under symlinked
-  folders, that the script cannot read and so cannot check
+- a file or folder in the checkout, outside .git/ folders, that the script
+  cannot read and so cannot check, including one under a symlinked folder. A
+  broken symlink points to nothing, so the script skips it.
 - a symlinked .claude/ folder anywhere in the checkout
 - a symlink directly in a .claude/ folder, or an entry there other than
   settings.json, settings.local.json, or worktrees/
@@ -122,23 +123,35 @@ def claude_folder_problems(folder):
             problems.append("{} is a symlink".format(path))
         elif path.name not in ACCEPTED_ENTRIES:
             problems.append("{} exists".format(path))
-        elif path.name == "settings.json":
+        elif path.name == "settings.json" and os.access(path, os.R_OK):
             problems += settings_problems(path)
     return problems
 
 
-def config_problems():
+def cannot_read(path, mode):
+    if os.access(path, mode):
+        return False
+    try:
+        os.stat(path)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        pass
+    return True
+
+
+def checkout_problems():
     problems = []
     info = REPO.stat()
     seen = {(info.st_dev, info.st_ino)}
     for folder, children, files in os.walk(REPO, followlinks=True, onerror=lambda error: problems.append(
             "{} cannot be read".format(error.filename))):
         here = Path(folder)
-        problems += ["{} cannot be read".format(here / name) for name in files if not os.access(here / name, os.R_OK)]
+        problems += ["{} cannot be read".format(here / name) for name in files if cannot_read(here / name, os.R_OK)]
         unseen = []
         for child in sorted(child for child in children if child != ".git"):
             path = here / child
-            if not os.access(path, os.R_OK | os.X_OK):
+            if cannot_read(path, os.R_OK | os.X_OK):
                 problems.append("{} cannot be read".format(path))
                 continue
             if child.lower() == ".claude":
@@ -165,7 +178,7 @@ def frontmatter_problem(text):
 
 
 def read_only_problems():
-    problems = config_problems()
+    problems = checkout_problems()
     if problems:
         return problems
     for relative, data, _ in manage.skill_files():
