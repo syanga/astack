@@ -28,9 +28,8 @@ are exceptions to the Python script convention. The scripts in
 Python 3.9. Agents and Claude Code hooks run them with the system `python3`,
 which is 3.9 on stock macOS. `scripts/jobgate.py` and the vendored
 `scripts/_vendor/tomllib` also run on Python 3.9, because repositories' commands
-run jobgate with the `python3` on `PATH`. `scripts/memory_guard.py` and
-`scripts/astack_files.py`, which `memory_guard.py` imports, also run on Python
-3.9, because the README tells users to run `memory_guard.py` with `python3`.
+run jobgate with the `python3` on `PATH`. `scripts/memory_guard.py` also runs
+on Python 3.9, because the README tells users to run it with `python3`.
 Follow the verification steps in [CLI.md](skills/orchestrate/CLI.md) to run the
 orchestration tests offline in a temporary copy. The Python suite also tests the
 imported decision-log helper.

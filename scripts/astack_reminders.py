@@ -10,7 +10,7 @@ import claude_router
 import memory_guard
 
 INSTALLER = Path(__file__).resolve().parent.parent / "install.sh"
-GUARD_README = "README.md#keep-a-linux-machine-responsive-when-memory-runs-out"
+GUARD_README = "README.md#remove-the-memory-guard"
 ROUTER_README = "README.md#install-the-optional-claude-router"
 
 
@@ -30,13 +30,10 @@ def todo(name: str, readme: str, command: str) -> list[str]:
 
 
 def guard_step(host: Host) -> list[str]:
-    current = memory_guard.status(host.guard)
-    if not current.available or current.installed:
-        return []
-    if memory_guard.at_boot(host.guard).value_without_astack is not None:
+    if not memory_guard.installed(host.guard):
         return []
     script = shlex.quote(str(Path(memory_guard.__file__).resolve()))
-    return todo("memory guard", GUARD_README, "sudo python3 {} install".format(script))
+    return todo("memory guard uninstall", GUARD_README, "sudo python3 {} uninstall".format(script))
 
 
 def linger_step(layout: dict, host: Host) -> list[str]:

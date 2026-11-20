@@ -162,49 +162,35 @@ Linux, macOS priority, and the result log.
 
 When agents and test suites fill a Linux machine's RAM, the kernel evicts the
 code of running programs. The desktop then freezes until the OOM killer ends a
-process. [scripts/memory_guard.py](scripts/memory_guard.py) turns on the
-kernel's
-[thrashing prevention](https://docs.kernel.org/admin-guide/mm/multigen_lru.html#thrashing-prevention)
-by setting `/sys/kernel/mm/lru_gen/min_ttl_ms` to 1000. When the whole machine
-runs short of memory, the kernel then ends a process instead of evicting pages
-used in the last second. The setting does not apply when a cgroup reaches its
-own `memory.max`, such as jobgate's kernel memory cap. At each boot,
-`systemd-tmpfiles` sets the value again from
-`/etc/tmpfiles.d/astack-memory-guard.conf`. The script needs the kernel's
-multi-gen LRU. On macOS, the script changes nothing.
+process. jobgate's kernel memory cap limits the commands that jobgate runs. A
+tmpfs `/tmp` keeps agent scratch files in RAM, so
+[move `/tmp` from RAM to disk](#move-tmp-from-ram-to-disk).
 
-When thrashing prevention acts, the kernel ends the process with the highest
-OOM score, usually the largest process. If that process's unit keeps systemd's
-default `OOMPolicy=stop`, systemd then stops the whole unit. On systemd 253 or
-newer, scope units also have `OOMPolicy=`, so a kill in a terminal tab's scope
-ends the tab and every agent in it. jobgate gives each run's scope
-`OOMPolicy=continue` on those versions, so systemd does not stop a jobgate run
-after a kill inside it.
+### Remove the memory guard
 
-To check the machine, preview the change, and make it:
+The `install` command of earlier versions of
+[scripts/memory_guard.py](scripts/memory_guard.py) set
+`/sys/kernel/mm/lru_gen/min_ttl_ms` to 1000, which turns on the kernel's
+[thrashing prevention](https://docs.kernel.org/admin-guide/mm/multigen_lru.html#thrashing-prevention).
+With that setting, kswapd OOM-kills a process whenever it reclaims memory
+while the oldest pages it could evict are less than a second old in every
+cgroup. It does not check how much memory is free. A fast write to a slow USB
+drive fills the page cache with dirty pages, which kswapd cannot evict until
+the drive stores them. kswapd moves those pages to a younger generation
+instead, so the generations turn over in less than a second. kswapd then keeps
+killing processes, the desktop included, until the writer exits.
 
-```sh
-python3 scripts/memory_guard.py status
-python3 scripts/memory_guard.py install --dry-run
-sudo python3 scripts/memory_guard.py install
-```
-
-To preview and revert the change:
+To check for the guard and remove it:
 
 ```sh
 python3 scripts/memory_guard.py uninstall --dry-run
 sudo python3 scripts/memory_guard.py uninstall
 ```
 
-`uninstall` restores the value that `min_ttl_ms` had before the first `install`.
-
-When another `tmpfiles.d` rule already sets `min_ttl_ms` at boot, `install`
-reports the value that rule sets and changes nothing.
-`systemd-tmpfiles --cat-config` lists the rules. To use astack's value, delete
-the other rule before you run `install` again. A file under
-`/usr/lib/tmpfiles.d` belongs to a package, so copy it to `/etc/tmpfiles.d`
-under the same name, where the copy replaces it. Then delete the rule from the
-copy. `status` shows the value that boot sets and whether astack's rule sets it.
+The dry run needs no root, and on a machine without the guard it prints
+`Nothing to uninstall`. `uninstall` restores the value that `min_ttl_ms` had
+before the first `install` and deletes
+`/etc/tmpfiles.d/astack-memory-guard.conf`.
 
 ### Move `/tmp` from RAM to disk
 
