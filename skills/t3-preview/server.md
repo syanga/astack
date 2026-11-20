@@ -4,13 +4,13 @@ In T3 Code, `preview_open` opens a URL in a preview tab. The tab's browser runs 
 
 1. Serve only the preview directory, a prototype's scratch app, or the task's dev server. Use task-specific logs and record each process in the [cleanup record](cleanup.md). For static files on macOS, use the firewall-approved `/usr/bin/python3`.
 2. Hand off the page:
-   - In T3 Code, do both of these:
-     - With the `preview_*` tools, open the page in a preview tab with `preview_open`. Verify loading and interactions in that tab. Reset any `preview_resize` or `preview_set_appearance` override. Then point the user to the tab.
-     - Give the URL for T3's browser panel, so the user can reopen the page after T3 closes a preview tab that had no viewer. Use this sentence. Fill in `<URL>`, and replace `<environment>` with the `label` that `t3_environment_read` returns, or with the output of `hostname` if you lack that tool:
+   - In T3 Code, take these steps:
+     1. If you have the `preview_*` tools, open the page in a preview tab with `preview_open`. Verify loading and interactions in that tab. Reset any `preview_resize` or `preview_set_appearance` override. Then point the user to the tab.
+     2. Give the URL for T3's browser panel. The user needs it when no preview tab is open, as after T3 closes a tab that had no viewer. Use this text. Fill in `<URL>`. Replace `<environment>` with the `label` from `t3_environment_read`. If you lack that tool, use the machine's friendly name (`scutil --get ComputerName` on macOS, `hostnamectl --pretty` on Linux), or `hostname` if it has none:
 
-       ```text
-       To reopen the page, paste `<URL>` into T3's browser panel. In the desktop app, then choose **Open in <environment>'s browser**.
-       ```
+        ```text
+        To open the page, paste `<URL>` into T3's browser panel. In the desktop app, then choose **Open in <environment>'s browser**.
+        ```
    - Outside T3 Code, give the `localhost` URL.
 
    If the user asks for a public link, follow [Create a public link](#create-a-public-link).
