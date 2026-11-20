@@ -34,9 +34,9 @@ description: Create, import, or modify skills in the astack repository. Use for 
 
    Give both reviewers the request, diff, repository rules, and referenced files
    without suggested conclusions. Reviewers report concrete findings without
-   editing or starting subagents. Assess the findings, fix demonstrated problems,
-   rerun the after runs a fix affects, and repeat affected reviews until clean or
-   blocked. Report unresolved blockers.
+   editing or starting subagents. Assess the findings and fix demonstrated
+   problems. After a fix, rerun the after runs it affects. Repeat affected
+   reviews until clean or blocked. Report unresolved blockers.
    If subagents are unavailable, perform both reviews yourself and report that
    they were not independent.
 6. For approved changes, follow [open-pr](../../../skills/open-pr/SKILL.md) to

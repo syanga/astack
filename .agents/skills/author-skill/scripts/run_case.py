@@ -22,8 +22,9 @@ in the checkout could approve a call:
   settings.json, settings.local.json, or worktrees/
 - a .claude/settings.json that sets anything but $schema, deny rules, and ask
   rules
-- a skill whose SKILL.md does not open with frontmatter between two lines of
-  exactly ---, or whose frontmatter has a line break other than LF or CRLF
+- a skill whose SKILL.md does not open with frontmatter between two --- lines,
+  or whose frontmatter has a line break other than LF or CRLF. A --- line may
+  end in spaces or tabs.
 - a skill frontmatter key other than name, description,
   disable-model-invocation, and argument-hint, such as allowed-tools
 
@@ -70,6 +71,7 @@ NARROWING_RULES = {"deny", "ask"}
 SETTINGS_KEYS = {"$schema", "permissions"}
 FRONTMATTER_KEYS = {"name", "description", "disable-model-invocation", "argument-hint"}
 OTHER_LINE_BREAKS = re.compile("[\r\x0b\x0c\x1c-\x1e\x85\u2028\u2029]")
+DELIMITER = re.compile("---[ \t]*")
 BROKEN_LINK_ERRORS = {errno.ENOENT, errno.ENOTDIR, errno.ELOOP}
 USER_SETTINGS = ("apiKeyHelper", "env", "model", "autoMemoryEnabled")
 PARENT_SESSION_VARIABLES = (
@@ -178,9 +180,10 @@ def checkout_problems():
 
 def frontmatter_problem(text):
     lines = text.replace("\r\n", "\n").split("\n")
-    if lines[0] != "---" or "---" not in lines[1:]:
-        return "has no frontmatter between two lines of exactly ---"
-    block = lines[1:lines.index("---", 1)]
+    closing = next((index for index, line in enumerate(lines[1:], 1) if DELIMITER.fullmatch(line)), None)
+    if not DELIMITER.fullmatch(lines[0]) or closing is None:
+        return "has no frontmatter between two --- lines"
+    block = lines[1:closing]
     if any(OTHER_LINE_BREAKS.search(line) for line in block):
         return "has a line break other than LF or CRLF in its frontmatter"
     keys = [line.split(":", 1)[0].strip() for line in block

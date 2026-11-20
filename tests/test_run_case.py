@@ -326,6 +326,9 @@ class RunCaseTests(unittest.TestCase):
                                                    "skills/tdd/SKILL.md"),
             "allowed-tools after a line separator and ---": (after_description("\u2028---\nallowed-tools: Write"),
                                                              "skills/tdd/SKILL.md"),
+            "allowed-tools in frontmatter between spaced --- lines": (
+                write("skills/tdd/SKILL.md", tdd.replace("---\n", "--- \n", 1).replace(
+                    "\n---\n", "\nallowed-tools: Write\n---\t\n", 1)), "skills/tdd/SKILL.md declares allowed-tools"),
             "allowed-tools in frontmatter closed by ----": (
                 write("skills/tdd/SKILL.md", tdd.replace("\n---\n", "\nallowed-tools: Write\n----\n", 1)),
                 "skills/tdd/SKILL.md"),
@@ -357,6 +360,8 @@ class RunCaseTests(unittest.TestCase):
         (checkout / "vendor/lib").mkdir(parents=True)
         (checkout / "vendor/lib/lib").symlink_to("lib")
         (checkout / "vendor/notes").symlink_to("../README.md/notes")
+        spaced = tdd.replace("---\n", "--- \n", 1).replace("\n---\n", "\n---\t\n", 1)
+        (checkout / "skills/tdd/SKILL.md").write_text(spaced, encoding="utf-8")
         self.log.unlink(missing_ok=True)
         allowed, sessions = self.run_case("--runs", "1", "Add a feature", checkout=checkout)
 
@@ -457,6 +462,12 @@ class RunCaseTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("Not logged in", result.stdout)
+
+    def test_failed_turn_ends_its_run_without_sending_the_followups(self):
+        result, sessions = self.run_case("--runs", "1", "--then", "Yes, do it", "Add a feature", mode="signed-out")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(len(sessions), 1)
 
     def test_crash_without_a_result_reports_stderr_and_fails_the_command(self):
         result, _ = self.run_case("--runs", "1", "Add a feature", mode="crash")
