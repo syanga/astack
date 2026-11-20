@@ -51,7 +51,7 @@ A thread you launched is one whose first message names your thread as the sender
   4. report to your thread
 * After a stopped thread reports, launch its branch's new owner in its worktree with `existing_worktree`.
 * Before you ask the user for a decision raised by a thread you launched or about its work, read and follow `decision-requests/SKILL.md` from the installed skills. Follow it while any such request is open, and when the user asks about one.
-* Read `full-send/RELAY.md` from the installed skills in these cases:
+* In these cases, read `full-send/RELAY.md` from the installed skills:
   - before you ask another thread to run full-send
   - when another thread asks you whether to run full-send
   - when a thread running full-send asks you anything
