@@ -26,8 +26,8 @@ in the checkout could approve a call:
 - a skill frontmatter key other than name, description,
   disable-model-invocation, and argument-hint, such as allowed-tools
 
-The script skips a broken symlink, one whose target is missing or loops,
-because it points to nothing.
+A broken symlink, one that loops or whose target is missing, does not count as
+a file the script cannot read.
 
 These checks catch a checkout you trust that loosens sessions by accident. They
 do not stop a checkout written to get past them, which could as easily edit
@@ -106,11 +106,15 @@ def build_config(root):
     return destination.parent
 
 
+def unreadable_problem(path):
+    return "{} cannot be read".format(path)
+
+
 def settings_problems(path):
     try:
         settings = json.loads(path.read_text(encoding="utf-8"))
     except OSError:
-        return ["{} cannot be read".format(path)]
+        return [unreadable_problem(path)]
     except ValueError:
         settings = None
     if not isinstance(settings, dict) or not isinstance(settings.get("permissions", {}), dict):
@@ -148,16 +152,15 @@ def checkout_problems():
     problems = []
     info = REPO.stat()
     seen = {(info.st_dev, info.st_ino)}
-    for folder, children, files in os.walk(REPO, followlinks=True, onerror=lambda error: problems.append(
-            "{} cannot be read".format(error.filename))):
+    for folder, children, files in os.walk(REPO, followlinks=True,
+                                          onerror=lambda error: problems.append(unreadable_problem(error.filename))):
         here = Path(folder)
-        problems += ["{} cannot be read".format(here / name) for name in files
-                     if exists_but_unreadable(here / name, os.R_OK)]
+        problems += [unreadable_problem(here / name) for name in files if exists_but_unreadable(here / name, os.R_OK)]
         unseen = []
         for child in sorted(child for child in children if child != ".git"):
             path = here / child
             if exists_but_unreadable(path, os.R_OK | os.X_OK):
-                problems.append("{} cannot be read".format(path))
+                problems.append(unreadable_problem(path))
                 continue
             if child.lower() == ".claude":
                 problems += claude_folder_problems(path)
