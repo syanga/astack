@@ -242,6 +242,19 @@ class ActivationFixture(ComponentFixture):
         self.acceptance = self.root / "acceptance.json"
         self.accept()
 
+    def use_accounts(self, *names, enabled=()):
+        config = json.loads((self.state_dir / "config.json").read_text())
+        config["accounts"] = [{"id": name, "capacity": 1} for name in names]
+        (self.state_dir / "config.json").write_text(json.dumps(config))
+        self.fake_router.status["accounts"] = [
+            {"id": name, "registered": True, "needs_login": False, "overage": {"state": "enabled" if name in enabled else "disabled"}}
+            for name in names]
+
+    def needs_login(self, *names):
+        for account in self.fake_router.status["accounts"]:
+            if account["id"] in names:
+                account.update(needs_login=True, overage=None)
+
     def popen(self, *arguments, **options):
         process = subprocess.Popen(*arguments, **options)
         self.started.append(process)
@@ -1436,6 +1449,31 @@ class UpdateOverActivationTests(ActivationFixture):
         if check_passes:
             self.fake_router.status["binary_sha256"] = hashlib.sha256(
                 b"#!/bin/sh\n# build 2\nprintf '%s\\n' \"$*\" >> \"$FAKE_ROUTER_LOG\"\n").hexdigest()
+
+    def test_an_update_keeps_routing_and_warns_when_an_account_needs_login_and_another_is_ready(self):
+        self.prepare_update()
+        self.use_accounts("work", "alumni")
+        self.needs_login("alumni")
+
+        result = self.component(FAKE_BUILD="2")
+
+        self.assertIn("warn      alumni not signed in\n"
+                      "          claude-router stop; claude-router login -account alumni; start\n", result.stdout)
+        self.assertIn("check     passed\n", result.stdout)
+        self.assertEqual(self.router_log.read_text(), "stop -state {0}\nstart -state {0}\n".format(self.state_dir))
+        self.assertEqual(self.base_url(), self.listen)
+        self.assertEqual(self.journal()["phase"], "active")
+
+    def test_an_update_connects_clients_directly_when_no_account_is_signed_in(self):
+        self.prepare_update()
+        self.use_accounts("work", "alumni")
+        self.needs_login("work", "alumni")
+
+        result = self.component(FAKE_BUILD="2", success=False)
+
+        self.assertIn("fail      work and alumni not signed in\n", result.stdout)
+        self.assertIn("astack: the updated router failed its check; Claude Code connects directly\n", result.stderr)
+        self.assert_direct_and_state_kept()
 
     def test_an_update_that_fails_to_stop_start_or_check_the_router_connects_clients_directly(self):
         for step in ("stop", "start", "check", "stop after a failed check"):

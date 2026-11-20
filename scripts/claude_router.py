@@ -1136,22 +1136,28 @@ def run_check(lay, state, settings_path, accepted, record_path, claude, timeout,
         line("skip", "paid overflow, no accounts to read")
     else:
         unready = [name for name in names if not seen.get(name, {}).get("registered") or seen[name].get("needs_login")]
-        if unready:
-            line("fail", "{} not signed in".format(joined(unready)), next_step="claude-router status")
-        else:
+        signed_in = [name for name in names if name not in unready]
+        if not unready:
             line("ok", "{} ready".format(", ".join(names)))
+        elif signed_in:
+            line("warn", "{} not signed in".format(joined(unready)), [login_step(name) for name in unready])
+        else:
+            line("fail", "{} not signed in".format(joined(unready)), next_step=login_step(unready[0]))
         readings = {name: (seen.get(name, {}).get("overage") or {}).get("state") for name in names}
         enabled = [name for name in names if readings[name] in ("enabled", "paid_use")]
-        unknown = [name for name in names if readings[name] not in ("enabled", "paid_use", "disabled")]
+        unknown = [name for name in signed_in if readings[name] not in ("enabled", "paid_use", "disabled")]
         if enabled:
             who = enabled[0] if len(enabled) == 1 else "their"
             line("fail", "paid overflow on for {}".format(joined(enabled)),
                  next_step="turn off {} paid overflow on claude.ai; claude-router check".format(who))
         elif unknown:
             line("fail", "paid overflow not read yet for {}".format(joined(unknown)), next_step="claude-router status")
+        elif not signed_in:
+            line("skip", "paid overflow, no account signed in")
         else:
             line("ok", "paid overflow off on {}".format(
-                names[0] if len(names) == 1 else "both accounts" if len(names) == 2 else "all {} accounts".format(len(names))))
+                joined(signed_in) if unready else names[0] if len(names) == 1
+                else "both accounts" if len(names) == 2 else "all {} accounts".format(len(names))))
     if points_at_router(lay.state, settings_path):
         line("ok", "Claude Code settings point at the router")
     else:
@@ -1186,6 +1192,10 @@ def run_check(lay, state, settings_path, accepted, record_path, claude, timeout,
     if steps or passed_line:
         say(CHECK_LINE.format("check", "failed" if steps else "passed"))
     return steps[0] if steps else None
+
+
+def login_step(name):
+    return "claude-router stop; claude-router login -account {}; start".format(name)
 
 
 def points_at_router(state_dir, settings_path):

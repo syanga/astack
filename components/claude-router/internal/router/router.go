@@ -490,6 +490,29 @@ func (r *Router) Admit(now Instant, account AccountID, model string) Reason {
 	return admissionBar(r.cfg, now, r.expiry.Stamp, r.accounts[idx], model)
 }
 
+// RefreshRefused records that the token endpoint refused the account's
+// refresh token. It marks the account as needing login from at, unless it
+// already needs login, which keeps its time. Either way, only Relogin clears
+// the requirement afterwards: LoginConfirmed does not, because the access
+// token can still work while no refresh can replace it. It reports whether
+// the account needed no login before.
+func (r *Router) RefreshRefused(account AccountID, at time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	idx, ok := r.index[account]
+	if !ok {
+		return false
+	}
+	a := &r.accounts[idx]
+	set := !a.needsLogin
+	if set {
+		a.needsLogin, a.needsLoginAt = true, at
+	}
+	a.refreshRefused = true
+	r.persist()
+	return set
+}
+
 // Relogin marks an account as logged in again.
 func (r *Router) Relogin(account AccountID) error {
 	r.commitMu.Lock()
@@ -500,7 +523,7 @@ func (r *Router) Relogin(account AccountID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if idx, ok := r.index[account]; ok {
-		r.accounts[idx].needsLogin = false
+		r.accounts[idx].needsLogin, r.accounts[idx].refreshRefused = false, false
 		r.persist()
 	}
 	return r.store.Err()
@@ -508,15 +531,16 @@ func (r *Router) Relogin(account AccountID) error {
 
 // LoginConfirmed clears an account's login requirement when a request with
 // its credential that started at start succeeded after the failure that set
-// it: the credential works, so the account needs no browser login. It
-// reports whether it cleared the requirement.
+// it: the credential works, so the account needs no browser login. It leaves
+// a requirement that RefreshRefused recorded. It reports whether it cleared
+// the requirement.
 func (r *Router) LoginConfirmed(account AccountID, start time.Time) bool {
 	r.commitMu.Lock()
 	defer r.commitMu.Unlock()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	idx, ok := r.index[account]
-	if !ok || !r.accounts[idx].needsLogin || !start.After(r.accounts[idx].needsLoginAt) {
+	if !ok || !r.accounts[idx].needsLogin || r.accounts[idx].refreshRefused || !start.After(r.accounts[idx].needsLoginAt) {
 		return false
 	}
 	r.accounts[idx].needsLogin = false

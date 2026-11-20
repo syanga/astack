@@ -34,11 +34,11 @@ status, events, and service logs hold no token.
 | Command | Use it for |
 | --- | --- |
 | `claude-router status` | The service, one line per account, problem lines, and a `next` line with the step to take. |
-| `claude-router check` | Whether this machine routes Claude Code. Exits 0 when every line passes. It can take 2 minutes, so give it a 180-second timeout. |
+| `claude-router check` | Whether this machine routes Claude Code. Exits 0 when no line fails. It can take 2 minutes, so give it a 180-second timeout. |
 | `claude-router cache` | Each account's cache hit rate, then the last 24 hours' account moves and the cache writes they caused. `-since 6h` sets another window. |
 
 To answer "is the router working", run `check` and report its lines, with the
-step from [Read check lines](#read-check-lines) for each `fail` line.
+step from [Read check lines](#read-check-lines) for each `fail` or `warn` line.
 
 ## Give the user every other command
 
@@ -73,8 +73,11 @@ for it.
 ## Read check lines
 
 `check` prints one line per check, then `check passed` or `check failed`, then
-a `next` line after a failure. Each line starts with `ok`, `fail`, or `skip`.
-A `skip` line follows a failure or a stopped router and needs no step.
+a `next` line after a failure. Each line starts with `ok`, `warn`, `fail`, or
+`skip`. A `skip` line follows a failure or a stopped router and needs no step.
+A `warn` line names accounts that are not signed in while another account is
+signed in, and the check can still pass. Follow the `NAMES not signed in` row
+for those accounts.
 
 | Text after `fail` | Step |
 | --- | --- |

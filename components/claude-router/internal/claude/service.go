@@ -197,7 +197,7 @@ func Start(cfg Config, opts Options) (_ *Service, err error) {
 	if err = s.startSDK(); err != nil {
 		return nil, err
 	}
-	if s.guard, err = installRefreshGuard(s.core, slices.Collect(maps.Values(s.authIDs))); err != nil {
+	if s.guard, err = installRefreshGuard(s.core, slices.Collect(maps.Values(s.authIDs)), s.refreshRefused); err != nil {
 		return nil, err
 	}
 	readCatalog := opts.ModelCatalog
@@ -265,6 +265,20 @@ func (s *Service) guardRegistered() bool {
 		s.events.emit(Event{Kind: "refresh_guard_replaced"})
 	}
 	return false
+}
+
+func (s *Service) refreshRefused(authID string) {
+	for account, id := range s.authIDs {
+		if id == authID {
+			s.requireLogin(account)
+		}
+	}
+}
+
+func (s *Service) requireLogin(account router.AccountID) {
+	if s.router.RefreshRefused(account, s.now()) {
+		s.events.emit(Event{Kind: "login_required", Account: account, Reason: "refresh_refused"})
+	}
 }
 
 func (s *Service) journalEvent(e router.JournalEvent) {

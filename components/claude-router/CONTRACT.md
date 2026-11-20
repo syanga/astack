@@ -525,6 +525,7 @@ calls the same `Router`; it has no second placement algorithm.
 | `Router.Commit(now, Request, Decision) (Decision, error)` | Makes a `place` or `migrate` durable. It decides again under the commit lock and commits that fresh decision, which it returns. |
 | `Router.Route(now, Request) (Decision, error)` | `Decide`, then `Commit`, before dispatch, in a loop of at most 3 attempts. PR3 calls this. |
 | `Router.Report(Failure) Class` | Records a failure before output and returns the class the policy acts on. |
+| `Router.RefreshRefused(account, at) bool` | Records that the token endpoint refused the account's refresh token. It marks the account as needing login from `at`, unless the account already needs login. It records the refusal in both cases. Afterwards only `Relogin`, or `claude-router login` through `Store.ClearNeedsLogin` while the router is stopped, clears the requirement. It reports whether it set the mark. |
 | `Router.Observe(account, attemptStart, Observation)` | Records the quota headers of one response. |
 | `Router.ObserveWeeklyUsage(account, WeeklyUsage)` | Keeps the newest valid account-wide weekly usage in memory without changing rejection evidence. |
 | `Router.ObserveUsage(account, start, kind, used)` | Records one account-wide five-hour or weekly window from a usage read that started at `start`. A `used` fraction from 0 up to but not including 1 counts as a report that the window is not rejected. Any other value changes nothing. |
@@ -1577,6 +1578,36 @@ most one refresh per failure run, the one that starts it, and none when the
 SDK's refresh failed first. An inference error the SDK records on the
 credential does not start a run.
 
+**A refresh token that the token endpoint refuses makes the account need
+login.** The token endpoint refuses a refresh token with a 400 or 401 answer
+whose OAuth `error` is `invalid_grant`. RFC 6749 section 5.2 gives that
+error for a grant that is invalid, expired, or revoked, so only a new login
+replaces the credential. The SDK's error for a failed exchange ends with the
+answer's status and body (`refreshHTTPError` in the SDK's
+`internal/auth/claude/anthropic_auth.go`). The guard classifies that text.
+For an exchange it sees, the SDK's or the router's, the guard marks the
+account at once through `Router.RefreshRefused`, whether or not a read waits
+for the refresh. For a refresh that began before the guard, the SDK's
+failure record (`LastError`) carries the same text, and the next read of the
+account marks it. A read during the failure run of a refused refresh token
+fails with `the token endpoint refused the credential's refresh token; the
+account needs login`. Any other failed exchange starts a failure run and
+leaves the login requirement unchanged. That covers a transport error, a
+timeout, a 429, a 5xx, and a 400 with another OAuth error. Setting the mark
+records a `login_required` event with reason `refresh_refused`. The mark
+survives a restart
+(`TestSDKRefreshRefusedForAnExpiredRefreshTokenMarksTheAccountAsNeedingLogin`,
+`TestOnlyARefusedRefreshTokenMarksTheAccountAsNeedingLogin`,
+`TestRefusalOfAnSDKRefreshThatBeganBeforeTheGuardMarksTheAccountAsNeedingLogin`,
+`TestAnAccountWhoseRefreshTokenWasRefusedNeedsLoginAfterARestartUntilItSignsInAgain`).
+Only `claude-router login` clears it. A settings read that succeeds
+afterwards does not, because the access token can still work while no
+refresh can replace it
+(`TestASettingsReadThatSucceedsAfterARefusalKeepsTheAccountNeedingLogin`).
+The SDK's error text is the only evidence of the answer's status. The guard
+reads the leftmost status in it, the SDK's own, so a body that quotes a
+refusal does not count as one.
+
 The rule has one cost. When an access token is refused (usage 401) before it
 is due, and a refresh of it fails or ends unknown, the router's or the
 SDK's, nothing refreshes it until the token enters the SDK's 4-hour lead:
@@ -1947,7 +1978,7 @@ For every client, the SDK sets `X-Stainless-Package-Version` and
 `served`, `served_mark_failed`, `paid_use_observed`, `overage_read`,
 `stamp_bounded`, `credential_refresh`, `client_auth_rejected`,
 `request_rejected`, `started`, `stopped`, `test_upstream_in_use`,
-`refresh_guard_replaced`, `model_catalog`, and, since PR4,
+`refresh_guard_replaced`, `model_catalog`, `login_required`, and, since PR4,
 `login_confirmed`. The journal adds three events:
 
 - `journal_failed`: `detail` holds the error of the failed write or sync.
@@ -2233,8 +2264,10 @@ behavior is the client's own continuation turn.
 
 ### Login and manual movement
 
-An `auth` failure marks the account as needing login. New conversations
-skip it. A conversation that has been served on it gets 503 naming
+An `auth` failure marks the account as needing login. A refresh token that
+the token endpoint refuses marks the account too (Paid-overflow reading).
+New conversations skip an account that needs login. A conversation that
+has been served on it gets 503 naming
 `claude-router login -account ID`, never 401, and keeps its assignment. An
 idle one moves instead when another account is eligible (Idle conversations
 are placed again). One that never served moves (PR2). That move rests on a
@@ -2243,9 +2276,10 @@ by:
 
 - `claude-router login`, which clears it in the saved account state while
   it holds the state directory, so it applies at the next start;
-- a settings read with the account's credential that began after the
-  failed attempt and succeeded, which shows that the credential works
-  (`login_confirmed` event). This covers a 401 that a refresh resolved.
+- a successful settings read with the account's credential that began after
+  the failure that set the mark, which shows that the credential works
+  (`login_confirmed` event). This covers a 401 that a refresh resolved. It
+  does not clear a mark that a refused refresh token set.
 
 `POST /claude-router/move` moves a conversation explicitly, whatever the
 account's state (`TestRevokedLoginKeepsAssignmentsAcrossRestartUntilMovedOrConfirmed`,
@@ -2259,12 +2293,13 @@ commit that starts after it decides with the login requirement cleared.
 
 ### Durable account state
 
-`router.Open` keeps each account's login requirement, known rejections,
-latest paid-overflow check, and latest paid use in `accounts.json` beside
-the journal. Every change is written before the call that made it returns:
-a temporary file is synced and renamed, and the directory is synced. A
-disabled check that only advanced by less than a minute, and a rejection
-with a known reset that was observed again, are not rewritten; the saved
+`router.Open` keeps each account's login requirement, its refusal record
+(`refresh_refused`), known rejections, latest paid-overflow check, and
+latest paid use in `accounts.json` beside the journal. Every change is
+written before the call that made it returns: a temporary file is synced
+and renamed, and the directory is synced. A disabled check that only
+advanced by less than a minute, and a rejection with a known reset that was
+observed again, are not rewritten; the saved
 copy is older and therefore more conservative. A failed write stops the
 store, like a failed journal write, and recovery writes the in-memory
 account state to the file (see "Assignment journal" under PR2). The file holds no `disabled` check
@@ -2319,7 +2354,7 @@ claude-router` call it with the default layout. The default targets and
 | Ownership record | `components.claude-router` in the astack manifest: the layout, a fingerprint per managed file, the fingerprints of created seeds, the commit, the router code digest as `code_sha256`, the Go version as `go`, and `pending`. It holds no secret. |
 | Interruption | Before each write, the helper records the file's expected fingerprint in `pending` and saves the manifest. A rerun adopts a pending file that holds that fingerprint. Other interruptions leave a file the next run reports as a conflict. The installer is not a transaction. |
 | Conflicts | An unmanaged or locally modified payload, descriptor, or `service.json` stops install and uninstall; `--force` moves it to `backups/<id>/` first. A component path that a harness target manages is refused. A changed data, state, or descriptor location needs an uninstall first. |
-| Update | A changed binary is replaced. A running service keeps the old binary until `stop` and `start`, and the installer prints that. When router activation is `active` and the install writes any managed file, the installer instead prints `RESTART <manager> <label>` when the binary changed and `CHECK claude-router check; claude-router direct if it fails`, then runs the installed `claude-router stop` and `start` when the binary changed, then `check` with the signal handling of activation. A foreground router gets no `RESTART` line and no restart, and runs the old binary until you start it again. A preview prints the same lines and runs nothing (`test_a_dry_run_over_an_activated_router_prints_what_the_install_then_does`). When `check` fails, or `stop`, `start`, or `check` raises, it runs `stop` and the helper's `direct`, prints `next      claude-router check`, and exits 1 with `astack: <reason>; Claude Code connects directly`. The reason is `the updated router failed its check`, after check lines that name the record mismatch; `the update was interrupted`; or `the update could not check the router (<error>)`. A `stop` that fails before `direct` prints its error and `direct` runs without claiming the router stopped. The signal handlers stay installed through that `stop` and `direct`, so a signal there does not end the install before `direct` restores the settings (`test_an_update_restarts_an_activated_router_and_keeps_it_active_when_check_passes`, `test_an_update_whose_check_fails_connects_clients_directly`, `test_an_update_that_fails_to_stop_start_or_check_the_router_connects_clients_directly`, `test_a_signal_during_the_update_check_ends_the_test_message_and_connects_clients_directly`, `test_a_signal_during_the_rollback_stop_still_connects_clients_directly`). When the manifest records a layout whose state directory exists, every install and uninstall, through `install.sh`, `uninstall.sh`, or the helper, and with or without `--component`, takes `activation.lock` in that directory before it builds or writes anything. It reads the manifest once to find the directory and again under the lock, and holds the lock until it ends: through the file writes, the restart, the check, the recovery, whose `direct` runs under the installer's descriptor, and the last manifest save. When the manifest read under the lock records another state directory or none, as after an uninstall that ended in between, it exits 1 with `astack: The claude-router installation changed before this command took its lock; run it again` and changes nothing (`test_an_install_refuses_when_an_uninstall_ends_before_it_takes_the_lock`). An activation that ends before the install takes the lock keeps its record, and the update restarts the router and checks it (`test_an_update_through_install_sh_keeps_and_checks_an_activation_that_ended_before_its_lock`, `test_an_update_through_the_helper_keeps_and_checks_an_activation_that_ended_before_its_lock`). An activation or `direct` that starts after the component's files are written and before an install with harness targets saves the manifest refuses (`test_a_direct_before_a_combined_update_saves_its_manifest_refuses_and_the_activation_stays`, `test_an_activation_before_a_combined_install_saves_its_manifest_refuses_and_runs_afterwards`). A preview neither creates nor takes the lock (`test_a_preview_over_an_install_neither_creates_nor_takes_the_activation_lock`). While another command holds the lock, the install exits 1 with `astack: another claude-router setup, account, activate, direct, install, or uninstall is running; wait for it to finish, then run again` and changes nothing (`test_an_update_while_an_account_change_holds_the_lock_refuses_and_changes_nothing`, `test_a_harness_install_while_an_account_change_holds_the_lock_refuses_and_changes_nothing`, `test_an_update_holds_the_lock_through_its_restart_check_and_recovery`). |
+| Update | A changed binary is replaced. A running service keeps the old binary until `stop` and `start`, and the installer prints that. When router activation is `active` and the install writes any managed file, the installer instead prints `RESTART <manager> <label>` when the binary changed and `CHECK claude-router check; claude-router direct if it fails`, then runs the installed `claude-router stop` and `start` when the binary changed, then `check` with the signal handling of activation. A foreground router gets no `RESTART` line and no restart, and runs the old binary until you start it again. A preview prints the same lines and runs nothing (`test_a_dry_run_over_an_activated_router_prints_what_the_install_then_does`). A check that warns that some accounts are not signed in still passes when another account is ready, so the update keeps routing and prints the warning with each account's login step (`test_an_update_keeps_routing_and_warns_when_an_account_needs_login_and_another_is_ready`). With no account signed in, the check fails (`test_an_update_connects_clients_directly_when_no_account_is_signed_in`). When `check` fails, or `stop`, `start`, or `check` raises, it runs `stop` and the helper's `direct`, prints `next      claude-router check`, and exits 1 with `astack: <reason>; Claude Code connects directly`. The reason is `the updated router failed its check`, after check lines that name the record mismatch; `the update was interrupted`; or `the update could not check the router (<error>)`. A `stop` that fails before `direct` prints its error and `direct` runs without claiming the router stopped. The signal handlers stay installed through that `stop` and `direct`, so a signal there does not end the install before `direct` restores the settings (`test_an_update_restarts_an_activated_router_and_keeps_it_active_when_check_passes`, `test_an_update_whose_check_fails_connects_clients_directly`, `test_an_update_that_fails_to_stop_start_or_check_the_router_connects_clients_directly`, `test_a_signal_during_the_update_check_ends_the_test_message_and_connects_clients_directly`, `test_a_signal_during_the_rollback_stop_still_connects_clients_directly`). When the manifest records a layout whose state directory exists, every install and uninstall, through `install.sh`, `uninstall.sh`, or the helper, and with or without `--component`, takes `activation.lock` in that directory before it builds or writes anything. It reads the manifest once to find the directory and again under the lock, and holds the lock until it ends: through the file writes, the restart, the check, the recovery, whose `direct` runs under the installer's descriptor, and the last manifest save. When the manifest read under the lock records another state directory or none, as after an uninstall that ended in between, it exits 1 with `astack: The claude-router installation changed before this command took its lock; run it again` and changes nothing (`test_an_install_refuses_when_an_uninstall_ends_before_it_takes_the_lock`). An activation that ends before the install takes the lock keeps its record, and the update restarts the router and checks it (`test_an_update_through_install_sh_keeps_and_checks_an_activation_that_ended_before_its_lock`, `test_an_update_through_the_helper_keeps_and_checks_an_activation_that_ended_before_its_lock`). An activation or `direct` that starts after the component's files are written and before an install with harness targets saves the manifest refuses (`test_a_direct_before_a_combined_update_saves_its_manifest_refuses_and_the_activation_stays`, `test_an_activation_before_a_combined_install_saves_its_manifest_refuses_and_runs_afterwards`). A preview neither creates nor takes the lock (`test_a_preview_over_an_install_neither_creates_nor_takes_the_activation_lock`). While another command holds the lock, the install exits 1 with `astack: another claude-router setup, account, activate, direct, install, or uninstall is running; wait for it to finish, then run again` and changes nothing (`test_an_update_while_an_account_change_holds_the_lock_refuses_and_changes_nothing`, `test_a_harness_install_while_an_account_change_holds_the_lock_refuses_and_changes_nothing`, `test_an_update_holds_the_lock_through_its_restart_check_and_recovery`). |
 | Shell PATH | Install appends two lines to the shell file: `# astack: claude-router on PATH` and `export PATH="<data>/bin:$PATH"`. `$SHELL` names the shell. When it is unset, the OS does: zsh on macOS, bash elsewhere. For zsh the file is `.zshrc`, in `$ZDOTDIR` when it is set and `--home` is not. For bash on Linux it is `~/.bashrc`. macOS Terminal starts bash as a login shell, so there it is the first of `~/.bash_profile`, `~/.bash_login`, and `~/.profile` that exists, or `~/.bash_profile`. For any other shell, install writes no file and prints `SKIP PATH` with the line. Before any write, on a terminal, it asks `Add claude-router to PATH in <file>? [Y/n] `. Any answer but `n` or `no`, in any letter case, adds the lines, and so does end of input. `n` or `no` skips them, prints the line, and records `shell_path_declined`, so later installs skip them too. Without a terminal it adds them. A file whose uncommented lines already name `astack/claude-router/bin` or the payload's `bin` directory stays as it is and is not recorded. Install appends in place, so an edit saved at the same time is kept, and a symlinked shell file stays a link whose target gets the lines. Uninstall removes the lines, and the newline install added before them when the lines still end the file, and replaces the file only when a read just before the swap matches its first read. A write that lands between that read and the swap can still be lost. Both keep the file's other bytes and its mode. A deleted shell file needs nothing removed. A shell file that cannot change prints `WARN` with the lines to edit by hand and does not stop the install or the uninstall, so uninstall still restores client settings. The manifest records the file and the two lines as `shell_path`. Uninstall removes exactly those lines, and the file when install created it and nothing else remains. A preview prints `APPEND` and asks nothing (`ShellPathTests` in `tests/test_claude_router_install.py`). |
 | Service name | Installs in different homes that use one `--service` name share one launchd label or systemd unit name. `start`, `stop`, `direct`, and uninstall act on a loaded job only when its descriptor is this installation's: launchd's `path` from `launchctl print`, or systemd's `FragmentPath`, compared after resolving symlinks. On a mismatch, `start` refuses and `stop` leaves the other job running and says so (`TestStopAndStartLeaveAJobLoadedFromAnotherHome`, `TestSystemdStopAndStartActOnlyOnTheirOwnUnit`, `TestStopActsOnItsOwnJobLoadedThroughASymlink`). |
 | Off until start | `stop` and `direct` keep the router off until `claude-router start`, across logins and reboots. launchd: `launchctl disable`, which persists a per-label override, so launchd neither loads the plist at login nor accepts a `bootstrap` (it fails with error 5), then `bootout` of this installation's loaded job. A disable leaves a loaded job running until the `bootout`, and it comes first, so a `stop` that fails or is killed between the two calls still leaves the job off at login (`TestAStopWhoseBootoutFailsStillKeepsTheJobOffAtLogin`). `start` runs `launchctl enable` when the label is disabled, then `bootstrap` or `kickstart`. systemd: `disable` then `stop`, for the same reason (`TestASystemdStopWhoseStopFailsStillKeepsTheUnitOffAtLogin`); `start` runs `enable` then `start`. When the router already answers, as after such a failed `stop`, `start` still turns the switch on before it prints `router  running` (`TestStartTurnsTheSwitchOnWhenTheRouterStillRunsAfterAFailedStop`). Uninstall runs `stop -uninstall`: launchd boots out this installation's job and runs `enable` when the label is disabled, also while another home's job holds the label, which leaves an `enabled` override entry that blocks nothing (launchctl has no verb that deletes the entry); systemd stops and disables the unit, which removes its `default.target.wants` link (`TestStopKeepsTheJobOffAcrossLoginsUntilStart`, `TestSystemdStopDisablesAndStartEnablesOnlyItsOwnUnit`). `start` and uninstall leave a switch that another installation owns as it is (Shared label switch, below). The systemd side is unit-tested against a fake `systemctl`, in Go and in Python (`TestAccountAddOnSystemdStopsAndStartsItsOwnUnit`, `test_systemd_install_writes_a_user_unit_and_uninstall_stops_it`, `test_on_linux_activation_reads_the_systemd_user_environment`). The PR9 Linux lane ran it on real systemd at `2e61073`. It used a systemd 257 user manager and fake accounts in a Debian 13 arm64 container. The kernel was Linux 7.0.12 in a Docker Desktop VM on macOS. `stop` and `start` passed. After a `stop`, the unit stayed `disabled` and stopped across a container restart. After a container restart with linger, the router served again (`evidence/PR9/linux/linux.json`). No record shows `stop` or `start` on a Linux machine outside a container. Acceptance runs use a foreground router (Acceptance record, below). The records that #102 and #103 committed (`accepted.json` at `4025d47` and `749b2ba`) come from runs with real accounts on a Linux machine. Both list `stop` and `start` as not rerun and cite the PR9 Linux lane for them. To cover this rule, a run on a Linux machine outside a container must show that `stop`, and separately `direct` after an activation, each leave the router not answering and keep it off across a reboot and login until `start`. It must also show that `start` then enables the unit and the router answers again. |
@@ -2623,17 +2658,33 @@ follows these rules:
 
 `claude_router.py check [--home DIR | --manifest FILE] [--claude PATH]
 [--settings FILE] [--acceptance FILE] [--timeout 120]` prints one line per
-check, with a 9-column label of `ok`, `fail`, or `skip`. `--home` and
+check, with a 9-column label of `ok`, `warn`, `fail`, or `skip`. `--home` and
 `--manifest` exclude each other, and `activate` takes them the same way
 (`test_home_and_manifest_together_are_refused`):
 
 1. The router answers `GET /claude-router/status` at the configured
    `listen`, named with the manager.
-2. Every account in `config.json` is registered and needs no login.
-3. Every account's paid-overflow reading is `disabled`. `enabled` or
-   `paid_use` fails with `paid overflow on for NAME` and `next      turn off
-   NAME paid overflow on claude.ai; claude-router check`. A missing reading
-   fails with `paid overflow not read yet for NAME`.
+2. Every account in `config.json` is registered and needs no login. When
+   some accounts are not signed in and at least one is, the line is
+   `warn      NAME not signed in`. Each such account's login step follows
+   on its own line under a blank label: `claude-router stop; claude-router
+   login -account NAME; start`. A warning is not a failure, so the check
+   continues and can pass, and `activate` and an update keep routing. When no
+   account is signed in, the line fails with
+   `NAME not signed in`, and `next` names the first account's login step
+   (`test_check_warns_with_the_login_step_and_passes_when_another_account_is_ready`,
+   `test_check_fails_with_the_login_step_when_no_account_is_signed_in`).
+3. Every signed-in account's paid-overflow reading is `disabled`. `enabled`
+   or `paid_use` on any account fails with `paid overflow on for NAME` and
+   `next      turn off NAME paid overflow on claude.ai; claude-router
+   check`. A missing reading of a signed-in account fails with `paid
+   overflow not read yet for NAME`. The router reads every account before it
+   listens (Start sequence), so a missing reading after start is a failed
+   read. Line 2 reports an account that is not signed in, and line 3 does
+   not ask for its reading
+   (`test_a_signed_in_account_without_a_reading_fails_beside_an_account_that_needs_login`).
+   With no account signed in, the line is `skip      paid overflow, no
+   account signed in`.
 4. The settings file holds the three keys of `client_settings` with the
    router's values. The default file is the one `activation.json` names,
    then `$CLAUDE_CONFIG_DIR/settings.json` or `~/.claude/settings.json`.

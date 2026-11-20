@@ -24,14 +24,6 @@ class CheckFixture(ActivationFixture):
         self.assertEqual(self.run_activate().returncode, 0)
         (self.root / "claude.log").write_text("")
 
-    def use_accounts(self, *names, enabled=()):
-        config = json.loads((self.state_dir / "config.json").read_text())
-        config["accounts"] = [{"id": name, "capacity": 1} for name in names]
-        (self.state_dir / "config.json").write_text(json.dumps(config))
-        self.fake_router.status["accounts"] = [
-            {"id": name, "registered": True, "needs_login": False, "overage": {"state": "enabled" if name in enabled else "disabled"}}
-            for name in names]
-
     def check(self, *arguments, **env):
         return self.helper("check", *arguments, **env)
 
@@ -94,15 +86,62 @@ class CheckTests(CheckFixture):
             "next      claude-router setup",
         ])
 
+    def test_check_warns_with_the_login_step_and_passes_when_another_account_is_ready(self):
+        self.needs_login("alumni")
+        self.fake_router.account = "work"
+
+        result = self.check()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.shown(result), self.golden("needs-login.txt"))
+        self.assertEqual(len(self.claude_calls()), 1)
+
+    def test_check_fails_with_the_login_step_when_no_account_is_signed_in(self):
+        self.use_accounts("work", "alumni")
+        self.needs_login("work", "alumni")
+
+        result = self.check()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.shown(result), "\n".join([
+            "ok        router running on 127.0.0.1:18787 (launchd)",
+            "fail      work and alumni not signed in",
+            "skip      paid overflow, no account signed in",
+            "ok        Claude Code settings point at the router",
+            "ok        code matches the accepted record (darwin/arm64)",
+            "skip      test message, not sent while a check fails",
+            "check     failed",
+            "next      claude-router stop; claude-router login -account work; start",
+        ]) + "\n")
+        self.assertEqual(self.claude_calls(), [])
+
+    def test_a_signed_in_account_without_a_reading_fails_beside_an_account_that_needs_login(self):
+        self.needs_login("alumni")
+        next(a for a in self.fake_router.status["accounts"] if a["id"] == "personal")["overage"] = None
+
+        result = self.check()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.shown(result).splitlines()[1:4], [
+            "warn      alumni not signed in",
+            "          claude-router stop; claude-router login -account alumni; start",
+            "fail      paid overflow not read yet for personal",
+        ])
+        self.assertEqual(self.claude_calls(), [])
+
     def test_lines_fit_eighty_columns_with_three_eight_character_accounts(self):
         names = ("abcdefgh", "ijklmnop", "qrstuvwx")
         self.use_accounts(*names, enabled=names)
         failing = self.check()
         self.use_accounts(*names)
+        self.needs_login("abcdefgh", "ijklmnop")
+        warning = self.check()
+        self.use_accounts(*names)
         passing = self.check()
 
         self.assertIn("fail      paid overflow on for abcdefgh, ijklmnop, and qrstuvwx\n", failing.stdout)
-        for result in (failing, passing):
+        self.assertIn("warn      abcdefgh and ijklmnop not signed in\n", warning.stdout)
+        for result in (failing, warning, passing):
             for line in result.stdout.splitlines():
                 self.assertLessEqual(len(re.sub(r":\d+ ", ":18787 ", line)), 80, line)
 

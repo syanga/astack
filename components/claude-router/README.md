@@ -266,10 +266,12 @@ a session reads its settings when it starts.
 `claude-router check` prints one line per check: the router runs, every
 account in `config.json` is ready, paid overflow is off on every account, the
 Claude Code settings point at the router, and the code matches the installed
-acceptance record. It then runs your `claude -p` with a new session ID, no
-tools, and a one-word prompt, for up to 120 seconds, and passes when
-`events.jsonl` shows that session's request answered 200. It never prints the
-prompt or the reply:
+acceptance record. When some accounts are not signed in and another account
+is signed in, the accounts line is a `warn` with each account's login step,
+and the check can still pass. It then runs your `claude -p` with a new
+session ID, no tools, and a one-word prompt, for up to 120 seconds, and
+passes when `events.jsonl` shows that session's request answered 200. It
+never prints the prompt or the reply:
 
 ```text
 ok        router running on 127.0.0.1:18787 (launchd)
@@ -502,6 +504,9 @@ Feed the router what it cannot see:
 - `Served` after the first successful response on an assignment.
 - `Relogin` after a browser login, `LoginConfirmed` after a request that
   began after an auth failure succeeded, and `Move` for a manual override.
+  `LoginConfirmed` leaves a login requirement that `RefreshRefused` set.
+- `RefreshRefused` when the token endpoint refuses an account's refresh
+  token.
 
 CONTRACT.md's PR2 section gives the placement rule, the defaults, and the
 journal rules.

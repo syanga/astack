@@ -6,15 +6,16 @@ import (
 
 type accountView struct {
 	Account
-	needsLogin   bool
-	needsLoginAt time.Time
-	observation  Observation
-	weekly       weeklyPreference
-	rejections   []rejection
-	allowedAt    map[string]time.Time
-	check        Overage
-	checkAt      time.Time
-	paidUseAt    time.Time
+	needsLogin     bool
+	needsLoginAt   time.Time
+	refreshRefused bool
+	observation    Observation
+	weekly         weeklyPreference
+	rejections     []rejection
+	allowedAt      map[string]time.Time
+	check          Overage
+	checkAt        time.Time
+	paidUseAt      time.Time
 }
 
 // paidUse reports whether observed paid use excludes the account: it does
