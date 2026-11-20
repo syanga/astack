@@ -52,4 +52,5 @@ A thread you launched is one whose first message names your thread as the sender
 * After a stopped thread reports, launch its branch's new owner in its worktree with `existing_worktree`.
 * Before you ask the user for a decision raised by a thread you launched or about its work, read and follow `decision-requests/SKILL.md` from the installed skills. Follow it while any such request is open, and when the user asks about one.
 * Before you ask another thread to run full-send, read `full-send/RELAY.md` from the installed skills.
+* When another thread asks whether to run full-send, ask the user and send back the user's answer. Ask even when the user's earlier words seem to answer it.
 * In a message to another thread, write each skill name bare, as in `full-send`, even inside a quote. A `/` or currency-symbol prefix, such as `$` or `€`, can invoke the skill. The one exception is the `$full-send` that opens a brief written as `full-send/RELAY.md` describes.
