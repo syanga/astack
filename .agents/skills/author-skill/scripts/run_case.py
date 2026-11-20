@@ -17,10 +17,11 @@ in the checkout could approve a call:
 
 - a folder anywhere in the checkout, including under symlinked folders, that
   cannot be read, because it could hold a .claude/ folder
-- a .claude/ folder that is a symlink
+- a .claude/ folder anywhere in the checkout that is a symlink
 - a symlink directly in a .claude/ folder, or an entry there other than
   settings.json, settings.local.json, or worktrees/
 - a .claude/settings.json with anything but deny and ask rules
+- a skill file that cannot be read
 - a skill whose SKILL.md does not open with frontmatter between two lines of
   exactly ---, or whose frontmatter has a line break other than LF or CRLF
 - a skill frontmatter key other than name, description,
@@ -46,6 +47,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -113,14 +115,18 @@ def settings_problems(path):
     return ["{} sets {}".format(path, ", ".join(sorted(keys)))] if keys else []
 
 
+def is_symlink(path):
+    return stat.S_ISLNK(os.lstat(path).st_mode)
+
+
 def claude_folder_problems(folder):
     try:
-        if folder.is_symlink():
+        if is_symlink(folder):
             return ["{} is a symlink".format(folder)]
         problems = []
         for entry in sorted(os.listdir(folder)):
             path = folder / entry
-            if path.is_symlink():
+            if is_symlink(path):
                 problems.append("{} is a symlink".format(path))
             elif entry not in ACCEPTED_ENTRIES:
                 problems.append("{} exists".format(path))
@@ -392,7 +398,7 @@ def main():
     args = parser.parse_args()
     try:
         problems = read_only_problems()
-    except ValueError as error:
+    except (OSError, ValueError) as error:
         parser.error(str(error))
     if problems:
         parser.error("sessions would not be read-only: " + "; ".join(problems))

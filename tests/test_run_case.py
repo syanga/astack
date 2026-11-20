@@ -212,12 +212,24 @@ class RunCaseTests(unittest.TestCase):
                 (checkout / path).write_text(text)
             return setup
 
-        def restrict(folder, mode):
+        def plant_skill_and_restrict(folder, mode):
             def setup(checkout):
                 (checkout / "components/demo/.claude/skills/ship").mkdir(parents=True)
                 (checkout / folder).chmod(mode)
                 self.addCleanup((checkout / folder).chmod, 0o755)
             return setup
+
+        def unsearchable_claude(checkout):
+            folder = checkout / "components/demo/.claude"
+            folder.mkdir(parents=True)
+            (checkout / "allow.json").write_text(allow)
+            (folder / "settings.local.json").symlink_to(checkout / "allow.json")
+            folder.chmod(0o444)
+            self.addCleanup(folder.chmod, 0o755)
+
+        def unreadable_skill(checkout):
+            (checkout / "skills/tdd/SKILL.md").chmod(0o000)
+            self.addCleanup((checkout / "skills/tdd/SKILL.md").chmod, 0o644)
 
         def link_parent(checkout):
             target = checkout.parent / "outside"
@@ -269,11 +281,13 @@ class RunCaseTests(unittest.TestCase):
             "a .claude first reached through a symlink": (
                 link_folder("claude-config", "packages/app/.claude"), "packages/app/.claude/commands exists"),
             "a symlinked settings.json": (link_settings, ".claude/settings.json is a symlink"),
-            "an unreadable nested .claude": (restrict("components/demo/.claude", 0o111),
+            "an unreadable nested .claude": (plant_skill_and_restrict("components/demo/.claude", 0o111),
                                              "components/demo/.claude cannot be read"),
-            "a .claude in a folder that cannot be searched": (restrict("components/demo", 0o444),
+            "a .claude in a folder that cannot be searched": (plant_skill_and_restrict("components/demo", 0o444),
                                                               "components/demo/.claude cannot be read"),
-            "an unreadable folder": (restrict("components", 0o000), "components cannot be read"),
+            "a .claude that cannot be searched": (unsearchable_claude, "components/demo/.claude cannot be read"),
+            "an unreadable folder": (plant_skill_and_restrict("components", 0o000), "components cannot be read"),
+            "an unreadable SKILL.md": (unreadable_skill, "skills/tdd/SKILL.md"),
             "a skill's allowed-tools": (skill_frontmatter("allowed-tools: Write"), "skills/tdd/SKILL.md"),
             "a quoted allowed-tools key": (skill_frontmatter('"allowed-tools": Write'), "skills/tdd/SKILL.md"),
             "an escaped allowed-tools key": (skill_frontmatter('"allowed\\x2dtools": Write'), "skills/tdd/SKILL.md"),
@@ -304,6 +318,8 @@ class RunCaseTests(unittest.TestCase):
         (checkout / ".claude/settings.json").write_text(json.dumps(narrowing))
         (checkout / ".claude/settings.local.json").write_text(json.dumps({"permissions": {"allow": ["Write"]}}))
         (checkout / "loop").symlink_to(".")
+        (checkout / "components/note").mkdir(parents=True)
+        (checkout / "components/note/.claude").write_text("a file, not a folder")
         self.log.unlink(missing_ok=True)
         allowed, sessions = self.run_case("--runs", "1", "Add a feature", checkout=checkout)
 
