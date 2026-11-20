@@ -85,6 +85,10 @@ if mode == "hang":
     os.replace(str(record) + ".tmp", record)
     time.sleep(60)
 session = argv[argv.index("--resume") + 1] if "--resume" in argv else "session-%d" % os.getpid()
+if mode == "dashed-answer":
+    emit({"type": "result", "subtype": "success", "is_error": False, "session_id": session,
+          "result": "Tests pass \u2014 done", "total_cost_usd": 0.25})
+    sys.exit(0)
 if mode == "line-separator":
     answer = {"type": "result", "subtype": "success", "is_error": False, "session_id": session,
               "result": "First line\u2028second line", "total_cost_usd": 0.25}
@@ -193,6 +197,14 @@ class RunCaseTests(unittest.TestCase):
             self.assertEqual(argv[argv.index("--setting-sources") + 1], "user,project")
             self.assertCountEqual(argv[argv.index("--allowedTools") + 1].split(","), ["Read", "Grep", "Glob", "Skill"])
 
+    def test_sessions_use_the_requested_model_and_turn_limit(self):
+        result, (session,) = self.run_case("--runs", "1", "--model", "sonnet", "--max-turns", "7", "Add a feature")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        argv = session["argv"]
+        self.assertEqual(argv[argv.index("--model") + 1], "sonnet")
+        self.assertEqual(argv[argv.index("--max-turns") + 1], "7")
+
     def test_report_lists_skills_actions_and_answers_per_run_and_in_total(self):
         result, _ = self.run_case("--runs", "2", "Add a feature")
 
@@ -213,13 +225,13 @@ class RunCaseTests(unittest.TestCase):
         self.assertEqual(len(list((self.temp / "out").glob("*.jsonl"))), 2)
 
     def test_refuses_to_run_when_the_checkout_could_approve_more_than_reading(self):
-        tdd = (self.checkout / "skills/tdd/SKILL.md").read_text()
+        tdd = (self.checkout / "skills/tdd/SKILL.md").read_text(encoding="utf-8")
         allow = json.dumps({"permissions": {"allow": ["Write"]}})
 
         def write(path, text):
             def setup(checkout):
                 (checkout / path).parent.mkdir(parents=True, exist_ok=True)
-                (checkout / path).write_text(text)
+                (checkout / path).write_text(text, encoding="utf-8")
             return setup
 
         def plant_skill_and_restrict(folder, mode):
@@ -464,6 +476,14 @@ class RunCaseTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("First line", result.stdout)
         self.assertIn("second line", result.stdout)
+
+    def test_answer_that_the_output_encoding_cannot_hold_keeps_the_report(self):
+        self.env["PYTHONIOENCODING"] = "latin-1"
+        result, _ = self.run_case("--runs", "1", "Add a feature", mode="dashed-answer")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Tests pass ? done", result.stdout)
+        self.assertIn("Summary of 1 runs", result.stdout)
 
     def test_error_result_fails_the_command_even_when_claude_exits_0(self):
         result, _ = self.run_case("--runs", "1", "Add a feature", mode="api-error")

@@ -20,7 +20,7 @@ description: Create, import, or modify skills in the astack repository. Use for 
    guidance, update its callers and preserve the decisions it controls.
    Apply [technical-writing](../../../skills/technical-writing/SKILL.md) and
    [unslop](../../../skills/unslop/SKILL.md) to the diff. For a behavior change,
-   take the after runs and revise until the edit works as Test a behavior change
+   take the after runs. Revise until the edit works as Test a behavior change
    defines. If it cannot, report the runs to the user and stop.
 5. After writing or modifying the skill, run two independent subagent reviews:
 
@@ -29,8 +29,8 @@ description: Create, import, or modify skills in the astack repository. Use for 
    - Behavior: check the request against the skill and its callers. Trace changed
      invocation, stopping conditions, invalidated acceptance results, and external
      writes through linked workflows. For changed behavior, check that the before
-     and after runs cover the changed branches, and run any branch they miss
-     with run_case.py.
+     and after runs cover the changed branches. Run any branch they miss with
+     run_case.py.
 
    Give both reviewers the request, diff, repository rules, and referenced files
    without suggested conclusions. Reviewers report concrete findings without

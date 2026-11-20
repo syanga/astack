@@ -3,10 +3,10 @@
 
 Each run gets its own configuration directory. It holds the CLAUDE.md and skills
 that `scripts/manage.py install` would deploy from this checkout for Claude
-Code. The directory's settings.json copies apiKeyHelper, env, model, and
-autoMemoryEnabled from your Claude Code settings. A session signed in only
-through /login cannot sign in here. Create a token with `claude setup-token`
-and export it as CLAUDE_CODE_OAUTH_TOKEN.
+Code. The script copies apiKeyHelper, env, model, and autoMemoryEnabled from
+your Claude Code settings into the directory's settings.json. A session signed
+in only through /login cannot sign in here. Create a token with
+`claude setup-token` and export it as CLAUDE_CODE_OAUTH_TOKEN.
 
 Sessions run in this checkout and may use only Read, Grep, Glob, Skill, and the
 shell commands Claude Code treats as read-only. Every other tool call is denied,
@@ -35,8 +35,9 @@ do not stop a checkout written to get past them, which could as easily edit
 this script.
 
 The report lists each run's skills, actions, and answers, then how many runs
-used each skill and had each tool denied. The script exits 1 when any run times
-out or fails. It stops every session when it is interrupted or terminated.
+used each skill and how many had each tool denied. The script exits 1 when any
+run times out or fails. It stops every session when it is interrupted or
+terminated.
 """
 
 import argparse
@@ -413,6 +414,7 @@ def main():
     parser.add_argument("--out", type=Path, help="a new or empty directory to hold the transcripts and case.json, "
                         "which records the prompts and options (default: a new temporary directory)")
     args = parser.parse_args()
+    sys.stdout.reconfigure(errors="replace")
     try:
         problems = read_only_problems()
     except (OSError, ValueError) as error:
