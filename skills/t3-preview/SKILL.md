@@ -13,11 +13,19 @@ T3's file panel renders HTML and runs its scripts over the existing connection, 
 
 ## Preview tabs
 
-The `preview_*` tools drive preview tabs in T3's browser panel, not the file panel. T3 streams preview tabs from the agent machine, and they lag on a remote connection. Use preview tabs only for your own checks. Open each one in the background by calling `preview_open` with `open: false` and `reuseExistingTab: false`. Pass the returned `tabId` to each later `preview_*` call. When the checks finish, close that tab with `t3_preview_close`. If a preview tab can't load the page, close it and run the checks with Playwright.
+The `preview_*` tools drive preview tabs in T3's browser panel, not the file panel. T3 streams preview tabs from the agent machine, and they lag on a remote connection. Use preview tabs only for your own checks. The user views and uses the page through the link you give them.
+
+To check a page in a preview tab, follow these steps:
+
+1. To open a background tab of your own, call `preview_open` with `open: false` and `reuseExistingTab: false`.
+2. Run the checks in that tab, including each interaction the user named. Pass the returned `tabId` to each `preview_*` call.
+3. Before you reply, call `t3_preview_close` on each tab you opened, even if the user wants to use the page.
+
+If a preview tab can't load the page, close it and run the checks with Playwright.
 
 ## Server previews
 
-For a backend, dev server, browser automation, or public link, follow [server previews](server.md).
+For a backend, dev server, or public link, follow [server previews](server.md).
 
 For direct HTML and server previews, report unverified visual, interaction, or backend checks and link the [preview cleanup record](cleanup.md).
 
