@@ -13,7 +13,7 @@ T3's file panel renders HTML and runs its scripts over the existing connection, 
 
 ## Preview tabs
 
-The `preview_*` tools drive preview tabs in T3's browser panel, not the file panel. T3 streams preview tabs from the agent machine, and they lag on a remote connection. For your own checks, call `preview_open` with `open: false` and `reuseExistingTab: false`. Pass the returned `tabId` to each check. When the checks finish, close that tab with `t3_preview_close`.
+The `preview_*` tools drive preview tabs in T3's browser panel, not the file panel. T3 streams preview tabs from the agent machine, and they lag on a remote connection. For your own checks, open a background tab by calling `preview_open` with `open: false` and `reuseExistingTab: false`. Pass the returned `tabId` to each later `preview_*` call. When the checks finish, close that tab with `t3_preview_close`. If a preview tab can't load the page, close it and run the checks with Playwright.
 
 ## Server previews
 
@@ -25,7 +25,7 @@ For direct HTML and server previews, report unverified visual, interaction, or b
 
 Take screenshots in light and dark at phone (375px) and desktop (1280px or wider) widths. Pass explicit widths to `preview_resize` or Playwright's `viewport`. Before each screenshot, check `window.innerWidth`, because a preset or the browser panel can give a different width. Capture the full page, or scroll the changed element into view. Look at every screenshot, because DOM measurements miss rendered details such as a date input's placeholder.
 
-In a [preview tab](#preview-tabs), use `preview_resize` and `preview_set_appearance`. When the `preview_*` tools are unavailable or a preview tab can't load the page, install Playwright outside the project lockfile and use its `viewport`, `isMobile`, and `colorScheme` options. Headless Chrome's `--window-size` does not narrow the layout below about 500px.
+In a [preview tab](#preview-tabs), use `preview_resize` and `preview_set_appearance`. Otherwise, install Playwright outside the project lockfile and use its `viewport`, `isMobile`, and `colorScheme` options. Headless Chrome's `--window-size` does not narrow the layout below about 500px.
 
 Each preview screenshot also returns the page's accessibility tree and logs. Capture large screenshot sets with Playwright, and use a preview tab for interaction and spot checks.
 
