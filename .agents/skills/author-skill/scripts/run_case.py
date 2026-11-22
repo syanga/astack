@@ -184,11 +184,10 @@ def checkout_problems():
 
 def main_checkout():
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    rev_parse = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=REPO, env=env,
-                               capture_output=True, text=True)
+    rev_parse = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=REPO, env=env, capture_output=True)
     if rev_parse.returncode != 0:
         return None
-    common = (REPO / rev_parse.stdout.strip()).resolve()
+    common = (REPO / os.fsdecode(rev_parse.stdout).rstrip("\n")).resolve()
     return common.parent if common.name == ".git" else common
 
 

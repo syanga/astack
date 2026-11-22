@@ -375,8 +375,8 @@ class RunCaseTests(unittest.TestCase):
                    GIT_COMMITTER_NAME="Test", GIT_COMMITTER_EMAIL="test@example.com")
         subprocess.run(["git", "-C", str(folder), *arguments], env=env, check=True, capture_output=True)
 
-    def linked_worktree(self):
-        main = self.copy_checkout()
+    def linked_worktree(self, name="checkout"):
+        main = self.copy_checkout().rename(self.temp / name)
         for arguments in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "checkout"],
                           ["worktree", "add", "-q", "--detach", str(main.parent / "lane")]):
             self.git(main, *arguments)
@@ -417,6 +417,20 @@ class RunCaseTests(unittest.TestCase):
 
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("checkout/.claude/skills exists", refused.stderr)
+        self.assertNotIn("Traceback", refused.stderr)
+        self.assertEqual(sessions, [])
+
+    def test_finds_a_main_checkout_whose_path_the_locale_cannot_decode(self):
+        main = self.linked_worktree("caf\u00e9")
+        (main / ".claude/skills/ship").mkdir(parents=True)
+        (main / ".claude/skills/ship/SKILL.md").write_text("ship it")
+        self.env.update(LC_ALL="C", PYTHONUTF8="0", PYTHONCOERCECLOCALE="0")
+
+        refused, sessions = self.run_case("--runs", "1", "Add a feature", checkout=main.parent / "lane",
+                                          out=self.temp / "refused")
+
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("/.claude/skills exists", refused.stderr)
         self.assertNotIn("Traceback", refused.stderr)
         self.assertEqual(sessions, [])
 
