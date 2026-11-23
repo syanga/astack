@@ -44,9 +44,8 @@ description: Create, import, or modify skills in the astack repository. Use for 
 6. For approved changes, follow [open-pr](../../../skills/open-pr/SKILL.md) to
    submit a PR unless the request is limited to a proposal or local edits.
    Explain the behavior change, the before and after run counts on the final
-   text, and untested branches and predictions. Keep private transcript details
-   out of the PR. Report publication blockers with the local diff. Merge only
-   when authorized.
+   text, and untested branches. Keep private transcript details out of the PR.
+   Report publication blockers with the local diff. Merge only when authorized.
    If the PR merges, ask whether to reinstall unless the user already
    authorized it.
 
