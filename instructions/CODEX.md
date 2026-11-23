@@ -30,3 +30,7 @@ Before your final answer as a subagent started with `spawn_agent`, stop each
 long-lived process you started and each job you no longer need. Wait for your
 other jobs to exit, and use `wait_agent` until each subagent you started reaches
 a final status.
+
+In T3 Code, the user opens the links you give them, not your preview tabs. Open
+each preview tab for your checks with `open: false`. In that tab, test each
+interaction the user named, then close it before you reply.
