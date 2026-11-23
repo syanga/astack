@@ -11,7 +11,7 @@ Write the brief in this order:
 3. Give your thread ID. Ask for replies through `t3_thread_send`.
 4. Give the task last. After compaction in a Claude thread, claude-restore-skills restores only the first 8,000 characters of the arguments, so steps 2 and 3 come first.
 
-Send each brief to a new thread, or to a thread you launched that has never run full-send. Start a new thread with `delegate_task` or `t3_thread_launch`. Send to such a thread with `t3_thread_send` in `queue` mode. Codex ignores a skill mention in a message steered into a running turn.
+Send each brief to a new thread, or to a thread you launched that has never run full-send or been sent a `$full-send` brief. Start a new thread with `delegate_task` or `t3_thread_launch`. Send to such a thread with `t3_thread_send` in `queue` mode. Codex ignores a skill mention in a message steered into a running turn.
 
 When a thread that has not yet received your `$full-send` brief asks you whether to run full-send, or asks for your question and the user's answer, take the steps below. A thread has not received a brief that `t3_queue` still lists in its queue.
 
