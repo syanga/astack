@@ -22,28 +22,31 @@ description: Create, import, or modify skills in the astack repository. Use for 
    [unslop](../../../skills/unslop/SKILL.md) to the diff. For a behavior change,
    take the after runs. Revise until the edit works as Test a behavior change
    defines. If no revision works, report the runs to the user and stop.
-5. After writing or modifying the skill, run two independent subagent reviews:
+5. After writing or modifying the skill, run one independent Behavior review in
+   a subagent. Give it the request, diff, repository rules, referenced files,
+   and each case's prompts and transcripts, without suggested conclusions. It
+   checks:
 
-   - Writing: apply the linked writing guidance. Check for redundancy across
-     skills, unnecessary rules, excessive prose, and misplaced guidance.
-   - Behavior: check the request against the skill and its callers. Trace changed
-     invocation, stopping conditions, invalidated acceptance results, and external
-     writes through linked workflows. For a behavior change, check that the
-     before and after runs cover the changed branches. Run any branch they miss
-     with run_case.py.
+   - the request against the skill and its callers, tracing changed invocation,
+     stopping conditions, invalidated acceptance results, and external writes
+     through linked workflows.
+   - that the runs are valid: each prompt follows Test a behavior change, the
+     scoring matches the transcripts, and the runs loaded the final text.
+   - that the before and after runs cover the changed branches.
 
-   Give both reviewers the request, diff, repository rules, and referenced files
-   without suggested conclusions. Reviewers report concrete findings without
-   editing or starting subagents. Assess the findings and fix demonstrated
-   problems. After a fix, rerun the after runs it affects. Repeat affected
-   reviews until clean or blocked. Report unresolved blockers.
-   If subagents are unavailable, perform both reviews yourself and report that
-   they were not independent.
+   The reviewer may run cases with run_case.py, and edits no files. A finding is
+   **demonstrated** when a run shows it, or, for a wrong fact, a broken link, or
+   invalid frontmatter, when the file shows it. Fix demonstrated findings and
+   rerun the cases each fix affects. Leave the text unchanged for a predicted
+   behavior that no run shows, and list it as untested. review-pr's Standards
+   axis reviews the writing. If subagents are unavailable, perform the review
+   yourself and report that it was not independent.
 6. For approved changes, follow [open-pr](../../../skills/open-pr/SKILL.md) to
    submit a PR unless the request is limited to a proposal or local edits.
    Explain the behavior change, the before and after run counts on the final
-   text, and untested branches. Keep private transcript details out of the PR.
-   Report publication blockers with the local diff. Merge only when authorized.
+   text, and untested branches and predictions. Keep private transcript details
+   out of the PR. Report publication blockers with the local diff. Merge only
+   when authorized.
    If the PR merges, ask whether to reinstall unless the user already
    authorized it.
 

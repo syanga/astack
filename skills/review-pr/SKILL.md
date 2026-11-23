@@ -44,7 +44,7 @@ Look for the originating spec, in this order:
 
 Search the repo for every file that documents how code should be written. When `CODING_STANDARDS.md` or `CONTRIBUTING.md` exists, it must be on the list.
 
-For TypeScript changes, include [TypeScript guidance](../typescript-best-practices/SKILL.md) in the Standards review. Separate demonstrated defects from optional style advice. Advice does not authorize a refactor.
+For TypeScript changes, include [TypeScript guidance](../typescript-best-practices/SKILL.md) in the Standards review. For every standard, separate demonstrated defects from optional style advice. A prose finding that changes neither meaning nor behavior, such as sentence length or word choice, is optional advice. Advice does not authorize a refactor.
 
 On top of whatever the repo documents, the Standards axis always carries the **smell baseline** below: a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing. Two rules bind it:
 
@@ -77,7 +77,7 @@ Every reviewer reports findings without changing code.
 - The shared diff and relevant commit history.
 - The list of standards-source files you found in step 3, **plus the smell baseline from step 3** pasted in full (the sub-agent has no other access to it).
 - For tests relevant to the change, include [test-behavior-not-implementation.md](../principles/test-behavior-not-implementation.md) in full and instruct the reviewer to apply it.
-- The brief: "Report, per file/hunk where relevant, (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls: documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Under 400 words."
+- The brief: "Report, per file/hunk where relevant, (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls: documented-standard breaches can be hard, but baseline smells and prose findings that change neither meaning nor behavior are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Under 400 words."
 - For a visual change, the screenshot paths from step 1 and the recorded prototype picks, with: "Compare the head screenshots with the shipped-page screenshots. Report each departure in color, typography, spacing, or components. Report each element the shipped page lacks that no recorded pick covers. Report each rendering defect, such as overflow, unreadable text, or a missing placeholder. Cite the screenshot."
 
 **Spec sub-agent prompt** should include:
@@ -125,6 +125,8 @@ A directory listing can be cut off, so open a linked file by its path before tre
 ### 5. Aggregate
 
 In fix-and-review mode, collect the applicable reports. Have the parent fix verified in-scope problems and rerun the caller's affected acceptance checks. Refresh the diff against the same base, including uncommitted repairs, and repeat the applicable Standards and Spec reviews.
+
+Judgement calls and optional advice never block convergence or Correctness. Change only what a verified problem needs. Leave judgement calls and optional advice unapplied unless the user asked for that change, and list them in the report. Give each later Standards and Spec reviewer, including the first pass of a new run, the findings already declined and why. Reopen a declined finding only on new evidence. When a repair would reverse an earlier repair, settle the item with a run or a user decision instead of another pass.
 
 Run Correctness once, on the first candidate where the applicable Standards and Spec reviews report no unresolved verified problems and required checks pass. For every later repair, from any axis, have a fresh native sub-agent verify it using the [focused brief](../harden-pr/sections/adversarial.md#re-review-after-fixes), and rerun Standards and Spec for what it touched. Rerun Correctness only when a repair substantially changes the design, on the outside provider when available and otherwise as the native fallback.
 
