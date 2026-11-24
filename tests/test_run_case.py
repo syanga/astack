@@ -21,15 +21,26 @@ from pathlib import Path
 
 config = Path(os.environ["CLAUDE_CONFIG_DIR"])
 argv = sys.argv[1:]
+
+def git(*arguments):
+    result = subprocess.run(["git", *arguments], capture_output=True, encoding="utf-8", errors="replace")
+    return result.stdout.splitlines() if result.returncode == 0 else None
+
+project_tdd = Path("skills/tdd/SKILL.md")
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps({
         "argv": argv,
         "cwd": os.getcwd(),
         "parent_session": os.environ.get("CLAUDECODE"),
-        "settings": json.loads((config / "settings.json").read_text()),
+        "settings": json.loads((config / "settings.json").read_text(encoding="utf-8")),
         "credentials": (config / ".credentials.json").exists(),
-        "tdd": (config / "skills/tdd/SKILL.md").read_text(),
-        "instructions": (config / "CLAUDE.md").read_text(),
+        "tdd": (config / "skills/tdd/SKILL.md").read_text(encoding="utf-8"),
+        "instructions": (config / "CLAUDE.md").read_text(encoding="utf-8"),
+        "branch": git("branch", "--show-current"),
+        "subjects": git("log", "--format=%s"),
+        "status": git("status", "--porcelain"),
+        "files": git("ls-files"),
+        "project_tdd": project_tdd.read_text(encoding="utf-8") if project_tdd.is_file() else None,
     }) + "\n")
 
 def emit(event):
@@ -99,6 +110,14 @@ emit({"type": "result", "subtype": "success", "is_error": False, "session_id": s
 '''
 
 
+def git(folder, *arguments):
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+               GIT_AUTHOR_NAME="Test", GIT_AUTHOR_EMAIL="test@example.com",
+               GIT_COMMITTER_NAME="Test", GIT_COMMITTER_EMAIL="test@example.com")
+    subprocess.run(["git", "-C", str(folder), *arguments], env=env, check=True, capture_output=True)
+
+
 class RunCaseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -106,6 +125,9 @@ class RunCaseTests(unittest.TestCase):
         cls.addClassCleanup(checkouts.cleanup)
         cls.checkout = Path(checkouts.name) / "checkout"
         shutil.copytree(REPO, cls.checkout, ignore=UNCOPIED)
+        for arguments in (["init", "-q", "-b", "fix-tdd-trigger"], ["add", "-A"],
+                          ["commit", "-q", "-m", "fix(tdd): fire on feature requests"]):
+            git(cls.checkout, *arguments)
 
     def copy_checkout(self):
         checkout = Path(tempfile.mkdtemp(dir=self.temp)) / "checkout"
@@ -191,11 +213,46 @@ class RunCaseTests(unittest.TestCase):
                                                    "model": "opus", "autoMemoryEnabled": False})
             self.assertFalse(session["credentials"])
             self.assertIsNone(session["parent_session"])
-            self.assertEqual(Path(session["cwd"]).resolve(), self.checkout.resolve())
             argv = session["argv"]
             self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
             self.assertEqual(argv[argv.index("--setting-sources") + 1], "user,project")
             self.assertCountEqual(argv[argv.index("--allowedTools") + 1].split(","), ["Read", "Grep", "Glob", "Skill"])
+
+    def test_sessions_run_in_a_copy_of_the_working_tree_whose_history_names_nothing_of_the_checkout(self):
+        checkout = self.copy_checkout()
+        with (checkout / ".gitignore").open("a") as ignore:
+            ignore.write("scratch/\n")
+        edited = (checkout / "skills/tdd/SKILL.md").read_text() + "\nEdited after the last commit.\n"
+        (checkout / "skills/tdd/SKILL.md").write_text(edited)
+        (checkout / "skills/tdd/NOTES.md").write_text("Untracked notes.\n")
+        (checkout / "scratch").mkdir()
+        (checkout / "scratch/draft.md").write_text("Ignored draft.\n")
+
+        result, (session,) = self.run_case("--runs", "1", "Add a feature", checkout=checkout)
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        project = Path(session["cwd"])
+        self.assertNotEqual(project.resolve(), checkout.resolve())
+        self.assertEqual(project.name, checkout.name)
+        self.assertFalse(project.exists())
+        self.assertEqual(session["branch"], ["main"])
+        self.assertEqual(len(session["subjects"]), 1)
+        self.assertNotIn("tdd", session["subjects"][0])
+        self.assertEqual(session["status"], [])
+        self.assertEqual(session["project_tdd"], edited)
+        self.assertIn("skills/tdd/NOTES.md", session["files"])
+        self.assertNotIn("scratch/draft.md", session["files"])
+
+    def test_refuses_a_checkout_that_is_not_a_git_repository(self):
+        checkout = self.copy_checkout()
+        shutil.rmtree(checkout / ".git")
+
+        refused, sessions = self.run_case("--runs", "1", "Add a feature", checkout=checkout)
+
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("cannot copy the checkout", refused.stderr)
+        self.assertNotIn("Traceback", refused.stderr)
+        self.assertEqual(sessions, [])
 
     def test_sessions_use_the_requested_model_and_turn_limit(self):
         result, (session,) = self.run_case("--runs", "1", "--model", "sonnet", "--max-turns", "7", "Add a feature")
@@ -368,71 +425,47 @@ class RunCaseTests(unittest.TestCase):
         self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
         self.assertEqual(len(sessions), 1)
 
-    def git(self, folder, *arguments):
-        env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-        env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
-                   GIT_AUTHOR_NAME="Test", GIT_AUTHOR_EMAIL="test@example.com",
-                   GIT_COMMITTER_NAME="Test", GIT_COMMITTER_EMAIL="test@example.com")
-        subprocess.run(["git", "-C", str(folder), *arguments], env=env, check=True, capture_output=True)
-
     def linked_worktree(self, name="checkout"):
         main = self.copy_checkout().rename(self.temp / name)
-        for arguments in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "checkout"],
-                          ["worktree", "add", "-q", "--detach", str(main.parent / "lane")]):
-            self.git(main, *arguments)
+        git(main, "worktree", "add", "-q", "--detach", str(main.parent / "lane"))
         return main
 
-    def test_refuses_a_skill_in_the_main_checkout_that_a_linked_worktree_loads(self):
-        main = self.linked_worktree()
-        (main / ".claude").mkdir()
-        (main / ".claude/settings.local.json").write_text("{}")
-
-        allowed, sessions = self.run_case("--runs", "1", "Add a feature", checkout=main.parent / "lane")
-
-        self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
-        self.assertEqual(len(sessions), 1)
-
-        (main / ".claude/skills/ship").mkdir(parents=True)
-        (main / ".claude/skills/ship/SKILL.md").write_text("ship it")
-        self.log.unlink()
-
-        refused, sessions = self.run_case("--runs", "1", "Add a feature", checkout=main.parent / "lane",
-                                          out=main.parent / "refused")
-
-        self.assertNotEqual(refused.returncode, 0)
-        self.assertIn("checkout/.claude/skills exists", refused.stderr)
-        self.assertNotIn("Traceback", refused.stderr)
-        self.assertEqual(sessions, [])
-
-    def test_finds_the_main_checkout_when_git_dir_points_elsewhere(self):
+    def test_copy_of_a_linked_worktree_takes_the_main_checkout_name_and_leaves_out_its_claude_folder(self):
         main = self.linked_worktree()
         (main / ".claude/skills/ship").mkdir(parents=True)
         (main / ".claude/skills/ship/SKILL.md").write_text("ship it")
+
+        result, (session,) = self.run_case("--runs", "1", "Add a feature", checkout=main.parent / "lane")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(Path(session["cwd"]).name, "checkout")
+        self.assertEqual(session["branch"], ["main"])
+        self.assertNotIn(".claude/skills/ship/SKILL.md", session["files"])
+
+    def test_sessions_see_the_copy_when_git_dir_points_elsewhere(self):
+        main = self.linked_worktree()
         decoy = Path(tempfile.mkdtemp(dir=self.temp)) / "decoy"
         decoy.mkdir()
-        self.git(decoy, "init", "-q")
+        git(decoy, "init", "-q")
+        git(decoy, "commit", "-q", "--allow-empty", "-m", "decoy subject")
         self.env["GIT_DIR"] = str(decoy / ".git")
 
-        refused, sessions = self.run_case("--runs", "1", "Add a feature", checkout=main.parent / "lane")
+        result, (session,) = self.run_case("--runs", "1", "Add a feature", checkout=main.parent / "lane")
 
-        self.assertNotEqual(refused.returncode, 0)
-        self.assertIn("checkout/.claude/skills exists", refused.stderr)
-        self.assertNotIn("Traceback", refused.stderr)
-        self.assertEqual(sessions, [])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(Path(session["cwd"]).name, "checkout")
+        self.assertNotIn("decoy subject", session["subjects"])
+        self.assertIn("skills/tdd/SKILL.md", session["files"])
 
-    def test_finds_a_main_checkout_whose_path_the_locale_cannot_decode(self):
+    def test_copies_a_checkout_whose_path_the_locale_cannot_decode(self):
         main = self.linked_worktree("caf\u00e9")
-        (main / ".claude/skills/ship").mkdir(parents=True)
-        (main / ".claude/skills/ship/SKILL.md").write_text("ship it")
         self.env.update(LC_ALL="C", PYTHONUTF8="0", PYTHONCOERCECLOCALE="0")
 
-        refused, sessions = self.run_case("--runs", "1", "Add a feature", checkout=main.parent / "lane",
-                                          out=self.temp / "refused")
+        result, sessions = self.run_case("--runs", "1", "Add a feature", checkout=main.parent / "lane")
 
-        self.assertNotEqual(refused.returncode, 0)
-        self.assertIn("/.claude/skills exists", refused.stderr)
-        self.assertNotIn("Traceback", refused.stderr)
-        self.assertEqual(sessions, [])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(len(sessions), 1)
 
     def test_refuses_an_unreadable_settings_json_only_as_unreadable(self):
         checkout = self.copy_checkout()
