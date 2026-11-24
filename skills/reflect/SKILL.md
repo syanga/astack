@@ -40,7 +40,7 @@ Sanity-check the synthesizer's Accepted list. For any item that would be enforce
 
 ### 5. Apply
 
-Read [writing-for-agents](../writing-for-agents/SKILL.md) before drafting edits. For installed skills, follow its [source-editing workflow](../writing-for-agents/SOURCE-EDITS.md) to locate the owning repository. Present the synthesizer's full Accepted/Rejected/Backlog output with concrete proposed diffs. The user picks which subset to apply and may redirect routings. Wait for selection unless the user already authorized those edits.
+Read [writing-for-agents](../writing-for-agents/SKILL.md) before drafting edits. For installed skills, follow its [source-editing workflow](../writing-for-agents/SOURCE-EDITS.md) to locate the owning repository. Present the synthesizer's full Accepted/Rejected/Backlog output with concrete proposed diffs. For each behavior-changing row, name the before case that would show the failure and say whether it has run. The user picks which subset to apply and may redirect routings. Wait for selection unless the user already authorized those edits.
 
 Report Backlog items as implementation proposals. File them to a tracker only when requested.
 
