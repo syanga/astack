@@ -72,6 +72,8 @@ In report-only mode, run the applicable reviewers in parallel when capacity perm
 
 Every reviewer reports findings without changing code.
 
+Reviewers review the diff. Keep the PR description out of every reviewer's prompt, even when the requirements say what it must contain.
+
 **Standards sub-agent prompt** should include:
 
 - The shared diff and relevant commit history.
@@ -127,6 +129,8 @@ A directory listing can be cut off, so open a linked file by its path before tre
 In fix-and-review mode, collect the applicable reports. Have the parent fix verified in-scope problems and rerun the caller's affected acceptance checks. Refresh the diff against the same base, including uncommitted repairs, and repeat the applicable Standards and Spec reviews.
 
 Judgement calls and optional advice never block convergence or Correctness. Change only what a verified problem needs. Leave judgement calls and optional advice unapplied unless the user asked for that change, and list them in the report. Give each later Standards and Spec reviewer, including the first pass of a new run, the findings already declined and why. Reopen a declined finding only on new evidence. When a repair would reverse an earlier repair, settle the item with a run or a user decision instead of another pass.
+
+The PR description is outside the review. A finding about it is never a verified problem: it never blocks convergence and starts no pass. When one shows that the description states a false result or a wrong setup step, correct the description. Leave other description findings unapplied and list them in the report.
 
 Run Correctness once, on the first candidate where the applicable Standards and Spec reviews report no unresolved verified problems and required checks pass. For every later repair, from any axis, have a fresh native sub-agent verify it using the [focused brief](../harden-pr/sections/adversarial.md#re-review-after-fixes), and rerun Standards and Spec for what it touched. Rerun Correctness only when a repair substantially changes the design, on the outside provider when available and otherwise as the native fallback.
 

@@ -23,12 +23,12 @@ Apply [technical-writing](../technical-writing/SKILL.md) to the title, descripti
 
 Follow the repository's title convention, using recent merged PRs and Git history as examples. Where the repository uses Conventional Commits, use `type(scope): subject`, with a type such as `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, or `perf`, and the changed area as the scope. Keep the subject short and imperative, with no trailing period. Prefer a title that explains the outcome, such as `fix(web): honor worktree defaults for new threads`. Name a real symbol when it carries the change.
 
-The description is a briefing for a reviewer who has the diff but has not seen this conversation. Explain why the change exists, what is out of scope when that matters, and how you verified it. Keep it readable in under a minute and within about 40 lines, since it may become the squash commit body.
+The description is a briefing for a reviewer who has the diff but has not seen this conversation. Write only what the diff cannot show: why the change exists, setup outside the repository, what is out of scope when that matters, and how you verified it. The diff shows what changed. Keep the description readable in under a minute, since it may become the squash commit body.
 
 Use these sections in this order by default. Include `## Verification` in every PR. Omit other sections that have nothing useful to say. A small PR can put the rest in brief prose without headings.
 
-- `## Why`. State the problem or goal and the approach in one or two short paragraphs. For a bug fix, explain what went wrong and what happens now.
-- `## Scope`. Name the symbols and paths that define the boundary, including both sides of a rename or retarget. State what is in and out when that distinction matters.
+- `## Why`. State the problem or goal in one short paragraph. For a bug fix, explain what went wrong.
+- `## Setup`. Name each step or setting outside the repository that the change needs, such as a secret, a repository setting, a migration, or a deploy order, and whether it is done.
 - `## Tradeoffs`. Explain rejected alternatives a reviewer would reasonably ask about. Omit this section when there was no real choice.
 - `## Blast radius`. In one to three sentences, name who or what the change affects and why it is safe or risky. Say whether it is a two-way door that is cheap to reverse or a one-way door that is not. Include the cost of leaving the problem unresolved when it helps assess the change.
 - `## Verification`. Name the commands or real run paths and their results. For a performance change, give a primary measured result with its unit, before and after.
