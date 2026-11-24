@@ -156,6 +156,21 @@ func TestAnUnusedFiveHourWindowCountsAsOnPaceInThePool(t *testing.T) {
 	}
 }
 
+func TestAModelNamedLikeAnAccountWideWindowGetsItsOwnPoolBar(t *testing.T) {
+	r := weeklyOnlyReport()
+	alumni := &r.Status.Accounts[1]
+	alumni.Usage.Windows = append(alumni.Usage.Windows, usageWindow(router.Weekly, "wk", 0.5, 8, 20, -2))
+	want := "pool    wk " + strings.Repeat("█", 15) + "│" + strings.Repeat("█", 5) + "▎" + strings.Repeat("╱", 12) + "  63%" +
+		"   wk " + strings.Repeat("█", 9) + "│" + strings.Repeat("█", 7) + strings.Repeat("╱", 17) + "  50%"
+
+	got := render(onScreen(r, 96, false))
+
+	if lines := strings.Split(got, "\n"); lines[1] != want {
+		t.Fatalf("status\n%s\nwant two 34-column bars: the weekly window of work and alumni, 62.5%% left with its tick at 43.75%%, "+
+			"then alumni's model wk, 50%% left with its tick at 42h/168h = 25%%\n%s", got, want)
+	}
+}
+
 func TestAReadingFromBeforeItsWindowResetCountsAsOnPaceInThePool(t *testing.T) {
 	r := weeklyOnlyReport()
 	r.Status.Accounts[0].Usage.Windows = []claude.UsageWindow{usageWindow(router.Weekly, "", 0.25, 14, 18, 0)}

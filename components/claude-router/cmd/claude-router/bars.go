@@ -348,14 +348,14 @@ func drawFill(c *cells, left, pace float64, marked bool, n int) {
 }
 
 type poolWindow struct {
-	label                  string
+	key, label             string
 	capacity, left, onPace float64
 }
 
 func poolWindows(r report) []poolWindow {
 	var pool []poolWindow
 	for _, win := range limitWindows {
-		pool = append(pool, poolWindow{label: win.short})
+		pool = append(pool, poolWindow{key: win.label, label: win.short})
 	}
 	for _, a := range r.Status.Accounts {
 		for _, row := range limitRows(r, a) {
@@ -370,10 +370,10 @@ func poolWindows(r report) []poolWindow {
 			if !ok {
 				onPace = left
 			}
-			i := slices.IndexFunc(pool, func(p poolWindow) bool { return p.label == row.short })
+			i := slices.IndexFunc(pool, func(p poolWindow) bool { return p.key == row.label })
 			if i < 0 {
 				i = len(pool)
-				pool = append(pool, poolWindow{label: row.short})
+				pool = append(pool, poolWindow{key: row.label, label: row.short})
 			}
 			pool[i].capacity += a.Capacity
 			pool[i].left += a.Capacity * left
