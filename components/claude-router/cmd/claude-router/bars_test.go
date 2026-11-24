@@ -156,6 +156,42 @@ func TestAnUnusedFiveHourWindowCountsAsOnPaceInThePool(t *testing.T) {
 	}
 }
 
+func TestAReadingFromBeforeItsWindowResetCountsAsOnPaceInThePool(t *testing.T) {
+	r := weeklyOnlyReport()
+	r.Status.Accounts[0].Usage.Windows = []claude.UsageWindow{usageWindow(router.Weekly, "", 0.25, 14, 18, 0)}
+	want := "pool    wk " + strings.Repeat("█", 50) + "│" + strings.Repeat("╱", 29) + "  63%"
+
+	got := render(onScreen(r, 96, false))
+
+	if lines := strings.Split(got, "\n"); lines[1] != want {
+		t.Fatalf("status at 14:20\n%s\nwant an 80-column bar with 50 columns left, (3×0.75 + 1×0.25) / 4 = 62.5%%, "+
+			"and its tick in the 51st, (3×0.75 + 1×42h/168h) / 4 = 62.5%%, because work's 14:16 reading names a reset at 14:18\n%s", got, want)
+	}
+}
+
+func TestEachPoolBarNeedsTenColumns(t *testing.T) {
+	r := withUsage(healthyReport())
+
+	if got := render(onScreen(r, 71, false)); utf8.RuneCountInString(strings.Split(got, "\n")[1]) != 71 {
+		t.Fatalf("status at 71 columns\n%s\nwant a pool line of 41 fixed columns and three 10-column bars", got)
+	}
+	if got := render(onScreen(r, 70, false)); strings.Contains(got, "pool") || !strings.Contains(got, "╭─ work") {
+		t.Fatalf("status at 70 columns\n%s\nwant the boxes and no pool line: three bars would get (70 - 41) / 3 = 9 columns", got)
+	}
+}
+
+func TestThePoolLineAppearsOnlyWithTheBoxes(t *testing.T) {
+	r := weeklyOnlyReport()
+
+	if got := render(onScreen(r, 52, false)); !strings.Contains(got, "\npool    wk ") || !strings.Contains(got, "╭─ work") {
+		t.Fatalf("status at 52 columns\n%s\nwant the boxes, whose bars get 52 - 42 = 10 columns, under a pool line", got)
+	}
+	if got := render(onScreen(r, 51, false)); got != render(r) {
+		t.Fatalf("status at 51 columns\n%s\nwant the lines and no pool line: the boxes' bars would get 9 columns, "+
+			"although the pool bar would get 35\n%s", got, render(r))
+	}
+}
+
 func TestASingleAccountGetsNoPoolLine(t *testing.T) {
 	r := withUsage(healthyReport())
 	if got := render(onScreen(r, 100, false)); !strings.Contains(got, "\npool    5h ") {
