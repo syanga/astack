@@ -496,14 +496,32 @@
     "note": "User-invoked, like most astack skills. Default members are Claude Opus 5.5 and GPT-6.1 Sol at xhigh, at the user's choice, because the user's providers are Claude and Codex. Outside T3 Code, dispatch follows arena's provider execution because a harness's own subagents cannot reach another provider. The Members and Review headings let hillclimb-council link to them. Upstream's review loop never ends when a delegate keeps requesting out-of-scope work, so declined requests can end it."
   },
   "static-ads": {
-    "repository": "https://github.com/graphed-inc/marketing-skills.git",
-    "path": "skills/static-ads",
-    "commit": "ea5a17dc816faa1fc919bc3579124b1acbdddeeb",
-    "license": "MIT, copied from repository-root LICENSE to skills/static-ads/LICENSE-graphed",
+    "repository": [
+      "https://github.com/graphed-inc/marketing-skills.git",
+      "https://github.com/Jakeschincariol/instagram-agent-skill.git"
+    ],
+    "path": [
+      "skills/static-ads",
+      "skills/ig-reel/hooks.json",
+      "skills/ig-reel/SKILL.md",
+      "templates/voice.md",
+      "skills/ig-carousel/SKILL.md",
+      "skills/ig-viral/SKILL.md"
+    ],
+    "commit": [
+      "ea5a17dc816faa1fc919bc3579124b1acbdddeeb",
+      "d03c56bb598be770c60b201f94237e5d1a4268a6"
+    ],
+    "license": "MIT, kept in skills/static-ads/LICENSE-graphed and skills/static-ads/LICENSE-instagram-agent-skill",
     "files": {
-      "SKILL.md": "skills/static-ads/SKILL.md",
-      "generate.sh": "skills/static-ads/scripts/generate.py"
+      "skills/static-ads/SKILL.md": "skills/static-ads/SKILL.md",
+      "skills/static-ads/generate.sh": "skills/static-ads/scripts/generate.py",
+      "skills/ig-reel/hooks.json": "skills/static-ads/hooks.md",
+      "skills/ig-reel/SKILL.md": "skills/static-ads/SKILL.md",
+      "templates/voice.md": "skills/static-ads/SKILL.md",
+      "skills/ig-viral/SKILL.md": "skills/static-ads/SKILL.md",
+      "skills/ig-carousel/SKILL.md": "skills/static-ads/scripts/render.py"
     },
-    "note": "Graphed needs its own account and CLI, so images come from the OpenAI Images API, which renders Meta's 4:5 at 1472x1840. The script then needs no polling, crop, or upload, and runs on Linux, which lacks sips. The Ad Library pull needs a paid scraping service, so the user pastes their current ads instead. User-invoked because each run spends money. With the brand's repo, GPT Image draws only a scene with no text, and an HTML page that headless Chrome screenshots puts the exact words, logo, and product images on top. Model-drawn ads in a live run drifted in color and showed made-up product pages, and pure HTML ads lost a blind comparison to model-drawn ones on looks."
+    "note": "Graphed needs its own account and CLI, so images come from the OpenAI Images API, which renders Meta's 4:5 at 1472x1840. The script then needs no polling, crop, or upload, and runs on Linux, which lacks sips. The Ad Library pull needs a paid scraping service, so the user pastes their current ads instead. User-invoked because each run spends money. With the brand's repo, GPT Image draws only a scene with no text, and an HTML page that headless Chrome screenshots puts the exact words, logo, and product images on top. Model-drawn ads in a live run drifted in color and showed made-up product pages, and pure HTML ads lost a blind comparison to model-drawn ones on looks. Instagram-agent-skill supplies the hook formulas and their traps, rewritten as static ad headlines. It also supplies the placeholder for a missing number, the proof and off-limits lists, and the sample-size caution. Its carousel rule of 32 px type and 120 px margins at 1080 px becomes 43 px and 160 px at 1440 px. Of the other 13 formulas, seven need a creator's own story or a video, and Numbered With A Favourite and The Steal need more than one image. Someone Else's Result is a testimonial, which the claims rules already limit, and Superlative, Contrarian Flip, and Nobody Tells You fit any brand. Its six scripts time and score Reels, humanize captions, and rank other accounts' Reels, so they stay out too."
   }
 }

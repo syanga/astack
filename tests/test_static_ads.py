@@ -378,6 +378,60 @@ class RenderTests(unittest.TestCase):
             mode = (self.run_folder / "Proof {}.png".format(placement)).stat().st_mode
             self.assertEqual(stat.S_IMODE(mode), 0o644)
 
+    def test_text_that_overlaps_other_text_is_reported(self):
+        self.write_page("Proof", ad_page("<p style=\"top: 900px\">Fits both</p>"
+                                         "<p style=\"top: 1100px\">Covered line</p>"
+                                         "<p style=\"top: 1120px; left: 260px\">Lying on top</p>"))
+
+        result = self.render()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        for placement in ["Feed", "Story"]:
+            lines = self.problems(result.stdout, "Proof {}:".format(placement))
+            self.assertTrue(any("Covered line" in line and "Lying on top" in line for line in lines), result.stdout)
+            self.assertFalse(any("Fits both" in line for line in lines), result.stdout)
+
+    def test_a_tightly_set_headline_with_a_colored_phrase_is_not_overlap(self):
+        self.write_page("Proof", ad_page("<p style=\"top: 400px; width: 900px; font: 116px system-ui, sans-serif; "
+                                         "line-height: 0.9; letter-spacing: -0.02em\">FRESH BEANS AT <span "
+                                         "style=\"color: #c00\">YOUR DOOR IN</span> 48 HOURS</p>"
+                                         "<p style=\"top: 1300px\">Covered line</p>"
+                                         "<p style=\"top: 1330px; left: 260px\">Lying on top</p>"))
+
+        result = self.render()
+
+        lines = [line for line in self.problems(result.stdout, "Proof Feed:") if "overlaps" in line]
+        self.assertTrue(any("Covered line" in line and "Lying on top" in line for line in lines), result.stdout)
+        for words in ["FRESH BEANS AT", "YOUR DOOR IN", "48 HOURS"]:
+            self.assertFalse(any(words in line for line in lines), result.stdout)
+
+    def test_text_too_small_to_read_on_a_phone_is_reported(self):
+        self.write_page("Proof", ad_page("<p style=\"top: 900px\">Fits both</p>"
+                                         "<p style=\"top: 1100px; font-size: 40px\">Fine print</p>"))
+
+        result = self.render()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        for placement in ["Feed", "Story"]:
+            lines = self.problems(result.stdout, "Proof {}:".format(placement))
+            self.assertTrue(any("Fine print" in line for line in lines), result.stdout)
+            self.assertFalse(any("Fits both" in line for line in lines), result.stdout)
+
+    def test_text_close_to_an_edge_is_reported(self):
+        self.write_page("Proof", ad_page("<p style=\"top: 900px\">Fits both</p>"
+                                         "<p style=\"top: 1100px; left: 100px\">Near the left</p>"
+                                         "<p style=\"top: 100px\">Near the top</p>"
+                                         "<p style=\"top: 1300px; left: auto; right: 100px\">Near the right</p>"
+                                         "<p style=\"bottom: 100px\">Near the bottom</p>"))
+
+        result = self.render()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        feed = self.problems(result.stdout, "Proof Feed:")
+        for words in ["Near the left", "Near the top", "Near the right", "Near the bottom"]:
+            self.assertTrue(any(words in line and "160 px" in line for line in feed), result.stdout)
+        self.assertFalse(any("Fits both" in line for line in feed), result.stdout)
+
     def test_pages_with_photos_are_checked_like_any_other(self):
         (self.run_folder / "pages/photo.png").write_bytes(png_image(1200, 900))
         photos = "".join("<img src=\"photo.png\" style=\"position: absolute; top: {}px; left: 200px; width: 300px\">"

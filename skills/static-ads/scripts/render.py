@@ -15,6 +15,9 @@ import tempfile
 PLACEMENTS = (("Feed", 1440, 1800), ("Story", 1440, 2560))
 STORY_TOP = 320
 STORY_BOTTOM = 693
+MIN_TEXT = 43
+EDGE = 160
+OVERLAP = 4
 MAX_NAME = 12
 TIMEOUT_SECONDS = 60
 PAGE_WAIT_MS = 15000
@@ -29,7 +32,13 @@ CHECK_PAGE = """<!doctype html>
 <script>
 const frame = document.getElementById("ad");
 frame.addEventListener("load", async () => {
-  const doc = frame.contentDocument, text = [];
+  const doc = frame.contentDocument, view = frame.contentWindow, text = [], blocks = new Map();
+  const block = (node) => {
+    let element = node.parentElement;
+    while (element.parentElement && view.getComputedStyle(element).display === "inline") element = element.parentElement;
+    if (!blocks.has(element)) blocks.set(element, blocks.size);
+    return blocks.get(element);
+  };
   await doc.fonts.ready;
   const broken = [...doc.images].filter((image) => image.complete && !image.naturalWidth)
     .map((image) => image.getAttribute("src"));
@@ -41,7 +50,8 @@ frame.addEventListener("load", async () => {
     const boxes = [...range.getClientRects()].filter((box) => box.width && box.height);
     if (!words || !boxes.length) continue;
     text.push({
-      words,
+      words, size: parseFloat(view.getComputedStyle(walk.currentNode.parentElement).fontSize),
+      block: block(walk.currentNode), boxes: boxes.map((box) => [box.left, box.top, box.right, box.bottom]),
       left: Math.min(...boxes.map((box) => box.left)), right: Math.max(...boxes.map((box) => box.right)),
       top: Math.min(...boxes.map((box) => box.top)), bottom: Math.max(...boxes.map((box) => box.bottom)),
     });
@@ -96,12 +106,40 @@ def png_size(path):
     return None
 
 
+def short(words):
+    return words if len(words) <= 40 else words[:39] + "…"
+
+
+def letter_band(box):
+    left, top, right, bottom = box
+    trim = (bottom - top) * 0.15
+    return left, top + trim, right, bottom - trim
+
+
+def overlap(first, second):
+    first, second = letter_band(first), letter_band(second)
+    width = min(first[2], second[2]) - max(first[0], second[0])
+    height = min(first[3], second[3]) - max(first[1], second[1])
+    return width >= OVERLAP and height >= OVERLAP
+
+
 def problems(text, placement, width, height):
     found = []
+    for index, item in enumerate(text):
+        for other in text[index + 1:]:
+            if item["block"] == other["block"]:
+                continue
+            if any(overlap(first, second) for first in item["boxes"] for second in other["boxes"]):
+                found.append('text overlaps other text: "{}" and "{}"'.format(short(item["words"]),
+                                                                            short(other["words"])))
     for item in text:
-        words = item["words"] if len(item["words"]) <= 40 else item["words"][:39] + "…"
+        words = short(item["words"])
         if item["left"] < 0 or item["top"] < 0 or item["right"] > width or item["bottom"] > height:
             found.append('text cut off at an edge: "{}"'.format(words))
+        elif min(item["left"], item["top"], width - item["right"], height - item["bottom"]) < EDGE:
+            found.append('text within {} px of an edge: "{}"'.format(EDGE, words))
+        if item["size"] < MIN_TEXT:
+            found.append('text under {} px: "{}"'.format(MIN_TEXT, words))
         if placement == "Story" and item["top"] < STORY_TOP:
             found.append('text in the top {} px, which Instagram covers: "{}"'.format(STORY_TOP, words))
         if placement == "Story" and item["bottom"] > height - STORY_BOTTOM:
