@@ -3,6 +3,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import shlex
+import shutil
 import struct
 import subprocess
 import sys
@@ -11,7 +13,14 @@ import threading
 import unittest
 import zlib
 
-SCRIPT = Path(__file__).resolve().parents[1] / "skills/static-ads/scripts/generate.py"
+SKILL = Path(__file__).resolve().parents[1] / "skills/static-ads"
+SCRIPT = SKILL / "scripts/generate.py"
+RENDER_SCRIPT = SKILL / "scripts/render.py"
+CHROME = next(filter(None, map(shutil.which, ["google-chrome", "google-chrome-stable", "chromium",
+                                              "chromium-browser"])), None)
+MAC_CHROMES = [Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+               Path("/Applications/Chromium.app/Contents/MacOS/Chromium")]
+CHROME = CHROME or next((str(path) for path in MAC_CHROMES if path.is_file()), None)
 
 
 def png_header(width, height):
@@ -19,6 +28,14 @@ def png_header(width, height):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
     return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
             + chunk(b"IEND", b""))
+
+
+def png_image(width, height):
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    rows = b"".join(b"\x00" + b"\xb4\x53\x2a" * width for _ in range(height))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
 
 
 RENDER = png_header(1472, 1840)
@@ -296,6 +313,183 @@ class GenerateTests(unittest.TestCase):
         self.generate()
 
         self.assertEqual([request["body"]["prompt"] for request in self.api.requests], ["A headline"])
+
+
+def ad_page(body, style=""):
+    return ("<!doctype html><html><head><meta charset=\"utf-8\"><style>html, body { margin: 0; width: 100%; "
+            "height: 100%; overflow: hidden; background: #fff; font: 60px sans-serif; } p { position: absolute; "
+            "margin: 0; left: 200px; } " + style + "</style></head><body>" + body + "</body></html>")
+
+
+SAFE = ad_page("<p style=\"top: 900px\">Fits both</p>")
+
+
+@unittest.skipUnless(CHROME, "needs Google Chrome or Chromium")
+class RenderTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="astack static ads ")
+        self.addCleanup(temporary.cleanup)
+        self.run_folder = Path(temporary.name) / "brand-ads-2026-11-24"
+        (self.run_folder / "pages").mkdir(parents=True)
+        self.home = Path(temporary.name) / "home"
+        self.home.mkdir()
+        self.chrome = Path(temporary.name) / "offline-chrome"
+        self.chrome.write_text("#!/bin/sh\nexec {} '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost' \"$@\"\n"
+                               .format(shlex.quote(CHROME)), encoding="utf-8")
+        self.chrome.chmod(0o755)
+
+    def write_page(self, name, html):
+        (self.run_folder / "pages" / (name + ".html")).write_text(html, encoding="utf-8")
+
+    def render(self, *arguments):
+        env = {**os.environ, "HOME": str(self.home)}
+        for name in ["XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME"]:
+            env.pop(name, None)
+        return subprocess.run([sys.executable, str(RENDER_SCRIPT), str(self.run_folder), "--chrome", str(self.chrome),
+                               *arguments], capture_output=True, text=True, env=env, timeout=300)
+
+    def size(self, name):
+        data = (self.run_folder / name).read_bytes()[:24]
+        return struct.unpack(">II", data[16:24])
+
+    def problems(self, output, name):
+        return [line for line in output.splitlines() if line.startswith(name + " ")]
+
+    def test_each_page_becomes_a_feed_file_and_a_story_file(self):
+        self.write_page("Proof", SAFE)
+
+        result = self.render()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.size("Proof Feed.png"), (1440, 1800))
+        self.assertEqual(self.size("Proof Story.png"), (1440, 2560))
+        self.assertEqual(self.problems(result.stdout, "Proof"), [])
+
+    def test_pages_with_photos_are_checked_like_any_other(self):
+        (self.run_folder / "pages/photo.png").write_bytes(png_image(1200, 900))
+        photos = "".join("<img src=\"photo.png\" style=\"position: absolute; top: {}px; left: 200px; width: 300px\">"
+                         .format(400 + 100 * index) for index in range(6))
+        for name in ["Proof", "Pain", "Offer"]:
+            self.write_page(name, ad_page(photos + "<p style=\"top: 900px\">Fits both</p>"
+                                          "<p style=\"bottom: 300px\">Too low</p>"))
+
+        result = self.render()
+
+        self.assertNotIn("FAILED", result.stdout)
+        for name in ["Proof", "Pain", "Offer"]:
+            story = self.problems(result.stdout, name + " Story:")
+            self.assertTrue(any("Too low" in line for line in story), result.stdout)
+
+    def test_a_name_longer_than_12_characters_is_refused_while_the_others_render(self):
+        self.write_page("Thirteen Char", SAFE)
+        self.write_page("Proof", SAFE)
+
+        result = self.render()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("Thirteen Char: FAILED", result.stdout)
+        self.assertFalse((self.run_folder / "Thirteen Char Feed.png").exists())
+        self.assertEqual(self.size("Proof Story.png"), (1440, 2560))
+
+    def test_text_where_instagram_covers_a_story_is_reported(self):
+        self.write_page("Proof", ad_page("<p style=\"top: 200px\">Too high</p><p style=\"bottom: 300px\">Too low</p>"
+                                         "<p style=\"top: 900px\">Fits both</p>"))
+
+        result = self.render()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        story = self.problems(result.stdout, "Proof Story:")
+        self.assertTrue(any("Too high" in line for line in story), result.stdout)
+        self.assertTrue(any("Too low" in line for line in story), result.stdout)
+        self.assertFalse(any("Fits both" in line for line in story), result.stdout)
+        self.assertEqual(self.problems(result.stdout, "Proof Feed:"), [])
+
+    def test_text_cut_off_at_an_edge_is_reported_for_each_placement(self):
+        self.write_page("Proof", ad_page("<p style=\"top: 900px; left: 1300px; white-space: nowrap\">Off the side</p>"))
+
+        result = self.render()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        for placement in ["Feed", "Story"]:
+            lines = self.problems(result.stdout, "Proof {}:".format(placement))
+            self.assertTrue(any("Off the side" in line for line in lines), result.stdout)
+
+    def test_the_starter_pages_render_without_a_problem(self):
+        shutil.copytree(SKILL / "starter", self.run_folder / "pages", dirs_exist_ok=True)
+        (self.run_folder / "pages/ad.html").rename(self.run_folder / "pages/Starter.html")
+        (self.run_folder / "pages/image-ad.html").rename(self.run_folder / "pages/Framed.html")
+        (self.run_folder / "pages/ad.png").write_bytes(png_image(1472, 1840))
+
+        result = self.render()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name in ["Starter", "Framed"]:
+            self.assertEqual(self.problems(result.stdout, name), [])
+            self.assertEqual(self.size(name + " Feed.png"), (1440, 1800))
+            self.assertEqual(self.size(name + " Story.png"), (1440, 2560))
+
+    def test_rendering_writes_nothing_to_the_home_folder(self):
+        self.write_page("Proof", SAFE)
+
+        result = self.render()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(list(self.home.iterdir()), [])
+
+    def serve(self, html):
+        requests, released = [], threading.Event()
+        self.addCleanup(released.set)
+
+        class Site(BaseHTTPRequestHandler):
+            def do_GET(self):
+                requests.append(self.path)
+                if self.path == "/hang":
+                    released.wait(120)
+                    return
+                data = html.encode() if self.path == "/" else png_image(10, 10)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html" if self.path == "/" else "image/png")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Site)
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return "http://localhost:{}".format(server.server_address[1]), requests
+
+    def test_a_live_page_is_screenshotted_by_its_hostname_into_a_new_run_folder(self):
+        url, requests = self.serve(ad_page("<p style=\"top: 900px\">Live page</p>"
+                                           "<script>fetch('/hang')</script>"))
+        shutil.rmtree(self.run_folder)
+
+        result = self.render("--page", url + "/")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.size("page.png"), (1440, 1800))
+        self.assertIn("/hang", requests)
+        self.assertEqual(list(self.home.iterdir()), [])
+
+    def test_an_ad_page_loads_nothing_from_the_network(self):
+        url, requests = self.serve("")
+        self.write_page("Proof", ad_page("<img src=\"{}/photo.png\"><p style=\"top: 900px\">Fits both</p>"
+                                         .format(url)))
+
+        result = self.render()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(requests, [])
+
+    def test_a_run_folder_without_pages_stops_with_a_message(self):
+        result = self.render()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("pages", result.stderr)
 
 
 if __name__ == "__main__":
