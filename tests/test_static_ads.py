@@ -128,16 +128,18 @@ class GenerateTests(unittest.TestCase):
         ])
         self.assertEqual((self.run_folder / "2-pain.png").read_bytes(), RENDER)
 
-    def test_an_ad_that_already_has_an_image_is_not_generated_again(self):
+    def test_an_ad_that_already_has_an_image_is_not_generated_again_and_its_size_is_shown(self):
         self.write_request("1-proof", {"prompt": "Kept"})
-        (self.run_folder / "1-proof.png").write_bytes(b"earlier render")
+        earlier = png_header(1080, 1350)
+        (self.run_folder / "1-proof.png").write_bytes(earlier)
         self.write_request("2-pain", {"prompt": "New"})
 
         result = self.generate()
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual([request["body"]["prompt"] for request in self.api.requests], ["New"])
-        self.assertEqual((self.run_folder / "1-proof.png").read_bytes(), b"earlier render")
+        self.assertEqual((self.run_folder / "1-proof.png").read_bytes(), earlier)
+        self.assertLine(result.stdout, "1-proof", "1080x1350")
 
     def test_a_rejected_ad_fails_while_the_others_finish(self):
         self.write_request("1-proof", {"prompt": "REJECT this one"})

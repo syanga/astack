@@ -90,7 +90,7 @@ def generate(request_path, model, base_url, key):
     png = folder / (name + ".png")
     try:
         if png.is_file() and png.stat().st_size:
-            say("{}: exists, skip".format(name))
+            say("{}: exists {}, skip".format(name, png_size(png.read_bytes())))
             return True
         request, references = load(request_path)
         body = {**{field: value for field, value in request.items() if field != "images"}, "model": model}

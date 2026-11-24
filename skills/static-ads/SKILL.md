@@ -67,7 +67,7 @@ python3 <skill-dir>/scripts/generate.py <run-folder>             # about $0.07 p
 
 `--dry-run` reads the request files and prints each ad's size, quality, prompt length, and reference count. It does not call OpenAI and does not spend money. That is the point: catch a bad request before the image run.
 
-The real run generates every ad in parallel with `gpt-image-2.6-sunburst`. For fast drafts, pass `--model gpt-image-2.6-flare`. An ad that fails prints `FAILED` with its error, so the rest of the batch can finish. For each finished ad, the script prints `done` with the image size and saves `<n>-<name>.png`. It also saves OpenAI's response, without the image, as `<n>-<name>.res.json`. It skips an ad that already has a PNG.
+The real run generates every ad in parallel with `gpt-image-2.6-sunburst`. For fast drafts, pass `--model gpt-image-2.6-flare`. An ad that fails prints `FAILED` with its error, so the rest of the batch can finish. For each finished ad, the script prints `done` with the image size and saves `<n>-<name>.png`. It also saves OpenAI's response, without the image, as `<n>-<name>.res.json`. It skips an ad that already has a PNG and prints `exists` with that file's size.
 
 ## 5. Review
 
@@ -76,7 +76,7 @@ View every PNG. Check for:
 - Made-up handles or URLs, such as a fake `@brand` or `shop.brand.ai`. Flag those to the user.
 - A wordmark that doesn't match
 - Copied customer logos
-- A size other than 1472x1840 on the ad's `done` line
+- A size other than 1472x1840 on the ad's `done` or `exists` line
 
 Read the script output for `FAILED`. A failed ad can still leave the script looking finished.
 
