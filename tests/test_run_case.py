@@ -221,7 +221,7 @@ class RunCaseTests(unittest.TestCase):
     def test_sessions_run_in_a_copy_of_the_working_tree_whose_history_names_nothing_of_the_checkout(self):
         checkout = self.copy_checkout()
         with (checkout / ".gitignore").open("a") as ignore:
-            ignore.write("scratch/\n")
+            ignore.write("scratch/\nREADME.md\n")
         edited = (checkout / "skills/tdd/SKILL.md").read_text() + "\nEdited after the last commit.\n"
         (checkout / "skills/tdd/SKILL.md").write_text(edited)
         (checkout / "skills/tdd/NOTES.md").write_text("Untracked notes.\n")
@@ -241,6 +241,7 @@ class RunCaseTests(unittest.TestCase):
         self.assertEqual(session["status"], [])
         self.assertEqual(session["project_tdd"], edited)
         self.assertIn("skills/tdd/NOTES.md", session["files"])
+        self.assertIn("README.md", session["files"])
         self.assertNotIn("scratch/draft.md", session["files"])
 
     def test_refuses_a_checkout_that_is_not_a_git_repository(self):

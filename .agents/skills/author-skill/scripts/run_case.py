@@ -216,7 +216,7 @@ def copy_checkout(folder):
     neutral = ["-c", "core.hooksPath=" + os.devnull, "-c", "commit.gpgsign=false",
                "-c", "user.name=Author", "-c", "user.email=author@example.com"]
     git(project, "init", "-q", "-b", "main")
-    git(project, *neutral, "add", "-A")
+    git(project, *neutral, "add", "-A", "--force")
     git(project, *neutral, "commit", "-q", "--no-verify", "--allow-empty", "-m", "Initial commit")
     return project
 
