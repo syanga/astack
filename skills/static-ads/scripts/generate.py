@@ -2,6 +2,7 @@
 import argparse
 import base64
 from concurrent.futures import ThreadPoolExecutor
+import http.client
 import json
 import mimetypes
 import os
@@ -17,6 +18,14 @@ TIMEOUT_SECONDS = 300
 OUTPUT = threading.Lock()
 
 
+class RefuseRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args):
+        return None
+
+
+OPENER = urllib.request.build_opener(RefuseRedirect)
+
+
 def say(line):
     with OUTPUT:
         sys.stdout.write(line + "\n")
@@ -29,7 +38,7 @@ def data_url(path):
 
 
 def png_size(data):
-    if data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR":
+    if len(data) >= 24 and data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR":
         return "{}x{}".format(*struct.unpack(">II", data[16:24]))
     return "unknown size"
 
@@ -37,7 +46,7 @@ def png_size(data):
 def api_error(error):
     try:
         message = json.loads(error.read())["error"]["message"]
-    except (ValueError, KeyError, TypeError):
+    except (OSError, http.client.HTTPException, ValueError, KeyError, TypeError):
         message = error.reason
     return "HTTP {}: {}".format(error.code, message)
 
@@ -53,10 +62,15 @@ def load(request_path):
     references = request.get("images", [])
     if not isinstance(references, list) or not all(isinstance(image, str) for image in references):
         raise ValueError("images must be a list of file names")
-    missing = [image for image in references if not (request_path.parent / image).is_file()]
+    folder = request_path.parent.resolve()
+    paths = [(folder / image).resolve() for image in references]
+    outside = [image for image, path in zip(references, paths) if not path.is_relative_to(folder)]
+    if outside:
+        raise ValueError("reference outside the run folder {}".format(", ".join(outside)))
+    missing = [image for image, path in zip(references, paths) if not path.is_file()]
     if missing:
         raise ValueError("missing reference {}".format(", ".join(missing)))
-    return request, [request_path.parent / image for image in references]
+    return request, paths
 
 
 def check(request_path):
@@ -88,7 +102,7 @@ def generate(request_path, model, base_url, key):
         call = urllib.request.Request(base_url + endpoint, data=json.dumps(body).encode(), method="POST",
                                       headers={"Authorization": "Bearer " + key,
                                                "Content-Type": "application/json"})
-        with urllib.request.urlopen(call, timeout=TIMEOUT_SECONDS) as reply:
+        with OPENER.open(call, timeout=TIMEOUT_SECONDS) as reply:
             response = json.loads(reply.read())
         image = base64.b64decode(response["data"][0]["b64_json"])
         partial = folder / (name + ".png.partial")
@@ -100,7 +114,7 @@ def generate(request_path, model, base_url, key):
     except urllib.error.HTTPError as error:
         say("{}: FAILED ({})".format(name, api_error(error)))
         return False
-    except (OSError, ValueError, KeyError, IndexError, TypeError) as error:
+    except (OSError, http.client.HTTPException, ValueError, KeyError, IndexError, TypeError) as error:
         say("{}: FAILED ({})".format(name, error))
         return False
     say("{}: done {}".format(name, png_size(image)))
@@ -120,11 +134,11 @@ def main():
         say("dry-run: checking request files only. Not calling OpenAI.")
         say("a real run would use {}".format(args.model))
         return 0 if all([check(path) for path in requests]) else 1
-    key = os.environ.get("OPENAI_API_KEY")
-    if not key:
-        parser.exit(1, "generate.py: set OPENAI_API_KEY to an OpenAI API key\n")
+    key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not key or not key.isprintable():
+        parser.exit(1, "generate.py: set OPENAI_API_KEY to an OpenAI API key on one line\n")
     base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-    with ThreadPoolExecutor(max_workers=max(len(requests), 1)) as pool:
+    with ThreadPoolExecutor(max_workers=len(requests)) as pool:
         results = list(pool.map(lambda path: generate(path, args.model, base_url, key), requests))
     return 0 if all(results) else 1
 

@@ -9,11 +9,11 @@ disable-model-invocation: true
 
 Brand URL → style guide → 5 ideas → GPT Image → 1472×1840 PNGs in `~/Downloads/<slug>-ads-<date>/`.
 
-Put every file from this run in that folder: the style guide, the reference image, the request files, and the ads. `<date>` is today's date as `YYYY-MM-DD`. The real run needs `OPENAI_API_KEY` in the environment.
+Put every file from this run in that folder: the style guide, the reference image, the request files, and the ads. `<date>` is today's date as `YYYY-MM-DD`. The real run needs `OPENAI_API_KEY` in the environment. Never print the key.
 
 ## 1. Their current ads
 
-If the user pasted the text of the ads they run, or attached screenshots, note what those ads lead with: proof, pain, or offer. The new ads should target the angles they don't cover yet. If the user gave no ads, aim each idea at a different pain or claim from the site's own copy.
+If the user pasted the text of the ads they run, or attached screenshots, note what those ads lead with: proof, pain, or offer. The new ads should target the angles they don't cover yet. If the user gave no ads, skip this step.
 
 ## 2. Brand style from the site
 
@@ -26,11 +26,11 @@ Use curl only, never the browser.
   - `og:image`
 - The `og:image` URL is the style reference for every render.
 - Download the og image into the run folder and view it to confirm the look.
-- Write `style-guide.md` in the run folder. Keep it short: colors, fonts, layout, copy rules and imagery, about 40 lines.
+- Write `ad-style-guide.md` in the run folder. Keep it short: colors, fonts, layout, copy rules and imagery, about 40 lines.
 
 ## 3. Five static ideas
 
-Use one line each: the visual, the headline (3–8 words, caps), the sub-line and the CTA. Aim each one at a pain their current ads don't cover. Show the user the list before generating unless they already said to make them.
+Use one line each: the visual, the headline (3–8 words, caps), the sub-line and the CTA. Aim each one at a pain their current ads don't cover. With no ads, aim each one at a different pain or claim from the site's own copy. Show the user the list before generating unless they already said to make them.
 
 ## 4. Generate
 
@@ -67,7 +67,7 @@ python3 <skill-dir>/scripts/generate.py <run-folder>             # about $0.07 p
 
 `--dry-run` reads the request files and prints each ad's size, quality, prompt length, and reference count. It does not call OpenAI and does not spend money. That is the point: catch a bad request before the image run.
 
-The real run generates every ad in parallel with `gpt-image-2.6-sunburst`. For fast drafts, pass `--model gpt-image-2.6-flare`. A request that fails prints `FAILED` with OpenAI's error, so the rest of the batch can finish. For each finished ad, the script prints `done` with the image size and saves `<n>-<name>.png`. It also saves OpenAI's response, without the image, as `<n>-<name>.res.json`. It skips an ad that already has a PNG.
+The real run generates every ad in parallel with `gpt-image-2.6-sunburst`. For fast drafts, pass `--model gpt-image-2.6-flare`. An ad that fails prints `FAILED` with its error, so the rest of the batch can finish. For each finished ad, the script prints `done` with the image size and saves `<n>-<name>.png`. It also saves OpenAI's response, without the image, as `<n>-<name>.res.json`. It skips an ad that already has a PNG.
 
 ## 5. Review
 
@@ -84,5 +84,5 @@ The script treats any existing PNG as done and skips generation. To generate an 
 
 ## Gotchas
 
-- **Size:** 1472×1840 is exactly 4:5 and just above the 1440×1800 Meta recommends for feed images. OpenAI needs both sides in multiples of 16, which 1800 isn't. Upload the file as it is.
+- **Size:** 1472×1840 is exactly 4:5 and just above the 1440×1800 Meta recommends for feed images. OpenAI needs both sides in multiples of 16, which 1800 isn't. Meta takes the file as it is, so don't resize it.
 - **Deliverables:** text-only answers when the user asks for just the text. Short md files, not HTML pages.
