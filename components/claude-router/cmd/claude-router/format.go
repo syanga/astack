@@ -127,6 +127,9 @@ func writeStatus(w io.Writer, r report, verbose bool) {
 		tail = append(tail, "next    "+next)
 	}
 	if boxes, ok := accountBoxes(r); ok {
+		if line, ok := poolLine(r); ok {
+			fmt.Fprintln(w, line)
+		}
 		for _, line := range boxes {
 			fmt.Fprintln(w)
 			fmt.Fprint(w, line)

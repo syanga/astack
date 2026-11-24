@@ -105,6 +105,70 @@ func TestATerminalTooNarrowForBarsGetsTheStatusLines(t *testing.T) {
 	}
 }
 
+func weeklyOnlyReport() report {
+	r := healthyReport()
+	work, alumni := &r.Status.Accounts[0], &r.Status.Accounts[1]
+	work.Capacity = 3
+	work.Usage = claude.UsageReading{At: at(0, 14, 16), Windows: []claude.UsageWindow{
+		usageWindow(router.Weekly, "", 0.25, 2, 20, -4)}}
+	alumni.Usage = claude.UsageReading{At: at(0, 14, 16), Windows: []claude.UsageWindow{
+		usageWindow(router.Weekly, "", 0.75, 8, 20, -2)}}
+	return r
+}
+
+var weeklyOnlyPool = "pool    wk " + strings.Repeat("█", 35) + "│" + strings.Repeat("█", 14) + strings.Repeat("╱", 30) + "  63%"
+
+func TestThePoolLineWeighsEachAccountByItsCapacity(t *testing.T) {
+	got := render(onScreen(weeklyOnlyReport(), 96, false))
+
+	if lines := strings.Split(got, "\n"); lines[1] != weeklyOnlyPool {
+		t.Fatalf("status\n%s\nwant under the router line an 80-column bar with 50 columns left, (3×0.75 + 1×0.25) / 4 = 62.5%%, "+
+			"and its tick in the 36th, (3×84h/168h + 1×42h/168h) / 4 = 43.75%%\n%s", got, weeklyOnlyPool)
+	}
+}
+
+func TestAnAccountWithoutAReadingStaysOutOfThePool(t *testing.T) {
+	r := weeklyOnlyReport()
+	side := disabledAt(at(0, 14, 16))
+	side.ID, side.Capacity = "side", 5
+	side.Quota = router.Observation{At: at(0, 14, 15), Windows: []router.Window{{Kind: router.Weekly}}}
+	r.Status.Accounts = append(r.Status.Accounts, side)
+
+	got := render(onScreen(r, 96, false))
+
+	if lines := strings.Split(got, "\n"); lines[1] != weeklyOnlyPool {
+		t.Fatalf("status\n%s\nwant the pool of work and alumni alone\n%s", got, weeklyOnlyPool)
+	}
+}
+
+func TestAnUnusedFiveHourWindowCountsAsOnPaceInThePool(t *testing.T) {
+	r := weeklyOnlyReport()
+	work, alumni := &r.Status.Accounts[0], &r.Status.Accounts[1]
+	work.Usage.Windows = append(work.Usage.Windows, claude.UsageWindow{Kind: router.FiveHour, Used: util(0)})
+	alumni.Usage.Windows = append(alumni.Usage.Windows, usageWindow(router.FiveHour, "", 0.5, 16, 50, 0))
+	want := "pool    5h " + strings.Repeat("█", 29) + "▊│╱╱╱  88%   wk "
+
+	got := render(onScreen(r, 96, false))
+
+	if lines := strings.Split(got, "\n"); !strings.HasPrefix(lines[1], want) {
+		t.Fatalf("status\n%s\nwant a 34-column 5-hour bar with 29.75 columns left, (3×1 + 1×0.5) / 4 = 87.5%%, "+
+			"and its tick at the same share, (3×1 + 1×2.5h/5h) / 4, because work's unused window has not started\n%s", got, want)
+	}
+}
+
+func TestASingleAccountGetsNoPoolLine(t *testing.T) {
+	r := withUsage(healthyReport())
+	if got := render(onScreen(r, 100, false)); !strings.Contains(got, "\npool    5h ") {
+		t.Fatalf("status of two accounts\n%s\nwant a pool line", got)
+	}
+
+	r.Status.Accounts = r.Status.Accounts[:1]
+
+	if got := render(onScreen(r, 100, false)); strings.Contains(got, "pool") {
+		t.Fatalf("status of one account\n%s\nwant no pool line", got)
+	}
+}
+
 func TestStatusShowsTheNewerOfTheHeaderAndUsageReadings(t *testing.T) {
 	r := healthyReport()
 	work := &r.Status.Accounts[0]
