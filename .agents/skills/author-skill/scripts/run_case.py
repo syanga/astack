@@ -12,7 +12,9 @@ Sessions run in a temporary copy of this checkout's tracked and untracked files
 as they are on disk, without ignored files or nested repositories. The copy
 holds one commit on a branch named main, so a session's git context shows no
 branch name, commit subject, or uncommitted change from this checkout. Before
-and after runs then differ only in the files.
+and after runs then differ only in the files. The copy takes the main
+checkout's folder name. The script refuses a checkout that is not a Git
+repository.
 
 Sessions may use only Read, Grep, Glob, Skill, and the shell commands Claude
 Code treats as read-only. Every other tool call is denied, so an attempt to
