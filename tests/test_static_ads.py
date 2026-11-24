@@ -157,23 +157,55 @@ class GenerateTests(unittest.TestCase):
                                        "images": ["og-image.png"]})
         self.write_request("2-pain", {"prompt": "Another", "size": "1472x1840", "quality": "high",
                                       "images": ["missing.png"]})
-        outside = self.home / "outside.png"
-        outside.write_bytes(b"not part of the run")
-        self.write_request("3-offer", {"prompt": "Third", "images": [str(outside)]})
 
         result = self.generate("--dry-run")
 
         self.assertEqual(self.api.requests, [])
         self.assertLine(result.stdout, "1-proof", "1472x1840", "high", "10 chars", "1 refs")
         self.assertLine(result.stdout, "2-pain", "FAILED", "missing.png")
-        self.assertLine(result.stdout, "3-offer", "FAILED")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(sorted(path.name for path in self.run_folder.iterdir()),
-                         ["1-proof.req.json", "2-pain.req.json", "3-offer.req.json", "og-image.png"])
+                         ["1-proof.req.json", "2-pain.req.json", "og-image.png"])
 
         self.generate()
 
         self.assertEqual([request["body"]["prompt"] for request in self.api.requests], ["A headline"])
+
+    def test_a_reference_outside_the_run_folder_is_never_uploaded(self):
+        outside = self.home / "outside.png"
+        outside.write_bytes(b"not part of the run")
+        (self.run_folder / "og-image.png").write_bytes(b"reference")
+        (self.run_folder / "linked.png").symlink_to(outside)
+        self.write_request("1-proof", {"prompt": "Inside", "images": ["og-image.png"]})
+        self.write_request("2-pain", {"prompt": "Absolute", "images": [str(outside)]})
+        self.write_request("3-offer", {"prompt": "Relative", "images": ["../../outside.png"]})
+        self.write_request("4-story", {"prompt": "Linked", "images": ["linked.png"]})
+
+        for arguments in [("--dry-run",), ()]:
+            result = self.generate(*arguments)
+
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            for name in ["2-pain", "3-offer", "4-story"]:
+                self.assertLine(result.stdout, name, "FAILED")
+        self.assertEqual([request["body"]["prompt"] for request in self.api.requests], ["Inside"])
+
+    def test_a_reference_that_loops_fails_while_the_others_finish(self):
+        (self.run_folder / "loop.png").symlink_to("loop.png")
+        self.write_request("1-proof", {"prompt": "Looped", "images": ["loop.png"]})
+        self.write_request("2-pain", {"prompt": "Fine"})
+
+        checked = self.generate("--dry-run")
+
+        self.assertEqual(checked.returncode, 1, checked.stdout + checked.stderr)
+        self.assertLine(checked.stdout, "1-proof", "FAILED")
+        self.assertLine(checked.stdout, "2-pain", "0 refs")
+
+        result = self.generate()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertLine(result.stdout, "1-proof", "FAILED")
+        self.assertLine(result.stdout, "2-pain", "done", "1472x1840")
+        self.assertEqual([request["body"]["prompt"] for request in self.api.requests], ["Fine"])
 
     def test_an_ad_whose_reply_is_cut_off_fails_while_the_others_finish(self):
         self.write_request("1-proof", {"prompt": "CUT OFF partway"})

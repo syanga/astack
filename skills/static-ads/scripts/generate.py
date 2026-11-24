@@ -2,7 +2,6 @@
 import argparse
 import base64
 from concurrent.futures import ThreadPoolExecutor
-import http.client
 import json
 import mimetypes
 import os
@@ -46,7 +45,7 @@ def png_size(data):
 def api_error(error):
     try:
         message = json.loads(error.read())["error"]["message"]
-    except (OSError, http.client.HTTPException, ValueError, KeyError, TypeError):
+    except Exception:
         message = error.reason
     return "HTTP {}: {}".format(error.code, message)
 
@@ -76,7 +75,7 @@ def load(request_path):
 def check(request_path):
     try:
         request, references = load(request_path)
-    except (OSError, ValueError) as error:
+    except Exception as error:
         say("{}: FAILED ({})".format(ad_name(request_path), error))
         return False
     say("{}: {} {}, {} chars, {} refs".format(ad_name(request_path), request.get("size", "auto"),
@@ -89,10 +88,10 @@ def generate(request_path, model, base_url, key):
     folder = request_path.parent
     name = ad_name(request_path)
     png = folder / (name + ".png")
-    if png.is_file() and png.stat().st_size:
-        say("{}: exists, skip".format(name))
-        return True
     try:
+        if png.is_file() and png.stat().st_size:
+            say("{}: exists, skip".format(name))
+            return True
         request, references = load(request_path)
         body = {**{field: value for field, value in request.items() if field != "images"}, "model": model}
         endpoint = "/images/generations"
@@ -114,7 +113,7 @@ def generate(request_path, model, base_url, key):
     except urllib.error.HTTPError as error:
         say("{}: FAILED ({})".format(name, api_error(error)))
         return False
-    except (OSError, http.client.HTTPException, ValueError, KeyError, IndexError, TypeError) as error:
+    except Exception as error:
         say("{}: FAILED ({})".format(name, error))
         return False
     say("{}: done {}".format(name, png_size(image)))
