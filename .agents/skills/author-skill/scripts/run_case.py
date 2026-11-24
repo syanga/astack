@@ -8,12 +8,20 @@ your Claude Code settings into the directory's settings.json. A session signed
 in only through /login cannot sign in here. Export a CLAUDE_CODE_OAUTH_TOKEN
 from `claude setup-token`.
 
-Sessions run in this checkout and may use only Read, Grep, Glob, Skill, and the
-shell commands Claude Code treats as read-only. Every other tool call is denied,
-so an attempt to edit, post, or merge appears in the report as a denied call
-instead of happening. Sessions skip local settings
-(.claude/settings.local.json). The script refuses to start when anything else
-in the checkout could approve a call:
+Sessions run in a temporary copy of this checkout's tracked and untracked files
+as they are on disk, without ignored files or nested repositories. The copy
+holds one commit on a branch named main, so a session's git context shows no
+branch name, commit subject, or uncommitted change from this checkout. Before
+and after runs then differ only in the files. The copy takes the main
+checkout's folder name. The script refuses a checkout that is not a Git
+repository.
+
+Sessions may use only Read, Grep, Glob, Skill, and the shell commands Claude
+Code treats as read-only. Every other tool call is denied, so an attempt to
+edit, post, or merge appears in the report as a denied call instead of
+happening. Sessions skip local settings (.claude/settings.local.json). The
+script refuses to start when anything else in the checkout could approve a
+call:
 
 - a file or folder in the checkout, outside .git/ folders, that the script
   cannot read and so cannot check, including one under a symlinked folder
@@ -30,10 +38,6 @@ in the checkout could approve a call:
 
 A broken symlink, one that loops or whose target is missing, does not count as
 a file or folder the script cannot read.
-
-When this checkout is a linked Git worktree, the .claude/ checks also cover the
-main checkout's .claude/ folder. Claude Code loads a folder such as skills/ or
-commands/ from there when this checkout's .claude/ lacks it.
 
 These checks catch a checkout you trust that loosens sessions by accident. They
 do not stop a checkout written to get past them, which could as easily edit
@@ -182,25 +186,39 @@ def checkout_problems():
     return sorted(set(problems))
 
 
+def without_git_variables():
+    return {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+
+
+def git(folder, *arguments):
+    return subprocess.run(["git", *arguments], cwd=folder, env=without_git_variables(), capture_output=True,
+                          check=True).stdout
+
+
 def main_checkout():
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    rev_parse = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=REPO, env=env, capture_output=True)
-    if rev_parse.returncode != 0:
-        return None
-    common = (REPO / os.fsdecode(rev_parse.stdout).rstrip("\n")).resolve()
+    common = (REPO / os.fsdecode(git(REPO, "rev-parse", "--git-common-dir")).rstrip("\n")).resolve()
     return common.parent if common.name == ".git" else common
 
 
-def main_checkout_problems():
-    checkout = main_checkout()
-    if checkout in (None, REPO):
-        return []
-    folder = checkout / ".claude"
-    if not folder.is_dir():
-        return []
-    if exists_but_unreadable(folder, os.R_OK | os.X_OK):
-        return [unreadable_problem(folder)]
-    return claude_folder_problems(folder)
+def copy_checkout(folder):
+    listing = git(REPO, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+    project = folder / main_checkout().name
+    project.mkdir()
+    for name in dict.fromkeys(os.fsdecode(listing).split("\0")):
+        source, target = REPO / name, project / name
+        if not name or not (source.is_symlink() or source.is_file()):
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_symlink():
+            target.symlink_to(os.readlink(source))
+        else:
+            shutil.copy2(source, target)
+    neutral = ["-c", "core.hooksPath=" + os.devnull, "-c", "commit.gpgsign=false",
+               "-c", "user.name=Author", "-c", "user.email=author@example.com"]
+    git(project, "init", "-q", "-b", "main")
+    git(project, *neutral, "add", "-A", "--force")
+    git(project, *neutral, "commit", "-q", "--no-verify", "--allow-empty", "-m", "Initial commit")
+    return project
 
 
 def frontmatter_problem(text):
@@ -218,7 +236,7 @@ def frontmatter_problem(text):
 
 
 def read_only_problems():
-    problems = checkout_problems() + main_checkout_problems()
+    problems = checkout_problems()
     if problems:
         return problems
     for relative, data, _ in manage.skill_files():
@@ -282,8 +300,8 @@ def read_events(text, turn):
             turn.result = event
 
 
-def run(index, prompts, config, args):
-    env = {key: value for key, value in os.environ.items() if key not in PARENT_SESSION_VARIABLES}
+def run(index, prompts, config, project, args):
+    env = {key: value for key, value in without_git_variables().items() if key not in PARENT_SESSION_VARIABLES}
     env["CLAUDE_CONFIG_DIR"] = str(config)
     turns, session = [], None
     for number, prompt in enumerate(prompts, 1):
@@ -294,7 +312,7 @@ def run(index, prompts, config, args):
             if stopping.is_set():
                 turn.problem = "stopped"
                 break
-            process = subprocess.Popen(command(prompt, args, session), cwd=REPO, env=env, stdin=subprocess.DEVNULL,
+            process = subprocess.Popen(command(prompt, args, session), cwd=project, env=env, stdin=subprocess.DEVNULL,
                                        stdout=stdout, stderr=subprocess.PIPE, encoding="utf-8", errors="replace",
                                        start_new_session=True)
             live_sessions.add(process)
@@ -329,13 +347,13 @@ def first_line(text, limit):
     return (str(text).splitlines() or [""])[0][:limit]
 
 
-def call_summary(call):
+def call_summary(call, project):
     data = call.get("input") or {}
     if "command" in data:
         return first_line(data["command"], 160)
     if "file_path" in data:
         path = Path(data["file_path"])
-        return str(path.relative_to(REPO)) if path.is_relative_to(REPO) else str(path)
+        return str(path.relative_to(project)) if path.is_relative_to(project) else str(path)
     if "description" in data:
         return str(data["description"])
     if "skill" in data:
@@ -343,7 +361,7 @@ def call_summary(call):
     return json.dumps(data)[:160]
 
 
-def actions(turns):
+def actions(turns, project):
     for turn in turns:
         for call in turn.calls:
             denied = call["id"] in turn.denied
@@ -354,7 +372,7 @@ def actions(turns):
                 outcome = " (denied)"
             elif call["id"] in turn.errors:
                 outcome = " (failed: {})".format(first_line(turn.errors[call["id"]], 120))
-            yield call["name"], denied, "{} {}{}".format(call["name"], call_summary(call), outcome)
+            yield call["name"], denied, "{} {}{}".format(call["name"], call_summary(call, project), outcome)
 
 
 def skills(turns):
@@ -367,7 +385,7 @@ def tally(counts, runs):
     return ", ".join("{} {}/{}".format(name, count, runs) for name, count in sorted(counts.items())) or "none"
 
 
-def report(results, out):
+def report(results, out, project):
     total, skill_runs, denied_runs = 0.0, Counter(), Counter()
     for index, turns in enumerate(results, 1):
         cost = sum((turn.result or {}).get("total_cost_usd") or 0 for turn in turns)
@@ -377,7 +395,7 @@ def report(results, out):
         run_skills = skills(turns)
         print("  Skills: {}".format(", ".join(run_skills) or "none"))
         denied = set()
-        listed = list(actions(turns))
+        listed = list(actions(turns, project))
         print("  Actions:" + ("" if listed else " none"))
         for name, was_denied, line in listed:
             if was_denied:
@@ -453,19 +471,26 @@ def main():
         signal.signal(signum, stop_all)
     args.out = args.out or Path(tempfile.mkdtemp(prefix="run-case-"))
     prompts = [args.prompt, *args.then]
-    problem = claim(args.out, {"prompts": prompts, "runs": args.runs, "model": args.model,
-                               "max_turns": args.max_turns, "timeout": args.timeout})
-    if problem:
-        parser.error(problem)
+    copies = Path(tempfile.mkdtemp())
     configs = Path(tempfile.mkdtemp(prefix="run-case-config-"))
     try:
+        try:
+            project = copy_checkout(copies)
+        except subprocess.CalledProcessError as error:
+            parser.error("cannot copy the checkout for the sessions: {}".format(
+                os.fsdecode(error.stderr).strip() or error))
+        problem = claim(args.out, {"prompts": prompts, "runs": args.runs, "model": args.model,
+                                   "max_turns": args.max_turns, "timeout": args.timeout})
+        if problem:
+            parser.error(problem)
         roots = [build_config(configs / str(index)) for index in range(1, args.runs + 1)]
         with ThreadPoolExecutor(args.runs) as pool:
-            results = list(pool.map(lambda index: run(index, prompts, roots[index - 1], args),
+            results = list(pool.map(lambda index: run(index, prompts, roots[index - 1], project, args),
                                     range(1, args.runs + 1)))
     finally:
+        shutil.rmtree(copies, ignore_errors=True)
         shutil.rmtree(configs, ignore_errors=True)
-    return report(results, args.out)
+    return report(results, args.out, project)
 
 
 if __name__ == "__main__":
