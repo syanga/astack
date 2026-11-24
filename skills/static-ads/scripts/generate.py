@@ -126,6 +126,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="check the request files without calling OpenAI")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     args = parser.parse_args()
+    sys.stdout.reconfigure(errors="backslashreplace")
     requests = sorted(args.folder.glob("*.req.json"))
     if not requests:
         parser.exit(1, "generate.py: no .req.json files in {}\n".format(args.folder))

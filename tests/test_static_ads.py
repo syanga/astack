@@ -41,7 +41,10 @@ class FakeImagesAPI:
                     self.end_headers()
                     return
                 if "REJECT" in body["prompt"]:
-                    status, reply = 400, {"error": {"message": "Your request was rejected."}}
+                    message = "Your request was rejected."
+                    if "UNPRINTABLE" in body["prompt"]:
+                        message += " \ud800"
+                    status, reply = 400, {"error": {"message": message}}
                 else:
                     image = RENDER[:16] if "SHORT" in body["prompt"] else RENDER
                     status, reply = 200, {"created": 1, "data": [{"b64_json": base64.b64encode(image).decode()}],
@@ -152,6 +155,16 @@ class GenerateTests(unittest.TestCase):
         self.assertLine(result.stdout, "2-pain", "done", "1472x1840")
         self.assertFalse((self.run_folder / "1-proof.png").exists())
         self.assertEqual((self.run_folder / "2-pain.png").read_bytes(), RENDER)
+
+    def test_an_error_that_cannot_be_printed_as_is_still_fails_only_its_ad(self):
+        self.write_request("1-proof", {"prompt": "REJECT, UNPRINTABLE"})
+        self.write_request("2-pain", {"prompt": "Fine"})
+
+        result = self.generate()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertLine(result.stdout, "1-proof", "FAILED", "Your request was rejected.")
+        self.assertLine(result.stdout, "2-pain", "done", "1472x1840")
 
     def test_a_dry_run_checks_the_requests_without_calling_the_api(self):
         (self.run_folder / "og-image.png").write_bytes(b"reference")
