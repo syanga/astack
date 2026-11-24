@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -98,6 +99,7 @@ func (c *cells) String() string {
 
 type limitRow struct {
 	label    string
+	short    string
 	left     *float64
 	out      bool
 	resetsAt time.Time
@@ -105,9 +107,9 @@ type limitRow struct {
 }
 
 var limitWindows = []struct {
-	kind  router.WindowKind
-	label string
-}{{router.FiveHour, "5-hour"}, {router.Weekly, "weekly"}}
+	kind         router.WindowKind
+	label, short string
+}{{router.FiveHour, "5-hour", "5h"}, {router.Weekly, "weekly", "wk"}}
 
 func modelLabel(w claude.UsageWindow) string { return "weekly " + w.Model }
 
@@ -119,7 +121,7 @@ func leftOf(used float64) *float64 {
 func limitRows(r report, a claude.AccountStatus) []limitRow {
 	var rows []limitRow
 	for _, win := range limitWindows {
-		row := limitRow{label: win.label, period: win.kind.Period()}
+		row := limitRow{label: win.label, short: win.short, period: win.kind.Period()}
 		if rj, ok := activeRejection(r.Now, a, win.kind); ok {
 			row.out, row.resetsAt = true, rejectionEnd(rj)
 		} else if w, ok := shownWindow(a, win.kind); ok && w.none {
@@ -130,7 +132,7 @@ func limitRows(r report, a claude.AccountStatus) []limitRow {
 		rows = append(rows, row)
 	}
 	for _, w := range modelWindows(a) {
-		row := limitRow{label: modelLabel(w), resetsAt: w.ResetsAt, period: router.Weekly.Period()}
+		row := limitRow{label: modelLabel(w), short: w.Model, resetsAt: w.ResetsAt, period: router.Weekly.Period()}
 		if w.Used != nil {
 			row.left = leftOf(*w.Used)
 		}
@@ -310,12 +312,23 @@ func drawBar(c *cells, now time.Time, row limitRow, n int) {
 		c.put("", strings.Repeat(" ", n))
 		return
 	}
-	units := int(*row.left*float64(n*8) + 0.5)
+	pace, marked := row.leftAtEvenPace(now)
+	drawFill(c, *row.left, pace, marked, n)
+}
+
+func (row limitRow) leftAtEvenPace(now time.Time) (float64, bool) {
+	if row.period <= 0 || !row.resetsAt.After(now) {
+		return 0, false
+	}
+	return min(float64(row.resetsAt.Sub(now))/float64(row.period), 1), true
+}
+
+func drawFill(c *cells, left, pace float64, marked bool, n int) {
+	units := int(left*float64(n*8) + 0.5)
 	full, part := units/8, units%8
 	evenPaceCell := -1
-	if row.period > 0 && row.resetsAt.After(now) {
-		leftAtEvenPace := min(float64(row.resetsAt.Sub(now))/float64(row.period), 1)
-		evenPaceCell = min(int(leftAtEvenPace*float64(n)+0.5), n-1)
+	if marked {
+		evenPaceCell = min(int(pace*float64(n)+0.5), n-1)
 	}
 	for i := range n {
 		inBar := i < full || (i == full && part > 0)
@@ -332,4 +345,70 @@ func drawBar(c *cells, now time.Time, row limitRow, n int) {
 			c.put(sgrUsed, "╱")
 		}
 	}
+}
+
+type poolWindow struct {
+	key, label             string
+	capacity, left, onPace float64
+}
+
+func poolWindows(r report) []poolWindow {
+	var pool []poolWindow
+	for _, win := range limitWindows {
+		pool = append(pool, poolWindow{key: win.label, label: win.short})
+	}
+	for _, a := range r.Status.Accounts {
+		for _, row := range limitRows(r, a) {
+			if !row.out && row.left == nil {
+				continue
+			}
+			var left float64
+			if row.left != nil {
+				left = *row.left
+			}
+			onPace, ok := row.leftAtEvenPace(r.Now)
+			if !ok {
+				onPace = left
+			}
+			i := slices.IndexFunc(pool, func(p poolWindow) bool { return p.key == row.label })
+			if i < 0 {
+				i = len(pool)
+				pool = append(pool, poolWindow{key: row.label, label: row.short})
+			}
+			pool[i].capacity += a.Capacity
+			pool[i].left += a.Capacity * left
+			pool[i].onPace += a.Capacity * onPace
+		}
+	}
+	return slices.DeleteFunc(pool, func(p poolWindow) bool { return p.capacity == 0 })
+}
+
+func poolLine(r report) (string, bool) {
+	if r.Screen == nil || len(r.Status.Accounts) < 2 {
+		return "", false
+	}
+	pool := poolWindows(r)
+	if len(pool) == 0 {
+		return "", false
+	}
+	const label, gap, share = "pool    ", "   ", " 100%"
+	fixed := len(label) + len(gap)*(len(pool)-1)
+	for _, p := range pool {
+		fixed += utf8.RuneCountInString(p.label) + 1 + len(share)
+	}
+	bar := (min(r.Screen.width, maxBoxWidth) - fixed) / len(pool)
+	if bar < minBarWidth {
+		return "", false
+	}
+	c := cells{color: r.Screen.color}
+	c.put("", label)
+	for i, p := range pool {
+		if i > 0 {
+			c.put("", gap)
+		}
+		c.put(sgrDim, p.label+" ")
+		drawFill(&c, p.left/p.capacity, p.onPace/p.capacity, true, bar)
+		c.put(sgrBold, fmt.Sprintf(" %3d%%", percent(p.left/p.capacity)))
+	}
+	return c.String(), true
 }
