@@ -56,7 +56,7 @@ Copy the font files, the logo, and the product images the ads will use into `pag
 
 ## 3. Five static ideas
 
-Use one line each: a name, the visual, the headline (3–8 words, caps), the sub-line, the CTA, and the cited page. The cited page is the URL of the site page that states the ad's claim. Put it on every line, even when several ideas cite the same page, and fetch each cited page with curl to check the claim is there. The name has 12 characters or fewer, such as `Proof`, because Meta's media library shows 12. Aim each one at a pain their current ads don't cover. With no ads, aim each one at a different pain or claim from the site's own copy. Give each idea a different formula from [hooks.md](hooks.md), name the formula, and check the headline against its trap. Take each number from the style guide's Proof list, and leave out everything on its Off limits list. When an idea needs a number the site doesn't state, write a placeholder such as `{{pass rate}}` and tell the user. The claims rules still apply, so drop that number or the idea before making the ads. Show the user the list before generating unless they already said to make them.
+Use one line each: a name, the visual, the headline (3–8 words, caps), the sub-line, the CTA, and the cited page. The cited page is the URL of the site page that states the ad's claim. Put it on every line, even when several ideas cite the same page, and fetch each cited page with curl to check the claim is there. The name has 12 characters or fewer, such as `Proof`, because Meta's media library shows 12. Aim each one at a pain their current ads don't cover. With no ads, aim each one at a different pain or claim from the site's own copy. Give each idea a different formula from [hooks.md](hooks.md), name the formula, and check the headline against its trap. Take each number from the style guide's Proof list, and leave out everything on its Off limits list. When an idea needs a number the site doesn't state, write a placeholder such as `{{pass rate}}` and tell the user. The claims rules still apply, so drop that number or the idea before making the ads. Show the user the list before generating unless they already said to make them. When you show it, ask which claims they can't make, such as ones a regulator or employer forbids. Add those to Off limits, and drop or change the ideas that make them.
 
 Every ad keeps to these claims rules:
 - It states only claims and numbers that its cited page states. That includes pass rates, guarantees, testimonials, customer counts, and prices. A claim or number that appears only in hidden markup, such as a stand-in price that a script replaces, is one the page doesn't state.
@@ -109,7 +109,7 @@ The style block, filled from the guide:
 - "Use ONLY the <brand name> wordmark and look from the reference, do not copy its headline or logos"
 - "Render all text exactly as written"
 - "Show no text other than the text in this prompt"
-- "Set every line of text at least 3% of the image's width tall, and at least 11% of its width from each edge"
+- "Set every line of text at least 3.5% of the image's width tall, and at least 11% of its width from each edge"
 - When the style guide records a notice, the notice at the bottom in the smallest type the line above allows, word for word
 
 Then run:
@@ -152,7 +152,7 @@ View every Feed and Story PNG. Without Chrome or Chromium, view each GPT Image a
 - Text the prompt didn't ask for, such as made-up page content
 - An ad that breaks a claims rule from step 3
 - For a GPT Image ad, a size other than 1472x1840 on its `done` or `exists` line
-- For a GPT Image ad, text smaller than about 3% of the image's width, or within about 11% of its width from an edge
+- For a GPT Image ad, text smaller than about 3.5% of the image's width, or within about 11% of its width from an edge
 
 Read the script output for `FAILED`. A failed ad can still leave the script looking finished.
 
