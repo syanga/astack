@@ -27,17 +27,17 @@ The description is a briefing for a reviewer who has the diff but has not seen t
 
 Use these sections in this order by default. Include `## Verification` in every PR. Omit other sections that have nothing useful to say. A small PR can put the rest in brief prose without headings.
 
-- `## Why`. State the problem or goal in one short paragraph. For a bug fix, explain what went wrong.
+- `## Why`. State the problem or goal in one short paragraph, and leave the fix to the diff. For a bug fix, explain what went wrong.
 - `## Setup`. Name each step or setting outside the repository that the change needs, such as a secret, a repository setting, a migration, or a deploy order, and whether it is done.
 - `## Tradeoffs`. Explain rejected alternatives a reviewer would reasonably ask about. Omit this section when there was no real choice.
-- `## Blast radius`. In one to three sentences, name who or what the change affects and why it is safe or risky. Say whether it is a two-way door that is cheap to reverse or a one-way door that is not. Include the cost of leaving the problem unresolved when it helps assess the change.
+- `## Blast radius`. In one to three sentences, name the users, callers, or systems the change affects and why it is safe or risky. Say whether it is a two-way door that is cheap to reverse or a one-way door that is not. Include the cost of leaving the problem unresolved when it helps assess the change.
 - `## Verification`. Name the commands or real run paths and their results. For a performance change, give a primary measured result with its unit, before and after.
 
 When screenshots or recordings demonstrate the change, upload them as GitHub attachments using `gh pr edit --attach` or GitHub's editor.
 
 Keep logs, SHA lists, exhaustive file inventories, and bulky evidence in linked artifacts. End with the model and harness attribution. Use commit bodies to explain what the subject leaves unsaid.
 
-Create or update the PR using a file for the body. When updating, keep any pass-limit alert from [posting.md](../harden-pr/posting.md). Confirm that it targets the intended base and is open for review, not a draft. In T3 Code, link it with `link_pull_request` when available.
+Create or update the PR using a file for the body. Before you post it, reread the body and cut each sentence or clause that a reviewer could learn from the diff, including how the change works. When updating, keep any pass-limit alert from [posting.md](../harden-pr/posting.md). Confirm that it targets the intended base and is open for review, not a draft. In T3 Code, link it with `link_pull_request` when available.
 
 Finish the requested phase or stack first. Then run [review-pr](../review-pr/SKILL.md) on each PR you opened or pushed to, unless the user declines review. Use fix-and-review mode unless the user asks for report-only review. Find the PR's signed review records that are complete and have no remaining findings. If any reviewed a commit the branch still contains, pass the latest such commit to review-pr as the fixed point. When the user explicitly requests hardening, run [harden-pr](../harden-pr/SKILL.md) instead, unless a brief assigns hardening to another owner.
 
