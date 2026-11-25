@@ -157,13 +157,28 @@ View every Feed and Story PNG. Without Chrome or Chromium, view each GPT Image a
 
 Read the script output for `FAILED`. A failed ad can still leave the script looking finished.
 
-Hand over only ads that keep every claims rule. For a hybrid ad, fix the page when its page breaks the rule, and run `render.py` again. When its scene breaks the rule, draw the scene again once, as the next paragraph says. When the new scene still breaks it, delete the scene's `<img>` from the page, so the ad shows the page's background color. Then run `render.py` again, and tell the user which rule the scene broke. For a GPT Image ad that breaks one, delete its `.req.json`, `.png`, `.res.json`, and `.html` in `pages/`, and its `<Name> Feed.png` and `<Name> Story.png` in the run folder. Then tell the user which rule it broke.
+Hand over only ads that keep every claims rule. For a hybrid ad, fix the page when its page fails a check, and run `render.py` again. When its scene fails a check, or `generate.py` prints `FAILED` for the scene, draw the scene again once, as the last paragraph of this step says. When the new scene still fails, delete the scene's `<img>` from the page, so the ad shows the page's background color. Then run `render.py` again, and tell the user which check the scene failed.
 
-`generate.py` treats any existing PNG as done and skips generation. To draw an image again, delete its `.png` and `.res.json` in `pages/`, such as `scene-<Name>.png` and `scene-<Name>.res.json` for a hybrid ad's scene. Then run `generate.py` and `render.py` again.
+When a GPT Image ad fails any check above other than image size, or type size and margins, redo it once:
+1. Change its prompt in `pages/<Name>.req.json` to fix what failed. For a misspelling, quote the word with its correct spelling. For made-up text, list every line of text the ad should show, and nothing else.
+2. Delete its `.png` and `.res.json` in `pages/`.
+3. Run `generate.py` on `pages/`. The run also retries any request that printed `FAILED`.
+4. Run `render.py`.
+5. Check the new Feed and Story files the same way.
+
+After the redo, follow these rules:
+- When the ad still breaks a claims rule, delete its `.req.json`, `.png`, `.res.json`, and `.html` in `pages/`, and its `<Name> Feed.png` and `<Name> Story.png` in the run folder.
+- When the redo prints `FAILED`, delete the same files.
+- When the ad fails another check, hand it over.
+- Tell the user which check each try failed, or the error the redo printed.
+
+When a GPT Image ad fails only image size, or type size and margins, hand it over and tell the user. To generate it again, they delete its `.png` and `.res.json` in `pages/`, then run `generate.py` and `render.py`.
+
+To draw a hybrid ad's scene again, delete `scene-<Name>.png` and `scene-<Name>.res.json` in `pages/`. Then run `generate.py` and `render.py` again.
 
 ## 6. Ad text
 
-Write `ad-text.json` in the run folder, with one entry per ad that passed the review:
+Write `ad-text.json` in the run folder, with one entry per ad you hand over:
 
 ```json
 {
