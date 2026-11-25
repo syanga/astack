@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import socket
 import struct
 import subprocess
 import sys
@@ -464,16 +465,50 @@ class RenderTests(unittest.TestCase):
         return "http://localhost:{}".format(server.server_address[1]), requests
 
     def test_a_live_page_is_screenshotted_by_its_hostname_into_a_new_run_folder(self):
-        url, requests = self.serve(ad_page("<p style=\"top: 900px\">Live page</p>"
+        url, requests = self.serve(ad_page("<p style=\"top: 900px\">Live page</p><img src=\"/hang\">"
                                            "<script>fetch('/hang')</script>"))
         shutil.rmtree(self.run_folder)
 
         result = self.render("--page", url + "/")
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.size("page.png"), (1440, 1800))
+        self.assertEqual(self.size("site-screenshot.png"), (1440, 1800))
         self.assertIn("/hang", requests)
         self.assertEqual(list(self.home.iterdir()), [])
+
+    def test_an_unreachable_page_fails_and_leaves_no_old_screenshot(self):
+        (self.run_folder / "site-screenshot.png").write_bytes(png_image(1440, 1800))
+        with socket.socket() as closed:
+            closed.bind(("127.0.0.1", 0))
+            port = closed.getsockname()[1]
+
+        result = self.render("--page", "http://localhost:{}/".format(port))
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("FAILED", result.stdout)
+        self.assertFalse((self.run_folder / "site-screenshot.png").exists())
+
+    def test_a_render_replaces_an_old_screenshot_even_when_it_is_read_only(self):
+        self.write_page("Proof", SAFE)
+        old = png_image(1440, 1800)
+        (self.run_folder / "Proof Feed.png").write_bytes(old)
+        (self.run_folder / "Proof Feed.png").chmod(0o444)
+
+        result = self.render()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotEqual((self.run_folder / "Proof Feed.png").read_bytes(), old)
+        self.assertEqual(self.size("Proof Feed.png"), (1440, 1800))
+
+    def test_an_image_that_does_not_load_is_reported(self):
+        self.write_page("Proof", ad_page("<img src=\"missing.png\"><p style=\"top: 900px\">Fits both</p>"))
+
+        result = self.render()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        for placement in ["Feed", "Story"]:
+            lines = self.problems(result.stdout, "Proof {}:".format(placement))
+            self.assertTrue(any("missing.png" in line for line in lines), result.stdout)
 
     def test_an_ad_page_loads_nothing_from_the_network(self):
         url, requests = self.serve("")
@@ -482,8 +517,8 @@ class RenderTests(unittest.TestCase):
 
         result = self.render()
 
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(requests, [])
+        self.assertTrue(any("photo.png" in line for line in self.problems(result.stdout, "Proof Feed:")), result.stdout)
 
     def test_a_run_folder_without_pages_stops_with_a_message(self):
         result = self.render()

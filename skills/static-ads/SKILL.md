@@ -39,11 +39,11 @@ Copy the font files, the logo, and the product images the ads will use into `pag
   - `font-family`, and the size/weight/letter-spacing combos
   - `<h1>`–`<h3>` text
   - `og:image`
-- Download the og image into the run folder. It is the style reference for every GPT Image call. When the page has no og:image, `page.png` from the next section is the reference.
+- Download the og image into the run folder as `site-og-image` with its own extension. It is the style reference for every GPT Image call. When the page has no og:image, `site-screenshot.png` from the next section is the reference.
 
 ### Both
 
-- Screenshot the page's first screen into the run folder as `page.png`, and view it to confirm the look. `<skill-dir>` is the folder this SKILL.md is in.
+- Screenshot the page's first screen into the run folder as `site-screenshot.png`, and view it to confirm the look. `<skill-dir>` is the folder this SKILL.md is in.
 
   ```bash
   python3 <skill-dir>/scripts/render.py <run-folder> --page <url>
@@ -89,7 +89,7 @@ Copy the reference image into `pages/`. Write one `pages/<Name>.req.json` per ad
 }
 ```
 
-`images` names reference files in `pages/`: the og image, or `page.png` when the page has no og:image.
+`images` names reference files in `pages/`: `site-og-image`, or `site-screenshot.png` when the page has no og:image.
 
 The style block, filled from the guide:
 - Brand colors with hex values

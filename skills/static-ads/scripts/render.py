@@ -17,6 +17,7 @@ STORY_TOP = 320
 STORY_BOTTOM = 693
 MAX_NAME = 12
 TIMEOUT_SECONDS = 60
+PAGE_WAIT_MS = 15000
 CHROME_NAMES = ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")
 MAC_CHROMES = (Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
                Path("/Applications/Chromium.app/Contents/MacOS/Chromium"))
@@ -28,6 +29,8 @@ const frame = document.getElementById("ad");
 frame.addEventListener("load", async () => {
   const doc = frame.contentDocument, text = [];
   await doc.fonts.ready;
+  const broken = [...doc.images].filter((image) => image.complete && !image.naturalWidth)
+    .map((image) => image.getAttribute("src"));
   const walk = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
   while (walk.nextNode()) {
     const words = walk.currentNode.textContent.trim().replace(/\\s+/g, " ");
@@ -43,7 +46,7 @@ frame.addEventListener("load", async () => {
   }
   const report = document.createElement("pre");
   report.id = "static-ads-check";
-  report.textContent = JSON.stringify(text);
+  report.textContent = JSON.stringify({text, broken});
   document.body.append(report);
 });
 </script></body></html>
@@ -102,6 +105,23 @@ def problems(text, placement, width, height):
     return found
 
 
+def capture(binary, scratch, width, height, url, target, network=False):
+    partial = target.with_name(".partial." + target.name)
+    partial.unlink(missing_ok=True)
+    extra = ["--timeout={}".format(PAGE_WAIT_MS)] if network else []
+    try:
+        chrome(binary, scratch, width, height, *extra, "--screenshot=" + str(partial), url, network=network)
+        size = png_size(partial)
+        if size is None:
+            raise RuntimeError("Chrome wrote no screenshot")
+        partial.replace(target)
+        return size
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        target.unlink(missing_ok=True)
+        raise
+
+
 def render(page, folder, binary, scratch):
     name = page.stem
     if len(name) > MAX_NAME:
@@ -111,7 +131,7 @@ def render(page, folder, binary, scratch):
     for placement, width, height in PLACEMENTS:
         png = folder / "{} {}.png".format(name, placement)
         try:
-            chrome(binary, scratch, width, height, "--screenshot=" + str(png), page.resolve().as_uri())
+            size = capture(binary, scratch, width, height, page.resolve().as_uri(), png)
             check = scratch / "check.html"
             check.write_text(CHECK_PAGE.replace("{src}", html.escape(page.resolve().as_uri()))
                              .replace("{width}", str(width)).replace("{height}", str(height)), encoding="utf-8")
@@ -120,16 +140,17 @@ def render(page, folder, binary, scratch):
             report = REPORT.search(dom)
             if not report:
                 raise RuntimeError("the page did not finish loading")
-            text = json.loads(html.unescape(report[1]))
+            checked = json.loads(html.unescape(report[1]))
         except (OSError, RuntimeError, ValueError) as error:
             print("{} {}: FAILED ({})".format(name, placement, error))
             return False
-        size = png_size(png)
         if size != (width, height):
             found.append("{} {}: the image is {}, not {}x{}".format(
                 name, placement, "x".join(map(str, size)) if size else "missing", width, height))
         sizes.append("{} {}".format(placement, "x".join(map(str, size)) if size else "missing"))
-        found += ["{} {}: {}".format(name, placement, problem) for problem in problems(text, placement, width, height)]
+        found += ["{} {}: {}".format(name, placement, problem)
+                  for problem in problems(checked["text"], placement, width, height)]
+        found += ["{} {}: image failed to load: {}".format(name, placement, src) for src in checked["broken"]]
     print("{}: {}".format(name, ", ".join(sizes)))
     for line in found:
         print(line)
@@ -137,16 +158,15 @@ def render(page, folder, binary, scratch):
 
 
 def screenshot_page(url, folder, binary, scratch):
-    png = folder / "page.png"
+    png = folder / "site-screenshot.png"
     try:
         folder.mkdir(parents=True, exist_ok=True)
-        chrome(binary, scratch, 1440, 1800, "--screenshot=" + str(png), url, network=True)
+        size = capture(binary, scratch, 1440, 1800, url, png, network=True)
     except (OSError, RuntimeError) as error:
         print("page: FAILED ({})".format(error))
         return 1
-    size = png_size(png)
-    print("page: {} {}".format("x".join(map(str, size)) if size else "missing", png))
-    return 0 if size else 1
+    print("page: {} {}".format("x".join(map(str, size)), png))
+    return 0
 
 
 def main():
@@ -154,7 +174,8 @@ def main():
         description="Screenshot every pages/<Name>.html in a run folder as <Name> Feed.png and <Name> Story.png.")
     parser.add_argument("folder", type=Path)
     parser.add_argument("--chrome", help="path to Google Chrome or Chromium, when it is not found on its own")
-    parser.add_argument("--page", metavar="URL", help="only screenshot the live page's first screen as page.png")
+    parser.add_argument("--page", metavar="URL",
+                        help="only screenshot the live page's first screen as site-screenshot.png")
     args = parser.parse_args()
     sys.stdout.reconfigure(errors="backslashreplace")
     pages = sorted((args.folder / "pages").glob("*.html"))
