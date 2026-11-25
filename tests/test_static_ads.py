@@ -640,7 +640,10 @@ class AdTextTests(unittest.TestCase):
                 "primary_text": "Beans roasted on Monday reach you by Wednesday. Order a bag.", **fields}
 
     def write(self, ads, **spec):
-        (self.run_folder / "ad-text.json").write_text(json.dumps({**spec, "ads": ads}), encoding="utf-8")
+        return self.write_text(json.dumps({**spec, "ads": ads}))
+
+    def write_text(self, text):
+        (self.run_folder / "ad-text.json").write_text(text, encoding="utf-8")
         return subprocess.run([sys.executable, str(AD_TEXT_SCRIPT), str(self.run_folder)],
                               capture_output=True, text=True, timeout=60)
 
@@ -672,7 +675,7 @@ class AdTextTests(unittest.TestCase):
         self.assertEqual([query["utm_campaign"] for query in self.links()], [["winter launch"]])
 
     def test_a_cited_page_keeps_its_own_query_but_not_its_old_utm_parameters(self):
-        result = self.write([self.ad("Café", page="https://acme.example/beans?ref&size=1%2C2;kg&utm_source=mail#top")])
+        result = self.write([self.ad("Café", page="https://acme.example/beans?ref&size=1%2C2;kg&utm_source=mail&utm%5Fmedium=email#top")])
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         link = next(line for line in self.copy().splitlines() if line.startswith("- Link: "))[len("- Link: "):]
@@ -694,10 +697,14 @@ class AdTextTests(unittest.TestCase):
         self.assertIn(text, self.copy())
 
     def test_a_line_break_in_the_preview_stays_on_one_line(self):
-        result = self.write([self.ad("Fresh", primary_text="Roasted Monday.\nAt your door Wednesday. Order a bag.")])
+        for line_break in ["\n", "\r\n", "\r"]:
+            with self.subTest(line_break=line_break):
+                result = self.write([self.ad("Fresh", primary_text="Roasted Monday.{}At your door Wednesday. Order a bag."
+                                             .format(line_break))])
 
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("- Before \"See more\": Roasted Monday. / At your door Wednesday. Order a bag.", self.copy())
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("- Before \"See more\": Roasted Monday. / At your door Wednesday. Order a bag.",
+                              self.copy())
 
     def test_text_that_breaks_a_rule_is_refused_and_nothing_is_written(self):
         cases = {
@@ -707,6 +714,8 @@ class AdTextTests(unittest.TestCase):
             "emoji": self.ad("Fresh", primary_text="Fresh beans every week \u2615"),
             "has an emoji": self.ad("Fresh", primary_text="Rated \u2b50\u2b50\u2b50\u2b50\u2b50 by our readers"),
             "headline has an emoji": self.ad("Fresh", headline="Small \u25fd squares"),
+            "primary_text has an emoji": self.ad("Fresh", primary_text="Step 1\u20e3 pick a roast."),
+            "page has no host": self.ad("Fresh", page="https:/beans"),
             "no name": {**self.ad("Fresh"), "name": 5},
             "name has an em dash": self.ad("A\u2014B"),
             "primary_text has an em dash": self.ad("Fresh", primary_text="Fresh beans \ufe58 every week."),
@@ -738,6 +747,19 @@ class AdTextTests(unittest.TestCase):
         self.assertIn("headline has an em dash", result.stdout)
         self.assertFalse((self.run_folder / "copy.md").exists())
 
+    def test_a_run_that_stops_before_writing_removes_the_copy_md_an_earlier_run_wrote(self):
+        cases = {"malformed JSON": '{"ads": [',
+                 "half of a character pair": json.dumps({"ads": [self.ad("Fresh", primary_text="Fresh \ud83d beans.")]})}
+        for case, text in cases.items():
+            with self.subTest(case=case):
+                self.assertEqual(self.write([self.ad("Fresh")]).returncode, 0)
+                self.assertTrue((self.run_folder / "copy.md").exists())
+
+                result = self.write_text(text)
+
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertFalse((self.run_folder / "copy.md").exists())
+
     def test_a_blank_or_placeholder_campaign_is_not_a_campaign(self):
         self.assertEqual(self.write([self.ad("Fresh")], campaign=" ").returncode, 0)
         self.assertEqual([query["utm_campaign"] for query in self.links()], [["acme-coffee-ads-2026-11-24"]])
@@ -746,6 +768,12 @@ class AdTextTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("campaign", result.stdout)
+
+    def test_a_campaign_with_angle_brackets_is_still_a_campaign(self):
+        result = self.write([self.ad("Fresh")], campaign="Spring <B> test")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([query["utm_campaign"] for query in self.links()], [["Spring <B> test"]])
 
     def test_an_ad_without_an_image_is_refused(self):
         ad = self.ad("Fresh")
@@ -774,7 +802,8 @@ class AdTextTests(unittest.TestCase):
     def test_without_chrome_a_gpt_image_ad_is_listed_by_its_render(self):
         ad = self.ad("Fresh")
         for placement in ["Feed", "Story"]:
-            (self.run_folder / "Fresh {}.png".format(placement)).unlink()
+            (self.run_folder / "Fresh {}.png".format(placement)).rename(
+                self.run_folder / "Dropped {}.png".format(placement))
         (self.run_folder / "pages").mkdir()
         (self.run_folder / "pages/Fresh.png").write_bytes(png_header(1472, 1840))
 
