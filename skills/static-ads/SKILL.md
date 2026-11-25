@@ -1,15 +1,15 @@
 ---
 name: static-ads
-description: Make five on-brand static Meta ads from a brand's website and, optionally, its repo, with GPT Image and headless Chrome.
+description: Make five on-brand static Meta ads and their ad text from a brand's website and, optionally, its repo, with GPT Image and headless Chrome.
 argument-hint: "<brand url> [repo]"
 disable-model-invocation: true
 ---
 
 # static-ads
 
-Brand URL and repo → style guide → 5 ideas → GPT Image scenes or ads → HTML pages → Feed and Story PNGs in `~/Downloads/<slug>-ads-<date>/`.
+Brand URL and repo → style guide → 5 ideas → GPT Image scenes or ads → HTML pages → Feed and Story PNGs and `copy.md` in `~/Downloads/<slug>-ads-<date>/`.
 
-Put every file from this run in that folder: the style guide, the reference image, the ad pages and their files, and the ads. `<slug>` is the brand's name in lowercase with hyphens, such as `acme-coffee`. `<date>` is today's date as `YYYY-MM-DD`. A GPT Image run needs `OPENAI_API_KEY` in the environment. Never print the key.
+Put every file from this run in that folder: the style guide, the reference image, the ad pages and their files, the ads, and the ad text. `<slug>` is the brand's name in lowercase with hyphens, such as `acme-coffee`. `<date>` is today's date as `YYYY-MM-DD`. A GPT Image run needs `OPENAI_API_KEY` in the environment. Never print the key.
 
 ## 1. Their current ads
 
@@ -160,6 +160,38 @@ Read the script output for `FAILED`. A failed ad can still leave the script look
 Hand over only ads that keep every claims rule. For a hybrid ad, fix the page when its page breaks the rule, and run `render.py` again. When its scene breaks the rule, draw the scene again once, as the next paragraph says. When the new scene still breaks it, delete the scene's `<img>` from the page, so the ad shows the page's background color. Then run `render.py` again, and tell the user which rule the scene broke. For a GPT Image ad that breaks one, delete its `.req.json`, `.png`, `.res.json`, and `.html` in `pages/`, and its `<Name> Feed.png` and `<Name> Story.png` in the run folder. Then tell the user which rule it broke.
 
 `generate.py` treats any existing PNG as done and skips generation. To draw an image again, delete its `.png` and `.res.json` in `pages/`, such as `scene-<Name>.png` and `scene-<Name>.res.json` for a hybrid ad's scene. Then run `generate.py` and `render.py` again.
+
+## 6. Ad text
+
+Write `ad-text.json` in the run folder, with one entry per ad that passed the review:
+
+```json
+{
+  "campaign": "<only when the user names a campaign>",
+  "ads": [
+    {"name": "<Name>", "page": "<cited page URL>", "headline": "<27 characters or fewer>", "primary_text": "<text>"}
+  ]
+}
+```
+
+- Put the primary text's point in its first 125 characters, which the feed shows before "See more". End the primary text with one ask, the ad's CTA.
+- Keep the headline to 27 characters, Meta's recommended length for Facebook Feed.
+- Write no description. Meta's is optional and often hidden.
+- The claims rules from step 3 apply to the headline and the primary text.
+
+Then run:
+
+```bash
+python3 <skill-dir>/scripts/ad_text.py <run-folder>
+```
+
+It writes `copy.md` with each ad's files, headline, link, and primary text, ready to paste into Ads Manager. Each link is the ad's cited page plus `utm_source=meta`, `utm_medium=paid`, `utm_campaign`, and `utm_content` from the ad's name. `utm_campaign` is the run folder's name unless the user names a campaign. While any ad fails a check, such as a long headline, an em dash, or an emoji, the script writes no `copy.md` and prints a line for each problem. Fix each problem it prints, and run it again until it prints `wrote`.
+
+## 7. Hand over
+
+Give the user the run folder and one line per ad. Then tell them:
+- Nothing was uploaded to Meta.
+- Adding ads to a live ad set restarts that ad set's learning phase, so the user picks when to add them.
 
 ## Gotchas
 
