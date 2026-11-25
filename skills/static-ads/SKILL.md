@@ -39,7 +39,7 @@ Copy the font files, the logo, and the product images the ads will use into `pag
   - `font-family`, and the size/weight/letter-spacing combos
   - `<h1>`–`<h3>` text
   - `og:image`
-- Download the og image into the run folder as `site-og-image` with its own extension. It is the style reference for every GPT Image call. When the page has no og:image, `site-screenshot.png` from the next section is the reference.
+- Download the og image into the run folder as `site-og-image` with its own extension. It is the style reference for every GPT Image ad. When the page has no og:image, `site-screenshot.png` from the next section is the reference.
 
 ### Both
 
@@ -58,23 +58,24 @@ Use one line each: a name, the visual, the headline (3–8 words, caps), the sub
 
 ## 4. Make the ads
 
-Every ad is a page, `pages/<Name>.html` in the run folder, and `render.py` screenshots each page twice: `<Name> Feed.png` at 1440x1800 and `<Name> Story.png` at 1440x2560. With a repo, build the whole ad in HTML. Without one, GPT Image draws the ad and the page frames it.
+Every ad is a page, `pages/<Name>.html` in the run folder, and `render.py` screenshots each page twice: `<Name> Feed.png` at 1440x1800 and `<Name> Story.png` at 1440x2560. With a repo, GPT Image draws a scene with no text, and the page puts the brand's real words and files on top of it. Without a repo, GPT Image draws the whole ad and the page frames it.
 
-### HTML ads, with a repo
+### Hybrid ads, with a repo
 
-Copy `<skill-dir>/starter/ad.html` to `pages/<Name>.html` for each ad. The starter lays out one ad for both sizes: a CSS media query moves the content into the part of a Story that Instagram leaves uncovered. Then:
-- Set the `:root` colors and fonts to the repo's values, with an `@font-face` for each font file in `pages/assets/`.
-- Put in the brand's logo, the product image, and the idea's headline, sub-line, CTA, and URL.
-- Replace the footer's notice line with the site's own notice, or delete the line when the site shows none.
+For each ad, write `pages/scene-<Name>.req.json` in the JSON shape the next section shows, with these changes:
+- The prompt describes a scene that fits the idea, in the brand's colors with their hex values. It keeps the main subject in the middle and leaves plain space at the top and bottom for text. It ends "No text, no letters, no numbers, no logos, no screens or pages with content".
+- The scene never shows the product. The page shows the real product image from the repo, so no product page is ever drawn.
+- `size` is `1152x2048`, so one scene fills both the Feed and the Story. Leave out `images`.
+
+Run `generate.py` on `pages/`, first with `--dry-run`. Each scene costs about $0.07.
+
+Then copy `<skill-dir>/starter/ad.html` to `pages/<Name>.html` for each ad. The starter lays out one ad for both sizes: a CSS media query moves the content into the part of a Story that Instagram leaves uncovered. Then:
+- Point the `scene` image at `scene-<Name>.png`.
+- Set the `:root` colors and fonts to the repo's values, with an `@font-face` for each font file in `pages/assets/`. Set `--scrim` dark or light enough that the text reads clearly on the scene.
+- Put in the brand's logo, the product image, the idea's headline, sub-line, and CTA, and the site's address.
+- Replace the footer's notice with the site's own notice, or delete it when the site shows none.
 - Change the layout when the idea needs it, such as a product shot that fills the frame.
 - Use only files in `pages/`. `render.py` blocks the network, so a remote font or image never loads.
-
-When an idea needs imagery the repo doesn't have, generate it without text. Write `pages/<image>.req.json` in the JSON shape the next section shows, with these changes:
-- The prompt describes only the scene in the brand's colors and ends "No text, no letters, no logos". Leave out the style block.
-- `images` is left out, so no page text gets copied.
-- `size` fits the slot in the page, with both sides in multiples of 16.
-
-Run `generate.py` on `pages/`, first with `--dry-run`, and use the PNG in the page. Each image costs about $0.07.
 
 ### GPT Image ads, without a repo
 
