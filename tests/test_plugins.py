@@ -253,6 +253,13 @@ class PluginTests(InstallerFixture):
         self.assertIn("demo@test-market", result.stderr)
         self.assertFalse(self.home.exists())
 
+    def test_target_without_plugin_cli_installs_and_uninstalls_cleanly(self):
+        self.install("--target", "antigravity")
+        self.assertTrue((self.home / ".gemini/config/GEMINI.md").is_file())
+        self.assertNotIn("plugins", self.manifest())
+        self.install("--target", "antigravity", command="uninstall")
+        self.assertFalse((self.home / ".gemini/config/GEMINI.md").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

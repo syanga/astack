@@ -1,12 +1,12 @@
 # Run a provider task
 
-Use fresh native agents or the installed Claude and Codex CLIs. Follow the
+Use fresh native agents or the installed Claude, Codex, and Antigravity CLIs. Follow the
 session's provider and model preferences. Keep each provider's configured model
 unless the user selects another. Record the provider, reported model identity,
 and reported reasoning effort. Leave unreported values unknown.
 
-For outside coverage, choose Claude when hosted in Codex and Codex when hosted
-in Claude. In another host, choose an available provider. If host identity is
+For outside coverage, choose any available provider different from the current
+host (Claude, Codex, or Antigravity). If host identity is
 unclear or inherited host markers conflict, report outside coverage as unavailable
 until the host is resolved. A completed result can still inform the work, but
 does not satisfy an outside-provider gate. A native agent is an independent
@@ -49,6 +49,15 @@ claude --print --safe-mode \
   < '<prompt-file>' > '<response-file>' 2> '<stderr-file>'
 ```
 
+For Antigravity, run from the assigned repository or isolated worktree:
+
+```bash
+agy --input-format text --output-format stream-json \
+  --disable-slash-commands \
+  --settings '{"agentMode":"","permissions":{"deny":["write_file(*)","command(*)","mcp(*)","read_url(*)","execute_url(*)","download_url(*)"]}}' \
+  < '<prompt-file>' > '<response-file>' 2> '<stderr-file>'
+```
+
 These invocations leave source unchanged. A design candidate returns its sketch
 as text. A code candidate returns a patch or complete files for the parent to
 materialize and test in its assigned worktree. Embed the assigned diff text in
@@ -68,6 +77,13 @@ Record the model and reasoning effort from the header. When the header shows
 `reasoning effort: none` and no config, profile, or `-c` override sets
 `model_reasoning_effort`, record the effort as unset (model default). Inspect
 Codex's final response and transcript.
+
+Antigravity writes newline-delimited JSON events to `<response-file>` and
+diagnostics to stderr. Read `model` from the `init` event when present, and read
+`status`, `response`, and `error` from the final `result` event. A `status`
+other than `SUCCESS` is a failure. When `init` omits `model`, record the model
+as unknown. The stream does not report reasoning effort separately, so record it
+as unknown unless the `init` model slug or `--effort` flag sets it.
 
 Process exit alone is not completion. Reject empty, refused, malformed, or
 incomplete output according to the caller's acceptance criteria. A candidate's

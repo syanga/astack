@@ -157,18 +157,20 @@ def settings_operations(harnesses, selected, state, home, use_env, args):
 
 def main():
     harnesses = json.loads((REPO / "harnesses.json").read_text(encoding="utf-8"))
+    default_targets = list(harnesses) + [astack_jobgate.NAME]
+    default_label = ", ".join(default_targets[:-1]) + ", and " + default_targets[-1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("install", "uninstall"))
-    parser.add_argument("--target", action="append", choices=list(harnesses) + [astack_jobgate.NAME, "all"],
-                        help="repeat for multiple targets; default: claude, codex, and jobgate, unless --component is given")
+    parser.add_argument("--target", action="append", choices=default_targets + ["all"],
+                        help="repeat for multiple targets; default: {}, unless --component is given".format(default_label))
     parser.add_argument("--component", action="append", choices=[claude_router.NAME],
                         help="optional component; never selected by default or by --target all")
     parser.add_argument("--home", type=Path, help="alternate home; ignores configuration environment overrides")
     parser.add_argument("--dry-run", action="store_true", help="show changes without writing anything")
     parser.add_argument("--force", action="store_true", help="back up conflicting files before replacing/removing them")
     args = parser.parse_args()
-    selected = args.target or ([] if args.component else ["claude", "codex", astack_jobgate.NAME])
-    selected = list(harnesses) + [astack_jobgate.NAME] if "all" in selected else list(dict.fromkeys(selected))
+    selected = args.target or ([] if args.component else default_targets)
+    selected = default_targets if "all" in selected else list(dict.fromkeys(selected))
     home = (args.home or Path.home()).expanduser().resolve()
     use_env = args.home is None
     state_root = destination({"default": ".local/state", "env": "XDG_STATE_HOME", "suffix": "astack"}, home, use_env)
@@ -189,6 +191,8 @@ def deploy(args, harnesses, selected, home, use_env, state_root, state_path, sta
     settings = settings_operations(harnesses, agents, state, home, use_env, args)
     plugin_configs = {}
     for target in agents:
+        if target not in astack_plugins.CLIS:
+            continue
         spec = harnesses[target]["settings"]
         plugin_configs[target] = astack_plugins.ConfigDir(destination(spec, home, use_env).parent, spec["env"], home, use_env)
         astack_plugins.check_config(target, state, plugin_configs[target])
@@ -300,7 +304,8 @@ def deploy(args, harnesses, selected, home, use_env, state_root, state_path, sta
     for change in settings:
         change.apply(state, state_path, backup_root, dry_run=args.dry_run)
     for target in agents:
-        astack_plugins.sync(target, plugins, state, state_path, plugin_configs[target], args.dry_run)
+        if target in plugin_configs:
+            astack_plugins.sync(target, plugins, state, state_path, plugin_configs[target], args.dry_run)
     if component:
         claude_router.apply(component, state, state_path, backup_root, dry_run=args.dry_run)
     if args.command == "install" and not args.dry_run and selected:

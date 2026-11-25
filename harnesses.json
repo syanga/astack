@@ -10,5 +10,10 @@
     "skills": {"default": ".agents", "suffix": "skills"},
     "settings": {"default": ".codex", "env": "CODEX_HOME", "suffix": "config.toml", "format": "toml", "source": "codex.json"},
     "overlay": "CODEX.md"
+  },
+  "antigravity": {
+    "instructions": {"default": ".gemini/config", "suffix": "GEMINI.md"},
+    "skills": {"default": ".gemini/config", "suffix": "skills"},
+    "overlay": "ANTIGRAVITY.md"
   }
 }

@@ -27,7 +27,7 @@ The N candidates will receive the same prompt, so the prompt is the contract.
 
 1. State the artifact each candidate is producing.
 2. Derive the rubric. State what success looks like for *this* task, then turn it into 3-6 concrete gradeable criteria. The rubric is the picker's tool in Phase D. Candidates see the task, constraints, and acceptance requirements. Keep the scoring rubric for the comparison.
-3. Pick the runners and a time or attempt budget. Start with one fresh Codex candidate and one fresh Claude candidate when available and permitted. Follow [provider execution](PROVIDERS.md). If a provider is unavailable, use separate native contexts and disclose the reduced diversity. Same-model attempts are valid, but are not cross-provider coverage. Honor the caller's candidate count and design criteria.
+3. Pick the runners and a time or attempt budget. Start with fresh candidates from different available providers (Claude, Codex, or Antigravity) when available and permitted. Follow [provider execution](PROVIDERS.md). If a provider is unavailable, use separate native contexts and disclose the reduced diversity. Same-model attempts are valid, but are not cross-provider coverage. Honor the caller's candidate count and design criteria.
 4. Pin the source revision and give every candidate the same grounding snapshot, including relevant uncommitted work. Assign separate output paths. Use isolated worktrees for code candidates, or a temporary per-candidate directory for sketches, per [separate-before-serializing-shared-state](../principles/separate-before-serializing-shared-state.md). Read-only runners return text for the parent to save.
 
 ## Phase B: Fan out

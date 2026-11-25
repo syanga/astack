@@ -108,7 +108,7 @@ Pass upstream findings to dependent workers before dispatch. Audit one sampled w
 
 ## Verification
 
-Scale verification to the unit. When VERIFY is a single cheap command, the worker runs it. Use a dedicated verifier for expensive checks, judgments that need independent review, or changes with broad effects. Run dedicated verifiers as native agents on the session's model. For a judgment that needs independent review, also get a review from Codex when hosted in Claude or from Claude when hosted in Codex, following [provider execution](../arena/PROVIDERS.md). Treat its findings as evidence for acceptance, not as a ledger receipt.
+Scale verification to the unit. When VERIFY is a single cheap command, the worker runs it. Use a dedicated verifier for expensive checks, judgments that need independent review, or changes with broad effects. Run dedicated verifiers as native agents on the session's model. For a judgment that needs independent review, also get a review from an available outside provider different from the current host, following [provider execution](../arena/PROVIDERS.md). Treat its findings as evidence for acceptance, not as a ledger receipt.
 
 Before setting a pass threshold on nondeterministic output, such as model extractions, measure how much repeat runs on identical input disagree. Choose a threshold that this disagreement alone cannot fail.
 

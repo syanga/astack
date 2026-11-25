@@ -1,7 +1,7 @@
 # astack
 
 astack is Alan's agent setup. I use it in [T3 Code](https://t3.codes) with
-Claude Code and Codex. It is based on
+Claude Code, Codex, and Google Antigravity. It is based on
 [pstack](https://github.com/cursor/plugins/tree/main/pstack),
 [Matt Pocock's skills](https://github.com/mattpocock/skills),
 [gstack](https://github.com/garrytan/gstack), and
@@ -40,8 +40,8 @@ and `jobgate`. To choose targets, pass `--target <name>` for each one, or
 `--target all` for all of them.
 Use the same targets for the preview and installation.
 Installation needs network access to install and refresh the plugins listed in
-[settings/plugins.json](settings/plugins.json) through each agent's plugin CLI.
-It skips agents whose CLI is not on `PATH`.
+[settings/plugins.json](settings/plugins.json) through the Claude Code and Codex
+plugin CLIs. It skips agents whose CLI is not on `PATH`.
 
 ## Customize
 
