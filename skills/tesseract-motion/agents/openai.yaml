@@ -1,0 +1,5 @@
+interface:
+  display_name: "Tesseract Motion"
+  short_description: "Add motion graphics to a video ad with Tesseract"
+policy:
+  allow_implicit_invocation: false
