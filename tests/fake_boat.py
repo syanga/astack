@@ -198,6 +198,10 @@ def status(path, pid):
         return
     exit_file = path / "procs" / "{}.exit".format(pid)
     code = int(exit_file.read_text()) if exit_file.exists() else None
+    if code is not None:
+        cli = take("cli_gone_after_status")
+        if cli:
+            os.replace(cli, cli + ".gone")
     emit({"running": code is None, "exitCode": code, "oomKilled": False, "signal": None})
 
 

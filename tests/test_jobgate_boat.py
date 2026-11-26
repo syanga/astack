@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 from test_jobgate import CALM, GIB, SCRIPT, JobgateTest, wait_for
 
@@ -213,11 +215,19 @@ class SourceTests(BoatTest):
         result = self.run_here(show)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), ["version = 3", "True False False False"])
-        self.assertIn("left out 3 untracked files that may hold secrets: .env, .envrc, notes.txt~", result.stderr)
+        self.assertIn("left out 3 uncommitted files that may hold secrets: .env, .envrc, notes.txt~", result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["dirty"], "yes")
         self.assertEqual((self.repo / ".git/index").read_bytes(), index)
         self.assertEqual([self.git(*arguments) for arguments in (("rev-parse", "HEAD"), ("status", "--porcelain"),
                                                                   ("diff", "--cached"))], before)
+
+    def test_a_staged_file_that_may_hold_secrets_stays_here(self):
+        (self.repo / ".env").write_text("TOKEN=secret\n")
+        self.git("add", ".env")
+        result = self.run_here("import os; print(os.path.exists('.env'))")
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "False"), result.stderr)
+        self.assertIn("left out 1 uncommitted file that may hold secrets: .env", result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["where"], "boat")
 
     def test_excluded_paths_never_leave_this_machine(self):
         (self.repo / "private").mkdir()
@@ -401,6 +411,30 @@ class SourceTests(BoatTest):
         self.assertEqual((result.returncode, result.stdout.strip()), (0, "version = 3"), result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["where"], "boat", result.stderr)
         self.assertEqual(files(), before)
+
+    def test_a_path_that_differs_from_an_excluded_path_only_in_case_keeps_the_run_here(self):
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
+        (self.repo / "Private").mkdir()
+        (self.repo / "Private/people.csv").write_text("name,email\nAda,ada@example.com\n")
+        self.commit("private data")
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Private/people.csv", result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere")
+        self.assertEqual(self.calls("new"), [])
+
+    def test_content_that_a_commit_had_under_another_case_of_an_excluded_path_counts_as_private(self):
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
+        (self.repo / "Private").mkdir()
+        (self.repo / "Private/people.csv").write_text("name,email\nAda,ada@example.com\n")
+        self.commit("private data")
+        self.git("mv", "Private/people.csv", "public.csv")
+        self.commit("move it out")
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("public.csv", result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere")
+        self.assertEqual(self.calls("new"), [])
 
     def test_an_excluded_file_name_with_a_newline_is_checked(self):
         (self.repo / "private").mkdir()
@@ -629,7 +663,7 @@ class FallbackTests(BoatTest):
         result = self.run_here(REPORT, "7")
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertNotIn("BOAT RUN FAILED", result.stderr)
-        self.assertRegex(result.stderr, r"box bx_\w+ disappeared after the run step ended, so jobgate may have missed")
+        self.assertRegex(result.stderr, r"the run step on box bx_\w+ ended, but jobgate may have missed some of its output")
         self.assertEqual(len(self.printed_logs(result.stderr)), 1, result.stderr)
         self.assertEqual(len([argv for argv in self.calls("new") if "--from" not in argv]), 1)
         self.assertEqual(self.result_fields(result.stderr)["exit"], "7")
@@ -638,7 +672,17 @@ class FallbackTests(BoatTest):
         self.plan(drop_after_output=["run", "run"], status_gone=[False, True])
         result = self.run_here("import sys; sys.stderr.write('working'); sys.exit(7)")
         self.assertEqual(result.returncode, 7, result.stderr)
-        self.assertRegex(result.stderr, r"working\njobgate: box bx_\w+ disappeared after the run step ended")
+        self.assertRegex(result.stderr, r"working\njobgate: the run step on box bx_\w+ ended, but jobgate may have missed")
+
+    def test_a_file_error_here_after_boat_reports_the_command_s_end_keeps_its_exit_code(self):
+        self.plan(drop=["run"], cli_gone_after_status=[str(self.fake_bin / "boat")])
+        result = self.run_here(REPORT, "7")
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertFalse((self.repo / "ran-here").exists())
+        self.assertNotIn("BOAT RUN FAILED", result.stderr)
+        self.assertRegex(result.stderr, r"the run step on box bx_\w+ ended, but jobgate may have missed some of its "
+                                        r"output \(jobgate on this machine failed")
+        self.assertEqual(self.result_fields(result.stderr)["exit"], "7")
 
     def test_error_output_without_a_newline_reaches_this_machine_while_the_command_runs(self):
         command = "import sys, time; sys.stderr.write('working' + chr(13)); sys.stderr.flush(); time.sleep(30)"
@@ -679,9 +723,12 @@ class FallbackTests(BoatTest):
                                "raise SystemExit(3)")
         self.assertEqual(result.returncode, 3, result.stderr)
         self.assertIn("result.json", result.stderr)
+        self.assertRegex(result.stderr, r"jobgate cannot read the result of jobgate on box bx_\w+, so workers, peak, "
+                                        r"and stated are unknown\. The boat log has the reason: ")
         fields = self.result_fields(result.stderr)
-        self.assertEqual((fields["where"], fields["workers"], fields["peak"], fields["exit"]),
-                         ("boat", "unknown", "unknown", "3"))
+        self.assertEqual((fields["where"], fields["workers"], fields["peak"], fields["stated"], fields["exit"]),
+                         ("boat", "unknown", "unknown", "unknown", "3"))
+        self.assertNotIn("oom_kills", fields)
 
     def test_error_output_that_boat_sends_in_small_frames_reaches_this_machine_whole(self):
         self.plan(frame_bytes=3)
@@ -1002,3 +1049,47 @@ class FallbackTests(BoatTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StopNoticeTests(unittest.TestCase):
+    def test_a_signal_during_the_stop_notice_lets_the_cleanup_finish(self):
+        spec = importlib.util.spec_from_file_location("jobgate_under_test", str(SCRIPT))
+        jobgate = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = jobgate
+        self.addCleanup(sys.modules.pop, spec.name)
+        spec.loader.exec_module(jobgate)
+
+        class Stderr:
+            def __init__(self, signals):
+                self.signals = list(signals)
+                self.writing = False
+
+            def write(self, text):
+                if self.writing:
+                    raise RuntimeError("reentrant call inside <_io.BufferedWriter name='<stderr>'>")
+                self.writing = True
+                try:
+                    if self.signals:
+                        os.kill(os.getpid(), self.signals.pop(0))
+                finally:
+                    self.writing = False
+
+            def flush(self):
+                pass
+
+        for name, signals, cleanup_writes in (("a second signal during the notice", [signal.SIGTERM], False),
+                                              ("the first signal during a cleanup write", [signal.SIGINT], True)):
+            with self.subTest(name):
+                stops = []
+                for number in (signal.SIGINT, signal.SIGTERM):
+                    self.addCleanup(signal.signal, number, signal.signal(number, lambda got, frame: stops.append(got)))
+                finished = False
+                with mock.patch.object(sys, "stderr", Stderr(signals)):
+                    with jobgate.held_signals("jobgate stops after it deletes box bx_1"):
+                        if cleanup_writes:
+                            sys.stderr.write("jobgate: cannot delete box bx_1\n")
+                        else:
+                            os.kill(os.getpid(), signal.SIGINT)
+                        finished = True
+                self.assertTrue(finished)
+                self.assertEqual(stops, [signal.SIGINT])

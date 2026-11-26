@@ -279,13 +279,16 @@ that read Git history therefore work on the box.
 - With a dirty worktree, jobgate commits the worktree's tracked files and the
   untracked files that `.gitignore` does not hide. It makes this commit in a
   scratch repository, so the repository's index, refs, and objects do not
-  change. The result line says `dirty=yes`.
-- jobgate leaves out untracked files whose names match `.env`, `.env.*`,
-  `*.env`, `.envrc`, `*~`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `.netrc`,
-  `.npmrc`, `.pypirc`, `.yarnrc.yml`, `.pgpass`, `.git-credentials`,
-  `credentials`, `credentials.json`, `application_default_credentials.json`,
-  `*.tfvars`, `*.tfstate`, `*.tfstate.*`, `*.jks`, `*.keystore`, `*.ppk`,
-  `id_rsa*`, `id_dsa*`, `id_ecdsa*`, or `id_ed25519*`. It prints their paths.
+  change. The result line says `dirty=yes`. Changes that `git status` does not
+  show do not reach the box. Examples are edits to files marked
+  `assume-unchanged` or `skip-worktree`.
+- jobgate leaves out files that `HEAD` lacks, untracked or staged, whose names
+  match `.env`, `.env.*`, `*.env`, `.envrc`, `*~`, `*.pem`, `*.key`, `*.p12`,
+  `*.pfx`, `.netrc`, `.npmrc`, `.pypirc`, `.yarnrc.yml`, `.pgpass`,
+  `.git-credentials`, `credentials`, `credentials.json`,
+  `application_default_credentials.json`, `*.tfvars`, `*.tfstate`,
+  `*.tfstate.*`, `*.jks`, `*.keystore`, `*.ppk`, `id_rsa*`, `id_dsa*`,
+  `id_ecdsa*`, or `id_ed25519*`. It prints their paths.
 - With `exclude`, the bundle leaves out the contents of every file under the
   excluded paths, in every commit of the history. The box gets the file names,
   but its checkout leaves the files out. A Git command on the box that reads
@@ -298,6 +301,10 @@ that read Git history therefore work on the box.
   file that a commit moved into an excluded directory, and an untracked copy of
   an excluded file. jobgate reads each file under the excluded paths on every
   run.
+  Here, a path in a commit matches an excluded path without regard to case, so
+  `Private/` counts for `private`. The bundle filter matches paths with case,
+  on every system. So the check names such a path, and the command runs here
+  until `exclude` lists that path too.
   If it finds a copy, the command runs on this machine. jobgate prints up to 5
   such paths to add to `exclude`, and the number of the others. It names one
   path for each such content. After you add those paths, the next run can name
@@ -306,8 +313,9 @@ that read Git history therefore work on the box.
   command also runs on this machine.
 - The copy check is a best effort. It finds a copy only in one of three forms:
   the same bytes, the bytes with each CRLF line ending turned into LF, or the
-  bytes with each LF turned into CRLF. Git's line-ending conversion stores and
-  checks out files in these forms. A copy in any other form reaches the box.
+  bytes with each LF that has no CR before it turned into CRLF. Git's
+  line-ending conversion stores and checks out files in these forms. A copy in
+  any other form reaches the box.
   Examples are an edited copy, and a copy that `working-tree-encoding` or a
   clean filter changes.
 - When the box starts from a snapshot, the bundle holds only the commits that
@@ -450,10 +458,11 @@ jobgate: test retries once on a new box
 It deletes the box and tries once more on a new box. When the second box also
 dies partway, the command runs on this machine. A command that exits with an
 error on the box has not died. jobgate returns its exit code and does not run the
-command again. Sometimes boat reports that the command ended, and then the box
-disappears before jobgate gets the rest of the output. jobgate then returns the
-exit code that boat reported. It prints that it may have missed output, and the
-path of the boat log.
+command again. Sometimes boat reports that the command ended, and then jobgate
+cannot get the rest of the output. The box disappears, or jobgate on this
+machine hits a file error. jobgate then returns the exit code that boat
+reported. It prints that it may have missed output, and the path of the boat
+log.
 
 When the box runs out of memory during the run step, jobgate prints the
 `BOAT RUN FAILED` and `boat log` lines, deletes the box, and exits with 137. It
@@ -536,8 +545,8 @@ On a boat run, `workers`, `peak`, `stated`, and `oom_kills` come from jobgate
 on the box. That jobgate writes its result to `~/.jobgate/run/result.json` on
 the box instead of printing it. After the run step, jobgate reads the file with
 `boat exec` and prints its own line with `where=boat`. When it cannot read the
-file, `workers`, `peak`, and `stated` are `unknown`, and the line has no
-`oom_kills`.
+file, it prints the path of the boat log, which holds the reason. Then
+`workers`, `peak`, and `stated` are `unknown`, and the line has no `oom_kills`.
 
 ## Exit codes
 
@@ -569,7 +578,7 @@ code of `taskpolicy`.
 | `JOBGATE_RUN` | jobgate sets it to the path of the run's file. A nested call reads it to find the outer run. |
 | `HOME` | jobgate takes `~` from the password database instead, so runs under every `HOME` share one configuration, queue, and results log. It reads `HOME` only when the account has no entry there. jobgate also ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. |
 | `JOBGATE_HOME` | Tests only. Replaces the account's home directory, which holds the configuration, the queue, and the results log. With a real systemd user session, a run that sets it still sets the real `jobgate.slice` cap from the `memory_share` it finds there. That cap applies to all of the user's runs, so set this variable only with a stand-in `systemctl` on `PATH`, as jobgate's tests do. |
-| `JOBGATE_RESULT_FILE` | Internal. On a box, jobgate sets it for the box's `jobgate run --local`. That run removes the variable before it starts the command. It writes its result to the named file as JSON instead of printing a result line. |
+| `JOBGATE_RESULT_FILE` | Internal. On a box, jobgate sets it for the box's `jobgate run --local`. That run removes the variable before it starts the command. That run also writes its result to the named file as JSON instead of printing a result line. |
 | `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with readings that replace the OS readings: `memory`, `cores`, `psi` or `darwin_level`, and `meminfo` or `vm_stat` text. jobgate reads `memory` and `cores` once per run. It reads the pressure and available-memory readings before each admission attempt. A `cgroup` value names a directory that stands in for the scope's cgroup. A `boat_silent_seconds` value replaces the 60 seconds that jobgate waits for output from `boat exec --attach`. A `boat_lost_seconds` value replaces the 10 minutes after which jobgate stops trying to reach a box. With a real systemd user session, a run that uses this file still sets the real `jobgate.slice` cap from its `memory` reading. That cap applies to all of the user's runs, so use this file only with a stand-in `systemctl` on `PATH`, as jobgate's tests do. |
 
 ## Files

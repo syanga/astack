@@ -139,9 +139,9 @@ def stop(number, frame):
     raise Stopped(number)
 
 
-def say(text: str, prefix: str = "jobgate: ") -> None:
+def say(text: str) -> None:
     try:
-        print(prefix + text, file=sys.stderr, flush=True)
+        print("jobgate: " + text, file=sys.stderr, flush=True)
     except OSError:
         pass
 
@@ -1121,6 +1121,7 @@ def take_source(root: Path, scratch: Path, dirty: Dirty) -> Source:
     object_format = git(["rev-parse", "--show-object-format"], cwd=root).strip()
     store = scratch / "store.git"
     git(["init", "-q", "--bare", "--object-format=" + object_format, str(store)], env=scratch_env())
+    git(["config", "core.ignorecase", "false"], git_dir=store)
     (store / "objects/info/alternates").write_bytes(os.fsencode(objects) + b"\n")
     commit, left_out = head.stdout.strip(), ()
     if dirty != "no":
@@ -1140,6 +1141,11 @@ def commit_worktree(root: Path, scratch: Path, store: Path, objects: str, head: 
     except OSError:
         git(["read-tree", head], cwd=root, env=env, config=config)
     git(["add", "-u"], cwd=root, env=env, config=config)
+    staged = [name for name in git(["diff-index", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=A", head],
+                                   cwd=root, env=env, config=config).split("\0") if name and may_hold_secret(name)]
+    if staged:
+        git(["update-index", "-z", "--force-remove", "--stdin"], cwd=root, env=env, stdin_text="\0".join(staged),
+            config=config)
     untracked = [name for name in git(["ls-files", "-z", "--others", "--exclude-standard"], cwd=root, env=env,
                                       config=config).split("\0") if name]
     sent = [name for name in untracked if not may_hold_secret(name)]
@@ -1147,7 +1153,8 @@ def commit_worktree(root: Path, scratch: Path, store: Path, objects: str, head: 
         git(["add", "--pathspec-from-file=-", "--pathspec-file-nul"], cwd=root, env=env, stdin_text="\0".join(sent),
             config=config)
     tree = git(["write-tree"], cwd=root, env=env, config=config).strip()
-    left_out = tuple(name for name in untracked if may_hold_secret(name))
+    secret = [name for name in untracked if may_hold_secret(name)]
+    left_out = tuple(secret + [name for name in staged if name not in secret])
     if tree == git(["rev-parse", head + "^{tree}"], cwd=root, env=env).strip():
         return head, left_out
     return git(["commit-tree", tree, "-p", head, "-m", "jobgate: uncommitted changes"], cwd=root, env=env).strip(), left_out
@@ -1348,8 +1355,8 @@ def worktree_ids(root: Path, settings: BoatSettings, algorithm: str) -> set[str]
 def history_blobs(source: Source, settings: BoatSettings) -> set[str]:
     blobs = set()
     with git_lines(source.store, ["rev-list", RUN_REF],
-                   ["--literal-pathspecs", "diff-tree", "--stdin", "-r", "-m", "--root", "--no-renames", "--no-commit-id",
-                    "--raw", "--no-abbrev", "--", *settings.exclude]) as changes:
+                   ["diff-tree", "--stdin", "-r", "-m", "--root", "--no-renames", "--no-commit-id", "--raw", "--no-abbrev",
+                    "--", *(":(literal,icase)" + path for path in settings.exclude)]) as changes:
         for line in changes:
             fields = line.split("\t", 1)[0].split()
             if len(fields) < 4 or not line.startswith(":"):
@@ -1690,7 +1697,10 @@ class Box:
         killed: dict | None = None
         lost = float(test_readings().get("boat_lost_seconds") or BOAT_LOST_SECONDS)
         while True:
-            frame = self.attach(pid, printed, relay)
+            try:
+                frame = self.attach(pid, printed, relay)
+            except OSError as error:
+                return self.lost(step, "jobgate on this machine failed: {}".format(error), ended, killed, relay, error)
             if frame is not None and not (frame.get("signal") and "oomKilled" not in frame):
                 return self.exit_code(step, frame)
             killed = frame or killed
@@ -1701,17 +1711,7 @@ class Box:
                     if time.monotonic() - lost_since >= lost:
                         raise BoatDied(step, "lost contact with the box for {}".format(duration(lost)))
             except BoatDied as died:
-                if ended is not None:
-                    code = self.exit_code(step, dict(killed or {}, **ended))
-                    relay.finish()
-                    self.log.note("box {} disappeared after the {} step ended, so jobgate may have missed some of its "
-                                  "output ({})".format(self.id, step, died.reason))
-                    self.log.note("boat log: {}".format(self.log.where))
-                    return code
-                if step == "run" and killed is not None and killed.get("signal") == "SIGKILL":
-                    raise BoatDied(step, "boat killed the run step with SIGKILL and did not say why ({}). It may have "
-                                         "run out of memory".format(died.reason), True) from None
-                raise
+                return self.lost(step, died.reason, ended, killed, relay, died)
             if status is not None:
                 lost_since = None
                 if killed is not None:
@@ -1721,6 +1721,20 @@ class Box:
                         return self.exit_code(step, status)
                     ended = status
             time.sleep(BOAT_PAUSE_SECONDS)
+
+    def lost(self, step: str, reason: str, ended: dict | None, killed: dict | None, relay: Relay,
+             error: Exception) -> int:
+        if ended is not None:
+            code = self.exit_code(step, dict(killed or {}, **ended))
+            relay.finish()
+            self.log.note("the {} step on box {} ended, but jobgate may have missed some of its output ({})".format(
+                step, self.id, reason))
+            self.log.note("boat log: {}".format(self.log.where))
+            return code
+        if step == "run" and killed is not None and killed.get("signal") == "SIGKILL":
+            raise BoatDied(step, "boat killed the run step with SIGKILL and did not say why ({}). It may have run out "
+                                 "of memory".format(reason), True) from None
+        raise error
 
     def attach(self, pid: int, printed: dict, relay: Relay) -> dict | None:
         # `boat exec --attach` replays a process's output from offset 0 on every attach.
@@ -1863,9 +1877,10 @@ def held_signals(message: str):
     held: list[int] = []
 
     def hold(number, frame) -> None:
-        if not held:
-            say(message)
         held.append(number)
+        if len(held) == 1:
+            with contextlib.suppress(RuntimeError):
+                say(message)
 
     numbers = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
     previous = {number: signal.signal(number, hold) for number in numbers}
@@ -1946,7 +1961,11 @@ def boat_attempt(cli: str, settings: BoatSettings, source: Source, plan: Plan, s
         step = "run"
         started = time.monotonic()
         code = box.phase("run", BOX_RUN)
-        return BoatRun(code, box.fetch(BOX_RESULT), started)
+        result = box.fetch(BOX_RESULT)
+        if not result:
+            log.note("jobgate cannot read the result of jobgate on box {}, so workers, peak, and stated are unknown. "
+                     "The boat log has the reason: {}".format(box.id, log.where))
+        return BoatRun(code, result, started)
     except BoatDied as died:
         died.box = box.id
         raise
@@ -2003,7 +2022,7 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
             say("the box gets the uncommitted changes as a temporary commit, so the result counts as dirty")
         if source.left_out:
             say("left out {} that may hold secrets: {}".format(
-                plural(len(source.left_out), "untracked file"), ", ".join(source.left_out)))
+                plural(len(source.left_out), "uncommitted file"), ", ".join(source.left_out)))
         spec = {"head": source.head, "commit": source.commit, "branch": source.branch,
                 "patterns": settings.sparse_patterns(), "setup": settings.setup, "setup_key": plan.setup_key,
                 "cwd": cwd, "path": repo_path_entries(root), "profile": profile.name,
