@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import json
 import math
+import os
 from pathlib import Path
 import re
 import shutil
@@ -287,10 +288,10 @@ def read_copy(brand, block, size):
     return Copy(ratio, background, lines)
 
 
-def ffmpeg(failure, *arguments, cwd=None):
+def ffmpeg(failure, *arguments, cwd=None, env=None):
     try:
         ran = subprocess.run(["ffmpeg", "-v", "error", *arguments], stdin=subprocess.DEVNULL, capture_output=True,
-                             cwd=cwd, timeout=120)
+                             cwd=cwd, env=env, timeout=120)
     except (OSError, subprocess.SubprocessError) as error:
         raise ComposeError("{} ({})".format(FFMPEG, error)) from None
     if ran.returncode:
@@ -315,10 +316,14 @@ def rasterize(font, size, text):
     with tempfile.TemporaryDirectory(prefix="static-ads-") as temp:
         shutil.copyfile(font, Path(temp, "f.ttf"))
         Path(temp, "t.txt").write_text(text, encoding="utf-8")
-        data = ffmpeg(FFMPEG, "-f", "lavfi", "-i", "color=c=black:s={}x{}:d=1,format=gray".format(width, height),
+        Path(temp, "fonts.conf").write_text("<fontconfig></fontconfig>\n", encoding="utf-8")
+        # drawtext falls back to a fontconfig match when the font file does not load; an empty config makes it fail.
+        data = ffmpeg("drawtext could not set type in " + font.name,
+                      "-f", "lavfi", "-i", "color=c=black:s={}x{}:d=1,format=gray".format(width, height),
                       "-vf", "drawtext=fontfile=f.ttf:textfile=t.txt:fontsize={0}:fontcolor=white:x={0}:y={1}"
                       ":y_align=baseline:expansion=none:ft_load_flags=no_hinting".format(size, baseline),
-                      "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-", cwd=temp)
+                      "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-", cwd=temp,
+                      env={**os.environ, "FONTCONFIG_FILE": str(Path(temp, "fonts.conf"))})
     if len(data) != width * height:
         raise ComposeError("{} (drawtext gave {} bytes, not {})".format(FFMPEG, len(data), width * height))
     box = ink(data, width, height)
@@ -381,7 +386,8 @@ def layout(brand, copy, width, height):
             logo = (x, top, x + wide, top + high)
             below = top + high + px(LOGO_GAP)
         size = sizes["headline"]
-        first = below + round(brand.styles["headline"].font.cap * size)
+        lead = drawn("headline", size)[0]
+        first = below + max(round(brand.styles["headline"].font.cap * size), lead.baseline - lead.box[1])
         heads = [line("headline", size, text, mask, first + round(LEADING["headline"] * size) * index)
                  for index, (text, mask) in enumerate(zip(copy.lines["headline"], drawn("headline", size)))]
         size = sizes["cta"]
@@ -559,7 +565,8 @@ def render(plan, art, png, record):
     partial = png.with_name(png.name + ".partial")
     partial.write_bytes(encode(width, height, out))
     partial.replace(png)
-    record.write_text(json.dumps({
+    settings = record.with_name(record.name + ".partial")
+    settings.write_text(json.dumps({
         "size": "{}x{}".format(width, height), "layout": "{}:{}".format(across, down), "background": copy.background,
         "art": art.name, "art_background": "#" + base.hex() if base else None,
         "art_accents": {"#" + accent.hex(): "#" + seen.hex() for accent, seen in drawn.items()},
@@ -571,3 +578,4 @@ def render(plan, art, png, record):
                   "size": line.size, "color": brand.styles[line.role].color, "box": list(line.box)}
                  for line in plan.lines],
     }, indent=2) + "\n", encoding="utf-8")
+    settings.replace(record)

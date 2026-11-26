@@ -87,11 +87,16 @@ def sfnt(tables):
     return header + directory + body
 
 
-def font(weight, width, chars=string.ascii_letters + string.digits + " .,!?'-", variable=False):
-    block = (struct.pack(">5hHH", 1, 50, 0, 550, 700, 3, 0) + bytes([1] * 4)
-             + struct.pack(">8h", 50, 0, 500, 0, 0, 700, 0, -700))
-    codes = sorted(map(ord, chars))
-    segments = [(code, ((1 if code == 32 else 2) - code) & 0xFFFF) for code in codes] + [(0xFFFF, 1)]
+def glyph(top):
+    return (struct.pack(">5hHH", 1, 50, 0, 550, top, 3, 0) + bytes([1] * 4)
+            + struct.pack(">8h", 50, 0, 500, 0, 0, top, 0, -top))
+
+
+def font(weight, width, chars=string.ascii_letters + string.digits + " .,!?'-", variable=False, tall="É"):
+    block, high = glyph(700), glyph(950)
+    codes = sorted(map(ord, chars + tall))
+    segments = [(code, ((1 if code == 32 else 3 if chr(code) in tall else 2) - code) & 0xFFFF)
+                for code in codes] + [(0xFFFF, 1)]
     count = len(segments)
     power = 2 ** (count.bit_length() - 1)
     starts = struct.pack(">{}H".format(count), *(code for code, _ in segments))
@@ -107,13 +112,13 @@ def font(weight, width, chars=string.ascii_letters + string.digits + " .,!?'-", 
     tables = {
         b"head": struct.pack(">IIIIHHqq4hHHhhh", 0x10000, 0x10000, 0, 0x5F0F3CF5, 3, 1000, 0, 0, 0, 0, 550, 700,
                              0, 8, 2, 1, 0),
-        b"hhea": struct.pack(">IhhhHhhhhhh4hhH", 0x10000, 900, -200, 0, 600, 0, 50, 550, 1, 0, 0, 0, 0, 0, 0, 0, 3),
-        b"maxp": struct.pack(">IH13H", 0x10000, 3, 4, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0),
+        b"hhea": struct.pack(">IhhhHhhhhhh4hhH", 0x10000, 900, -200, 0, 600, 0, 50, 550, 1, 0, 0, 0, 0, 0, 0, 0, 4),
+        b"maxp": struct.pack(">IH13H", 0x10000, 4, 4, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0),
         b"OS/2": bytes(os2),
-        b"hmtx": struct.pack(">6h", 500, 0, 300, 0, 600, 50),
+        b"hmtx": struct.pack(">8h", 500, 0, 300, 0, 600, 50, 600, 50),
         b"cmap": cmap,
-        b"loca": struct.pack(">4I", 0, 0, 0, len(block)),
-        b"glyf": block,
+        b"loca": struct.pack(">5I", 0, 0, 0, len(block), len(block) + len(high)),
+        b"glyf": block + high,
         b"name": struct.pack(">3H", 0, 0, 6),
         b"post": struct.pack(">IIhhIIIII", 0x30000, 0, -100, 50, 0, 0, 0, 0, 0),
     }
@@ -730,7 +735,10 @@ class GenerateTests(unittest.TestCase):
         self.write_ad("1-proof", "928x1152")
         first = self.generate_on_vertex()
         composed = (self.run_folder / "1-proof.png").read_bytes()
-        (self.run_folder / "1-proof.png").unlink()
+        outside = self.home / "outside.json"
+        outside.write_text("kept", encoding="utf-8")
+        (self.run_folder / "1-proof.type.json").unlink()
+        (self.run_folder / "1-proof.type.json").symlink_to(outside)
 
         again = self.generate_on_vertex()
 
@@ -738,7 +746,56 @@ class GenerateTests(unittest.TestCase):
         self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
         self.assertLine(again.stdout, "1-proof", "exists 928x1152, skip render, composed")
         self.assertEqual((self.run_folder / "1-proof.png").read_bytes(), composed)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "kept")
+        self.assertEqual(json.loads((self.run_folder / "1-proof.type.json").read_text(encoding="utf-8"))["art"],
+                         "1-proof.art.png")
+
+        self.write_ad("1-proof", "928x1152", headline="Read the sky")
+        edited = self.generate_on_vertex()
+
+        self.assertEqual(edited.returncode, 0, edited.stdout + edited.stderr)
+        self.assertNotEqual((self.run_folder / "1-proof.png").read_bytes(), composed)
         self.assertEqual(len(self.api.requests), 1)
+
+    @needs_ffmpeg
+    def test_type_stays_inside_the_safe_zone_with_marks_above_the_capitals_and_no_logo(self):
+        self.write_brand()
+        (self.run_folder / "layer.json").write_text(json.dumps({**BRAND, "logo": None}), encoding="utf-8")
+        self.write_ad("1-story", "576x1024", size="1080x1920", headline="Éclat")
+
+        result = self.generate_on_vertex()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        width, height, found = marks(self.run_folder / "1-story.png")
+        self.assertGreaterEqual(min(y for x, y in found), 0.14 * height)
+
+    @needs_ffmpeg
+    def test_a_font_file_that_ffmpeg_cannot_load_fails_instead_of_falling_back(self):
+        self.write_brand()
+        broken = font(500, 7).replace(b"hhea", b"xxxx", 1)
+        (self.run_folder / "fonts/headline.ttf").write_bytes(broken)
+        self.write_ad("1-proof", "928x1152")
+        self.write_request("2-plain", {"prompt": "Fine"})
+
+        checked = self.generate_on_vertex("--dry-run")
+        result = self.generate_on_vertex()
+
+        for run in [checked, result]:
+            self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+            self.assertLine(run.stdout, "1-proof", "FAILED", "headline.ttf")
+        self.assertEqual([prompt(request["body"]) for request in self.api.requests], ["Fine"])
+
+    def test_an_ad_named_like_another_ads_art_fails_before_any_image_request(self):
+        self.write_request("1-proof.art", {"prompt": "Clash"})
+        self.write_request("2-plain", {"prompt": "Fine"})
+
+        checked = self.generate("--dry-run")
+        result = self.generate()
+
+        for run in [checked, result]:
+            self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+            self.assertLine(run.stdout, "1-proof.art", "FAILED", ".art")
+        self.assertEqual([prompt(request["body"]) for request in self.api.requests], ["Fine"])
 
     def test_a_compose_request_with_an_unusable_font_fails_before_any_image_request(self):
         self.write_request("2-plain", {"prompt": "Fine"})

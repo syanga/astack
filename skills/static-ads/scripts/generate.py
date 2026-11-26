@@ -221,6 +221,8 @@ def wants_compose(request_path):
 
 
 def load(request_path):
+    if ad_name(request_path).endswith(".art"):
+        raise ValueError("an ad name may not end in .art, which names a composed ad's art")
     request = json.loads(request_path.read_text(encoding="utf-8"))
     if not isinstance(request, dict) or not isinstance(request.get("prompt"), str) or not request["prompt"]:
         raise ValueError("the request has no prompt")
