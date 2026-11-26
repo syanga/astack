@@ -157,6 +157,7 @@ type outcome struct {
 	Attempts     int
 	Result       string
 	Usage        Usage
+	Quota        *UsageReading
 }
 
 func (s *Service) messages(c *gin.Context) {
@@ -186,12 +187,12 @@ func (s *Service) messages(c *gin.Context) {
 	var tried router.AccountID
 	finish := func(kind string, account router.AccountID, d router.Decision, status int, out *outcome) {
 		dur := s.now().Sub(start).Milliseconds()
-		e := Event{Kind: kind, Conversation: conv, Account: account, Decision: d.Kind, Reason: string(d.Reason), Status: status, Attempt: req.Attempt, Attempts: upstream, Stream: &stream, DurationMS: &dur}
+		e := Event{Kind: kind, Conversation: conv, Account: account, Model: id.Model, Decision: d.Kind, Reason: string(d.Reason), Status: status, Attempt: req.Attempt, Attempts: upstream, Stream: &stream, DurationMS: &dur}
 		if d.Kind == router.Wait {
 			e.Until = d.Until
 		}
 		if out != nil {
-			e.Outcome, e.Class = out.Result, out.Class
+			e.Outcome, e.Class, e.Quota = out.Result, out.Class, out.Quota
 			if out.Usage.known() {
 				u := out.Usage
 				e.Usage = &u
@@ -303,7 +304,7 @@ func (s *Service) messages(c *gin.Context) {
 			Observation:  exhaustionEvidence(out.Header, attemptAt, out.Class),
 		})
 		if class != router.ClassNetwork {
-			s.events.emit(Event{Kind: "attempt_failed", Conversation: conv, Account: account, Class: class, Status: out.Status, Attempt: req.Attempt})
+			s.events.emit(Event{Kind: "attempt_failed", Conversation: conv, Account: account, Model: id.Model, Class: class, Status: out.Status, Attempt: req.Attempt, Quota: out.Quota})
 		}
 		if class == router.ClassRequestScoped {
 			status := out.Status
@@ -459,17 +460,22 @@ func (s *Service) dispatch(c *gin.Context, info callInfo, authID string, id Iden
 			out.Violation = "the SDK attempted another account than the pinned one"
 		}
 	}
-	if n := len(tried); n > 0 && !out.Delivered && !out.ClientGone {
+	if n := len(tried); n > 0 {
 		last := tried[n-1]
-		out.AttemptAt = last.Start
-		if out.Header == nil {
-			out.Header = last.Header
+		if q := quotaFrom(last.Header, last.End); q != nil {
+			out.Quota = q
 		}
-		if last.Phase != "" {
-			out.Class, out.Phase, out.Err, out.Status = router.ClassNetwork, last.Phase, last.Err, 0
-		}
-		if out.Class == "" {
-			out.Class = classify(last.Status, out.Status, out.Err, last.Header)
+		if !out.Delivered && !out.ClientGone {
+			out.AttemptAt = last.Start
+			if out.Header == nil {
+				out.Header = last.Header
+			}
+			if last.Phase != "" {
+				out.Class, out.Phase, out.Err, out.Status = router.ClassNetwork, last.Phase, last.Err, 0
+			}
+			if out.Class == "" {
+				out.Class = classify(last.Status, out.Status, out.Err, last.Header)
+			}
 		}
 	}
 	return out

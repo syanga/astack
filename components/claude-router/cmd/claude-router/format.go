@@ -130,6 +130,9 @@ func writeStatus(w io.Writer, r report, verbose bool) {
 		if line, ok := poolLine(r); ok {
 			fmt.Fprintln(w, line)
 		}
+		if line, ok := legendLine(r); ok {
+			fmt.Fprintln(w, line)
+		}
 		for _, line := range boxes {
 			fmt.Fprintln(w)
 			fmt.Fprint(w, line)
@@ -478,8 +481,11 @@ func writeAccountDetail(w io.Writer, r report, a claude.AccountStatus, width int
 		}
 		fmt.Fprintf(w, "%s%-13s%-48sseen %s (%s)\n", pad, label, value, when(r.Now, seen), age)
 	}
-	used := func(u float64, resetsAt time.Time) string {
+	used := func(u float64, local *float64, resetsAt time.Time) string {
 		value := fmt.Sprintf("%d%% used", percent(u))
+		if local != nil {
+			value += fmt.Sprintf(" (%d%% here)", percent(*local))
+		}
 		if !resetsAt.IsZero() {
 			value += ", resets " + resetLong(r.Now, resetsAt)
 		}
@@ -488,20 +494,32 @@ func writeAccountDetail(w io.Writer, r report, a claude.AccountStatus, width int
 	for _, win := range limitWindows {
 		value, seen := "no reading yet", time.Time{}
 		if rj, ok := activeRejection(r.Now, a, win.kind); ok {
-			value, seen = fmt.Sprintf("rejected at %s, resets %s", when(r.Now, rj.At), resetLong(r.Now, rejectionEnd(rj))), rj.At
+			here := ""
+			if local, ok := r.Digest.localUsage(a.ID, win.kind, "", 1, rj.ResetsAt); ok {
+				here = fmt.Sprintf(" (%d%% here)", percent(local))
+			}
+			value, seen = fmt.Sprintf("rejected at %s%s, resets %s", when(r.Now, rj.At), here, resetLong(r.Now, rejectionEnd(rj))), rj.At
 			if rj.ResetsAt.IsZero() {
-				value = fmt.Sprintf("rejected at %s, reset unknown, recheck %s", when(r.Now, rj.At), when(r.Now, rejectionEnd(rj)))
+				value = fmt.Sprintf("rejected at %s%s, reset unknown, recheck %s", when(r.Now, rj.At), here, when(r.Now, rejectionEnd(rj)))
 			}
 		} else if q, ok := shownWindow(a, win.kind); ok && q.none {
 			value, seen = "no limit on this plan", q.seen
 		} else if ok {
-			value, seen = used(q.used, q.resetsAt), q.seen
+			var local *float64
+			if l, ok := r.Digest.localUsage(a.ID, win.kind, "", q.used, q.resetsAt); ok {
+				local = &l
+			}
+			value, seen = used(q.used, local, q.resetsAt), q.seen
 		}
 		reading(win.label, value, seen)
 	}
 	for _, m := range modelWindows(a) {
 		if m.Used != nil {
-			reading(modelLabel(m), used(*m.Used, m.ResetsAt), a.Usage.At)
+			var local *float64
+			if l, ok := r.Digest.localUsage(a.ID, router.Weekly, m.Model, *m.Used, m.ResetsAt); ok {
+				local = &l
+			}
+			reading(modelLabel(m), used(*m.Used, local, m.ResetsAt), a.Usage.At)
 		}
 	}
 	if counts := resetCounts(r, a); len(counts) > 0 {

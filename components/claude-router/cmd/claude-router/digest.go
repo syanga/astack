@@ -84,11 +84,24 @@ type digest struct {
 	Conversations map[string]*conversationDigest
 	Migrations    []migration
 	Cache         cacheWindow
+	QuotaSince    time.Time
+	QuotaSamples  map[windowID][]quotaSample
+	RequestSpans  map[router.AccountID][]requestSpan
 }
 
 func readDigest(path string, since time.Time) (digest, error) {
-	d := digest{Accounts: map[router.AccountID]*usageTotals{}, Conversations: map[string]*conversationDigest{},
-		Cache: cacheWindow{Since: since, Accounts: map[router.AccountID]*usageTotals{}}}
+	return readDigestAt(path, since, time.Time{})
+}
+
+func readDigestAt(path string, since, quotaSince time.Time) (digest, error) {
+	d := digest{
+		Accounts:      map[router.AccountID]*usageTotals{},
+		Conversations: map[string]*conversationDigest{},
+		Cache:         cacheWindow{Since: since, Accounts: map[router.AccountID]*usageTotals{}},
+		QuotaSince:    quotaSince,
+		QuotaSamples:  map[windowID][]quotaSample{},
+		RequestSpans:  map[router.AccountID][]requestSpan{},
+	}
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return d, nil
@@ -114,13 +127,41 @@ func (d *digest) read(r io.Reader) error {
 }
 
 func (d *digest) add(e claude.Event) {
+	if e.Account != "" && e.Quota != nil {
+		d.addQuota(e.Account, e.At, e.Quota)
+	}
 	switch e.Kind {
 	case "migrated":
 		d.Migrations = append(d.Migrations, migration{At: e.At, Conversation: e.Conversation, From: string(e.From), To: string(e.Account), Reason: e.Reason})
 		if e.Conversation != "" {
 			d.conversation(e.Conversation).moveReason = e.Reason
 		}
+	case "attempt_failed":
+		if e.Account != "" && e.Class != router.ClassNetwork {
+			start, end := e.At, e.At
+			if e.Quota != nil && !e.Quota.At.IsZero() {
+				if e.Quota.At.Before(start) {
+					start = e.Quota.At
+				}
+				if e.Quota.At.After(end) {
+					end = e.Quota.At
+				}
+			}
+			d.addRequestSpan(e.Account, start, end, e.Model)
+		}
 	case "request":
+		if e.Account != "" && (e.Attempts > 0 || e.Status == http.StatusOK) {
+			start, end := requestStart(e), e.At
+			if e.Quota != nil && !e.Quota.At.IsZero() {
+				if e.Quota.At.Before(start) {
+					start = e.Quota.At
+				}
+				if e.Quota.At.After(end) {
+					end = e.Quota.At
+				}
+			}
+			d.addRequestSpan(e.Account, start, end, e.Model)
+		}
 		if !e.At.Before(d.Cache.Since) && e.Account != "" {
 			d.Cache.count(e)
 		}
@@ -230,4 +271,38 @@ func val(p *int64) int64 {
 		return 0
 	}
 	return *p
+}
+
+func (d *digest) addQuota(account router.AccountID, fallback time.Time, q *claude.UsageReading) {
+	at := q.At
+	if at.IsZero() {
+		at = fallback
+	}
+	if !d.QuotaSince.IsZero() && at.Before(d.QuotaSince) {
+		return
+	}
+	if d.QuotaSamples == nil {
+		d.QuotaSamples = map[windowID][]quotaSample{}
+	}
+	for _, w := range q.Windows {
+		if w.Used == nil || w.Kind.Period() == 0 {
+			continue
+		}
+		id := windowID{Account: account, Kind: w.Kind, Model: w.Model}
+		d.QuotaSamples[id] = append(d.QuotaSamples[id], quotaSample{
+			At:       at,
+			Used:     min(max(*w.Used, 0), 1),
+			ResetsAt: w.ResetsAt,
+		})
+	}
+}
+
+func (d *digest) addRequestSpan(account router.AccountID, start, end time.Time, model string) {
+	if !d.QuotaSince.IsZero() && end.Before(d.QuotaSince) {
+		return
+	}
+	if d.RequestSpans == nil {
+		d.RequestSpans = map[router.AccountID][]requestSpan{}
+	}
+	d.RequestSpans[account] = append(d.RequestSpans[account], requestSpan{Start: start, End: end, Model: model})
 }

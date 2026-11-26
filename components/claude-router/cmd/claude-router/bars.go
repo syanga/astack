@@ -40,6 +40,7 @@ const (
 // SGR parameters, in the 256-color palette that macOS Terminal also draws.
 const (
 	sgrLeft      = "38;5;173"
+	sgrHere      = "38;5;74"
 	sgrUsed      = "38;5;239"
 	sgrOut       = "38;5;88"
 	sgrPace      = "1;97"
@@ -101,6 +102,7 @@ type limitRow struct {
 	label    string
 	short    string
 	left     *float64
+	local    *float64
 	out      bool
 	resetsAt time.Time
 	period   time.Duration
@@ -122,12 +124,22 @@ func limitRows(r report, a claude.AccountStatus) []limitRow {
 	var rows []limitRow
 	for _, win := range limitWindows {
 		row := limitRow{label: win.label, short: win.short, period: win.kind.Period()}
+		var used float64
+		var resetForLocal time.Time
+		hasReading := false
 		if rj, ok := activeRejection(r.Now, a, win.kind); ok {
 			row.out, row.resetsAt = true, rejectionEnd(rj)
+			used, resetForLocal, hasReading = 1, rj.ResetsAt, true
 		} else if w, ok := shownWindow(a, win.kind); ok && w.none {
 			continue
 		} else if ok {
 			row.left, row.resetsAt = leftOf(w.used), w.resetsAt
+			used, resetForLocal, hasReading = w.used, w.resetsAt, true
+		}
+		if hasReading {
+			if local, ok := r.Digest.localUsage(a.ID, win.kind, "", used, resetForLocal); ok {
+				row.local = &local
+			}
 		}
 		rows = append(rows, row)
 	}
@@ -135,6 +147,9 @@ func limitRows(r report, a claude.AccountStatus) []limitRow {
 		row := limitRow{label: modelLabel(w), short: w.Model, resetsAt: w.ResetsAt, period: router.Weekly.Period()}
 		if w.Used != nil {
 			row.left = leftOf(*w.Used)
+			if local, ok := r.Digest.localUsage(a.ID, router.Weekly, w.Model, *w.Used, row.resetsAt); ok {
+				row.local = &local
+			}
 		}
 		rows = append(rows, row)
 	}
@@ -194,8 +209,20 @@ func resetClock(now, t time.Time) string {
 
 const (
 	percentWidth = len("100% left")
+	hereWidth    = len("100% here")
 	resetWidth   = len("Sun 09:00 (6d 23h)")
 )
+
+func hasLocalUsage(r report) bool {
+	for _, a := range r.Status.Accounts {
+		for _, row := range limitRows(r, a) {
+			if row.local != nil {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 func accountBoxes(r report) ([]string, bool) {
 	if r.Screen == nil {
@@ -203,19 +230,25 @@ func accountBoxes(r report) ([]string, bool) {
 	}
 	width := min(r.Screen.width, maxBoxWidth)
 	labelWidth := len("weekly")
+	showHere := false
 	for _, a := range r.Status.Accounts {
 		for _, row := range limitRows(r, a) {
 			labelWidth = max(labelWidth, utf8.RuneCountInString(row.label))
+			showHere = showHere || row.local != nil
 		}
 	}
 	labelWidth++
-	bar := width - 4 - labelWidth - 2 - percentWidth - 2 - resetWidth
+	extra := 0
+	if showHere {
+		extra = 2 + hereWidth
+	}
+	bar := width - 4 - labelWidth - 2 - percentWidth - extra - 2 - resetWidth
 	if bar < minBarWidth {
 		return nil, false
 	}
 	var out []string
 	for _, a := range r.Status.Accounts {
-		box, ok := accountBox(r, a, width, labelWidth, bar)
+		box, ok := accountBox(r, a, width, labelWidth, bar, showHere)
 		if !ok {
 			return nil, false
 		}
@@ -224,7 +257,7 @@ func accountBoxes(r report) ([]string, bool) {
 	return out, true
 }
 
-func accountBox(r report, a claude.AccountStatus, width, labelWidth, barWidth int) (string, bool) {
+func accountBox(r report, a claude.AccountStatus, width, labelWidth, barWidth int, showHere bool) (string, bool) {
 	color := r.Screen.color
 	var lines []string
 
@@ -262,6 +295,22 @@ func accountBox(r report, a claude.AccountStatus, width, labelWidth, barWidth in
 			c.put(sgrDim, fmt.Sprintf("%*s", percentWidth, "--"))
 		default:
 			c.put(sgrBold, fmt.Sprintf("%3d%% left", percent(*row.left)))
+		}
+		if showHere {
+			c.put("", "  ")
+			switch {
+			case row.local != nil:
+				p := percent(*row.local)
+				style := sgrHere
+				if p == 0 {
+					style = sgrDim
+				}
+				c.put(style, fmt.Sprintf("%3d%% here", p))
+			case row.out || row.left != nil:
+				c.put(sgrDim, fmt.Sprintf("%*s", hereWidth, "--"))
+			default:
+				c.put("", strings.Repeat(" ", hereWidth))
+			}
 		}
 		if !row.resetsAt.IsZero() {
 			c.put("", "  ")
@@ -304,8 +353,12 @@ func stateStyle(state string) string {
 }
 
 func drawBar(c *cells, now time.Time, row limitRow, n int) {
+	var local float64
+	if row.local != nil {
+		local = *row.local
+	}
 	if row.out {
-		c.put(sgrOut, strings.Repeat("╱", n))
+		drawFill(c, 0, local, 0, false, true, n)
 		return
 	}
 	if row.left == nil {
@@ -313,7 +366,7 @@ func drawBar(c *cells, now time.Time, row limitRow, n int) {
 		return
 	}
 	pace, marked := row.leftAtEvenPace(now)
-	drawFill(c, *row.left, pace, marked, n)
+	drawFill(c, *row.left, local, pace, marked, false, n)
 }
 
 func (row limitRow) leftAtEvenPace(now time.Time) (float64, bool) {
@@ -323,9 +376,25 @@ func (row limitRow) leftAtEvenPace(now time.Time) (float64, bool) {
 	return min(float64(row.resetsAt.Sub(now))/float64(row.period), 1), true
 }
 
-func drawFill(c *cells, left, pace float64, marked bool, n int) {
+func drawFill(c *cells, left, local, pace float64, marked, out bool, n int) {
+	if out {
+		hereEnd := hereEndCell(0, local, 0, n)
+		for i := range n {
+			if i < hereEnd {
+				c.put(sgrHere, "▒")
+			} else {
+				c.put(sgrOut, "╱")
+			}
+		}
+		return
+	}
 	units := int(left*float64(n*8) + 0.5)
 	full, part := units/8, units%8
+	leftCells := full
+	if part > 0 {
+		leftCells++
+	}
+	hereEnd := hereEndCell(left, local, leftCells, n)
 	evenPaceCell := -1
 	if marked {
 		evenPaceCell = min(int(pace*float64(n)+0.5), n-1)
@@ -341,15 +410,27 @@ func drawFill(c *cells, left, pace float64, marked bool, n int) {
 			c.put(sgrLeft, "█")
 		case i == full && part > 0:
 			c.put(sgrLeft, eighths[part])
+		case i < hereEnd:
+			c.put(sgrHere, "▒")
 		default:
 			c.put(sgrUsed, "╱")
 		}
 	}
 }
 
+func hereEndCell(left, local float64, leftCells, n int) int {
+	if local <= 0 || leftCells >= n {
+		return leftCells
+	}
+	if left+local >= 1-1e-9 {
+		return n
+	}
+	return min(leftCells+int(local*float64(n)+0.5), n)
+}
+
 type poolWindow struct {
-	key, label             string
-	capacity, left, onPace float64
+	key, label                    string
+	capacity, left, local, onPace float64
 }
 
 func poolWindows(r report) []poolWindow {
@@ -366,6 +447,10 @@ func poolWindows(r report) []poolWindow {
 			if row.left != nil {
 				left = *row.left
 			}
+			var local float64
+			if row.local != nil {
+				local = *row.local
+			}
 			onPace, ok := row.leftAtEvenPace(r.Now)
 			if !ok {
 				onPace = left
@@ -377,6 +462,7 @@ func poolWindows(r report) []poolWindow {
 			}
 			pool[i].capacity += a.Capacity
 			pool[i].left += a.Capacity * left
+			pool[i].local += a.Capacity * local
 			pool[i].onPace += a.Capacity * onPace
 		}
 	}
@@ -407,8 +493,25 @@ func poolLine(r report) (string, bool) {
 			c.put("", gap)
 		}
 		c.put(sgrDim, p.label+" ")
-		drawFill(&c, p.left/p.capacity, p.onPace/p.capacity, true, bar)
+		drawFill(&c, p.left/p.capacity, p.local/p.capacity, p.onPace/p.capacity, true, false, bar)
 		c.put(sgrBold, fmt.Sprintf(" %3d%%", percent(p.left/p.capacity)))
 	}
+	return c.String(), true
+}
+
+func legendLine(r report) (string, bool) {
+	if r.Screen == nil || !hasLocalUsage(r) {
+		return "", false
+	}
+	c := cells{color: r.Screen.color}
+	c.put("", "        ")
+	c.put(sgrLeft, "█")
+	c.put(sgrDim, " left   ")
+	c.put(sgrHere, "▒")
+	c.put(sgrDim, " this machine   ")
+	c.put(sgrUsed, "╱")
+	c.put(sgrDim, " other   ")
+	c.put(sgrPace, "│")
+	c.put(sgrDim, " even pace")
 	return c.String(), true
 }

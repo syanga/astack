@@ -194,8 +194,13 @@ func (o *overageReader) readLocked(ctx context.Context, account router.AccountID
 	now := o.s.clock.instant()
 	end := now.Stamp
 	var state router.Overage
+	var quota *UsageReading
 	if err == nil {
-		o.noteUsage(account, body.windows(), start, now)
+		windows := body.windows()
+		o.noteUsage(account, windows, start, now)
+		if len(windows) > 0 {
+			quota = &UsageReading{At: now.Stamp, Windows: windows}
+		}
 		state, err = body.overage()
 	}
 	dur := end.Sub(start).Milliseconds()
@@ -206,7 +211,7 @@ func (o *overageReader) readLocked(ctx context.Context, account router.AccountID
 		o.state[account] = st
 		o.settle(account, err)
 		o.mu.Unlock()
-		o.s.events.emit(Event{Kind: "overage_read", Account: account, Outcome: "unknown", Detail: err.Error(), DurationMS: &dur})
+		o.s.events.emit(Event{Kind: "overage_read", Account: account, Outcome: "unknown", Quota: quota, Detail: err.Error(), DurationMS: &dur})
 		return
 	}
 	begun, arrived, ok := o.s.bounded(start, end, state != router.OverageDisabled)
@@ -225,7 +230,7 @@ func (o *overageReader) readLocked(ctx context.Context, account router.AccountID
 	o.mu.Lock()
 	o.settle(account, nil)
 	o.mu.Unlock()
-	o.s.events.emit(Event{Kind: "overage_read", Account: account, Outcome: "read", Overage: state, DurationMS: &dur})
+	o.s.events.emit(Event{Kind: "overage_read", Account: account, Outcome: "read", Overage: state, Quota: quota, DurationMS: &dur})
 }
 
 // readingStamp dates a reading the upstream made at an unknown time between

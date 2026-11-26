@@ -1,7 +1,12 @@
 package claude
 
 import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -172,5 +177,73 @@ func TestASettingsReadWithoutReadableLimitFieldsClearsTheLimitReading(t *testing
 
 	if got := accountStatus(t, s, "acct-a"); len(got.Usage.Windows) != 0 || got.Overage.State != router.OverageDisabled {
 		t.Fatalf("usage %+v, overage %q, want no limit windows from the malformed read and the disabled reading", got.Usage, got.Overage.State)
+	}
+}
+
+func TestEventsLogModelAndQuotaFromUsageReadsResponsesAndRejections(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	reset5h := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	reset7d := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second)
+	e.upstream.setUsage("acct-a", usageReply{Enabled: boolPtr(false), Fields: map[string]any{
+		"five_hour": map[string]any{"utilization": 10.0, "resets_at": reset5h.Format(time.RFC3339)},
+		"seven_day": map[string]any{"utilization": 20.0, "resets_at": reset7d.Format(time.RFC3339)},
+		"limits": []any{
+			map[string]any{"kind": "weekly_scoped", "percent": 5, "resets_at": reset7d.Format(time.RFC3339),
+				"scope": map[string]any{"model": map[string]any{"display_name": "Fable"}}},
+		},
+	}})
+	e.start()
+
+	e.upstream.script("acct-a",
+		reply{Header: map[string]string{
+			"anthropic-ratelimit-unified-5h-utilization": "0.25",
+			"anthropic-ratelimit-unified-5h-reset":       strconv.FormatInt(reset5h.Unix(), 10),
+			"anthropic-ratelimit-unified-7d-utilization": "NaN",
+		}},
+		reply{Status: 429, Header: map[string]string{
+			"anthropic-ratelimit-unified-5h-status": "rejected",
+			"anthropic-ratelimit-unified-5h-reset":  strconv.FormatInt(reset5h.Unix(), 10),
+		}},
+	)
+	if r := e.send(msg{Session: sessionID(1), Model: "claude-sonnet-4-6"}); r.Status != 200 {
+		t.Fatalf("first request status %d, want 200", r.Status)
+	}
+	if r := e.send(msg{Session: sessionID(1), Model: "claude-sonnet-4-6"}); r.Status != 429 {
+		t.Fatalf("second request status %d, want 429", r.Status)
+	}
+	e.svc.Close()
+
+	raw, err := os.ReadFile(filepath.Join(e.dir, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawOverage, sawRequest, sawFailed bool
+	for _, line := range bytes.Split(raw, []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var ev Event
+		if err := json.Unmarshal(line, &ev); err != nil {
+			t.Fatalf("invalid JSON line %q: %v", line, err)
+		}
+		switch ev.Kind {
+		case "overage_read":
+			if ev.Outcome == "read" && ev.Quota != nil && len(ev.Quota.Windows) == 3 {
+				sawOverage = true
+			}
+		case "request":
+			if ev.Status == 200 && ev.Model == "claude-sonnet-4-6" && ev.Quota != nil && len(ev.Quota.Windows) == 1 &&
+				ev.Quota.Windows[0].Kind == router.FiveHour && ev.Quota.Windows[0].Used != nil && *ev.Quota.Windows[0].Used == 0.25 {
+				sawRequest = true
+			}
+		case "attempt_failed":
+			if ev.Class == router.ClassExhausted && ev.Model == "claude-sonnet-4-6" && ev.Quota != nil && len(ev.Quota.Windows) == 1 &&
+				ev.Quota.Windows[0].Kind == router.FiveHour && ev.Quota.Windows[0].Used != nil && *ev.Quota.Windows[0].Used == 1.0 {
+				sawFailed = true
+			}
+		}
+	}
+	if !sawOverage || !sawRequest || !sawFailed {
+		t.Fatalf("missing logged quota events: overage=%v request=%v failed=%v\n%s", sawOverage, sawRequest, sawFailed, raw)
 	}
 }

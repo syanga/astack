@@ -13,14 +13,16 @@ import (
 )
 
 // Event is one sanitized service event. It carries account labels, a hash
-// of the conversation key, statuses, classes, decisions, counters, and
-// timing. It never carries a token, a prompt, a header value, or a body.
+// of the conversation key, model IDs, quota readings, statuses, classes,
+// decisions, counters, and timing. It never carries a token, a prompt, a
+// header value, or a body.
 type Event struct {
 	At           time.Time        `json:"at"`
 	Kind         string           `json:"kind"`
 	Conversation string           `json:"conversation,omitempty"`
 	Account      router.AccountID `json:"account,omitempty"`
 	From         router.AccountID `json:"from,omitempty"`
+	Model        string           `json:"model,omitempty"`
 	Decision     router.Kind      `json:"decision,omitempty"`
 	Reason       string           `json:"reason,omitempty"`
 	Class        router.Class     `json:"class,omitempty"`
@@ -32,6 +34,7 @@ type Event struct {
 	Outcome      string           `json:"outcome,omitempty"`
 	Overage      router.Overage   `json:"overage,omitempty"`
 	Usage        *Usage           `json:"usage,omitempty"`
+	Quota        *UsageReading    `json:"quota,omitempty"`
 	DurationMS   *int64           `json:"duration_ms,omitempty"`
 	Until        time.Time        `json:"until,omitzero"`
 	Detail       string           `json:"detail,omitempty"`
