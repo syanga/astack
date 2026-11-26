@@ -831,7 +831,6 @@ class GenerateTests(unittest.TestCase):
         self.write_brand()
         self.write_ad("1-proof", "928x1152")
         self.write_request("1-proof.ART", {"prompt": "Clash"})
-        (self.run_folder / "1-proof.ART.png").write_bytes(png_header(1080, 1350))
         self.write_request("2-solo.art", {"prompt": "Alone"})
         self.write_request("3-plain", {"prompt": "Plain"})
         self.write_request("3-plain.art", {"prompt": "Plain art"})
