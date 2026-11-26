@@ -72,6 +72,13 @@ class RoundsTests(unittest.TestCase):
         path.write_text(json.dumps(craft), encoding="utf-8")
         return path
 
+    def vote_without(self, member, **flaws):
+        path = self.vote(**flaws)
+        craft = json.loads(path.read_text(encoding="utf-8"))
+        del craft[member]
+        path.write_text(json.dumps(craft), encoding="utf-8")
+        return path
+
     def rounds(self, *arguments):
         return subprocess.run([sys.executable, str(SCRIPT), *arguments], capture_output=True, text=True, timeout=60)
 
@@ -84,7 +91,14 @@ class RoundsTests(unittest.TestCase):
                            "--targets", targets)
 
     def calls(self):
-        return self.log.read_text(encoding="utf-8").splitlines() if self.log.exists() else []
+        return sorted(self.log.read_text(encoding="utf-8").splitlines()) if self.log.exists() else []
+
+    def assertCalls(self, expected):
+        self.assertEqual(self.calls(), sorted(expected))
+
+    def assertRefused(self, result):
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
     def assertStatus(self, result, status):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -104,11 +118,11 @@ class RoundsTests(unittest.TestCase):
             "Panel A": "3.000 vs 2.500 (+0.500)", "Panel B": "2.750 vs 2.500 (+0.250)",
             "Decision": "keep: panel A +0.500 > 0.250, panel B +0.250 > 0"})
         self.assertEqual((self.run_folder / "table.md").read_text(encoding="utf-8"), kept.stdout)
-        self.assertEqual(self.calls(), ["A v1", "A v0", "B v1", "B v0"])
+        self.assertCalls(["A v1", "A v0", "B v1", "B v0"])
 
         self.round("v2", self.vote(v2=["minor"], v1=["minor"]))
 
-        self.assertEqual(self.calls()[4:], ["A v2", "A v1"])
+        self.assertCalls(["A v1", "A v0", "B v1", "B v0", "A v2", "A v1"])
 
     def test_a_rise_on_panel_a_of_exactly_the_margin_reverts_without_running_panel_b(self):
         self.version("v0", 2.5, 2.5)
@@ -120,7 +134,7 @@ class RoundsTests(unittest.TestCase):
         self.assertStatus(result, "next: round 2 against v0")
         self.assertEqual(row(result.stdout, 1)["Panel B"], "-")
         self.assertEqual(row(result.stdout, 1)["Decision"], "revert: panel A +0.250 <= 0.250")
-        self.assertEqual(self.calls(), ["A v1", "A v0"])
+        self.assertCalls(["A v1", "A v0"])
 
     def test_panel_b_without_a_rise_reverts(self):
         self.version("v0", 2.5, 2.5)
@@ -131,7 +145,7 @@ class RoundsTests(unittest.TestCase):
 
         self.assertStatus(result, "next: round 2 against v0")
         self.assertEqual(row(result.stdout, 1)["Decision"], "revert: panel B +0.000 <= 0")
-        self.assertEqual(self.calls(), ["A v1", "A v0", "B v1", "B v0"])
+        self.assertCalls(["A v1", "A v0", "B v1", "B v0"])
 
     def test_a_major_flaw_in_the_new_version_reverts_without_running_a_panel(self):
         self.version("v0", 2.5, 2.5)
@@ -149,7 +163,7 @@ class RoundsTests(unittest.TestCase):
 
         self.round("v2", self.vote(v2=["minor"], v0=["minor"]))
 
-        self.assertEqual(self.calls(), ["A v2", "A v0", "B v2", "B v0"])
+        self.assertCalls(["A v2", "A v0", "B v2", "B v0"])
 
     def test_a_gate_fix_keeps_drops_within_the_margin_and_reverts_a_drop_beyond_it(self):
         self.version("v0", 2.5, 2.5)
@@ -162,7 +176,7 @@ class RoundsTests(unittest.TestCase):
         self.assertStatus(dropped, "next: round 2 against v0")
         self.assertEqual(row(dropped.stdout, 1)["Craft"], "pass vs fail")
         self.assertEqual(row(dropped.stdout, 1)["Decision"], "revert (gate fix): panel A -0.375 < -0.250")
-        self.assertEqual(self.calls(), ["A v1", "A v0"])
+        self.assertCalls(["A v1", "A v0"])
 
         held = self.round("v2", self.vote(v2=["minor"], v0=["major"]))
 
@@ -186,7 +200,7 @@ class RoundsTests(unittest.TestCase):
 
         self.round("v2", self.vote(v2=["minor"], v0=["minor"]))
 
-        self.assertEqual(self.calls(), ["A v2", "A v0", "B v2", "B v0"])
+        self.assertCalls(["A v2", "A v0", "B v2", "B v0"])
 
     def test_the_same_member_without_a_score_in_two_votes_in_a_row_stops_the_run(self):
         self.version("v0", 2.5, 2.5)
@@ -267,7 +281,7 @@ class RoundsTests(unittest.TestCase):
 
         self.assertStatus(retried, "next: round 2 against v1")
         self.assertEqual(row(retried.stdout, 1)["Decision"], "keep: panel A +0.500 > 0.250, panel B +0.250 > 0")
-        self.assertEqual(self.calls(), ["A v1", "A v0", "B v1", "A v1", "A v0", "B v1", "B v0"])
+        self.assertCalls(["A v1", "A v0", "B v1", "A v1", "A v0", "B v1", "B v0"])
 
     def test_a_round_refuses_a_version_or_vote_it_cannot_score_and_records_nothing(self):
         self.version("v0", 2.5, 2.5)
@@ -284,11 +298,10 @@ class RoundsTests(unittest.TestCase):
             ("a folder with two images", "v2", self.vote(v2=[], v0=["minor"])),
             ("a vote without the current best", "v3", self.vote(v3=[])),
             ("a flaw without a severity", "v3", self.vote(v3=["blocker"], v0=["minor"])),
+            ("a vote that leaves out a member", "v3", self.vote_without("sol", v3=[], v0=["minor"])),
         ]:
             with self.subTest(label):
-                result = self.round(version, craft)
-
-                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertRefused(self.round(version, craft))
         table = self.rounds("table", str(self.run_folder))
         self.assertIsNone(row(table.stdout, 1))
         self.assertEqual(self.calls(), [])
@@ -296,7 +309,7 @@ class RoundsTests(unittest.TestCase):
         accepted = self.round("v3", self.vote(v3=["minor"], v0=["minor"]))
 
         self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
-        self.assertEqual(self.calls()[:2], ["A v3", "A v0"])
+        self.assertCalls(["A v3", "A v0", "B v3", "B v0"])
         self.assertEqual(self.round("v3", self.vote(v3=["minor"], v1=["minor"])).returncode, 1)
 
     def test_a_second_start_is_refused(self):

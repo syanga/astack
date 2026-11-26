@@ -18,7 +18,7 @@ The caller supplies these. Ask for any that is missing.
 - The ad: one image and the text that runs with it, such as the primary text and headline.
 - The craft brief: a rubric whose gate checks define a major flaw, and the brand guide and claims file it names.
 - How to render a new version, such as a static-ads request file and image backend.
-- The panel command template. `rounds.py` replaces `{panel}` with `A` or `B`, `{image}` with the version's image, and `{copy}` with its `copy.txt`, each shell-quoted. The command prints a JSON object whose `purchase_intent.mean` is the panel's mean purchase intent. Panel A is the metric. Panel B uses another model, other personas, and other reference statements, and confirms a keep. Each panel must draw the same personas on every run, so the new version and the current best face the same buyers.
+- The panel command template. `rounds.py` replaces `{panel}` with `A` or `B`, `{image}` with the version's image, and `{copy}` with its `copy.txt`, each shell-quoted. The command prints, as its last line, a JSON object whose `purchase_intent.mean` is the panel's mean purchase intent. Panel A is the metric. Panel B uses another model, other personas, and other reference statements, and confirms a keep. Each panel must draw the same personas on every run, so the new version and the current best face the same buyers.
 - The margin: the largest change in panel A's mean that repeated runs on one unchanged ad produce.
 
 ## Set up the run
@@ -35,7 +35,7 @@ This replaces hillclimb steps 1 to 3 and hillclimb-council's "Set up the vote".
      --panel-command '<template>' --margin <margin>
    ```
 
-   `<skill-dir>` is the folder this SKILL.md is in. Add `--rounds <n>` for a budget below 5.
+   `<skill-dir>` is the folder this SKILL.md is in. For a budget below 5 rounds, add `--rounds <n>`. Each member in the craft file must stay in every later craft file.
 
 The craft file maps each council member to its flaws per version. List only flaws that pass the quote check. Write `null` for a member that gave no score after its retries.
 
@@ -48,10 +48,10 @@ The craft file maps each council member to its flaws per version. List only flaw
 
 ## Run each round
 
-These steps replace hillclimb-council's vote steps as named.
+These steps replace hillclimb steps 4 to 6 and hillclimb-council's vote steps as named.
 
-1. Build the bundle per vote step 7 from the current best's flaws: three fixes, or every queued flaw if fewer. If the current best has a major flaw, put every queued major flaw in the bundle instead, because `rounds.py` keeps no version with a major flaw. Each fix edits the render request or `copy.txt`. Write all of them into one new version yourself, with no parts, implementers, or worktrees. Render it with the current best image as a reference, so the render keeps what the fixes leave alone. Leave the reference out when a fix changes the type, colors, or layout of the whole ad. After a revert, pivot per vote step 8.
-2. View the render before the vote. Render again if the image is blank, has the wrong size, or garbles text that the request spelled out. Write the new version's `text.txt`.
+1. Build the bundle per vote step 7 from the current best's flaws: three fixes, or every queued flaw if fewer. If the current best has a major flaw, put every queued major flaw in the bundle instead, because `rounds.py` keeps no version with a major flaw. Each fix edits the render request or `copy.txt`. Write all of them into one new version yourself, with no parts, implementers, or worktrees. Render it with the current best image as a reference, so the render keeps what the fixes leave alone. Leave the reference out when a fix changes the type, colors, or layout of the whole ad. After a round reverts on a conclusive vote, pivot per vote step 8. After an inconclusive vote, skip the pivot as hillclimb-council says.
+2. View the render before the vote. If the image is blank, has the wrong size, or garbles text that the request spelled out, render again. Write the new version's `text.txt`.
 3. Vote per vote steps 2 to 4. The ballot holds the image and `copy.txt` of the new version and the current best, and nothing else. Panel B replaces the confirm ballot, so make none.
 4. Write the craft file with both versions for each member, then run:
 
@@ -60,9 +60,9 @@ These steps replace hillclimb-council's vote steps as named.
      --targets '<the flaws this bundle fixes>'
    ```
 
-   This replaces vote steps 5 and 6. `rounds.py` runs the panels, applies the keep rule, prints the round table, and ends with `next:` and the current best, or `stop:` and the reasons. If a panel command fails, `rounds.py` exits 1, records nothing, and names the saved stderr. Fix the cause and run the same command again.
+   This replaces vote step 5. `rounds.py` runs the panels, applies the keep rule, prints the round table, and ends with `next:` and the current best, or `stop:` and the reasons. If a panel command fails, `rounds.py` exits 1, records nothing, and names the saved stderr. Fix the cause and run the same command again.
 
-Skip vote step 6's trim. Each render redraws the whole image, so dropping one fix also changes what the other fixes left alone.
+Skip vote step 6's trim instead. Each render redraws the whole image, so dropping one fix also changes what the other fixes left alone.
 
 ### Keep rule
 
@@ -70,14 +70,14 @@ Skip vote step 6's trim. Each render redraws the whole image, so dropping one fi
 
 ## Stop
 
-This replaces hillclimb-council's Stop and hillclimb steps 7 to 9. `rounds.py` prints `stop:` and refuses more rounds at the first of these:
+This replaces hillclimb-council's Stop and hillclimb steps 7 to 9. `rounds.py` prints `stop:` with every reason that holds, and refuses more rounds, when any of these holds:
 
-- The budget is spent: 5 rounds, or `--rounds`. Five is the most a run may take.
-- The current best has no flaws in a conclusive vote. The run skips the empty-queue rerun, because the craft check already gates every keep.
+- The budget is spent: 5 rounds, or `--rounds`.
+- The current best has no flaws in a conclusive vote. The run skips the empty-queue rerun to save a vote. A stop here leaves a current best that a full vote found clean.
 - One member gave no score in two votes in a row.
 
 No target stop applies, because the panel has no target score. Run no recheck, review-pr, or PR.
 
 ## Report
 
-Reply with the last round table, the current best's folder, its flaws from the last vote, and each judge failure as hillclimb-council's Report describes it. `python3 <skill-dir>/scripts/rounds.py table <run>` prints the table again.
+This replaces hillclimb's Reply and hillclimb-council's Report. Reply with the last round table, the current best's folder, its flaws from the last vote, and each judge failure: the member, the vote, the attempts, and the error or the other version it quoted. `python3 <skill-dir>/scripts/rounds.py table <run>` prints the table again.

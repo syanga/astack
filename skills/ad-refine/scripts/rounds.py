@@ -251,6 +251,9 @@ def run_round(args):
         raise Refusal("version {} already appears in this run; the current best is {}".format(new, best))
     files = {name: version_files(run, name) for name in (new, best)}
     craft = load_craft(args.craft, [new, best])
+    if set(craft) != set(state["start"]["craft"]):
+        raise Refusal("craft file {} must name the members {}; write null for a member without a score".format(
+            args.craft, ", ".join(sorted(state["start"]["craft"]))))
     number = len(state["rounds"]) + 1
     means = {}
     while isinstance(outcome := decide(verdict(craft, new), verdict(craft, best), state["margin"], means), Panel):
