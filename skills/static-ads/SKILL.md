@@ -157,14 +157,14 @@ View every Feed and Story PNG. Without Chrome or Chromium, view each GPT Image a
 
 Read the script output for `FAILED`. A failed ad can still leave the script looking finished.
 
-Hand over only ads that keep every claims rule. For a hybrid ad, fix the page when its page fails a check, and run `render.py` again. When its scene fails a check, or `generate.py` prints `FAILED` for the scene, draw the scene again once, as the last paragraph of this step says. When the new scene still fails, delete the scene's `<img>` from the page, so the ad shows the page's background color. Then run `render.py` again, and tell the user the check each try failed, or the error `generate.py` printed.
+Hand over only ads that keep every claims rule. For a hybrid ad, fix the page when its page fails a check, and run `render.py` again. When its scene fails a check, or `generate.py` prints `FAILED` for the scene, draw the scene again once, as "To draw an image again" below says. When the new scene still fails, delete the scene's `<img>` from the page, so the ad shows the page's background color. Then run `render.py` again, and tell the user, for each try, the check the scene failed or the error `generate.py` printed.
 
 For each GPT Image ad, find the first row that fits its state, and take that row's action:
 
 | State of the ad | Action |
 |---|---|
 | Has no `pages/<Name>.png` after its retry or its redo | Delete it. |
-| Has no `pages/<Name>.png` because `generate.py` printed `FAILED` for it | Retry it once by taking redo steps 3 and 4. When the error names a problem in the request, fix the request before step 3. |
+| Has no `pages/<Name>.png` because `generate.py` printed `FAILED` for it | Retry it once by taking redo steps 1, 3, and 4. |
 | Passes every check | Hand it over. |
 | Fails only the image size check, the type size and margins check, or both | Hand it over, and tell the user which checks it fails. |
 | Fails another check and has had no redo | Redo it. |
@@ -172,14 +172,14 @@ For each GPT Image ad, find the first row that fits its state, and take that row
 | Fails another check after its redo | Hand it over, and tell the user which check each try failed. |
 
 A redo has four steps:
-1. Fix what failed in `pages/<Name>.req.json`. For a misspelling, quote the word with its correct spelling. For made-up text, take out the part of the scene that invites it, such as a screen or page with content.
+1. Fix what failed in `pages/<Name>.req.json`. For a misspelling, quote the word with its correct spelling. For made-up text, take out the part of the scene that invites it, such as a screen or page with content. After a `FAILED` line, change the request only when the error names a problem in it.
 2. Delete the ad's `.png` and `.res.json` in `pages/`.
-3. Run `generate.py --dry-run`, and fix the request until the dry run prints no `FAILED`.
-4. Run `generate.py` and `render.py`, and review the new files.
+3. Run `generate.py --dry-run <run-folder>/pages/<Name>.req.json`, and fix the request until the dry run prints no `FAILED`.
+4. Run `generate.py` on the same request file, not on `pages/`, so it sends no other request. Then run `render.py <run-folder>`, and review the new files.
 
-To delete an ad, delete its `.req.json`, `.png`, `.res.json`, and `.html` in `pages/`, and its `<Name> Feed.png` and `<Name> Story.png` in the run folder. Tell the user why: the check each try failed, or the error `generate.py` printed.
+To delete an ad, delete its `.req.json`, `.png`, `.res.json`, and `.html` in `pages/`, and its `<Name> Feed.png` and `<Name> Story.png` in the run folder. Tell the user why: for each try, the check it failed or the error `generate.py` printed. When no ad is left, skip step 6.
 
-To draw an image again, delete its `.png` and `.res.json` in `pages/`, such as `scene-<Name>.png` and `scene-<Name>.res.json` for a hybrid ad's scene. Then take redo steps 3 and 4. For each ad you hand over with a failed check, tell the user these steps.
+To draw an image again, take the four redo steps with the image's own files, such as `scene-<Name>.req.json`, `scene-<Name>.png`, and `scene-<Name>.res.json` for a hybrid ad's scene. For each ad you hand over with a failed check, tell the user these steps.
 
 ## 6. Ad text
 
