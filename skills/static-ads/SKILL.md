@@ -141,7 +141,7 @@ It screenshots every `pages/<Name>.html` with headless Chrome and prints each ad
 - Text that overlaps other text
 - An image that failed to load
 
-It reads the text in the page, not text drawn inside an image, so place an image that holds text by eye. Fix the page and run `render.py` again until it prints no problem. It replaces the PNGs each time, and deletes both of an ad's PNGs when it prints `FAILED` for the ad. Without Chrome or Chromium, hand over each GPT Image ad's `pages/<Name>.png` as its Feed image, and tell the user the Story files are missing.
+It reads the text in the page, not text drawn inside an image, so place an image that holds text by eye. When an image failed to load because `generate.py` printed `FAILED` for it, leave that problem for step 5. For every other problem, fix the page and run `render.py` again until it prints no other problem. `render.py` replaces the PNGs each time, and deletes both of an ad's PNGs when it prints `FAILED` for the ad. Without Chrome or Chromium, hand over each GPT Image ad's `pages/<Name>.png` as its Feed image, and tell the user the Story files are missing.
 
 ## 5. Review
 
@@ -152,33 +152,34 @@ View every Feed and Story PNG. Without Chrome or Chromium, view each GPT Image a
 - Copied customer logos
 - Text the prompt didn't ask for, such as made-up page content
 - An ad that breaks a claims rule from step 3
-- For a GPT Image ad, a size other than 1472x1840 on its `done` or `exists` line
-- For a GPT Image ad, text in `pages/<Name>.png` smaller than about 3.5% of the image's width, or within about 12% of its width from an edge
+- **Image size:** for a GPT Image ad, a size other than 1472x1840 on its `done` or `exists` line
+- **Type size and margins:** for a GPT Image ad, text in `pages/<Name>.png` smaller than about 3.5% of the image's width, or within about 12% of its width from an edge
 
-Read the script output for `FAILED`. A failed ad can still leave the script looking finished. When `generate.py` prints `FAILED` for an ad before review, run it again once, then run `render.py`. When it prints `FAILED` for that ad again, delete the ad.
+Read the script output for `FAILED`. A failed ad can still leave the script looking finished.
 
-Hand over only ads that keep every claims rule. For a hybrid ad, fix the page when its page fails a check, and run `render.py` again. When its scene fails a check, or `generate.py` prints `FAILED` for the scene, draw the scene again once, as the last paragraph of this step says. When the new scene still fails, delete the scene's `<img>` from the page, so the ad shows the page's background color. Then run `render.py` again, and tell the user which check the scene failed.
+Hand over only ads that keep every claims rule. For a hybrid ad, fix the page when its page fails a check, and run `render.py` again. When its scene fails a check, or `generate.py` prints `FAILED` for the scene, draw the scene again once, as the last paragraph of this step says. When the new scene still fails, delete the scene's `<img>` from the page, so the ad shows the page's background color. Then run `render.py` again, and tell the user the check each try failed, or the error `generate.py` printed.
 
-For each GPT Image ad, take the first row that fits:
+For each GPT Image ad, find the first row that fits its state, and take that row's action:
 
-| The ad | Next |
+| State of the ad | Action |
 |---|---|
-| passed every check | Hand it over. |
-| failed only image size, or type size and margins | Hand it over, and tell the user which check it failed. |
-| failed another check, and has had no redo | Redo it. |
-| still breaks a claims rule after its redo | Delete it. |
-| fails another check after its redo | Hand it over, and tell the user which check each try failed. |
+| Has no `pages/<Name>.png` after its retry or its redo | Delete it. |
+| Has no `pages/<Name>.png` because `generate.py` printed `FAILED` for it | Retry it once by taking redo steps 3 and 4. When the error names a problem in the request, fix the request before step 3. |
+| Passes every check | Hand it over. |
+| Fails only the image size check, the type size and margins check, or both | Hand it over, and tell the user which checks it fails. |
+| Fails another check and has had no redo | Redo it. |
+| Breaks a claims rule after its redo | Delete it. |
+| Fails another check after its redo | Hand it over, and tell the user which check each try failed. |
 
-To redo an ad:
+A redo has four steps:
 1. Fix what failed in `pages/<Name>.req.json`. For a misspelling, quote the word with its correct spelling. For made-up text, take out the part of the scene that invites it, such as a screen or page with content.
-2. Delete its `.png` and `.res.json` in `pages/`.
-3. Run `generate.py` with `--dry-run`, and fix the request until the dry run prints no `FAILED`.
-4. Run `generate.py`. When it prints `FAILED` for the ad, delete the ad.
-5. Run `render.py`, and review the new Feed and Story files.
+2. Delete the ad's `.png` and `.res.json` in `pages/`.
+3. Run `generate.py --dry-run`, and fix the request until the dry run prints no `FAILED`.
+4. Run `generate.py` and `render.py`, and review the new files.
 
 To delete an ad, delete its `.req.json`, `.png`, `.res.json`, and `.html` in `pages/`, and its `<Name> Feed.png` and `<Name> Story.png` in the run folder. Tell the user why: the check each try failed, or the error `generate.py` printed.
 
-To draw an ad's image again, delete its `.png` and `.res.json` in `pages/`, such as `scene-<Name>.png` and `scene-<Name>.res.json` for a hybrid ad's scene. Then run `generate.py` and `render.py`. Tell the user how for each ad you hand over with a failed check.
+To draw an image again, delete its `.png` and `.res.json` in `pages/`, such as `scene-<Name>.png` and `scene-<Name>.res.json` for a hybrid ad's scene. Then take redo steps 3 and 4. For each ad you hand over with a failed check, tell the user these steps.
 
 ## 6. Ad text
 
