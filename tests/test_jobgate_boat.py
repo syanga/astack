@@ -278,6 +278,7 @@ class SourceTests(BoatTest):
         (self.repo / "private/people.csv").write_text("name,email\nAda,ada@example.com\n")
         for name in ("here", "again"):
             (self.repo / "private" / name).symlink_to(".")
+        (self.repo / "private/itself").symlink_to("itself")
         result = self.run_here(REPORT)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["where"], "boat", result.stderr)
@@ -333,6 +334,42 @@ class SourceTests(BoatTest):
         self.assertIn("copy.txt", result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere")
         self.assertEqual(self.calls("new"), [])
+
+    def test_private_content_that_a_later_commit_stores_with_crlf_endings_keeps_the_run_here(self):
+        (self.repo / ".gitattributes").write_text("copy.txt -text\n")
+        (self.repo / "private.txt").write_bytes(b"name,email\nAda,ada@example.com\n")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private.txt"]\n')
+        self.commit("add private data")
+        (self.repo / "copy.txt").write_bytes(b"name,email\r\nAda,ada@example.com\r\n")
+        self.git("rm", "-q", "private.txt")
+        self.commit("keep a checked-out copy with CRLF endings")
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("copy.txt", result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere")
+        self.assertEqual(self.calls("new"), [])
+
+    def test_a_submodule_under_an_excluded_path_does_not_stop_the_run(self):
+        (self.repo / "private/sub").mkdir(parents=True)
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
+        self.git("update-index", "--add", "--cacheinfo", "160000,{},private/sub".format("ab" * 20))
+        self.commit("add a submodule under private")
+        self.assertIn("160000 commit", self.git("ls-tree", "HEAD", "private/sub"))
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["where"], "boat", result.stderr)
+
+    def test_an_excluded_file_name_with_a_newline_is_checked(self):
+        (self.repo / "private").mkdir()
+        (self.repo / "private/a\nb.csv").write_text("name,email\nAda,ada@example.com\n")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
+        self.commit("add private data with an odd name")
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["where"], "boat", result.stderr)
+        shutil.copyfile(str(self.repo / "private/a\nb.csv"), str(self.repo / "copy.csv"))
+        result = self.run_here(REPORT)
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere", result.stderr)
 
     def test_a_sha256_repository_runs_on_the_box(self):
         shutil.rmtree(str(self.repo / ".git"))
@@ -734,6 +771,21 @@ class FallbackTests(BoatTest):
         self.assertRegex(result.stderr, r"BOAT RUN FAILED during run on box bx_\w+: boat killed the run step with SIGKILL "
                                         r"and did not say why \(the box is gone\)")
         self.assertNotIn("retries once", result.stderr)
+
+    def test_a_kill_followed_by_lost_contact_is_not_retried(self):
+        self.set_machine(memory=64 * GIB, cores=8, psi=CALM, boat_lost_seconds=1)
+        self.plan(oom=["run"], status_fail=[True] * 10)
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 128 + signal.SIGKILL, result.stderr)
+        self.assertFalse((self.repo / "ran-here").exists())
+        self.assertIn("did not say why (lost contact with the box for 1s)", result.stderr)
+
+    def test_a_kill_that_boat_cannot_explain_during_setup_is_retried(self):
+        self.plan(oom=["setup"], status_gone=[True])
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("retries once on a new box", result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["where"], "boat")
 
     def test_a_command_that_runs_out_of_memory_on_the_box_is_reported_and_not_run_again(self):
         self.plan(oom=["run"])

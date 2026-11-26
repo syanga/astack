@@ -37,7 +37,7 @@ import tarfile
 import tempfile
 import threading
 import time
-from typing import BinaryIO, Callable, ContextManager, Iterator, Literal, NamedTuple, NoReturn
+from typing import Callable, Iterator, Literal, NamedTuple, NoReturn
 
 sys.dont_write_bytecode = True
 try:
@@ -112,6 +112,7 @@ SECRET_NAMES = (".env", ".env.*", "*.env", ".envrc", "*~", "*.pem", "*.key", "*.
                 "*.ppk", "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*")
 REPO_PATH = re.compile(r"[^*?\[\]!#\\\n\x00]+")
 COMMIT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
+GITLINK_MODE = "160000"
 
 Dirty = Literal["yes", "no", "unknown"]
 
@@ -1126,54 +1127,101 @@ def commit_worktree(root: Path, scratch: Path, store: Path, objects: str, head: 
     return git(["commit-tree", tree, "-p", head, "-m", "jobgate: uncommitted changes"], cwd=root, env=env).strip(), left_out
 
 
-def lf_chunks(stream: BinaryIO) -> Iterator[bytes]:
+def line_ending_forms(chunks: Iterator[bytes]) -> Iterator[tuple[bytes, bytes]]:
     held = b""
-    for chunk in iter(lambda: stream.read(READ_BYTES), b""):
+    for chunk in chunks:
         data = held + chunk
         held = b"\r" if data.endswith(b"\r") else b""
-        yield data[:len(data) - len(held)].replace(b"\r\n", b"\n")
-    yield held
+        lf = data[:len(data) - len(held)].replace(b"\r\n", b"\n")
+        yield lf, lf.replace(b"\n", b"\r\n")
+    yield held, held
 
 
-def lf_object_id(read: Callable[[], ContextManager[BinaryIO]], size: int, algorithm: str) -> str | None:
-    with read() as stream:
-        normalized = sum(len(chunk) for chunk in lf_chunks(stream))
-    if normalized == size:
-        return None
-    digest = hashlib.new(algorithm, b"blob %d\0" % normalized)
-    with read() as stream:
-        for chunk in lf_chunks(stream):
-            digest.update(chunk)
-    return digest.hexdigest()
+def content_ids(read: Callable[[], Iterator[bytes]], algorithm: str, as_is: bool) -> set[str]:
+    size = lf_size = crlf_size = 0
+
+    def counted() -> Iterator[bytes]:
+        nonlocal size
+        for chunk in read():
+            size += len(chunk)
+            yield chunk
+
+    for lf, crlf in line_ending_forms(counted()):
+        lf_size += len(lf)
+        crlf_size += len(crlf)
+    raw = hashlib.new(algorithm, b"blob %d\0" % size) if as_is else None
+    lf_digest = hashlib.new(algorithm, b"blob %d\0" % lf_size) if lf_size != size else None
+    crlf_digest = hashlib.new(algorithm, b"blob %d\0" % crlf_size) if crlf_size != size else None
+    if raw is None and lf_digest is None and crlf_digest is None:
+        return set()
+
+    def tapped() -> Iterator[bytes]:
+        for chunk in read():
+            if raw is not None:
+                raw.update(chunk)
+            yield chunk
+
+    for lf, crlf in line_ending_forms(tapped()):
+        if lf_digest is not None:
+            lf_digest.update(lf)
+        if crlf_digest is not None:
+            crlf_digest.update(crlf)
+    return {digest.hexdigest() for digest in (raw, lf_digest, crlf_digest) if digest is not None}
 
 
-@contextlib.contextmanager
-def blob_stream(store: Path, blob: str) -> Iterator[BinaryIO]:
-    process = subprocess.Popen(["git", "--git-dir", str(store), "cat-file", "blob", blob], stdin=subprocess.DEVNULL,
-                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    assert process.stdout is not None
-    try:
-        yield process.stdout
-    finally:
-        process.stdout.close()
-        code = process.wait()
-    if code != 0:
-        raise BoatUnavailable("git", "git cat-file could not read blob {}".format(blob))
+class BlobReader:
+    def __init__(self, store: Path) -> None:
+        self.process = subprocess.Popen(["git", "--git-dir", str(store), "cat-file", "--batch"], stdin=subprocess.PIPE,
+                                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.timer = threading.Timer(GIT_SECONDS, self.process.kill)
+        self.timer.start()
+
+    def chunks(self, blob: str) -> Iterator[bytes]:
+        stdin, stdout = self.process.stdin, self.process.stdout
+        assert stdin is not None and stdout is not None
+        stdin.write(blob.encode() + b"\n")
+        stdin.flush()
+        header = stdout.readline().split()
+        if len(header) != 3 or header[1] != b"blob":
+            raise BoatUnavailable("git", "git cat-file cannot read {}, which the exclude check needs: {}".format(
+                blob, b" ".join(header).decode(errors="replace") or "no answer"))
+        remaining = int(header[2])
+        while remaining:
+            chunk = stdout.read(min(READ_BYTES, remaining))
+            if not chunk:
+                raise BoatUnavailable("git", "git cat-file stopped while it read {}".format(blob))
+            remaining -= len(chunk)
+            yield chunk
+        stdout.read(1)
+
+    def close(self) -> None:
+        self.timer.cancel()
+        for stream in (self.process.stdin, self.process.stdout):
+            if stream is not None:
+                with contextlib.suppress(OSError):
+                    stream.close()
+        self.process.kill()
+        self.process.wait()
 
 
-def stat_if_present(path: str) -> os.stat_result | None:
-    try:
-        return os.stat(path)
-    except FileNotFoundError:
-        return None
-    except OSError as error:
-        if error.errno == errno.ELOOP:
-            return None
-        raise
+def file_chunks(descriptor: int, size: int, path: str) -> Iterator[bytes]:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    total = 0
+    while True:
+        chunk = os.read(descriptor, READ_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        yield chunk
+    if total != size:
+        raise OSError(errno.EAGAIN, "the file changed while jobgate read it", path)
 
 
-def worktree_files(root: Path, settings: BoatSettings) -> list[tuple[str, int]]:
-    files: list[tuple[str, int]] = []
+def missing(error: OSError) -> bool:
+    return isinstance(error, FileNotFoundError) or error.errno == errno.ELOOP
+
+
+def worktree_paths(root: Path, settings: BoatSettings) -> Iterator[str]:
     walked: set[tuple[int, int]] = set()
 
     def fail(error: OSError) -> NoReturn:
@@ -1181,10 +1229,14 @@ def worktree_files(root: Path, settings: BoatSettings) -> list[tuple[str, int]]:
 
     for excluded in settings.exclude:
         top = str(root / excluded)
-        info = stat_if_present(top)
-        if info is not None and stat.S_ISREG(info.st_mode):
-            files.append((top, info.st_size))
-        if info is None or not stat.S_ISDIR(info.st_mode):
+        try:
+            is_directory = stat.S_ISDIR(os.stat(top).st_mode)
+        except OSError as error:
+            if missing(error):
+                continue
+            raise
+        if not is_directory:
+            yield top
             continue
         for directory, subdirectories, names in os.walk(top, onerror=fail, followlinks=True):
             identity = os.stat(directory)
@@ -1192,31 +1244,50 @@ def worktree_files(root: Path, settings: BoatSettings) -> list[tuple[str, int]]:
                 subdirectories.clear()
                 continue
             walked.add((identity.st_dev, identity.st_ino))
-            for name in names:
-                path = os.path.join(directory, name)
-                info = stat_if_present(path)
-                if info is not None and stat.S_ISREG(info.st_mode):
-                    files.append((path, info.st_size))
-    return files
+            yield from (os.path.join(directory, name) for name in names)
 
 
-def private_blobs(source: Source, settings: BoatSettings, root: Path) -> set[str]:
+def worktree_ids(root: Path, settings: BoatSettings, algorithm: str) -> set[str]:
+    ids: set[str] = set()
+    for path in worktree_paths(root, settings):
+        try:
+            descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        except OSError as error:
+            if missing(error):
+                continue
+            raise
+        try:
+            info = os.fstat(descriptor)
+            if stat.S_ISREG(info.st_mode):
+                ids |= content_ids(functools.partial(file_chunks, descriptor, info.st_size, path), algorithm, True)
+        finally:
+            os.close(descriptor)
+    return ids
+
+
+def history_blobs(source: Source, settings: BoatSettings) -> set[str]:
     commits = git(["rev-list", RUN_REF], git_dir=source.store)
     changes = git(["--literal-pathspecs", "diff-tree", "--stdin", "-r", "-m", "--root", "--no-renames", "--no-commit-id",
                    "--raw", "--no-abbrev", "--", *settings.exclude], git_dir=source.store, stdin_text=commits)
-    history = sorted({field for line in changes.splitlines() if line.startswith(":") for field in line.split()[2:4]
-                      if COMMIT_ID.fullmatch(field) and field.strip("0")})
-    sizes = git(["cat-file", "--batch-check=%(objectname) %(objectsize)"], git_dir=source.store,
-                stdin_text="".join(blob + "\n" for blob in history)).split() if history else []
-    sources = [(functools.partial(blob_stream, source.store, blob), int(size))
-               for blob, size in zip(sizes[::2], sizes[1::2])]
-    files = worktree_files(root, settings)
+    blobs = set()
+    for line in changes.splitlines():
+        fields = line.split("\t", 1)[0].split()
+        if len(fields) < 4 or not line.startswith(":"):
+            continue
+        for mode, blob in ((fields[0][1:], fields[2]), (fields[1], fields[3])):
+            if mode not in ("000000", GITLINK_MODE) and COMMIT_ID.fullmatch(blob):
+                blobs.add(blob)
+    return blobs
+
+
+def private_blobs(source: Source, settings: BoatSettings, root: Path) -> set[str]:
+    history = history_blobs(source, settings)
     blobs = set(history)
-    if files:
-        blobs.update(git(["hash-object", "--no-filters", "--stdin-paths"], cwd=root,
-                         stdin_text="".join(path + "\n" for path, _ in files)).split())
-        sources += [(functools.partial(open, path, "rb"), size) for path, size in files]
-    blobs.update(blob for blob in (lf_object_id(read, size, source.object_format) for read, size in sources) if blob)
+    if history:
+        with contextlib.closing(BlobReader(source.store)) as reader:
+            for blob in sorted(history):
+                blobs |= content_ids(functools.partial(reader.chunks, blob), source.object_format, False)
+    blobs |= worktree_ids(root, settings, source.object_format)
     blobs.discard(git(["hash-object", "--stdin"], git_dir=source.store, stdin_text="").strip())
     return blobs
 
@@ -1542,6 +1613,7 @@ class Box:
         lost_since: float | None = None
         ended = False
         killed: dict | None = None
+        lost = float(test_readings().get("boat_lost_seconds") or BOAT_LOST_SECONDS)
         while True:
             frame = self.attach(pid, printed, relay)
             if frame is not None and not (frame.get("signal") and "oomKilled" not in frame):
@@ -1551,8 +1623,8 @@ class Box:
                 status = self.status(step, pid)
                 if status is None:
                     lost_since = lost_since or time.monotonic()
-                    if time.monotonic() - lost_since >= BOAT_LOST_SECONDS:
-                        raise BoatDied(step, "lost contact with the box for {}".format(duration(BOAT_LOST_SECONDS)))
+                    if time.monotonic() - lost_since >= lost:
+                        raise BoatDied(step, "lost contact with the box for {}".format(duration(lost)))
             except BoatDied as died:
                 if step == "run" and killed is not None and killed.get("signal") == "SIGKILL":
                     raise BoatDied(step, "boat killed the run step with SIGKILL and did not say why ({}). It may have "

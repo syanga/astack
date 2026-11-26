@@ -290,22 +290,26 @@ that read Git history therefore work on the box.
   excluded paths, in every commit of the history. The box gets the file names,
   but its checkout leaves the files out. A Git command on the box that reads
   their contents fails.
-- Before it starts a box, jobgate looks for private content at other paths in
-  the history and in the uncommitted changes that the box would get. Private
-  content is what any commit ever had under an excluded path, and every file
-  under an excluded path now. That includes files that `.gitignore` hides and
-  files that a symbolic link leads to. Examples are a file that a commit moved
-  into an excluded directory, and an untracked copy of an excluded file.
-  jobgate compares private content as it is, and also with each CRLF line
-  ending turned into LF, as Git stores text files. It reads each file under the
-  excluded paths on every run.
-  If it finds such content, the command runs on this machine. jobgate prints up
-  to 5 such paths to add to `exclude`, and the number of the others. It names
-  one path for each such content. After you add those paths, the next run can
-  name another path with the same content. Empty files do not count. When
-  jobgate cannot read a file or directory under an excluded path, the command
-  also runs on this machine. A copy that another Git filter changes, such as
-  `working-tree-encoding` or a clean filter, can still reach the box.
+- Before it starts a box, jobgate also looks for copies of private content at
+  other paths, in the history and in the uncommitted changes that the box
+  would get. Private content is what any commit ever had under an excluded
+  path, and every file under an excluded path now. That includes files that
+  `.gitignore` hides and files that a symbolic link leads to. Examples are a
+  file that a commit moved into an excluded directory, and an untracked copy of
+  an excluded file. jobgate reads each file under the excluded paths on every
+  run.
+  If it finds a copy, the command runs on this machine. jobgate prints up to 5
+  such paths to add to `exclude`, and the number of the others. It names one
+  path for each such content. After you add those paths, the next run can name
+  another path with the same content. Empty files and submodules do not count.
+  When jobgate cannot read a file or directory under an excluded path, the
+  command also runs on this machine.
+- The copy check is a best effort. It finds a copy only in one of three forms:
+  the same bytes, the bytes with each CRLF line ending turned into LF, or the
+  bytes with each LF turned into CRLF. Git's line-ending conversion stores and
+  checks out files in these forms. A copy in any other form reaches the box.
+  Examples are an edited copy, and a copy that `working-tree-encoding` or a
+  clean filter changes.
 - When the box starts from a snapshot, the bundle holds only the commits that
   the snapshot lacks.
 - The box checks out no submodules. A submodule's directory is empty on the
@@ -447,8 +451,9 @@ When the box runs out of memory during the run step, jobgate prints the
 `BOAT RUN FAILED` and `boat log` lines, deletes the box, and exits with 137. It
 does not retry the command and does not run it on this machine, because the
 command would use the same memory here. jobgate does the same when boat kills
-the run step with SIGKILL and does not say why before the box disappears or
-jobgate loses contact with it for 10 minutes.
+the run step with SIGKILL and jobgate cannot learn why. That happens when the
+box disappears, or jobgate cannot reach the box for 10 minutes, before boat
+says whether the box ran out of memory.
 
 Each log holds everything that the box printed during one attempt, and
 jobgate's boat messages. It also holds the arguments, exit code, and output of
@@ -553,7 +558,7 @@ code of `taskpolicy`.
 | `JOBGATE_RUN` | jobgate sets it to the path of the run's file. A nested call reads it to find the outer run. |
 | `HOME` | jobgate takes `~` from the password database instead, so runs under every `HOME` share one configuration, queue, and results log. It reads `HOME` only when the account has no entry there. jobgate also ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. |
 | `JOBGATE_HOME` | Tests only. Replaces the account's home directory, which holds the configuration, the queue, and the results log. With a real systemd user session, a run that sets it still sets the real `jobgate.slice` cap from the `memory_share` it finds there. That cap applies to all of the user's runs, so set this variable only with a stand-in `systemctl` on `PATH`, as jobgate's tests do. |
-| `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with readings that replace the OS readings: `memory`, `cores`, `psi` or `darwin_level`, and `meminfo` or `vm_stat` text. jobgate reads `memory` and `cores` once per run. It reads the pressure and available-memory readings before each admission attempt. A `cgroup` value names a directory that stands in for the scope's cgroup. A `boat_silent_seconds` value replaces the 60 seconds that jobgate waits for output from `boat exec --attach`. With a real systemd user session, a run that uses this file still sets the real `jobgate.slice` cap from its `memory` reading. That cap applies to all of the user's runs, so use this file only with a stand-in `systemctl` on `PATH`, as jobgate's tests do. |
+| `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with readings that replace the OS readings: `memory`, `cores`, `psi` or `darwin_level`, and `meminfo` or `vm_stat` text. jobgate reads `memory` and `cores` once per run. It reads the pressure and available-memory readings before each admission attempt. A `cgroup` value names a directory that stands in for the scope's cgroup. A `boat_silent_seconds` value replaces the 60 seconds that jobgate waits for output from `boat exec --attach`. A `boat_lost_seconds` value replaces the 10 minutes after which jobgate stops trying to reach a box. With a real systemd user session, a run that uses this file still sets the real `jobgate.slice` cap from its `memory` reading. That cap applies to all of the user's runs, so use this file only with a stand-in `systemctl` on `PATH`, as jobgate's tests do. |
 
 ## Files
 
