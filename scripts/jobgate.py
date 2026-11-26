@@ -93,6 +93,7 @@ BOX_UPLOAD = ".jobgate-upload.tgz"
 BOX_FORMAT = "1"
 BOX_MEMORY_SHARE = 0.9
 BOX_SETUP_FAILED = 4
+BOX_REFUSED = 5
 BOX_PREPARE = ('set -e; run="$HOME/.jobgate/run"; rm -rf "$run"; mkdir -p "$run"; tar -xzf "$HOME/{0}" -C "$run"; '
                'rm -f "$HOME/{0}"; exec python3 "$run/jobgate.py" _box prepare "$run/run.json"').format(BOX_UPLOAD)
 BOX_RUN = 'exec python3 "$HOME/.jobgate/run/jobgate.py" _box run "$HOME/.jobgate/run/run.json"'
@@ -1562,6 +1563,9 @@ def boat_attempt(cli: str, settings: BoatSettings, source: Source, plan: Plan, s
         code = box.phase("setup", BOX_PREPARE, Relay(log))
         if code == BOX_SETUP_FAILED:
             raise BoatDied("setup", "the setup script {} failed".format(settings.setup))
+        if code == BOX_REFUSED:
+            raise BoatUnavailable("box_refused", "jobgate on the box refused to run [{}]. For a box with too little "
+                                  "memory, set a larger type in [boat]".format(profile.name))
         if code != 0:
             raise BoatDied("setup", "the box could not check out the commit (exit {})".format(code))
         if not from_snapshot:
@@ -1696,6 +1700,19 @@ def box_prepare(spec: dict, run_dir: Path, repo: Path) -> int:
     for args in steps:
         if not box_git(repo, *args):
             return 1
+    config = machine_config()
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("memory_share = {}\n".format(BOX_MEMORY_SHARE))
+    try:
+        profile_config = find_config(repo / spec["cwd"])
+        profile = load_profile(profile_config, read_toml(profile_config), spec["profile"])
+        host = machine()
+        if profile.memory(1) > host.share:
+            raise Refusal("[{}] needs {} for 1 worker, more than the {} that this box gives commands".format(
+                profile.name, size(profile.memory(1)), size(host.share)))
+    except Refusal as refusal:
+        say(str(refusal))
+        return BOX_REFUSED
     state_path = Path.home() / ".jobgate/state.json"
     if read_json(state_path).get("setup_key") != spec["setup_key"]:
         say("the box runs the setup script {}".format(spec["setup"]))
@@ -1708,9 +1725,6 @@ def box_prepare(spec: dict, run_dir: Path, repo: Path) -> int:
 
 
 def box_run(spec: dict, repo: Path) -> int:
-    config = machine_config()
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text("memory_share = {}\n".format(BOX_MEMORY_SHARE))
     env = dict(os.environ, PATH=os.pathsep.join([str(repo / entry) for entry in spec["path"]] +
                                                 [os.environ.get("PATH", os.defpath)]))
     argv = [sys.executable, str(Path(__file__).resolve()), "run", "--local",

@@ -337,6 +337,18 @@ class FallbackTests(BoatTest):
         third = self.run_here(REPORT)
         self.assertEqual(self.result_fields(third.stderr)["where"], "boat", third.stderr)
 
+    def test_a_profile_too_big_for_the_box_is_reported_and_left_to_this_machine(self):
+        box_machine = self.root / "box-machine.json"
+        box_machine.write_text(json.dumps({"memory": 2 * 1024 ** 3, "cores": 2}))
+        self.env["FAKE_BOAT_BOX_MACHINE"] = str(box_machine)
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.repo / "ran-here").exists())
+        self.assertRegex(result.stderr, r"BOAT RUN FAILED during setup on box bx_\w+: jobgate on the box refused")
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "box_refused")
+        self.assertEqual(len(self.calls("delete")), 1)
+        self.assertEqual(self.boxes_left(), [])
+
     def test_a_file_error_on_this_machine_before_the_box_starts_leaves_the_run_to_this_machine(self):
         template = self.root / "git-template"
         (template / "objects/info/alternates").mkdir(parents=True)

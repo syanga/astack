@@ -41,7 +41,9 @@ def box(box_id):
 
 def box_env(path):
     home = str(path / "home")
-    return dict(os.environ, HOME=home, JOBGATE_HOME=home, PATH=os.environ["FAKE_BOAT_BOX_PATH"])
+    machine = os.environ.get("FAKE_BOAT_BOX_MACHINE", os.environ.get("JOBGATE_MACHINE_FILE", ""))
+    return dict(os.environ, HOME=home, JOBGATE_HOME=home, PATH=os.environ["FAKE_BOAT_BOX_PATH"],
+                JOBGATE_MACHINE_FILE=machine)
 
 
 def option(args, name):
