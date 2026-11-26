@@ -78,6 +78,7 @@ BOAT_TABLE = "boat"
 BOAT_KEYS = ("setup", "setup_inputs", "type", "exclude")
 BOAT_TYPES = ("small", "default", "large", "xlarge")
 BOAT_TTL_SECONDS = 3600
+BOAT_NEW_SECONDS = 600
 BOAT_EXTEND_SECONDS = 600
 BOAT_OFF_SECONDS = 3600
 BOAT_SAVE_SECONDS = 900
@@ -965,7 +966,7 @@ def oom_kills(cgroup: Path) -> int | None:
 
 def git_state(repo: Path) -> tuple[str, Dirty]:
     head = run_captured(["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", "HEAD"])
-    status = run_captured(["git", "-C", str(repo), "status", "--porcelain"])
+    status = run_captured(["git", "-C", str(repo), "--no-optional-locks", "status", "--porcelain"])
     commit = head.stdout.strip() if head.returncode == 0 else "none"
     dirty: Dirty = "unknown" if status.returncode != 0 else ("yes" if status.stdout.strip() else "no")
     return commit, dirty
@@ -1009,13 +1010,15 @@ class BoatUnavailable(Exception):
         self.code = code
         self.reason = reason
         self.status = status
+        self.box: str | None = None
 
 
 class BoatDied(Exception):
-    def __init__(self, step: str, reason: str) -> None:
+    def __init__(self, step: str, reason: str, out_of_memory: bool = False) -> None:
         super().__init__(reason)
         self.step = step
         self.reason = reason
+        self.out_of_memory = out_of_memory
         self.box: str | None = None
 
 
@@ -1276,9 +1279,7 @@ class Box:
             args = ["new", "--type", box_type, "--no-env", "--fail-fast", "--ttl", str(BOAT_TTL_SECONDS), "--json"]
             if from_snapshot:
                 args += ["--from", name, "--no-snapshots"]
-            result, objects = self.call(args, 600)
-            self.id = next((value["id"] for value in objects if isinstance(value.get("id"), str) and value["id"]),
-                           self.id)
+            result, objects = self.new(args)
             failure = boat_failure(result, objects)
             if failure is None and self.id is not None:
                 return from_snapshot
@@ -1287,6 +1288,39 @@ class Box:
             failure = failure or {"code": "no_box", "error": "boat new printed no box id"}
             raise BoatUnavailable(str(failure.get("code") or "boat_failed"), describe(failure), failure.get("status"))
         raise AssertionError("unreachable")
+
+    def new(self, args: list[str]) -> tuple[subprocess.CompletedProcess, list[dict]]:
+        argv = [self.cli, *args]
+        lines: list[str] = []
+        with tempfile.TemporaryFile() as errors:
+            try:
+                process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors,
+                                           env=boat_env(), text=True, encoding="utf-8", errors="replace")
+            except OSError as error:
+                return subprocess.CompletedProcess(
+                    argv, 127, "", "cannot run {}: {}".format(argv[0], error.strerror or error)), []
+            output = process.stdout
+            assert output is not None
+            timer = threading.Timer(BOAT_NEW_SECONDS, process.kill)
+            timer.start()
+            try:
+                for line in output:
+                    lines.append(line)
+                    with contextlib.suppress(ValueError):
+                        value = json.loads(line)
+                        if isinstance(value, dict) and isinstance(value.get("id"), str) and value["id"]:
+                            self.id = value["id"]
+                process.wait()
+            finally:
+                timer.cancel()
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+                output.close()
+            errors.seek(0)
+            stderr = errors.read().decode("utf-8", "replace")
+        result = subprocess.CompletedProcess(argv, process.returncode, "".join(lines), stderr)
+        return result, boat_objects(result)
 
     def state(self) -> dict:
         _, objects = self.call(["exec", str(self.id), "--json", "--", "sh", "-c", 'cat "$HOME/.jobgate/state.json"'], 120)
@@ -1322,6 +1356,8 @@ class Box:
         while True:
             frame = self.attach(pid, printed, relay)
             if frame is not None:
+                if frame.get("signal") and "oomKilled" not in frame:
+                    frame = dict(frame, **(self.status(step, pid) or {}))
                 return self.exit_code(step, frame)
             status = self.status(step, pid)
             if status is None:
@@ -1382,7 +1418,7 @@ class Box:
     @staticmethod
     def exit_code(step: str, info: dict) -> int:
         if info.get("oomKilled"):
-            raise BoatDied(step, "the box ran out of memory and killed the {} step".format(step))
+            raise BoatDied(step, "the box ran out of memory and killed the {} step".format(step), step == "run")
         code = info.get("exitCode")
         if isinstance(code, int) and not info.get("signal"):
             return code
@@ -1467,7 +1503,7 @@ def turn_boat_off(unavailable: BoatUnavailable) -> None:
 class BoatRun(NamedTuple):
     code: int
     result: dict
-    started: float
+    started: float | None
 
 
 def boat_attempt(cli: str, settings: BoatSettings, source: Source, plan: Plan, spec: dict, scratch: Path,
@@ -1495,8 +1531,8 @@ def boat_attempt(cli: str, settings: BoatSettings, source: Source, plan: Plan, s
         started = time.monotonic()
         relay = Relay(log)
         return BoatRun(box.phase("run", BOX_RUN, relay), relay.result(), started)
-    except BoatDied as died:
-        died.box = box.id
+    except (BoatDied, BoatUnavailable) as failure:
+        failure.box = box.id
         raise
     finally:
         if heartbeat is not None:
@@ -1546,6 +1582,9 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
             try:
                 outcome = boat_attempt(cli, settings, source, plan, spec, scratch, log, profile)
             except BoatUnavailable as unavailable:
+                if unavailable.box is not None:
+                    log.note("BOAT RUN FAILED on box {}: {}".format(unavailable.box, unavailable.reason))
+                    log.note("boat log: {}".format(log.where))
                 log.note("boat cannot run {}, so it runs here: {}".format(profile.name, unavailable.reason))
                 if unavailable.status == BOAT_PAYMENT_STATUS or unavailable.code in BOAT_PAYMENT_CODES:
                     turn_boat_off(unavailable)
@@ -1553,9 +1592,13 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
             except BoatDied as died:
                 log.note("BOAT RUN FAILED during {} on box {}: {}".format(died.step, died.box or "none", died.reason))
                 log.note("boat log: {}".format(log.where))
-                log.note("{} retries once on a new box".format(profile.name) if attempt == 1 else
-                         "{} runs here instead".format(profile.name))
-                continue
+                if not died.out_of_memory:
+                    log.note("{} retries once on a new box".format(profile.name) if attempt == 1 else
+                             "{} runs here instead".format(profile.name))
+                    continue
+                log.note("jobgate does not retry a command that ran out of memory, and does not run it here. "
+                         "Set a larger type in [boat], or a larger worker_mem")
+                outcome = BoatRun(128 + signal.SIGKILL, {}, None)
             finally:
                 log.close()
             fields = outcome.result
@@ -1563,7 +1606,8 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
                 ("time", datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
                 ("profile", profile.name), ("where", "boat"), ("box", settings.type), ("repo", root),
                 ("commit", source.head), ("dirty", dirty), ("workers", fields.get("workers", "unknown")),
-                ("wait", "{}s".format(round(outcome.started - arrived))), ("peak", fields.get("peak", "unknown")),
+                ("wait", "unknown" if outcome.started is None else "{}s".format(round(outcome.started - arrived))),
+                ("peak", fields.get("peak", "unknown")),
                 ("stated", fields.get("stated", "unknown")),
                 *([("oom_kills", fields["oom_kills"])] if "oom_kills" in fields else []), ("exit", outcome.code),
             ])

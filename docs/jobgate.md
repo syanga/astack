@@ -350,6 +350,9 @@ is true:
 - boat refuses to start a box. Examples: no login (`unauthorized`), a full start
   limit (`rate_limited`), no ready machine (`no_ready_machine`), or a box type
   that the plan lacks (`trial_machine_class_not_allowed`).
+- boat creates a box but reports an error before the box is ready. jobgate
+  prints `BOAT RUN FAILED` with the box and a log, as in
+  [When a box dies partway](#when-a-box-dies-partway), and deletes the box.
 - boat refused a start for payment less than an hour ago. After an HTTP 402
   error, such as `billing_required`, or after `trial_compute_limit_reached`,
   jobgate skips boat for an hour. It keeps the end time in
@@ -367,7 +370,8 @@ A box dies partway when one of these happens:
 - The copy to the box fails.
 - The checkout or the setup script fails.
 - The box disappears.
-- boat kills a step's process, or the box runs out of memory.
+- boat kills a step's process, or the box runs out of memory during the setup
+  step.
 - jobgate cannot reach the box for 10 minutes.
 
 jobgate then prints the step, the box, the reason, and a log:
@@ -382,6 +386,11 @@ It deletes the box and tries once more on a new box. When the second box also
 dies partway, the command runs on this machine. A command that exits with an
 error on the box has not died. jobgate returns its exit code and does not run the
 command again.
+
+When the box runs out of memory during the run step, jobgate prints the
+`BOAT RUN FAILED` and `boat log` lines, deletes the box, and exits with 137. It
+does not retry the command and does not run it on this machine, because the
+command would use the same memory here.
 
 Each log holds everything that the box printed during one attempt, and
 jobgate's boat messages. `~/.cache/jobgate/boat/` keeps the last 20 logs.
@@ -430,7 +439,7 @@ time=2026-11-17T18:00:00Z profile=test where=local repo=/src/app commit=4f0c2d9e
 | `profile` | The profile name |
 | `where` | Where the run ran: `local` or `boat` |
 | `box` | On a boat run, the box type |
-| `fallback` | On a run that went to this machine instead of boat, the reason: a boat error code, `no_cli`, `git`, `no_commit`, `no_setup`, or `died` |
+| `fallback` | On a run that went to this machine instead of boat, the reason: a boat error code, `boat_failed` when the `boat` CLI exited with an error and no code, `no_box` when `boat new` printed no box id, `no_cli`, `git`, `no_commit`, `no_setup`, `died`, or `off` when the payment refusal that turned boat off had no code |
 | `repo` | The directory that contains `jobgate.toml` |
 | `commit` | `git rev-parse HEAD` when the run started, or `none` |
 | `dirty` | `yes` when `git status --porcelain` printed anything when the run started, `no` when it printed nothing, `unknown` outside Git |

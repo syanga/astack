@@ -49,12 +49,12 @@ def option(args, name):
 
 
 def new(args):
-    error = take("new")
-    if error:
-        fail(error["code"], error["status"], error["error"])
     source = option(args, "--from")
     if source is not None and not (STATE / "saved" / source).is_dir():
         fail("snapshot_not_found", 404, 'No saved snapshot "{}".'.format(source))
+    error = take("new")
+    if error and not error.get("after_created"):
+        fail(error["code"], error["status"], error["error"])
     count = len(list((STATE / "boxes").glob("bx_*"))) if (STATE / "boxes").is_dir() else 0
     box_id = "bx_{}{}".format(count + 1, os.getpid())
     path = STATE / "boxes" / box_id
@@ -64,6 +64,12 @@ def new(args):
     else:
         shutil.copytree(str(STATE / "saved" / source / "home"), str(path / "home"), symlinks=True)
     emit({"event": "created", "id": box_id, "ttlSeconds": int(option(args, "--ttl") or 0)})
+    if error:
+        fail(error["code"], error["status"], error["error"])
+    hold = take("hold_new")
+    if hold:
+        (STATE / "new-held").touch()
+        time.sleep(hold)
     emit({"event": "ready", "id": box_id, "state": "ready"})
 
 
@@ -109,6 +115,16 @@ def attach(path, pid):
         time.sleep(0.2)
         vanish(path)
         fail("not_found", 404, "the connection to the box closed")
+    out_of_memory = json.loads(plan_path.read_text()).get("oom", []) if plan_path.exists() else []
+    if out_of_memory and out_of_memory[0] == step:
+        take("oom")
+        try:
+            os.killpg(int(pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        (procs / "{}.oom".format(pid)).touch()
+        emit({"exitCode": None, "signal": "SIGKILL", "status": "exited", "type": "exit"})
+        sys.exit(137)
     while True:
         finished = (procs / "{}.exit".format(pid)).exists()
         for kind, suffix in (("stdout", "out"), ("stderr", "err")):
@@ -131,6 +147,9 @@ def attach(path, pid):
 
 
 def status(path, pid):
+    if (path / "procs" / "{}.oom".format(pid)).exists():
+        emit({"running": False, "exitCode": None, "oomKilled": True, "signal": "SIGKILL"})
+        return
     exit_file = path / "procs" / "{}.exit".format(pid)
     code = int(exit_file.read_text()) if exit_file.exists() else None
     emit({"running": code is None, "exitCode": code, "oomKilled": False, "signal": None})

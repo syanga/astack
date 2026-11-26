@@ -24,7 +24,7 @@ print("commits", subprocess.run(["git", "rev-list", "--count", "HEAD"], capture_
 print("workers", os.environ["TEST_WORKERS"])
 sys.exit(int(sys.argv[1]) if len(sys.argv) > 1 else 0)
 '''
-SETUP_RUNS = "import os; print(open(os.path.expanduser('~/setup-runs')).read().count('setup'))"
+SETUP_RUNS = "import os; print(open(os.path.expanduser('~/setup-runs')).read().strip())"
 
 
 class BoatTest(JobgateTest):
@@ -165,6 +165,9 @@ class SourceTests(BoatTest):
         (self.repo / "notes.txt~").write_text("backup\n")
         before = [self.git(*arguments) for arguments in (("rev-parse", "HEAD"), ("status", "--porcelain"),
                                                           ("diff", "--cached"))]
+        later = os.stat(str(self.repo / "boat-setup.sh")).st_mtime + 10
+        os.utime(str(self.repo / "boat-setup.sh"), (later, later))
+        index = (self.repo / ".git/index").read_bytes()
         show = ("import os; print(open('app.py').read().strip()); "
                 "print(*(os.path.exists(name) for name in ('new_module.py', '.env', 'notes.txt~')))")
         result = self.run_here(show)
@@ -172,6 +175,7 @@ class SourceTests(BoatTest):
         self.assertEqual(result.stdout.splitlines(), ["version = 3", "True False False"])
         self.assertIn("left out 2 untracked files that may hold secrets: .env, notes.txt~", result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["dirty"], "yes")
+        self.assertEqual((self.repo / ".git/index").read_bytes(), index)
         self.assertEqual([self.git(*arguments) for arguments in (("rev-parse", "HEAD"), ("status", "--porcelain"),
                                                                   ("diff", "--cached"))], before)
 
@@ -193,17 +197,21 @@ class SourceTests(BoatTest):
         self.assertEqual(uploaded & private, set())
 
     def test_a_saved_snapshot_skips_the_setup_until_a_setup_input_changes(self):
+        (self.repo / "boat-setup.sh").write_text('od -An -N8 -tx1 /dev/urandom | tr -d " \\n" >> "$HOME/setup-runs"\n'
+                                                 'echo >> "$HOME/setup-runs"\n')
         self.boat_settings('setup = "boat-setup.sh"\nsetup_inputs = ["requirements.txt"]\n')
         (self.repo / "requirements.txt").write_text("pytest==8\n")
         self.commit("pin")
         first, second = self.run_here(SETUP_RUNS), self.run_here(SETUP_RUNS)
-        self.assertEqual((first.stdout.strip(), second.stdout.strip()), ("1", "1"), first.stderr + second.stderr)
+        self.assertEqual(len(first.stdout.split()), 1, first.stderr)
+        self.assertEqual(second.stdout, first.stdout, second.stderr)
         saved = self.saved_snapshots()
         self.assertEqual(len(saved), 1)
         (self.repo / "requirements.txt").write_text("pytest==9\n")
         self.commit("bump")
         third = self.run_here(SETUP_RUNS)
-        self.assertEqual((third.returncode, third.stdout.strip()), (0, "1"), third.stderr)
+        self.assertEqual((third.returncode, len(third.stdout.split())), (0, 1), third.stderr)
+        self.assertNotEqual(third.stdout, second.stdout)
         self.assertEqual(len(self.saved_snapshots()), 1)
         self.assertNotEqual(self.saved_snapshots(), saved)
 
@@ -225,6 +233,18 @@ class FallbackTests(BoatTest):
                 self.assertEqual((fields["where"], fields["fallback"]), ("local", code))
                 self.assertIn(message, result.stderr)
 
+    def test_a_box_that_boat_creates_but_cannot_start_is_reported_deleted_and_left_to_this_machine(self):
+        self.plan(new=[{"code": "boot_failed", "status": 500, "error": "the box did not boot", "after_created": True}])
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.repo / "ran-here").exists())
+        self.assertRegex(result.stderr, r"BOAT RUN FAILED .*on box bx_\w+: the box did not boot")
+        logs = re.findall(r"^jobgate: boat log: (.+)$", result.stderr, re.MULTILINE)
+        self.assertIn("the box did not boot", Path(logs[0]).read_text())
+        fields = self.result_fields(result.stderr)
+        self.assertEqual((fields["where"], fields["fallback"]), ("local", "boot_failed"))
+        self.assertEqual(self.boxes_left(), [])
+
     def test_runs_here_without_the_boat_cli(self):
         (self.fake_bin / "boat").unlink()
         result = self.run_here(REPORT)
@@ -236,11 +256,13 @@ class FallbackTests(BoatTest):
     def test_a_payment_error_turns_boat_off_for_an_hour(self):
         self.plan(new=[{"code": "billing_required", "status": 402,
                         "error": "The included time is used and the wallet is empty."}])
-        first, second = self.run_here(REPORT), self.run_here(REPORT)
+        first = self.run_here(REPORT)
+        starts = len(self.calls("new"))
+        second = self.run_here(REPORT)
         self.assertEqual([self.result_fields(result.stderr)["fallback"] for result in (first, second)],
                          ["billing_required", "billing_required"])
         self.assertIn("boat is off until", second.stderr)
-        self.assertEqual(len(self.calls("new")), 1)
+        self.assertEqual(len(self.calls("new")), starts)
 
     def test_a_box_that_dies_once_is_replaced_by_a_new_box(self):
         self.plan(vanish=["setup"])
@@ -276,6 +298,29 @@ class FallbackTests(BoatTest):
         self.assertIn("cannot install the toolchain", result.stderr)
         logs = re.findall(r"^jobgate: boat log: (.+)$", result.stderr, re.MULTILINE)
         self.assertIn("cannot install the toolchain", Path(logs[0]).read_text())
+        self.assertEqual(self.boxes_left(), [])
+
+    def test_a_command_that_runs_out_of_memory_on_the_box_is_reported_and_not_run_again(self):
+        self.plan(oom=["run"])
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 128 + signal.SIGKILL, result.stderr)
+        self.assertFalse((self.repo / "ran-here").exists())
+        self.assertRegex(result.stderr, r"BOAT RUN FAILED during run on box bx_\w+: .*ran out of memory")
+        self.assertEqual(len(self.calls("delete")), 1)
+        fields = self.result_fields(result.stderr)
+        self.assertEqual((fields["where"], fields["exit"]), ("boat", str(128 + signal.SIGKILL)))
+        self.assertEqual(self.boxes_left(), [])
+
+    def test_stopping_jobgate_while_boat_starts_the_box_deletes_the_box(self):
+        self.plan(hold_new=[60])
+        process = subprocess.Popen([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", "pass"],
+                                   cwd=str(self.repo), env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                   text=True, start_new_session=True)
+        self.addCleanup(lambda: process.poll() is None and process.kill())
+        wait_for((self.boat_dir / "new-held").exists)
+        os.killpg(process.pid, signal.SIGINT)
+        _, stderr = process.communicate(timeout=60)
+        self.assertEqual(process.returncode, 128 + signal.SIGINT, stderr)
         self.assertEqual(self.boxes_left(), [])
 
     def test_stopping_jobgate_deletes_the_box(self):

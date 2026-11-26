@@ -164,7 +164,8 @@ new box. After a second failure, the command runs on this machine.
 2. If the reason says the setup script failed, fix the script and run the
    command again. A changed script makes the next run set up a new box.
 3. If the reason says the box ran out of memory, set a larger `type` in
-   `[boat]`, or a larger `worker_mem` in the profile.
+   `[boat]`, or a larger `worker_mem` in the profile. jobgate does not retry a
+   command that ran out of memory, and does not run it on this machine.
 
 ## Follow a run
 
