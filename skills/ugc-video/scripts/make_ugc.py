@@ -305,7 +305,7 @@ def main():
     voice_changed = voice.exists() and voice_of(out) != meta.get("voice_id")
     if raw_v.exists() and pending.exists() and (a.clone_voice or (a.rerender and not voice_changed)):
         sys.exit(f"The last run downloaded its take but stopped before finishing. {again} to finish it.")
-    if pending.exists() and (a.rerender or a.clone_voice):
+    if pending.exists() and not raw_v.exists() and (a.rerender or a.clone_voice):
         sys.exit(f"A kie take is still pending. {again} to check it. To give it up, delete {pending} first; "
                  "the next take is paid for again.")
     new_take = (f"{out} has a take made with the old voice, so a new voice needs a new take. Pass --rerender "
