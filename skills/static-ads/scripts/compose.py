@@ -16,6 +16,8 @@ LOGO_GAP = 40
 CTA_GAP = 48
 MIN_CAP = 28
 ART_TOLERANCE = 0.02
+SCRIM_GAP = 0.02
+SCRIM_FADE = 0.05
 MAX_LINES = {"headline": 3, "subline": 2, "cta": 1}
 LEADING = {"headline": 1.05, "subline": 1.3}
 PILL_HEIGHT = 2.2
@@ -318,7 +320,7 @@ def rasterize(font, size, text):
         Path(temp, "t.txt").write_text(text, encoding="utf-8")
         Path(temp, "fonts.conf").write_text("<fontconfig></fontconfig>\n", encoding="utf-8")
         # drawtext falls back to a fontconfig match when the font file does not load; an empty config makes it fail.
-        data = ffmpeg("drawtext could not set type in " + font.name,
+        data = ffmpeg("{}; could not set type in {}".format(FFMPEG, font.name),
                       "-f", "lavfi", "-i", "color=c=black:s={}x{}:d=1,format=gray".format(width, height),
                       "-vf", "drawtext=fontfile=f.ttf:textfile=t.txt:fontsize={0}:fontcolor=white:x={0}:y={1}"
                       ":y_align=baseline:expansion=none:ft_load_flags=no_hinting".format(size, baseline),
@@ -427,10 +429,12 @@ def preview(folder, block, size):
 
 def describe(plan):
     sizes = {line.role: line.size for line in plan.lines}
-    return "compose {}:{} on {}, headline {}x{}px, subline {}x{}px, cta {}px, logo {}".format(
+    return "compose {}:{} on {}, headline {}x{}px, subline {}x{}px, cta {}px, logo {}, art {:.0f}-{:.0f}%".format(
         *plan.copy.ratio, plan.copy.background, len(plan.copy.lines["headline"]), sizes["headline"],
         len(plan.copy.lines["subline"]), sizes["subline"], sizes["cta"],
-        plan.brand.logo.file if plan.brand.logo else "none")
+        plan.brand.logo.file if plan.brand.logo else "none",
+        100 * (plan.top / plan.height + SCRIM_GAP + SCRIM_FADE),
+        100 * (plan.bottom / plan.height - SCRIM_GAP - SCRIM_FADE))
 
 
 def near(samples, color, reach):
@@ -522,7 +526,7 @@ def render(plan, art, png, record):
     if len(pixels) != stride * height:
         raise ComposeError("ffmpeg decoded {} to {} bytes, not {}".format(art.name, len(pixels), stride * height))
     target = rgb(copy.background)
-    gap, fade = round(0.02 * height), round(0.05 * height)
+    gap, fade = round(SCRIM_GAP * height), round(SCRIM_FADE * height)
     solid_top, solid_bottom = plan.top + gap, plan.bottom - gap
     out, base, drawn = key(pixels, target, brand.accents, stride * solid_top, stride * solid_bottom)
     out[:stride * solid_top] = target * width * solid_top
@@ -579,3 +583,4 @@ def render(plan, art, png, record):
                  for line in plan.lines],
     }, indent=2) + "\n", encoding="utf-8")
     settings.replace(record)
+    return base is not None

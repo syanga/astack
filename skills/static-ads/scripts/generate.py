@@ -220,9 +220,17 @@ def wants_compose(request_path):
     return isinstance(request, dict) and "compose" in request
 
 
+def art_clash(request_path):
+    name = ad_name(request_path)
+    if name.lower().endswith(".art") and (request_path.parent / (name[:-4] + ".req.json")).is_file():
+        return "ad {} would share a file with the art of ad {}; rename it".format(name, name[:-4])
+    return None
+
+
 def load(request_path):
-    if ad_name(request_path).endswith(".art"):
-        raise ValueError("an ad name may not end in .art, which names a composed ad's art")
+    clash = art_clash(request_path)
+    if clash:
+        raise ValueError(clash)
     request = json.loads(request_path.read_text(encoding="utf-8"))
     if not isinstance(request, dict) or not isinstance(request.get("prompt"), str) or not request["prompt"]:
         raise ValueError("the request has no prompt")
@@ -260,7 +268,7 @@ def generate(request_path, backend, session):
     png = folder / (name + ".png")
     art = folder / (name + ".art.png")
     try:
-        if png.is_file() and png.stat().st_size and not wants_compose(request_path):
+        if png.is_file() and png.stat().st_size and not wants_compose(request_path) and not art_clash(request_path):
             say("{}: exists {}, skip".format(name, png_size(png.read_bytes())))
             return True
         request, references, plan = load(request_path)
@@ -276,14 +284,15 @@ def generate(request_path, backend, session):
             (folder / (name + ".res.json")).write_text(json.dumps(response, indent=2) + "\n", encoding="utf-8")
             status = "done {}"
         if plan:
-            compose.render(plan, art, png, folder / (name + ".type.json"))
+            filled = compose.render(plan, art, png, folder / (name + ".type.json"))
     except urllib.error.HTTPError as error:
         say("{}: FAILED ({})".format(name, api_error(error)))
         return False
     except Exception as error:
         say("{}: FAILED ({})".format(name, error))
         return False
-    say("{}: {}{}".format(name, status.format(png_size(image)), ", composed" if plan else ""))
+    composed = (", composed" if filled else ", composed, art background not filled") if plan else ""
+    say("{}: {}{}".format(name, status.format(png_size(image)), composed))
     return True
 
 

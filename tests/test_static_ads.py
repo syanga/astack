@@ -758,7 +758,7 @@ class GenerateTests(unittest.TestCase):
         self.assertEqual(len(self.api.requests), 1)
 
     @needs_ffmpeg
-    def test_type_stays_inside_the_safe_zone_with_marks_above_the_capitals_and_no_logo(self):
+    def test_type_stays_below_the_story_interface_with_marks_above_the_capitals_and_no_logo(self):
         self.write_brand()
         (self.run_folder / "layer.json").write_text(json.dumps({**BRAND, "logo": None}), encoding="utf-8")
         self.write_ad("1-story", "576x1024", size="1080x1920", headline="Éclat")
@@ -766,8 +766,20 @@ class GenerateTests(unittest.TestCase):
         result = self.generate_on_vertex()
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        width, height, found = marks(self.run_folder / "1-story.png")
+        _, height, found = marks(self.run_folder / "1-story.png")
         self.assertGreaterEqual(min(y for x, y in found), 0.14 * height)
+
+    @needs_ffmpeg
+    def test_art_whose_background_is_far_from_the_hex_is_composed_with_a_note(self):
+        self.write_brand()
+        self.write_ad("1-day", "928x1152", background="#5b86a8")
+        self.write_ad("2-night", "928x1152")
+
+        result = self.generate_on_vertex()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertLine(result.stdout, "1-day", "done 928x1152, composed, art background not filled")
+        self.assertNotIn("not filled", [line for line in result.stdout.splitlines() if line.startswith("2-night:")][0])
 
     @needs_ffmpeg
     def test_a_font_file_that_ffmpeg_cannot_load_fails_instead_of_falling_back(self):
@@ -786,16 +798,19 @@ class GenerateTests(unittest.TestCase):
         self.assertEqual([prompt(request["body"]) for request in self.api.requests], ["Fine"])
 
     def test_an_ad_named_like_another_ads_art_fails_before_any_image_request(self):
-        self.write_request("1-proof.art", {"prompt": "Clash"})
-        self.write_request("2-plain", {"prompt": "Fine"})
+        self.write_request("1-proof", {"prompt": "Fine"})
+        self.write_request("1-proof.ART", {"prompt": "Clash"})
+        (self.run_folder / "1-proof.ART.png").write_bytes(png_header(1080, 1350))
+        self.write_request("2-solo.art", {"prompt": "Alone"})
 
         checked = self.generate("--dry-run")
         result = self.generate()
 
         for run in [checked, result]:
             self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
-            self.assertLine(run.stdout, "1-proof.art", "FAILED", ".art")
-        self.assertEqual([prompt(request["body"]) for request in self.api.requests], ["Fine"])
+            self.assertLine(run.stdout, "1-proof.ART", "FAILED", "1-proof")
+        self.assertLine(result.stdout, "2-solo.art", "done")
+        self.assertEqual(sorted(prompt(request["body"]) for request in self.api.requests), ["Alone", "Fine"])
 
     def test_a_compose_request_with_an_unusable_font_fails_before_any_image_request(self):
         self.write_request("2-plain", {"prompt": "Fine"})
@@ -839,9 +854,9 @@ class GenerateTests(unittest.TestCase):
 
         self.assertEqual(checked.returncode, 1, checked.stdout + checked.stderr)
         self.assertRegex(checked.stdout, r"(?m)^1-proof: compose 4:5 on #5b86a8, headline 2x[0-9]+px, "
-                                         r"subline 1x[0-9]+px, cta [0-9]+px, logo lockup\.png$")
+                                         r"subline 1x[0-9]+px, cta [0-9]+px, logo lockup\.png, art [0-9]+-[0-9]+%$")
         self.assertRegex(checked.stdout, r"(?m)^2-story: compose 9:16 on #061521, headline 2x[0-9]+px, "
-                                         r"subline 2x[0-9]+px, cta [0-9]+px, logo lockup\.png$")
+                                         r"subline 2x[0-9]+px, cta [0-9]+px, logo lockup\.png, art [0-9]+-[0-9]+%$")
         self.assertLine(checked.stdout, "3-long", "FAILED", "READ THE SKY YOU WERE BORN UNDER TONIGHT AND EVERY NIGHT",
                         "minimum")
         self.assertEqual(self.api.requests, [])

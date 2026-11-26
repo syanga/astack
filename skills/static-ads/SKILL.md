@@ -101,7 +101,7 @@ python3 <skill-dir>/scripts/generate.py <run-folder>             # about 7 cents
 
 `--dry-run` reads the request files and prints each ad's output shape, prompt length, and reference count. It does not call the image API and does not spend money. That is the point: catch a bad request before the image run.
 
-The real run generates every ad in parallel. OpenAI uses `gpt-image-2.6-sunburst`, or `gpt-image-2.6-flare` for fast drafts. Gemini uses `gemini-3-pro-image` on Vertex, or `gemini-3.1-flash-image` for fast drafts. Pass a draft model with `--model`. A busy reply (HTTP 429, 500, 502, 503, or 504) gets up to two retries. An ad that still fails prints `FAILED` with its error, so the rest of the batch can finish. For each finished ad, the script prints `done` with the image size and saves `<n>-<name>.png`. It also saves the API's response, without the image, as `<n>-<name>.res.json`. It skips an ad that already has a PNG and prints `exists` with that file's size. For an ad with a `compose` block, it skips only the image call, while the ad's `.art.png` exists, as described under [With a layer file](#with-a-layer-file).
+The real run generates every ad in parallel. OpenAI uses `gpt-image-2.6-sunburst`, or `gpt-image-2.6-flare` for fast drafts. Gemini uses `gemini-3-pro-image` on Vertex, or `gemini-3.1-flash-image` for fast drafts. Pass a draft model with `--model`. A busy reply (HTTP 429, 500, 502, 503, or 504) gets up to two retries. An ad that still fails prints `FAILED` with its error, so the rest of the batch can finish. For each finished ad, the script prints `done` with the image size and saves `<n>-<name>.png`. It also saves the API's response, without the image, as `<n>-<name>.res.json`. It skips an ad that already has a PNG and prints `exists` with that file's size. For an ad with a `compose` block, it skips only the image call, as long as the ad's `.art.png` exists, as described under [With a layer file](#with-a-layer-file).
 
 Gemini reads its token from `gcloud auth application-default print-access-token` and its project from `GOOGLE_CLOUD_PROJECT`, else from `gcloud config get-value project`. When the token step fails, ask the user to run `gcloud auth application-default login`, adding `--impersonate-service-account=<account>` when their project grants Vertex access through a service account. Gemini takes an aspect ratio and a size tier instead of pixels. The script turns `1472x1840` into 4:5 at 2K, and the dry run prints `4:5 2K`. A size whose ratio Gemini does not offer fails in the dry run.
 
@@ -125,7 +125,7 @@ Add a `compose` block to each request, and write the prompt for the art alone:
 
 - `headline` takes 1 to 3 lines, `subline` 1 or 2, and `cta` 1. Break lines with `\n` where a reader would pause. The script picks the largest size that fits each line.
 - `background` is one of the layer file's `backgrounds`. Leave it out for the first.
-- The prompt asks for no text of any kind: no letters, words, numbers, logos, buttons, or frames. It names the background hex as one flat color, edge to edge, and centers the subject in the band the type leaves open: 33% to 70% of the height on 4:5, 38% to 65% on 1:1, and 36% to 48% on 9:16. Art outside that band fades under the type's background.
+- The prompt asks for no text of any kind: no letters, words, numbers, logos, buttons, or frames. It names the background hex as one flat color, edge to edge, and keeps the subject inside the art band that the dry run prints for that ad, such as `art 33-70%` of the height. The band depends on the ratio and the number of lines. Art outside it fades under the type's background. Write each `compose` block, run the dry run, then write the band into the prompt.
 - Leave the headline, wordmark, font, CTA pill, and "Render all text exactly as written" out of the style block.
 
 The layout puts the logo and headline at the top, the art in the middle, and the sub-line and CTA pill at the bottom, inside the placement's safe zone. On 4:5 and 1:1, type stays 7% from every edge. On 9:16, it stays out of the top 15%, the bottom 36%, and 8% at each side. The size must be 4:5, 1:1, or 9:16.
@@ -133,7 +133,7 @@ The layout puts the logo and headline at the top, the art in the middle, and the
 The compose step needs `ffmpeg` 6.1 or later with the `drawtext` filter. The dry run checks the fonts and lays out the type, then prints one more line per ad, with sizes in pixels at 1080 wide:
 
 ```
-1-proof: compose 4:5 on #061521, headline 2x72px, subline 1x46px, cta 42px, logo lockup.png
+1-proof: compose 4:5 on #061521, headline 2x72px, subline 1x46px, cta 42px, logo lockup.png, art 33-72%
 ```
 
 A missing or wrong font file, a character the font lacks, or a line too long to stay 28 px tall at 1080 wide fails that ad in the dry run, before any image call. Shorten or split the line it names.
@@ -151,7 +151,7 @@ View every PNG. Check for:
 - Copied customer logos
 - A size on the ad's `done` or `exists` line other than 1472x1840 from OpenAI or 1856x2304 from Gemini
 - On a composed ad, words or a logo drawn into the art, or art cut off at the top or bottom of its band. Delete the `.art.png` and rerun to draw it again.
-- On a composed ad, `"art_background": null` in its `.type.json`. The art's background was too far from the hex to fill, so the middle band keeps the art's own color. Draw the art again.
+- A composed ad whose output line ends in `art background not filled`. The art's background was too far from the hex to fill, so the middle band keeps the art's own color. Draw the art again.
 
 Read the script output for `FAILED`. A failed ad can still leave the script looking finished.
 
