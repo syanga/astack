@@ -10,13 +10,17 @@ import urllib.request
 
 FAL_BASE = "https://queue.fal.run"
 KIE_BASE = "https://api.kie.ai"
-REFUSED = (429, 502, 503, 504)
+REFUSED = (429,)
 KIE_REFUSED = (429, 455)
 UNANSWERED = (OSError, http.client.HTTPException, ValueError)
 SCALE = float(os.environ.get("UGC_RETRY_SCALE") or 1)
 
 
 class VendorError(Exception):
+    pass
+
+
+class TakeFailed(VendorError):
     pass
 
 
@@ -54,6 +58,9 @@ def submit(vendor, url, headers, body, refused):
         try:
             reply = call("POST", url, headers, body)
         except urllib.error.HTTPError as error:
+            if error.code >= 500:
+                raise VendorError(f"{vendor} submit got {http_error(error)}. Not resubmitted, "
+                                  "because the job may have been accepted") from None
             if error.code not in REFUSED or attempt == 2:
                 raise VendorError(f"{vendor} refused the submit: {http_error(error)}") from None
             reason = f"HTTP {error.code}"
@@ -117,16 +124,21 @@ def fal_run(model, body, *, key, base=FAL_BASE, timeout=1800):
     return result
 
 
-def kie_run(model, input, *, key, base=KIE_BASE, timeout=1800):
-    base = base.rstrip("/")
-    auth = {"Authorization": f"Bearer {key}"}
-    deadline = time.monotonic() + timeout
-    reply = submit("kie", f"{base}/api/v1/jobs/createTask", {**auth, "Content-Type": "application/json"},
+def kie_submit(model, input, *, key, base=KIE_BASE):
+    reply = submit("kie", f"{base.rstrip('/')}/api/v1/jobs/createTask",
+                   {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                    {"model": model, "input": input},
                    lambda reply: f"code {reply.get('code')}" if reply.get("code") in KIE_REFUSED else None)
     task = (reply.get("data") or {}).get("taskId")
-    if reply.get("code") != 200 or not task:
+    if reply.get("code") != 200 or not isinstance(task, str) or not task:
         raise VendorError(f"kie refused the task: code {reply.get('code')}: {reply.get('msg')}")
+    return task
+
+
+def kie_wait(task, *, key, base=KIE_BASE, timeout=1800):
+    base = base.rstrip("/")
+    auth = {"Authorization": f"Bearer {key}"}
+    deadline = time.monotonic() + timeout
     name = f"kie task {task}"
 
     def finished(reply):
@@ -140,7 +152,7 @@ def kie_run(model, input, *, key, base=KIE_BASE, timeout=1800):
         if state in ("waiting", "queuing", "generating"):
             return None
         if state == "fail":
-            raise VendorError(f"{name} failed: {record.get('failCode')}: {record.get('failMsg')}")
+            raise TakeFailed(f"{name} failed: {record.get('failCode')}: {record.get('failMsg')}")
         if state != "success":
             raise VendorError(f"{name}: unknown state {state!r}")
         try:
@@ -161,7 +173,10 @@ def fetch(url, dest):
     try:
         with urllib.request.urlopen(url, timeout=300) as reply, open(partial, "wb") as out:
             shutil.copyfileobj(reply, out)
-    except (OSError, http.client.HTTPException, ValueError) as error:
+            expected = reply.headers.get("Content-Length")
+        if expected is not None and partial.stat().st_size != int(expected):
+            raise VendorError(f"download stopped at {partial.stat().st_size} of {expected} bytes")
+    except (OSError, http.client.HTTPException, ValueError, VendorError) as error:
         partial.unlink(missing_ok=True)
         raise VendorError(f"download failed: {error}") from None
     partial.replace(dest)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, json, math, os, re, shlex, shutil, subprocess, sys
+import argparse, hashlib, json, math, os, re, shlex, shutil, subprocess, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -85,7 +85,8 @@ def missing_setup(a, d):
     return missing
 
 
-def upload(cmd, path, key):
+def upload(cmd, path, name):
+    key = f"ugc-video/{hashlib.sha256(Path(path).read_bytes()).hexdigest()[:16]}/{name}"
     r = subprocess.run(shlex.split(cmd) + [str(path), key], capture_output=True, text=True, errors="replace")
     lines = [line.strip() for line in r.stdout.splitlines() if line.strip()]
     if r.returncode != 0 or not lines or not lines[-1].startswith(("http://", "https://")):
@@ -127,7 +128,7 @@ def tts_body(text, voice_id):
 
 def clone_voice(a, d, meta):
     key = api_key("FAL_KEY")
-    url = upload(a.upload_cmd, d / "voice-ref.mp3", f"ugc-video/voices/{d.name}/voice-ref.mp3")
+    url = upload(a.upload_cmd, d / "voice-ref.mp3", "voice-ref.mp3")
     log(f"clone: {CLONE}, about ${CLONE_USD:.2f}")
     try:
         res = vendors.fal_run(CLONE, {"audio_url": url}, key=key, base=FAL_BASE, timeout=600)
@@ -239,7 +240,17 @@ def main():
     if a.clone_voice:
         clone_voice(a, d, meta)
     fal_key, kie_key = api_key("FAL_KEY"), api_key("KIE_API_KEY")
+    run = {"spoken": spoken, "presenter": str(d)}
+    record = out / "run.json"
+    if out.is_dir() and any(out.iterdir()):
+        try:
+            earlier = json.loads(record.read_text())
+        except (OSError, ValueError):
+            earlier = None
+        if earlier != run:
+            sys.exit(f"{out} holds a run for another script or presenter. Pass a new --slug.")
     out.mkdir(parents=True, exist_ok=True)
+    record.write_text(json.dumps(run, indent=1, ensure_ascii=False) + "\n")
     (out / "script.txt").write_text(original + "\n")
     (out / "script-spoken.txt").write_text(spoken + "\n")
 
@@ -279,6 +290,7 @@ def main():
     take_usd = seconds * SEEDANCE_USD_PER_SEC
 
     raw_v = out / "raw-480p.mp4"
+    pending = out / "seedance.task.json"
     if raw_v.exists() and a.rerender:
         n = 1
         while (out / f"raw-480p-take{n}.mp4").exists():
@@ -286,19 +298,31 @@ def main():
         raw_v.rename(out / f"raw-480p-take{n}.mp4")
         log(f"  kept the old take as raw-480p-take{n}.mp4")
     if not raw_v.exists():
-        key = f"ugc-video/{slug}"
-        au = upload(a.upload_cmd, voice, f"{key}/voice.mp3")
-        im = upload(a.upload_cmd, image, f"{key}/presenter{image.suffix.lower()}")
-        body = {"prompt": prompt(seconds), "reference_image_urls": [im], "reference_audio_urls": [au],
-                "resolution": "480p", "aspect_ratio": "9:16", "duration": seconds, "generate_audio": True,
-                "output_format": "mp4"}
-        (out / "seedance.body.json").write_text(json.dumps(body, indent=1))
-        log(f"4 Seedance: {seconds}s at 480p, about ${take_usd:.2f}, usually 5-10 min")
+        if pending.exists():
+            task = json.loads(pending.read_text())["taskId"]
+            log(f"4 Seedance: checking kie task {task} again, not resubmitted")
+        else:
+            au = upload(a.upload_cmd, voice, "voice.mp3")
+            im = upload(a.upload_cmd, image, f"presenter{image.suffix.lower()}")
+            body = {"prompt": prompt(seconds), "reference_image_urls": [im], "reference_audio_urls": [au],
+                    "resolution": "480p", "aspect_ratio": "9:16", "duration": seconds, "generate_audio": True,
+                    "output_format": "mp4"}
+            (out / "seedance.body.json").write_text(json.dumps(body, indent=1))
+            log(f"4 Seedance: {seconds}s at 480p, about ${take_usd:.2f}, usually 5-10 min")
+            try:
+                task = vendors.kie_submit(SEEDANCE, body, key=kie_key, base=KIE_BASE)
+            except VendorError as e:
+                sys.exit(f"Seedance submit failed: {e}")
+            pending.write_text(json.dumps({"taskId": task}) + "\n")
         try:
-            rec = vendors.kie_run(SEEDANCE, body, key=kie_key, base=KIE_BASE, timeout=1800)
-        except VendorError as e:
+            rec = vendors.kie_wait(task, key=kie_key, base=KIE_BASE, timeout=1800)
+        except vendors.TakeFailed as e:
+            pending.unlink()
             sys.exit(f"Seedance failed: {e}\nNot resubmitted. A new take costs about ${take_usd:.2f}. Ask the person first; "
                      "if they say yes, run the same command again (it reuses voice.mp3).")
+        except VendorError as e:
+            sys.exit(f"{e}\nkie may still finish task {task}. Run the same command again to check it; "
+                     "that does not pay for a new take.")
         (out / "seedance.result.json").write_text(json.dumps(rec, indent=1))
         if rec.get("creditsConsumed") is not None:
             log(f"  kie charged {rec['creditsConsumed']} credits")
@@ -309,7 +333,8 @@ def main():
             vendors.fetch(urls[0], raw_v)
         except VendorError as e:
             sys.exit(f"The take is done and paid for, but the download failed: {e}\n"
-                     f"Download {urls[0]} to {raw_v}, then run the same command again.")
+                     "Run the same command again to download it without paying again.")
+        pending.unlink()
         log(f"4 Seedance: done, {dur(raw_v):.2f}s")
     else:
         log("4 Seedance: reusing raw-480p.mp4 (use --rerender for a new take, only after the person says yes)")

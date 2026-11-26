@@ -41,9 +41,9 @@ A real run needs `FAL_KEY`, `KIE_API_KEY`, and an [upload hook](#upload-hook). N
 | 6 | Fix: wrong word, so the same word is spliced from the MP3 (video untouched). Stutter or extra words, so they are cut from video and audio as a jump cut. Each fix is tried at several timings and kept only if a whole-file transcript then reads right | local | free |
 | 7 | Upscale: `resize_grain.py` (Lanczos, light sharpen, phone grain) to 1080x1920 | local ffmpeg | free |
 
-Steps are resumable. An existing `voice.mp3` or `raw-480p.mp4` in the output folder is reused.
+Steps are resumable. An existing `voice.mp3` or `raw-480p.mp4` in the output folder is reused. A folder that holds a run for another script or presenter stops the run, so pass a new `--slug`. The kie task id is saved in `seedance.task.json` before polling. If polling times out, fails to connect, or the process stops, running the same command checks that task again instead of paying for a new take.
 
-The script retries a fal or kie submit that the vendor refuses with a 429, 502, 503, or 504, because a refused submit costs nothing. It does not resubmit a job that failed or timed out. It prints the vendor's error and stops.
+The script retries a submit that fal answers with HTTP 429 or kie with code 429 or 455, because a refused submit costs nothing. It never resubmits after a 5xx, a dropped connection, a failed take, or a timeout, because the vendor may have accepted the job. It prints the vendor's error and stops.
 
 ## Rules (learned from test runs, Oct 2026)
 
@@ -53,7 +53,7 @@ The script retries a fal or kie submit that the vendor refuses with a 429, 502, 
 - `--caps Brand1,Brand2` writes those names in caps in the Seedance dialogue only (the MP3 text stays normal). Optional. It was used in the clean test runs.
 - **Whisper spellings are not errors.** Whisper writes "Klaviyo" as "Clavio" and "focaccia" as "facaccia" in our own MP3 too. The check only flags a word when the render is heard differently from the MP3.
 - **Cut times come from short clips, never the full file.** whisper.cpp word times drift up to about 0.5 s over a long file, by a different amount in each track. The fixer times every cut on clips of about 3.5 s and tries several.
-- **Run locally.** ffmpeg and whisper run on the user's machine. If either is missing, the dry run and a real run print the install command. Show that to the user and let them install it. `--no-fix` skips the word check only after they ask, or when Whisper is installed and too slow.
+- **Run locally.** ffmpeg and whisper run on the user's machine. If either is missing, the dry run and a real run print the install command. Show that to the user and let them install it. `--no-fix` skips the word check only after they ask.
 
 ## Presenters
 
@@ -76,7 +76,7 @@ A presenter is a synthetic person made for one brand. Each one is a folder in th
 
 ## Upload hook
 
-kie and fal fetch the MP3, the still, and the voice sample from URLs. The upload hook is a command that uploads one file and prints a URL that anyone can fetch for at least an hour. `make_ugc.py` runs it with two arguments, the local path and a storage key such as `ugc-video/<slug>/voice.mp3`, and reads the URL from the last line of its output. Set it with `--upload-cmd` or `UGC_UPLOAD_CMD`. A hook for S3:
+kie and fal fetch the MP3, the still, and the voice sample from URLs. The upload hook is a command that uploads one file and prints a URL that anyone can fetch for at least an hour. `make_ugc.py` runs it with two arguments, the local path and a storage key such as `ugc-video/<hash>/voice.mp3`, and reads the URL from the last line of its output. `<hash>` is the start of the file's SHA-256, so two runs never share a key for different files. Set it with `--upload-cmd` or `UGC_UPLOAD_CMD`. A hook for S3:
 
 ```sh
 #!/bin/sh
@@ -96,13 +96,13 @@ aws s3 presign "s3://<bucket>/$2" --expires-in 3600
 | `--slug` / `--out-dir` | first words / `./ugc-videos` | |
 | `--upload-cmd` | `UGC_UPLOAD_CMD` | See [Upload hook](#upload-hook) |
 | `--rerender` | off | New Seedance take with the same MP3. **Only after the user says yes** |
-| `--no-fix` | off | Skip the whisper check. Only if the user asks, or Whisper is installed and too slow |
+| `--no-fix` | off | Skip the whisper check. Only after the user asks |
 | `--no-upscale` | off | Stop at 480p |
 | `--clone-voice` | off | New voice id from the presenter's `voice-ref.mp3` |
 
 ## Output (`ugc-videos/<slug>/`)
 
-`<slug>.mp4` (final, 1080x1920), `raw-480p.mp4` (Seedance take), `fixed-480p.mp4`, `voice.mp3` (the fitted MP3), `script.txt`, `script-spoken.txt`, `check.json` (splices, cuts, and anything not fixed), `tts.body.json`, `tts.result.json`, `seedance.body.json`, and `seedance.result.json` (kie's task record, with the credits it charged). A re-render keeps the old take as `raw-480p-take<n>.mp4`.
+`<slug>.mp4` (final, 1080x1920), `raw-480p.mp4` (Seedance take), `fixed-480p.mp4`, `voice.mp3` (the fitted MP3), `script.txt`, `script-spoken.txt`, `check.json` (splices, cuts, and anything not fixed), `run.json` (the script and presenter this folder belongs to), `tts.body.json`, `tts.result.json`, `seedance.body.json`, and `seedance.result.json` (kie's task record, with the credits it charged). A re-render keeps the old take as `raw-480p-take<n>.mp4`.
 
 ## Requirements
 

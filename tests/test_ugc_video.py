@@ -1,4 +1,5 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hashlib
 import json
 import math
 import os
@@ -35,6 +36,10 @@ print()
 """
 
 
+def storage_key(name, content):
+    return "ugc-video/{}/{}".format(hashlib.sha256(content).hexdigest()[:16], name)
+
+
 def ffmpeg(*args):
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *map(str, args)], check=True)
 
@@ -43,6 +48,7 @@ class FakeVendors:
     def __init__(self, test, served):
         self.requests, self.served = [], served
         self.refuse_fal, self.refuse_kie, self.kie_fail, self.poll_base = [], [], None, None
+        self.poll_errors = []
         self.jobs, self.polls = {}, {}
         fake = self
 
@@ -88,6 +94,8 @@ class FakeVendors:
                 return self.send(handler, 200, {"code": self.refuse_kie.pop(0), "msg": "slow down", "data": None})
             return self.send(handler, 200, {"code": 200, "msg": "success", "data": {"taskId": "task-1"}})
         if path == "/kie/api/v1/jobs/recordInfo":
+            if self.poll_errors:
+                return self.send(handler, self.poll_errors.pop(0), {"msg": "unauthorized"})
             record = {"taskId": "task-1", "state": "generating"}
             if polls > 1 and self.kie_fail:
                 record.update(state="fail", failCode="500", failMsg=self.kie_fail)
@@ -189,8 +197,8 @@ class MakeUgcTests(unittest.TestCase):
         self.assertEqual(task["model"], "bytedance/seedance-2-5")
         prompt = task["input"].pop("prompt")
         self.assertEqual(task["input"], {
-            "reference_image_urls": [uploads["ugc-video/test-ad/presenter.jpg"]],
-            "reference_audio_urls": [uploads["ugc-video/test-ad/voice.mp3"]],
+            "reference_image_urls": [uploads[storage_key("presenter.jpg", b"still")]],
+            "reference_audio_urls": [uploads[storage_key("voice.mp3", (self.out / "voice.mp3").read_bytes())]],
             "resolution": "480p", "aspect_ratio": "9:16", "duration": 5, "generate_audio": True,
             "output_format": "mp4"})
         self.assertIn(SPOKEN, prompt)
@@ -209,7 +217,7 @@ class MakeUgcTests(unittest.TestCase):
 
     @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
     def test_a_refused_submit_is_retried_until_accepted_and_never_after(self):
-        self.fake.refuse_fal = [502]
+        self.fake.refuse_fal = [429]
         self.fake.refuse_kie = [429]
 
         result = self.run_script("--no-upscale")
@@ -218,6 +226,43 @@ class MakeUgcTests(unittest.TestCase):
         self.assertEqual(len(self.posts(TTS)), 2)
         self.assertEqual(len(self.posts(CREATE)), 2)
         self.assertTrue((self.out / "raw-480p.mp4").is_file())
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_a_gateway_error_on_submit_is_not_retried_because_the_job_may_exist(self):
+        self.fake.refuse_fal = [504]
+
+        result = self.run_script("--no-upscale")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("may have been accepted", result.stderr)
+        self.assertEqual(len(self.posts(TTS)), 1)
+        self.assertEqual(self.posts(CREATE), [])
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_a_take_left_unfinished_is_checked_again_on_the_next_run_not_resubmitted(self):
+        self.fake.poll_errors = [401]
+
+        first = self.run_script("--no-upscale")
+        second = self.run_script("--no-upscale")
+
+        self.assertNotEqual(first.returncode, 0)
+        self.assertIn("task-1", first.stderr)
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        self.assertEqual(len(self.posts(CREATE)), 1)
+        self.assertEqual(len(self.posts(TTS)), 1)
+        self.assertTrue((self.out / "raw-480p.mp4").is_file())
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_a_folder_holding_another_script_stops_the_run_before_any_request(self):
+        self.assertEqual(self.run_script("--no-upscale").returncode, 0)
+        requests = len(self.fake.requests)
+
+        result = self.make("--script", "A different ad for another brand.", "--slug", "test-ad", "--no-fix")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--slug", result.stderr)
+        self.assertEqual(len(self.fake.requests), requests)
+        self.assertEqual((self.out / "script.txt").read_text(), TEXT + "\n")
 
     @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
     def test_a_failed_take_is_reported_with_the_cost_of_another_and_not_resubmitted(self):
@@ -239,7 +284,7 @@ class MakeUgcTests(unittest.TestCase):
         result = self.make("--clone-voice")
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        url = self.uploads()["ugc-video/voices/maya/voice-ref.mp3"]
+        url = self.uploads()[storage_key("voice-ref.mp3", b"voice sample")]
         self.assertEqual(self.posts(CLONE), [{"audio_url": url}])
         self.assertEqual([body["voice_setting"]["voice_id"] for body in self.posts(TTS)], ["voice-new"])
         self.assertEqual(json.loads((self.presenter / "presenter.json").read_text()),
