@@ -99,6 +99,14 @@ def upload(cmd, path, name):
     return lines[-1]
 
 
+def archive(raw_v):
+    n = 1
+    while (raw_v.parent / f"raw-480p-take{n}.mp4").exists():
+        n += 1
+    raw_v.rename(raw_v.parent / f"raw-480p-take{n}.mp4")
+    log(f"  kept the old take as raw-480p-take{n}.mp4")
+
+
 def slugify(s):
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:40]
 
@@ -211,6 +219,8 @@ def main():
     for w in [x.strip() for x in a.caps.split(",") if x.strip()]:
         dialogue = re.sub(rf"\b{re.escape(w)}\b", w.upper(), dialogue)
     slug = a.slug or slugify(" ".join(spoken.split()[:6]))
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", slug):
+        ap.error("the slug may hold only letters, digits, dots, dashes, and underscores; pass --slug")
     out = Path(a.out_dir).expanduser().resolve() / slug
     template = PROMPT.read_text()
 
@@ -259,10 +269,17 @@ def main():
         if earlier != run:
             sys.exit(f"{out} holds a run for another script or presenter. Pass a new --slug.")
     voice, raw_v, pending = out / "voice.mp3", out / "raw-480p.mp4", out / "seedance.task.json"
-    taken = raw_v.exists() or pending.exists()
+    again = "Run the command again without --rerender or --clone-voice"
+    if raw_v.exists() and pending.exists():
+        pending.unlink()
+        if a.rerender or a.clone_voice:
+            sys.exit(f"The last run downloaded its take but stopped before finishing. {again} to finish it.")
+    if pending.exists() and (a.rerender or a.clone_voice):
+        sys.exit(f"A kie take is still pending. {again} to check it. To give it up, delete {pending} first; "
+                 "the next take is paid for again.")
     new_take = (f"{out} has a take made with the old voice, so a new voice needs a new take. Pass --rerender "
                 f"(about ${est_secs * SEEDANCE_USD_PER_SEC:.2f}) only after the user says yes.")
-    if a.clone_voice and taken and not a.rerender:
+    if a.clone_voice and raw_v.exists() and not a.rerender:
         sys.exit(new_take)
     if a.clone_voice:
         clone_voice(a, d, meta)
@@ -273,11 +290,12 @@ def main():
     (out / "script-spoken.txt").write_text(spoken + "\n")
 
     if voice.exists() and voice_of(out) != meta["voice_id"]:
-        if taken and not a.rerender:
+        if raw_v.exists() and not a.rerender:
             sys.exit(new_take)
+        if raw_v.exists():
+            archive(raw_v)
         for name in ("voice.mp3", "voice-raw.mp3", "voice-trim.wav"):
             (out / name).unlink(missing_ok=True)
-        pending.unlink(missing_ok=True)
         log("2 MP3: the voice id changed, so the MP3 is made again")
     if not voice.exists():
         body = tts_body(spoken, meta["voice_id"])
@@ -310,22 +328,24 @@ def main():
         log(f"2 MP3: {raw:.2f}s -> pause trim {trim:.2f}s -> atempo {tempo:.3f} -> {dur(voice):.2f}s")
     else:
         log(f"2 MP3: reusing {voice.name} ({dur(voice):.2f}s)")
+    if dur(voice) < 2:
+        sys.exit("The MP3 is under 2 s, and kie needs 2 s or more of reference audio. Lengthen the script.")
     seconds = min(30, max(4, math.ceil(dur(voice))))
     take_usd = seconds * SEEDANCE_USD_PER_SEC
 
-    if raw_v.exists():
-        pending.unlink(missing_ok=True)
     if raw_v.exists() and a.rerender:
-        n = 1
-        while (out / f"raw-480p-take{n}.mp4").exists():
-            n += 1
-        raw_v.rename(out / f"raw-480p-take{n}.mp4")
-        log(f"  kept the old take as raw-480p-take{n}.mp4")
+        archive(raw_v)
     if not raw_v.exists():
         if pending.exists():
-            task = json.loads(pending.read_text())["taskId"]
+            task = json.loads(pending.read_text()).get("taskId")
+            if not task:
+                sys.exit("An earlier submit to kie got no clear answer, so kie may have accepted a paid take. Check "
+                         f"the kie dashboard. To submit again, delete {pending} first; that pays for a new take.")
             log(f"4 Seedance: checking kie task {task} again, not resubmitted")
         else:
+            for path, limit in ((voice, 15), (image, 30)):
+                if path.stat().st_size > limit * 1024 * 1024:
+                    sys.exit(f"{path} is over kie's {limit} MB limit for a reference file.")
             au = upload(a.upload_cmd, voice, "voice.mp3")
             im = upload(a.upload_cmd, image, f"presenter{image.suffix.lower()}")
             body = {"prompt": prompt(seconds), "reference_image_urls": [im], "reference_audio_urls": [au],
@@ -334,9 +354,18 @@ def main():
             (out / "seedance.body.json").write_text(json.dumps(body, indent=1))
             log(f"4 Seedance: {seconds}s at 480p, about ${take_usd:.2f}, usually 5-10 min")
             try:
+                with open(pending, "x") as marker:
+                    marker.write(json.dumps({"taskId": None}) + "\n")
+            except FileExistsError:
+                sys.exit(f"Another run is submitting this take ({pending} appeared). Let it finish.")
+            try:
                 task = vendors.kie_submit(SEEDANCE, body, key=kie_key, base=KIE_BASE)
-            except VendorError as e:
+            except vendors.Refused as e:
+                pending.unlink()
                 sys.exit(f"Seedance submit failed: {e}")
+            except VendorError as e:
+                sys.exit(f"Seedance submit failed: {e}\nkie may have accepted it. Check the kie dashboard before "
+                         f"you delete {pending} and submit again.")
             pending.write_text(json.dumps({"taskId": task}) + "\n")
         try:
             rec = vendors.kie_wait(task, key=kie_key, base=KIE_BASE, timeout=1800)
@@ -345,8 +374,7 @@ def main():
             sys.exit(f"Seedance failed: {e}\nNot resubmitted. A new take costs about ${take_usd:.2f}. Ask the person first; "
                      "if they say yes, run the same command again (it reuses voice.mp3).")
         except VendorError as e:
-            sys.exit(f"{e}\nkie may still finish task {task}. Run the same command again to check it; "
-                     "that does not pay for a new take.")
+            sys.exit(f"{e}\nkie may still finish task {task}. {again} to check it; that does not pay for a new take.")
         (out / "seedance.result.json").write_text(json.dumps(rec, indent=1))
         if rec.get("creditsConsumed") is not None:
             log(f"  kie charged {rec['creditsConsumed']} credits")
@@ -355,11 +383,13 @@ def main():
             sys.exit(f"kie finished the take with no resultUrls. See {out / 'seedance.result.json'}")
         try:
             vendors.fetch(urls[0], raw_v)
-        except VendorError as e:
+            length = dur(raw_v)
+        except (VendorError, RuntimeError, ValueError) as e:
+            raw_v.unlink(missing_ok=True)
             sys.exit(f"The take is done and paid for, but the download failed: {e}\n"
-                     "Run the same command again to download it without paying again.")
+                     f"{again} to download it without paying again.")
         pending.unlink()
-        log(f"4 Seedance: done, {dur(raw_v):.2f}s")
+        log(f"4 Seedance: done, {length:.2f}s")
     else:
         log("4 Seedance: reusing raw-480p.mp4 (use --rerender for a new take, only after the person says yes)")
 

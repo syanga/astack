@@ -26,6 +26,10 @@ class TakeFailed(VendorError):
     pass
 
 
+class Refused(VendorError):
+    pass
+
+
 class RefuseRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args):
         return None
@@ -64,7 +68,7 @@ def submit(vendor, url, headers, body, refused):
                 raise VendorError(f"{vendor} submit got {http_error(error)}. Not resubmitted, "
                                   "because the job may have been accepted") from None
             if error.code not in REFUSED or attempt == 2:
-                raise VendorError(f"{vendor} refused the submit: {http_error(error)}") from None
+                raise Refused(f"{vendor} refused the submit: {http_error(error)}") from None
             reason = f"HTTP {error.code}"
         except UNANSWERED as error:
             raise VendorError(f"{vendor} submit got no clear answer ({error}). Not resubmitted, "
@@ -132,8 +136,10 @@ def kie_submit(model, input, *, key, base=KIE_BASE):
                    {"model": model, "input": input},
                    lambda reply: f"code {reply.get('code')}" if reply.get("code") in KIE_REFUSED else None)
     task = (reply.get("data") or {}).get("taskId")
+    if reply.get("code") in (401, 402, 422) + KIE_REFUSED:
+        raise Refused(f"kie refused the task: code {reply.get('code')}: {reply.get('msg')}")
     if reply.get("code") != 200 or not isinstance(task, str) or not task:
-        raise VendorError(f"kie refused the task: code {reply.get('code')}: {reply.get('msg')}")
+        raise VendorError(f"kie gave no task id: code {reply.get('code')}: {reply.get('msg')}")
     return task
 
 

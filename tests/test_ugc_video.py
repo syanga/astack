@@ -48,7 +48,7 @@ class FakeVendors:
     def __init__(self, test, served):
         self.requests, self.served = [], served
         self.refuse_fal, self.refuse_kie, self.kie_fail, self.poll_base = [], [], None, None
-        self.poll_errors, self.short = [], set()
+        self.poll_errors, self.short, self.drop_create = [], set(), 0
         self.jobs, self.polls = {}, {}
         fake = self
 
@@ -73,7 +73,8 @@ class FakeVendors:
 
     def handle(self, handler, body):
         path = urlsplit(handler.path).path
-        self.requests.append({"method": handler.command, "path": path,
+        self.requests.append({"method": handler.command, "path": path, "query": urlsplit(handler.path).query,
+                              "type": handler.headers.get("Content-Type"),
                               "auth": handler.headers.get("Authorization"), "body": body})
         polls = self.polls[path] = self.polls.get(path, 0) + 1
         if path.startswith("/files/") and (self.served / path[len("/files/"):]).is_file():
@@ -103,6 +104,9 @@ class FakeVendors:
                 return self.send(handler, 200, {"custom_voice_id": "voice-new"})
             return self.send(handler, 200, {"audio": {"url": self.url + "/files/tts.mp3"}})
         if path == CREATE:
+            if self.drop_create:
+                self.drop_create -= 1
+                return
             if self.refuse_kie:
                 return self.send(handler, 200, {"code": self.refuse_kie.pop(0), "msg": "slow down", "data": None})
             return self.send(handler, 200, {"code": 200, "msg": "success", "data": {"taskId": "task-1"}})
@@ -332,10 +336,11 @@ class MakeUgcTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         initiated = [r for r in self.fake.requests if r["path"] == "/falrest/storage/upload/initiate"]
-        self.assertEqual([(r["auth"], r["body"]["file_name"]) for r in initiated],
-                         [("Key " + FAL_KEY, "voice.mp3"), ("Key " + FAL_KEY, "presenter.jpg")])
+        self.assertEqual([(r["auth"], r["query"], r["body"]) for r in initiated], [
+            ("Key " + FAL_KEY, "storage_type=fal-cdn-v3", {"file_name": "voice.mp3", "content_type": "audio/mpeg"}),
+            ("Key " + FAL_KEY, "storage_type=fal-cdn-v3", {"file_name": "presenter.jpg", "content_type": "image/jpeg"})])
         puts = [r for r in self.fake.requests if r["method"] == "PUT"]
-        self.assertEqual([r["auth"] for r in puts], [None, None])
+        self.assertEqual([(r["auth"], r["type"]) for r in puts], [(None, "audio/mpeg"), (None, "image/jpeg")])
         [task] = self.posts(CREATE)
         stored = {name: (self.served / name).read_bytes() for name in os.listdir(self.served) if name.startswith("fal-")}
         image = task["input"]["reference_image_urls"][0]
@@ -372,16 +377,60 @@ class MakeUgcTests(unittest.TestCase):
         self.assertEqual(json.loads((self.presenter / "presenter.json").read_text()), self.meta)
 
     @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
-    def test_a_rerender_after_a_crash_before_cleanup_submits_a_new_take(self):
+    def test_a_rerender_after_a_crash_before_cleanup_finishes_that_take_and_pays_for_no_other(self):
         self.assertEqual(self.run_script("--no-upscale").returncode, 0)
         (self.out / "seedance.task.json").write_text(json.dumps({"taskId": "task-1"}))
 
-        result = self.run_script("--no-upscale", "--rerender")
+        rerender = self.run_script("--no-upscale", "--rerender")
+        plain = self.run_script("--no-upscale")
 
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(len(self.posts(CREATE)), 2)
-        self.assertTrue((self.out / "raw-480p-take1.mp4").is_file())
+        self.assertNotEqual(rerender.returncode, 0)
+        self.assertIn("without --rerender", rerender.stderr)
+        self.assertEqual(plain.returncode, 0, plain.stdout + plain.stderr)
+        self.assertEqual(len(self.posts(CREATE)), 1)
+        self.assertFalse((self.out / "raw-480p-take1.mp4").exists())
         self.assertFalse((self.out / "seedance.task.json").exists())
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_a_submit_with_no_clear_answer_is_never_resubmitted_by_a_rerun(self):
+        self.fake.drop_create = 1
+
+        first = self.run_script("--no-upscale")
+        second = self.run_script("--no-upscale")
+
+        self.assertNotEqual(first.returncode, 0)
+        self.assertNotEqual(second.returncode, 0)
+        self.assertIn("kie dashboard", second.stderr)
+        self.assertEqual(len(self.posts(CREATE)), 1)
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_a_pending_take_blocks_rerender_and_clone_until_it_is_checked(self):
+        self.fake.poll_errors = [401]
+        self.assertNotEqual(self.run_script("--no-upscale").returncode, 0)
+
+        rerender = self.run_script("--no-upscale", "--rerender")
+        clone = self.run_script("--no-upscale", "--clone-voice", "--rerender")
+        plain = self.run_script("--no-upscale")
+
+        self.assertNotEqual(rerender.returncode, 0)
+        self.assertNotEqual(clone.returncode, 0)
+        self.assertEqual(plain.returncode, 0, plain.stdout + plain.stderr)
+        self.assertEqual(self.posts(CLONE), [])
+        self.assertEqual(len(self.posts(CREATE)), 1)
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_a_voice_refresh_stopped_before_the_new_mp3_never_reuses_the_old_take(self):
+        self.assertEqual(self.run_script("--no-upscale").returncode, 0)
+        (self.presenter / "presenter.json").write_text(json.dumps({**self.meta, "voice_id": "voice-new"}))
+        self.fake.refuse_fal = [400]
+
+        stopped = self.run_script("--no-upscale", "--rerender")
+        restart = self.run_script("--no-upscale")
+
+        self.assertNotEqual(stopped.returncode, 0)
+        self.assertEqual(restart.returncode, 0, restart.stdout + restart.stderr)
+        self.assertEqual(len(self.posts(CREATE)), 2)
+        self.assertEqual(self.posts(TTS)[-1]["voice_setting"]["voice_id"], "voice-new")
 
     @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
     def test_a_new_voice_on_a_finished_folder_needs_a_rerender_before_any_spend(self):
@@ -410,7 +459,7 @@ class MakeUgcTests(unittest.TestCase):
 class StutterCutTests(unittest.TestCase):
     SCRIPT = "our app never shares your data"
 
-    def fix(self, transcripts):
+    def fix(self, transcripts, voice=None):
         sys.path.insert(0, str(SCRIPT.parent))
         self.addCleanup(sys.path.remove, str(SCRIPT.parent))
         import fix_words
@@ -427,7 +476,7 @@ class StutterCutTests(unittest.TestCase):
             if cuts:
                 last["cut"] = (cuts[-1]["cs"], cuts[-1]["ce"])
 
-        fakes = {"words": lambda audio, tag, *a: heard(self.SCRIPT if tag == "voice" else
+        fakes = {"words": lambda audio, tag, *a: heard((voice or self.SCRIPT) if tag == "voice" else
                                                          "our app app never shares your data"),
                  "plain": plain, "jump_cut": jump_cut, "run": lambda *cmd: "",
                  "search_cut": lambda *a: list(transcripts)}
@@ -445,6 +494,12 @@ class StutterCutTests(unittest.TestCase):
 
         self.assertEqual(report["cuts"], [{"heard": "app", "removed": [2.0, 2.4]}])
         self.assertEqual(report["unfixed"], [])
+
+    def test_a_cut_is_refused_when_it_drops_a_word_whisper_also_missed_in_the_mp3(self):
+        report = self.fix({(1.0, 1.4): "our app shares your data"}, voice="our app shares your data")
+
+        self.assertEqual(report["cuts"], [])
+        self.assertEqual([u["kind"] for u in report["unfixed"]], ["extra words"])
 
     def test_a_stutter_with_only_word_losing_cuts_is_reported_not_fixed(self):
         report = self.fix({(1.0, 1.4): "our app shares your data"})

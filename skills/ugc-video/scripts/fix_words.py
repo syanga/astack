@@ -13,7 +13,7 @@ usage: fix_words.py <render.mp4> <voice.mp3> <script-spoken.txt> <out.mp4> [--ch
 Cut times always come from a short (~3.5 s) clip around the spot, in both tracks. Full-file whisper.cpp times
 drift by up to ~0.5 s, and by a different amount in each track.
 """
-import array, difflib, json, math, os, re, subprocess, sys, tempfile
+import array, difflib, json, math, os, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -242,9 +242,9 @@ def find(render, voice, script_words, R, V, unfixed):
     return splices, cuts, mp3_raw
 
 
-def errors(path, script_words, mp3_raw, tag):
+def errors(path, script_words, mp3_raw, tag, W=None):
     """Script index ranges that are still wrong in `path` (whole-file plain transcript, same rules as find)."""
-    W = [{"w": norm(x), "raw": x} for x in plain(path, tag) if norm(x)]
+    W = W if W is not None else [{"w": norm(x), "raw": x} for x in plain(path, tag) if norm(x)]
     bad = []
     for op, a1, a2, b1, b2 in align(script_words, W)[1]:
         got = canon([h["raw"] for h in W[b1:b2]])
@@ -332,6 +332,13 @@ def fix(render, voice, script_path, out, check_only=False, log=print):
     """Run the whole check + fix. Returns a report dict (also what --report writes)."""
     global TMP, LOG
     TMP, LOG = tempfile.mkdtemp(), log
+    try:
+        return checked(render, voice, script_path, out, check_only)
+    finally:
+        shutil.rmtree(TMP, ignore_errors=True)
+
+
+def checked(render, voice, script_path, out, check_only):
     script_words = [norm(w) for w in Path(script_path).read_text().split() if norm(w)]
     unfixed = []
     R, V = words(render, "render"), words(voice, "voice")
@@ -373,8 +380,10 @@ def fix(render, voice, script_path, out, check_only=False, log=print):
         for cs, ce in c["options"][:6]:
             test = f"{TMP}/cuttest.mp4"
             jump_cut(spliced, kept + [{"cs": cs, "ce": ce}], test)
-            now = errors(test, script_words, mp3_raw, "cutcheck")
-            near = [r for r in now if r[0] <= c["a2"] and r[1] >= c["a1"]]
+            W = [{"w": norm(x), "raw": x} for x in plain(test, "cutcheck") if norm(x)]
+            now = errors(test, script_words, mp3_raw, "cutcheck", W)
+            near = [(a1, a2) for _, a1, a2, b1, b2 in align(script_words, W)[1]
+                    if a1 <= c["a2"] and a2 >= c["a1"] and canon([h["raw"] for h in W[b1:b2]]) != canon(script_words[a1:a2])]
             clean = not near and len(now) < len(base)
             LOG(f"    cut '{c['heard']}' {cs:.2f}-{ce:.2f}: "
                 f"{'clean' if clean else 'extra or missing words there' if near else 'new error'}")
