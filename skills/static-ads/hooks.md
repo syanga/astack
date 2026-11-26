@@ -4,7 +4,7 @@ Each formula is a headline shape, with an example and the formula's trap, the mo
 
 Two rules cover every formula:
 - **Say the number.** When the headline states an amount, a time, or a price, use the number the cited page gives. "Fast" and "a lot" are not numbers.
-- **Make it this brand's.** If the headline would work for any other brand in the niche, it isn't this brand's hook. Put in the thing only this brand can say.
+- **Make it this brand's.** Build the headline on an item from the style guide's Only us list. If the headline would work for any other brand in the niche, it isn't this brand's hook.
 
 | Formula | Headline shape | Example | Trap |
 | --- | --- | --- | --- |
