@@ -494,5 +494,16 @@
     "commit": "1085050f3baed1ac724caa4a8166145fb2ac88af",
     "license": "MIT, kept in skills/council/LICENSE",
     "note": "User-invoked, like most astack skills. Default members are Claude Opus 5.5 and GPT-6.1 Sol at xhigh, at the user's choice, because the user's providers are Claude and Codex. Outside T3 Code, dispatch follows arena's provider execution because a harness's own subagents cannot reach another provider. The Members and Review headings let hillclimb-council link to them. Upstream's review loop never ends when a delegate keeps requesting out-of-scope work, so declined requests can end it."
+  },
+  "static-ads": {
+    "repository": "https://github.com/graphed-inc/marketing-skills.git",
+    "path": "skills/static-ads",
+    "commit": "ea5a17dc816faa1fc919bc3579124b1acbdddeeb",
+    "license": "MIT, copied from repository-root LICENSE to skills/static-ads/LICENSE-graphed",
+    "files": {
+      "SKILL.md": "skills/static-ads/SKILL.md",
+      "generate.sh": "skills/static-ads/scripts/generate.py"
+    },
+    "note": "Graphed needs its own account and CLI, so images come from the OpenAI Images API, which renders Meta's 4:5 at 1472x1840. The script then needs no polling, crop, or upload, and runs on Linux, which lacks sips. The Ad Library pull needs a paid scraping service, so the user pastes their current ads instead. User-invoked because each run spends money."
   }
 }
