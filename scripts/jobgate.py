@@ -95,6 +95,8 @@ READ_BYTES = 2**20
 BOAT_LOGS_KEPT = 20
 BOAT_PAYMENT_STATUS = 402
 BOAT_PAYMENT_CODES = ("trial_compute_limit_reached",)
+BOAT_REFUSAL_STATUSES = (401, 403, 429, BOAT_PAYMENT_STATUS)
+BOAT_REFUSAL_CODES = ("unauthorized", "rate_limited", "no_ready_machine", *BOAT_PAYMENT_CODES)
 BOX_HOME = "/home/user"
 BOX_UPLOAD = ".jobgate-upload.tgz"
 BOX_FORMAT = "1"
@@ -117,7 +119,7 @@ GIT_SELECTORS = ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
                  "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX", "GIT_QUARANTINE_PATH")
 VENDORED = ("tomllib/__init__.py", "tomllib/_parser.py", "tomllib/_re.py", "tomllib/_types.py")
 RESULT_PREFIX = "jobgate: time="
-RESULT_LINE_CHARS = 4096
+RESULT_HOLD_CHARS = 65536
 
 Dirty = Literal["yes", "no", "unknown"]
 
@@ -1069,8 +1071,14 @@ class Plan(NamedTuple):
     setup_key: str
 
 
+@functools.lru_cache(maxsize=None)
+def repository_variables() -> frozenset:
+    listed = run_captured(["git", "rev-parse", "--local-env-vars"])
+    return frozenset(GIT_SELECTORS) | frozenset(listed.stdout.split() if listed.returncode == 0 else ())
+
+
 def scratch_env() -> dict:
-    return {key: value for key, value in os.environ.items() if key not in GIT_SELECTORS}
+    return {key: value for key, value in os.environ.items() if key not in repository_variables()}
 
 
 def git(args: list[str], cwd: Path | None = None, git_dir: Path | None = None, env: dict | None = None,
@@ -1183,29 +1191,41 @@ def content_ids(read: Callable[[], Iterator[bytes]], algorithm: str, with_raw: b
 @contextlib.contextmanager
 def git_lines(store: Path, *commands: list[str]) -> Iterator[Iterator[str]]:
     processes: list[subprocess.Popen] = []
+    expired = threading.Event()
+
+    def expire() -> None:
+        expired.set()
+        for process in list(processes):
+            process.kill()
+
+    timer = threading.Timer(GIT_SECONDS, expire)
+    timer.start()
     with tempfile.TemporaryFile() as errors:
-        upstream = None
-        for args in commands:
-            process = subprocess.Popen(["git", "--git-dir", str(store), *args], stdin=upstream or subprocess.DEVNULL,
-                                       stdout=subprocess.PIPE, stderr=errors, env=scratch_env())
-            if upstream is not None:
-                upstream.close()
-            upstream = process.stdout
-            processes.append(process)
-        timer = threading.Timer(GIT_SECONDS, lambda: [process.kill() for process in processes])
-        timer.start()
-        output = processes[-1].stdout
-        assert output is not None
         try:
-            yield (line.rstrip(b"\n").decode(errors="surrogateescape") for line in output)
+            upstream = None
+            for args in commands:
+                process = subprocess.Popen(["git", "--git-dir", str(store), *args],
+                                           stdin=upstream or subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors,
+                                           env=scratch_env())
+                processes.append(process)
+                if upstream is not None:
+                    upstream.close()
+                upstream = process.stdout
+            assert upstream is not None
+            yield (line.rstrip(b"\n").decode(errors="surrogateescape") for line in upstream)
         finally:
-            timer.cancel()
-            output.close()
+            for process in processes:
+                if process.stdout is not None:
+                    process.stdout.close()
             codes = [process.wait() for process in processes]
-        if any(codes):
+            timer.cancel()
+        failed = next((args for args, code in zip(commands, codes) if code), None)
+        if failed is not None:
+            name = next(arg for arg in failed if not arg.startswith("-"))
             errors.seek(0)
-            reason = (errors.read().decode(errors="replace").strip().splitlines() or ["exit {}".format(codes)])[-1]
-            raise BoatUnavailable("git", "git {} failed: {}".format(commands[-1][0], reason))
+            reason = "timed out after {}".format(duration(GIT_SECONDS)) if expired.is_set() else (
+                errors.read().decode(errors="replace").strip().splitlines() or ["exit {}".format(codes)])[-1]
+            raise BoatUnavailable("git", "git {} failed: {}".format(name, reason))
 
 
 class BlobReader:
@@ -1505,7 +1525,7 @@ class Relay:
     def __init__(self, log: BoatLog) -> None:
         self.log = log
         self.partial = ""
-        self.continued = False
+        self.open_line = False
         self.results: list[str] = []
 
     def __call__(self, kind: str, data: str) -> None:
@@ -1514,26 +1534,37 @@ class Relay:
             self.emit(sys.stdout, data)
             return
         lines = (self.partial + data).split("\n")
-        self.partial = lines.pop()
+        rest = lines.pop()
         for line in lines:
             self.error_line(line + "\n")
-        if self.partial and (self.continued or len(self.partial) > RESULT_LINE_CHARS or not (
-                RESULT_PREFIX.startswith(self.partial) or self.partial.startswith(RESULT_PREFIX))):
-            self.emit(sys.stderr, self.partial)
-            self.partial = ""
-            self.continued = True
+        start = rest.find(RESULT_PREFIX)
+        if start < 0:
+            start = next((len(rest) - size for size in range(min(len(rest), len(RESULT_PREFIX) - 1), 0, -1)
+                          if rest.endswith(RESULT_PREFIX[:size])), len(rest))
+        if len(rest) - start > RESULT_HOLD_CHARS:
+            start = len(rest)
+        self.error_text(rest[:start])
+        self.partial = rest[start:]
 
     def error_line(self, line: str) -> None:
-        if not self.continued and line.startswith(RESULT_PREFIX):
-            self.results.append(line[len("jobgate: "):].strip())
-        else:
-            self.emit(sys.stderr, line)
-        self.continued = False
+        start = line.rfind(RESULT_PREFIX)
+        if start < 0:
+            self.error_text(line)
+            return
+        self.error_text(line[:start])
+        self.results.append(line[start + len("jobgate: "):].strip())
+
+    def error_text(self, text: str) -> None:
+        if text:
+            self.emit(sys.stderr, text)
+            self.open_line = not text.endswith("\n")
 
     def finish(self) -> None:
         if self.partial:
             self.error_line(self.partial)
             self.partial = ""
+        if self.open_line:
+            self.error_text("\n")
 
     def result(self) -> dict:
         try:
@@ -1583,7 +1614,7 @@ class Box:
                 continue
             failure = failure or {"code": "no_box", "error": "boat new printed no box id"}
             code = str(failure.get("code") or "boat_failed")
-            if self.id is not None and failure.get("status") != BOAT_PAYMENT_STATUS and code not in BOAT_PAYMENT_CODES:
+            if self.id is not None and failure.get("status") not in BOAT_REFUSAL_STATUSES and code not in BOAT_REFUSAL_CODES:
                 raise BoatDied("start", "boat created the box but could not start it: " + describe(failure))
             raise BoatUnavailable(code, describe(failure), failure.get("status"))
         raise AssertionError("unreachable")
@@ -1674,7 +1705,10 @@ class Box:
                         raise BoatDied(step, "lost contact with the box for {}".format(duration(lost)))
             except BoatDied as died:
                 if ended is not None:
-                    return self.exit_code(step, ended)
+                    self.log.note("box {} disappeared after the {} step ended, so jobgate may have missed some of its "
+                                  "output ({})".format(self.id, step, died.reason))
+                    self.log.note("boat log: {}".format(self.log.where))
+                    return self.exit_code(step, dict(killed or {}, **ended))
                 if step == "run" and killed is not None and killed.get("signal") == "SIGKILL":
                     raise BoatDied(step, "boat killed the run step with SIGKILL and did not say why ({}). It may have "
                                          "run out of memory".format(died.reason), True) from None
@@ -1767,6 +1801,9 @@ class Box:
     def exit_code(step: str, info: dict) -> int:
         if info.get("oomKilled"):
             raise BoatDied(step, "the box ran out of memory and killed the {} step".format(step), step == "run")
+        if step == "run" and info.get("signal") == "SIGKILL" and "oomKilled" not in info:
+            raise BoatDied(step, "boat killed the run step with SIGKILL and did not say why. It may have run out of "
+                                 "memory", True)
         code = info.get("exitCode")
         if isinstance(code, int) and not info.get("signal"):
             return code
@@ -1922,11 +1959,10 @@ def boat_attempt(cli: str, settings: BoatSettings, source: Source, plan: Plan, s
         unavailable.box, unavailable.step = box.id, step
         raise unavailable from error
     finally:
-        with held_signals("jobgate stops after it deletes box {}".format(box.id) if box.id is not None else
-                          "jobgate stops after it cleans up"):
-            if heartbeat is not None:
-                heartbeat.stop()
-            if box.id is not None:
+        if box.id is not None:
+            with held_signals("jobgate stops after it deletes box {}".format(box.id)):
+                if heartbeat is not None:
+                    heartbeat.stop()
                 box.delete()
 
 

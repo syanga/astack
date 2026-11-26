@@ -426,7 +426,10 @@ and gives the reason in its `fallback` field.
 
 A box dies partway when one of these happens:
 
-- boat creates the box but reports an error before the box is ready.
+- boat creates the box but reports an error before the box is ready. A
+  refusal, such as a full start limit or an empty wallet, runs the command here
+  instead, as [When the command runs here instead](#when-the-command-runs-here-instead)
+  says.
 - The copy to the box fails.
 - The checkout or the setup script fails.
 - The box disappears.
@@ -445,9 +448,10 @@ jobgate: test retries once on a new box
 It deletes the box and tries once more on a new box. When the second box also
 dies partway, the command runs on this machine. A command that exits with an
 error on the box has not died. jobgate returns its exit code and does not run the
-command again. When boat reports that the command ended and the box then
-disappears before jobgate gets the rest of the output, jobgate also returns the
-exit code that boat reported.
+command again. Sometimes boat reports that the command ended, and then the box
+disappears before jobgate gets the rest of the output. jobgate then returns the
+exit code that boat reported. It prints that it may have missed output, and the
+path of the boat log.
 
 When the box runs out of memory during the run step, jobgate prints the
 `BOAT RUN FAILED` and `boat log` lines, deletes the box, and exits with 137. It

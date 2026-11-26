@@ -365,13 +365,25 @@ class SourceTests(BoatTest):
         self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere", result.stderr)
 
     def test_git_variables_from_the_caller_leave_the_repository_unchanged(self):
-        git_dir = str(self.repo / ".git")
-        config = (self.repo / ".git/config").read_bytes()
-        result = self.gate("run", "test", "--", sys.executable, "-c", REPORT,
-                           env=dict(self.env, GIT_DIR=git_dir, GIT_COMMON_DIR=git_dir))
-        self.assertEqual(result.returncode, 0, result.stderr)
+        git_dir = self.repo / ".git"
+        (self.repo / "private").mkdir()
+        (self.repo / "private/people.csv").write_text("name,email\nAda,ada@example.com\n")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
+        self.commit("add private data")
+        (self.repo / "app.py").write_text("version = 3\n")
+
+        def files():
+            return sorted(str(path.relative_to(git_dir)) for path in git_dir.rglob("*") if path.is_file()
+                          and path.name != "index")
+
+        before = (files(), (git_dir / "config").read_bytes())
+        variables = {"GIT_DIR": str(git_dir), "GIT_COMMON_DIR": str(git_dir),
+                     "GIT_OBJECT_DIRECTORY": str(git_dir / "objects")}
+        result = self.gate("run", "test", "--", sys.executable, "-c", "print(open('app.py').read().strip())",
+                           env=dict(self.env, **variables))
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "version = 3"), result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["where"], "boat", result.stderr)
-        self.assertEqual((self.repo / ".git/config").read_bytes(), config)
+        self.assertEqual((files(), (git_dir / "config").read_bytes()), before)
 
     def test_an_excluded_file_name_with_a_newline_is_checked(self):
         (self.repo / "private").mkdir()
@@ -551,7 +563,7 @@ class FallbackTests(BoatTest):
     def test_a_box_that_boat_creates_but_cannot_start_is_reported_and_replaced(self):
         boot_failure = {"code": "boot_failed", "status": 500, "error": "the box did not boot", "after_created": True,
                         "detail": "kernel panic in the box image"}
-        for failures, where in ((1, "boat"), (2, "local")):
+        for failures, where, fallback in ((1, "boat", None), (2, "local", "died")):
             with self.subTest(failures=failures):
                 self.plan(new=[boot_failure] * failures)
                 result = self.run_here(REPORT)
@@ -561,10 +573,30 @@ class FallbackTests(BoatTest):
                 log = self.printed_logs(result.stderr)[0].read_text()
                 self.assertIn("kernel panic in the box image", log)
                 fields = self.result_fields(result.stderr)
-                self.assertEqual(fields["where"], where)
-                if where == "local":
-                    self.assertEqual(fields["fallback"], "died")
+                self.assertEqual((fields["where"], fields.get("fallback")), (where, fallback))
                 self.assertEqual(self.boxes_left(), [])
+
+    def test_a_refusal_after_boat_creates_the_box_runs_the_command_here(self):
+        cases = [{"code": "no_ready_machine", "status": 503, "error": "no machine is ready"},
+                 {"code": "billing_required", "status": 402, "error": "The wallet is empty."}]
+        for refusal in cases:
+            with self.subTest(code=refusal["code"]):
+                (self.repo / "ran-here").unlink() if (self.repo / "ran-here").exists() else None
+                self.plan(new=[dict(refusal, after_created=True)])
+                result = self.run_here(REPORT)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue((self.repo / "ran-here").exists())
+                self.assertEqual(self.result_fields(result.stderr)["fallback"], refusal["code"])
+                self.assertNotIn("retries once", result.stderr)
+                self.assertEqual(self.boxes_left(), [])
+
+    def test_a_refusal_after_a_snapshot_box_is_deleted_keeps_boat_s_code(self):
+        self.plan(miss_after_created=[True], new=[{"code": "rate_limited", "status": 429, "error": "A start limit is full"}])
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "rate_limited")
+        self.assertNotIn("BOAT RUN FAILED", result.stderr)
+        self.assertEqual(self.boxes_left(), [])
 
     def test_a_box_that_boat_creates_before_it_reports_a_missing_snapshot_is_deleted(self):
         self.plan(miss_after_created=[True])
@@ -579,31 +611,39 @@ class FallbackTests(BoatTest):
         result = self.run_here(REPORT, "7")
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertNotIn("BOAT RUN FAILED", result.stderr)
+        self.assertRegex(result.stderr, r"box bx_\w+ disappeared after the run step ended, so jobgate may have missed")
+        self.assertEqual(len(self.printed_logs(result.stderr)), 1, result.stderr)
         self.assertEqual(len([argv for argv in self.calls("new") if "--from" not in argv]), 1)
         self.assertEqual(self.result_fields(result.stderr)["exit"], "7")
 
     def test_error_output_without_a_newline_reaches_this_machine_while_the_command_runs(self):
-        started = self.root / "box started"
-        command = ("import pathlib, sys, time; sys.stderr.write('working' + chr(13)); sys.stderr.flush(); "
-                   "time.sleep(30)")
+        command = "import sys, time; sys.stderr.write('working' + chr(13)); sys.stderr.flush(); time.sleep(30)"
         process = subprocess.Popen([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", command],
                                    cwd=str(self.repo), env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                    start_new_session=True)
         self.addCleanup(lambda: process.poll() is None and process.kill())
         seen = []
-
-        def read():
-            for chunk in iter(lambda: os.read(process.stderr.fileno(), 4096), b""):
-                seen.append(chunk)
-                if b"working\r" in b"".join(seen):
-                    started.touch()
-
-        threading.Thread(target=read, daemon=True).start()
-        wait_for(started.exists)
+        threading.Thread(target=lambda: seen.extend(iter(lambda: os.read(process.stderr.fileno(), 4096), b"")),
+                         daemon=True).start()
+        wait_for(lambda: b"working\r" in b"".join(seen))
         self.assertIsNone(process.poll())
         os.killpg(process.pid, signal.SIGINT)
         process.wait(timeout=60)
-        self.assertEqual(self.boxes_left(), [])
+
+    def test_the_box_result_is_read_after_error_output_without_a_newline(self):
+        result = self.run_here("import sys; sys.stderr.write('progress without a newline')")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("progress without a newline", result.stderr)
+        self.assertEqual(result.stderr.count("jobgate: time="), 1, result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["workers"], "4")
+
+    def test_a_kill_whose_status_omits_the_memory_flag_is_not_retried(self):
+        self.plan(oom=["run"], status_unknown=[True])
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 128 + signal.SIGKILL, result.stderr)
+        self.assertFalse((self.repo / "ran-here").exists())
+        self.assertIn("boat killed the run step with SIGKILL and did not say why", result.stderr)
+        self.assertNotIn("retries once", result.stderr)
 
     def test_the_upload_carries_only_the_runtime_files_of_jobgate(self):
         copy = self.root / "jobgate copy"

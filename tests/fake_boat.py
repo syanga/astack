@@ -10,8 +10,6 @@ import time
 STATE = Path(os.environ["FAKE_BOAT_DIR"])
 BOX_HOME = "/home/user/"
 STEPS = {"_box prepare": "setup", "_box run": "run"}
-GIT_SELECTORS = ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
-                 "GIT_ALTERNATE_OBJECT_DIRECTORIES")
 
 
 def emit(value):
@@ -44,7 +42,7 @@ def box(box_id):
 def box_env(path):
     home = str(path / "home")
     machine = os.environ.get("FAKE_BOAT_BOX_MACHINE", os.environ.get("JOBGATE_MACHINE_FILE", ""))
-    env = {key: value for key, value in os.environ.items() if key not in GIT_SELECTORS}
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     return dict(env, HOME=home, JOBGATE_HOME=home, PATH=os.environ["FAKE_BOAT_BOX_PATH"], JOBGATE_MACHINE_FILE=machine)
 
 
@@ -181,6 +179,9 @@ def status(path, pid):
     if take("status_gone"):
         fail("not_found", 404, "not found (404)")
     if (path / "procs" / "{}.oom".format(pid)).exists():
+        if take("status_unknown"):
+            emit({"running": False, "exitCode": None, "signal": "SIGKILL"})
+            return
         emit({"running": False, "exitCode": None, "oomKilled": True, "signal": "SIGKILL"})
         return
     exit_file = path / "procs" / "{}.exit".format(pid)
