@@ -291,10 +291,10 @@ that read Git history therefore work on the box.
   excluded path also lives at another path, in the history or in the
   uncommitted changes that the box would get. Examples are a file that a commit
   moved into an excluded directory, and an untracked copy of an excluded file.
-  If one does, the command runs here. jobgate prints up to 5 such paths to add
-  to `exclude`, and the number of the others. It names one path for each
-  content, so the next run can name another copy of the same content. Empty
-  files do not count.
+  If it finds such content, the command runs on this machine. jobgate prints up
+  to 5 such paths to add to `exclude`, and the number of the others. It names
+  one path for each excluded file content. After you add those paths, the next
+  run can name another path with the same content. Empty files do not count.
 - When the box starts from a snapshot, the bundle holds only the commits that
   the snapshot lacks.
 
@@ -374,7 +374,8 @@ is true:
   error, such as `billing_required`, or after `trial_compute_limit_reached`,
   jobgate skips boat for an hour. It keeps the end time in
   `~/.cache/jobgate/boat-off.json`.
-- Git cannot read the repository, or the commit has no setup script.
+- Before it starts a box, Git cannot read the repository, the commit has no
+  setup script, or jobgate on this machine hits a file error (`local_error`).
 - The run died partway on two boxes in a row.
 
 jobgate prints why. The result line says `where=local` and gives the reason in

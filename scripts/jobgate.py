@@ -1120,8 +1120,8 @@ def check_exclude(source: Source, settings: BoatSettings) -> None:
     if elsewhere:
         shown = ", ".join(elsewhere[:5]) + ("" if len(elsewhere) <= 5 else ", and {} more".format(len(elsewhere) - 5))
         raise BoatUnavailable("excluded_elsewhere", "content from the excluded paths is also at {}, in the history or "
-                              "the uncommitted changes. Add {} to exclude. jobgate names one path for each content, so "
-                              "the next run can name other copies".format(
+                              "the uncommitted changes. Add {} to exclude. After that, the next run can name other "
+                              "paths with the same content".format(
                                   shown, "these paths" if len(elsewhere) > 1 else "this path"))
 
 
@@ -1605,12 +1605,16 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
     queue = Queue.open()
     root = config.parent
     _, dirty = git_state(root)
-    scratch = Path(tempfile.mkdtemp(prefix="jobgate-boat-"))
+    scratch: Path | None = None
     try:
         try:
+            scratch = Path(tempfile.mkdtemp(prefix="jobgate-boat-"))
             source = take_source(root, scratch, dirty)
             check_exclude(source, settings)
             plan = make_plan(source, settings)
+        except OSError as error:
+            say("boat cannot run {}, so it runs here: jobgate on this machine failed: {}".format(profile.name, error))
+            return Fallback("local_error")
         except BoatUnavailable as unavailable:
             say("boat cannot run {}, so it runs here: {}".format(profile.name, unavailable.reason))
             return Fallback(unavailable.code)
@@ -1662,7 +1666,8 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
             return outcome.code
         return Fallback("died")
     finally:
-        shutil.rmtree(str(scratch), ignore_errors=True)
+        if scratch is not None:
+            shutil.rmtree(str(scratch), ignore_errors=True)
 
 
 def box_git(repo: Path, *args: str) -> bool:

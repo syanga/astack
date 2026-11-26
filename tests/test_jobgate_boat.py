@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
 
 from test_jobgate import SCRIPT, JobgateTest, wait_for
@@ -329,6 +330,23 @@ class FallbackTests(BoatTest):
                          ["billing_required", "billing_required"])
         self.assertIn("boat is off until", second.stderr)
         self.assertEqual(len(self.calls("new")), starts)
+        off_file = Path(self.env["JOBGATE_HOME"]) / ".cache/jobgate/boat-off.json"
+        off = json.loads(off_file.read_text())
+        self.assertAlmostEqual(off["until"] - time.time(), 3600, delta=120)
+        off_file.write_text(json.dumps(dict(off, until=time.time() - 1)))
+        third = self.run_here(REPORT)
+        self.assertEqual(self.result_fields(third.stderr)["where"], "boat", third.stderr)
+
+    def test_a_file_error_on_this_machine_before_the_box_starts_leaves_the_run_to_this_machine(self):
+        template = self.root / "git-template"
+        (template / "objects/info/alternates").mkdir(parents=True)
+        self.env["GIT_TEMPLATE_DIR"] = str(template)
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.repo / "ran-here").exists())
+        self.assertIn("jobgate on this machine failed", result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "local_error")
+        self.assertEqual(self.calls("new"), [])
 
     def test_a_box_that_dies_once_is_replaced_by_a_new_box(self):
         self.plan(vanish=["setup"])
