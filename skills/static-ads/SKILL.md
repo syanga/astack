@@ -57,7 +57,7 @@ Copy the font files, the logo, and the product images the ads will use into `pag
 Use one line each: a name, the visual, the headline (3–8 words, caps), the sub-line, the CTA, and the cited page. The cited page is the URL of the site page that states the ad's claim. Put it on every line, even when several ideas cite the same page, and fetch each cited page with curl to check the claim is there. The name has 12 characters or fewer, such as `Proof`, because Meta's media library shows 12. Aim each one at a pain their current ads don't cover. With no ads, aim each one at a different pain or claim from the site's own copy. Show the user the list before generating unless they already said to make them.
 
 Every ad keeps to these claims rules:
-- It states only claims and numbers that its cited page states. That includes pass rates, guarantees, testimonials, customer counts, and prices.
+- It states only claims and numbers that its cited page states. That includes pass rates, guarantees, testimonials, customer counts, and prices. A claim or number that appears only in hidden markup, such as a stand-in price that a script replaces, is one the page doesn't state.
 - The only logo or mark it shows is the brand's own, so no exam owner's or partner's logo.
 - It names products, exams, and organizations the way the site names them.
 - When the style guide records a notice, every ad carries it word for word. The first rule covers the ad's claims, not the notice.
@@ -138,7 +138,7 @@ It reads the text in the page, not text drawn inside an image, so place an image
 
 ## 5. Review
 
-View every Feed and Story PNG. Check for:
+View every Feed and Story PNG. Without Chrome or Chromium, view each GPT Image ad's `pages/<Name>.png` instead. Check for:
 - Misspelled text
 - Made-up handles or URLs, such as a fake `@brand` or `shop.brand.ai`. Flag those to the user.
 - A wordmark that doesn't match
@@ -149,9 +149,9 @@ View every Feed and Story PNG. Check for:
 
 Read the script output for `FAILED`. A failed ad can still leave the script looking finished.
 
-Hand over only ads that keep every claims rule. For an HTML ad that breaks one, fix its page and run `render.py` again. For a GPT Image ad that breaks one, delete its `.req.json`, `.png`, `.res.json`, and `.html` in `pages/`, and its `<Name> Feed.png` and `<Name> Story.png` in the run folder. Then tell the user which rule it broke.
+Hand over only ads that keep every claims rule. For a hybrid ad, fix the page when its page breaks the rule, and run `render.py` again. When its scene breaks the rule, draw the scene again once, as the next paragraph says. When the new scene still breaks it, delete the scene's `<img>` from the page, so the ad shows the page's background color. Then run `render.py` again, and tell the user which rule the scene broke. For a GPT Image ad that breaks one, delete its `.req.json`, `.png`, `.res.json`, and `.html` in `pages/`, and its `<Name> Feed.png` and `<Name> Story.png` in the run folder. Then tell the user which rule it broke.
 
-`generate.py` treats any existing PNG as done and skips generation. To generate an ad again, delete its `.png` and `.res.json` in `pages/`, then run `generate.py` and `render.py` again.
+`generate.py` treats any existing PNG as done and skips generation. To draw an image again, delete its `.png` and `.res.json` in `pages/`, such as `scene-<Name>.png` and `scene-<Name>.res.json` for a hybrid ad's scene. Then run `generate.py` and `render.py` again.
 
 ## Gotchas
 
