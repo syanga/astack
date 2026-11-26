@@ -50,11 +50,17 @@ Copy the font files, the logo, and the product images the ads will use into `pag
   ```
 
   The screenshot needs Google Chrome or Chromium, and so does every Feed and Story file in step 4. When `render.py` finds neither, tell the user. With a repo, stop there, because no ad can be made. Without a repo, go on with GPT Image, and ask the user for a reference image when the page has no og:image.
-- Write `ad-style-guide.md` in the run folder. Keep it short: colors, fonts, layout, product names and prices, copy rules and imagery, about 40 lines.
+- Write `ad-style-guide.md` in the run folder. Keep it short: colors, fonts, layout, product names and prices, copy rules and imagery, about 40 lines. Look for the site's notice in the page's footer and on the legal or terms pages the footer links to. A notice is a non-affiliation line, or a trademark line that names a mark or its owner. "All other trademarks are the property of their owners" names neither, so it isn't one. Copy the notice into the guide word for word.
 
 ## 3. Five static ideas
 
-Use one line each: a name, the visual, the headline (3–8 words, caps), the sub-line and the CTA. The name has 12 characters or fewer, such as `Proof`, because Meta's media library shows 12. Aim each one at a pain their current ads don't cover. With no ads, aim each one at a different pain or claim from the site's own copy. Show the user the list before generating unless they already said to make them.
+Use one line each: a name, the visual, the headline (3–8 words, caps), the sub-line, the CTA, and the cited page. The cited page is the URL of the site page that states the ad's claim. Put it on every line, even when several ideas cite the same page, and fetch each cited page with curl to check the claim is there. The name has 12 characters or fewer, such as `Proof`, because Meta's media library shows 12. Aim each one at a pain their current ads don't cover. With no ads, aim each one at a different pain or claim from the site's own copy. Show the user the list before generating unless they already said to make them.
+
+Every ad keeps to these claims rules:
+- It states only claims and numbers that its cited page states. That includes pass rates, guarantees, testimonials, customer counts, and prices. A claim or number that appears only in hidden markup, such as a stand-in price that a script replaces, is one the page doesn't state.
+- The only logo or mark it shows is the brand's own, so no exam owner's or partner's logo.
+- It names products, exams, and organizations the way the site names them.
+- When the style guide records a notice, every ad carries it word for word. The first rule covers the ad's claims, not the notice.
 
 ## 4. Make the ads
 
@@ -73,7 +79,7 @@ Then copy `<skill-dir>/starter/ad.html` to `pages/<Name>.html` for each ad. The 
 - Point the `scene` image at `scene-<Name>.png`.
 - Set the `:root` colors and fonts to the repo's values, with an `@font-face` for each font file in `pages/assets/`. Set `--scrim` dark or light enough that the text reads clearly on the scene.
 - Put in the brand's logo, the product image, the idea's headline, sub-line, and CTA, and the site's address.
-- Replace the footer's notice with the site's own notice, or delete it when the site shows none.
+- Replace the footer's notice with the notice from the style guide, or delete it when the guide records none.
 - Change the layout when the idea needs it, such as a product shot that fills the frame.
 - Use only files in `pages/`. `render.py` blocks the network, so a remote font or image never loads.
 
@@ -95,12 +101,13 @@ Copy the reference image into `pages/`. Write one `pages/<Name>.req.json` per ad
 The style block, filled from the guide:
 - Brand colors with hex values
 - Headline font description and case
-- Small wordmark at the top "exactly like the reference". When the reference shows no wordmark, describe it in words: the brand name, its font, and its color.
+- Small wordmark at the top "exactly like the <brand name> wordmark in the reference". When the reference doesn't show the brand's wordmark, describe it in words: the brand name, its font, and its color.
 - The CTA pill
 - "No drop shadows, no robots, no glowing AI imagery"
-- "Use ONLY the wordmark and look from the reference, do not copy its headline or logos"
+- "Use ONLY the <brand name> wordmark and look from the reference, do not copy its headline or logos"
 - "Render all text exactly as written"
 - "Show no text other than the text in this prompt"
+- When the style guide records a notice, the notice in small type at the bottom, word for word
 
 Then run:
 
@@ -131,17 +138,20 @@ It reads the text in the page, not text drawn inside an image, so place an image
 
 ## 5. Review
 
-View every Feed and Story PNG. Check for:
+View every Feed and Story PNG. Without Chrome or Chromium, view each GPT Image ad's `pages/<Name>.png` instead. Check for:
 - Misspelled text
 - Made-up handles or URLs, such as a fake `@brand` or `shop.brand.ai`. Flag those to the user.
 - A wordmark that doesn't match
 - Copied customer logos
 - Text the prompt didn't ask for, such as made-up page content
+- An ad that breaks a claims rule from step 3
 - For a GPT Image ad, a size other than 1472x1840 on its `done` or `exists` line
 
 Read the script output for `FAILED`. A failed ad can still leave the script looking finished.
 
-`generate.py` treats any existing PNG as done and skips generation. To generate an ad again, delete its `.png` and `.res.json` in `pages/`, then run `generate.py` and `render.py` again.
+Hand over only ads that keep every claims rule. For a hybrid ad, fix the page when its page breaks the rule, and run `render.py` again. When its scene breaks the rule, draw the scene again once, as the next paragraph says. When the new scene still breaks it, delete the scene's `<img>` from the page, so the ad shows the page's background color. Then run `render.py` again, and tell the user which rule the scene broke. For a GPT Image ad that breaks one, delete its `.req.json`, `.png`, `.res.json`, and `.html` in `pages/`, and its `<Name> Feed.png` and `<Name> Story.png` in the run folder. Then tell the user which rule it broke.
+
+`generate.py` treats any existing PNG as done and skips generation. To draw an image again, delete its `.png` and `.res.json` in `pages/`, such as `scene-<Name>.png` and `scene-<Name>.res.json` for a hybrid ad's scene. Then run `generate.py` and `render.py` again.
 
 ## Gotchas
 
