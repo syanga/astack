@@ -79,6 +79,8 @@ def chrome(binary, scratch, width, height, *arguments, network=False):
     command = [binary, "--headless", "--disable-gpu", "--hide-scrollbars", "--no-first-run",
                "--no-default-browser-check", "--force-device-scale-factor=1", "--run-all-compositor-stages-before-draw",
                "--user-data-dir=" + str(scratch / "profile"), "--window-size={},{}".format(width, height), *arguments]
+    if sys.platform == "darwin":
+        command.insert(1, "--use-mock-keychain")
     if not network:
         command[1:1] = ["--host-resolver-rules=MAP * ~NOTFOUND", "--virtual-time-budget=10000"]
     env = {**os.environ, "HOME": str(scratch / "home"), "XDG_CONFIG_HOME": str(scratch / "config"),
