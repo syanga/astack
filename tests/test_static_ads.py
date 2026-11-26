@@ -397,7 +397,7 @@ class GenerateTests(unittest.TestCase):
     def test_a_vertex_dry_run_shows_each_ratio_and_tier_without_calling_vertex_or_gcloud(self):
         (self.run_folder / "og-image.png").write_bytes(b"reference")
         sizes = {"1-portrait": "1472x1840", "2-square": "1024x1024", "3-square": "1080x1080", "4-wide": "3840x2160",
-                 "5-huge": "8192x8192", "7-odd": "1000x1001", "8-empty": "0x0"}
+                 "5-huge": "8192x8192", "7-odd": "1000x1001", "8-empty": "0x0", "9-cinema": "2520x1080"}
         for name, size in sizes.items():
             self.write_request(name, {"prompt": name, "size": size, "quality": "high", "images": ["og-image.png"]})
         self.write_request("6-auto", {"prompt": "6-auto"})
@@ -413,7 +413,8 @@ class GenerateTests(unittest.TestCase):
                      "3-square: 1:1 2K, 8 chars, 1 refs",
                      "4-wide: 16:9 4K, 6 chars, 1 refs",
                      "5-huge: 1:1 4K, 6 chars, 1 refs",
-                     "6-auto: auto, 6 chars, 0 refs"]:
+                     "6-auto: auto, 6 chars, 0 refs",
+                     "9-cinema: 21:9 2K, 8 chars, 1 refs"]:
             self.assertIn(line, lines)
         self.assertLine(checked.stdout, "7-odd", "FAILED", "1000x1001", "4:5")
         self.assertLine(checked.stdout, "8-empty", "FAILED", "0x0", "4:5")
@@ -434,6 +435,7 @@ class GenerateTests(unittest.TestCase):
             "4-wide": {"responseModalities": ["IMAGE"], "imageConfig": {"aspectRatio": "16:9", "imageSize": "4K"}},
             "5-huge": {"responseModalities": ["IMAGE"], "imageConfig": {"aspectRatio": "1:1", "imageSize": "4K"}},
             "6-auto": {"responseModalities": ["IMAGE"]},
+            "9-cinema": {"responseModalities": ["IMAGE"], "imageConfig": {"aspectRatio": "21:9", "imageSize": "2K"}},
         })
 
     def test_a_busy_reply_is_retried_for_up_to_three_attempts_on_either_backend(self):

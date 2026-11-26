@@ -5,7 +5,6 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import json
-from math import gcd
 import mimetypes
 import os
 from pathlib import Path
@@ -23,7 +22,7 @@ RETRIED_STATUSES = frozenset({429, 500, 502, 503, 504})
 RETRY_WAITS = (5, 10)
 MAX_RETRY_AFTER = 60
 OUTPUT = threading.Lock()
-VERTEX_RATIOS = ("1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9")
+VERTEX_RATIOS = ((1, 1), (2, 3), (3, 2), (3, 4), (4, 3), (4, 5), (5, 4), (9, 16), (16, 9), (21, 9))
 VERTEX_TIERS = (("1K", 1024), ("2K", 2048), ("4K", 4096))
 
 
@@ -146,13 +145,13 @@ def vertex_image_config(request):
     sides = re.fullmatch(r"([1-9][0-9]*)x([1-9][0-9]*)", size) if isinstance(size, str) else None
     if sides:
         width, height = map(int, sides.groups())
-        divisor = gcd(width, height)
-        ratio = "{}:{}".format(width // divisor, height // divisor)
-        if ratio in VERTEX_RATIOS:
+        ratio = next(("{}:{}".format(across, down) for across, down in VERTEX_RATIOS
+                      if width * down == height * across), None)
+        if ratio:
             tier = next((name for name, side in VERTEX_TIERS if width * height <= side * side), "4K")
             return {"aspectRatio": ratio, "imageSize": tier}
     raise ValueError("size {} is not <width>x<height> in a ratio Vertex supports: {}".format(
-        size, ", ".join(VERTEX_RATIOS)))
+        size, ", ".join("{}:{}".format(*ratio) for ratio in VERTEX_RATIOS)))
 
 
 def vertex_shape(request):
