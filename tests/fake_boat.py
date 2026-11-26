@@ -10,6 +10,8 @@ import time
 STATE = Path(os.environ["FAKE_BOAT_DIR"])
 BOX_HOME = "/home/user/"
 STEPS = {"_box prepare": "setup", "_box run": "run"}
+GIT_SELECTORS = ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                 "GIT_ALTERNATE_OBJECT_DIRECTORIES")
 
 
 def emit(value):
@@ -42,8 +44,8 @@ def box(box_id):
 def box_env(path):
     home = str(path / "home")
     machine = os.environ.get("FAKE_BOAT_BOX_MACHINE", os.environ.get("JOBGATE_MACHINE_FILE", ""))
-    return dict(os.environ, HOME=home, JOBGATE_HOME=home, PATH=os.environ["FAKE_BOAT_BOX_PATH"],
-                JOBGATE_MACHINE_FILE=machine)
+    env = {key: value for key, value in os.environ.items() if key not in GIT_SELECTORS}
+    return dict(env, HOME=home, JOBGATE_HOME=home, PATH=os.environ["FAKE_BOAT_BOX_PATH"], JOBGATE_MACHINE_FILE=machine)
 
 
 def option(args, name):
@@ -53,6 +55,10 @@ def option(args, name):
 def new(args):
     source = option(args, "--from")
     if source is not None and not (STATE / "saved" / source).is_dir():
+        if take("miss_after_created"):
+            box_id = "bx_miss{}".format(os.getpid())
+            (STATE / "boxes" / box_id / "home").mkdir(parents=True)
+            emit({"event": "created", "id": box_id})
         fail("snapshot_not_found", 404, 'No saved snapshot "{}".'.format(source))
     error = take("new")
     if error and not error.get("after_created"):
@@ -125,6 +131,12 @@ def attach(path, pid):
     stall = bool(stalls) and stalls[0] == step
     if stall:
         take("stall")
+    drops = json.loads(plan_path.read_text()).get("drop", []) if plan_path.exists() else []
+    if drops and drops[0] == step:
+        take("drop")
+        while not (procs / "{}.exit".format(pid)).exists():
+            time.sleep(0.05)
+        fail("unavailable", 503, "the connection dropped")
     if planned and planned[0] == step:
         take("vanish")
         time.sleep(0.2)

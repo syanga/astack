@@ -113,6 +113,11 @@ SECRET_NAMES = (".env", ".env.*", "*.env", ".envrc", "*~", "*.pem", "*.key", "*.
 REPO_PATH = re.compile(r"[^*?\[\]!#\\\n\x00]+")
 COMMIT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 GITLINK_MODE = "160000"
+GIT_SELECTORS = ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                 "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX", "GIT_QUARANTINE_PATH")
+VENDORED = ("tomllib/__init__.py", "tomllib/_parser.py", "tomllib/_re.py", "tomllib/_types.py")
+RESULT_PREFIX = "jobgate: time="
+RESULT_LINE_CHARS = 4096
 
 Dirty = Literal["yes", "no", "unknown"]
 
@@ -1064,8 +1069,14 @@ class Plan(NamedTuple):
     setup_key: str
 
 
+def scratch_env() -> dict:
+    return {key: value for key, value in os.environ.items() if key not in GIT_SELECTORS}
+
+
 def git(args: list[str], cwd: Path | None = None, git_dir: Path | None = None, env: dict | None = None,
         stdin_text: str | None = None, config: tuple[str, ...] = ()) -> str:
+    if env is None and git_dir is not None:
+        env = scratch_env()
     argv = ["git", *(option for setting in config for option in ("-c", setting)),
             *(["--git-dir", str(git_dir)] if git_dir is not None else []), *args]
     feed: dict = ({"input": stdin_text.encode(errors="surrogateescape")} if stdin_text is not None
@@ -1094,8 +1105,8 @@ def take_source(root: Path, scratch: Path, dirty: Dirty) -> Source:
     objects = git(["rev-parse", "--path-format=absolute", "--git-path", "objects"], cwd=root).strip()
     object_format = git(["rev-parse", "--show-object-format"], cwd=root).strip()
     store = scratch / "store.git"
-    git(["init", "-q", "--bare", "--object-format=" + object_format, str(store)])
-    (store / "objects/info/alternates").write_text(objects + "\n")
+    git(["init", "-q", "--bare", "--object-format=" + object_format, str(store)], env=scratch_env())
+    (store / "objects/info/alternates").write_bytes(os.fsencode(objects) + b"\n")
     commit, left_out = head.stdout.strip(), ()
     if dirty != "no":
         commit, left_out = commit_worktree(root, scratch, store, objects, commit)
@@ -1137,7 +1148,7 @@ def line_ending_forms(chunks: Iterator[bytes]) -> Iterator[tuple[bytes, bytes]]:
     yield held, held
 
 
-def content_ids(read: Callable[[], Iterator[bytes]], algorithm: str, as_is: bool) -> set[str]:
+def content_ids(read: Callable[[], Iterator[bytes]], algorithm: str, with_raw: bool) -> set[str]:
     size = lf_size = crlf_size = 0
 
     def counted() -> Iterator[bytes]:
@@ -1149,7 +1160,7 @@ def content_ids(read: Callable[[], Iterator[bytes]], algorithm: str, as_is: bool
     for lf, crlf in line_ending_forms(counted()):
         lf_size += len(lf)
         crlf_size += len(crlf)
-    raw = hashlib.new(algorithm, b"blob %d\0" % size) if as_is else None
+    raw = hashlib.new(algorithm, b"blob %d\0" % size) if with_raw else None
     lf_digest = hashlib.new(algorithm, b"blob %d\0" % lf_size) if lf_size != size else None
     crlf_digest = hashlib.new(algorithm, b"blob %d\0" % crlf_size) if crlf_size != size else None
     if raw is None and lf_digest is None and crlf_digest is None:
@@ -1169,10 +1180,38 @@ def content_ids(read: Callable[[], Iterator[bytes]], algorithm: str, as_is: bool
     return {digest.hexdigest() for digest in (raw, lf_digest, crlf_digest) if digest is not None}
 
 
+@contextlib.contextmanager
+def git_lines(store: Path, *commands: list[str]) -> Iterator[Iterator[str]]:
+    processes: list[subprocess.Popen] = []
+    with tempfile.TemporaryFile() as errors:
+        upstream = None
+        for args in commands:
+            process = subprocess.Popen(["git", "--git-dir", str(store), *args], stdin=upstream or subprocess.DEVNULL,
+                                       stdout=subprocess.PIPE, stderr=errors, env=scratch_env())
+            if upstream is not None:
+                upstream.close()
+            upstream = process.stdout
+            processes.append(process)
+        timer = threading.Timer(GIT_SECONDS, lambda: [process.kill() for process in processes])
+        timer.start()
+        output = processes[-1].stdout
+        assert output is not None
+        try:
+            yield (line.rstrip(b"\n").decode(errors="surrogateescape") for line in output)
+        finally:
+            timer.cancel()
+            output.close()
+            codes = [process.wait() for process in processes]
+        if any(codes):
+            errors.seek(0)
+            reason = (errors.read().decode(errors="replace").strip().splitlines() or ["exit {}".format(codes)])[-1]
+            raise BoatUnavailable("git", "git {} failed: {}".format(commands[-1][0], reason))
+
+
 class BlobReader:
     def __init__(self, store: Path) -> None:
         self.process = subprocess.Popen(["git", "--git-dir", str(store), "cat-file", "--batch"], stdin=subprocess.PIPE,
-                                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=scratch_env())
         self.timer = threading.Timer(GIT_SECONDS, self.process.kill)
         self.timer.start()
 
@@ -1183,7 +1222,7 @@ class BlobReader:
         stdin.flush()
         header = stdout.readline().split()
         if len(header) != 3 or header[1] != b"blob":
-            raise BoatUnavailable("git", "git cat-file cannot read {}, which the exclude check needs: {}".format(
+            raise BoatUnavailable("git", "git cat-file cannot read {}, which the copy check needs: {}".format(
                 blob, b" ".join(header).decode(errors="replace") or "no answer"))
         remaining = int(header[2])
         while remaining:
@@ -1214,10 +1253,10 @@ def file_chunks(descriptor: int, size: int, path: str) -> Iterator[bytes]:
         total += len(chunk)
         yield chunk
     if total != size:
-        raise OSError(errno.EAGAIN, "the file changed while jobgate read it", path)
+        raise OSError("{} changed while jobgate read it".format(path))
 
 
-def missing(error: OSError) -> bool:
+def unreachable(error: OSError) -> bool:
     return isinstance(error, FileNotFoundError) or error.errno == errno.ELOOP
 
 
@@ -1232,7 +1271,7 @@ def worktree_paths(root: Path, settings: BoatSettings) -> Iterator[str]:
         try:
             is_directory = stat.S_ISDIR(os.stat(top).st_mode)
         except OSError as error:
-            if missing(error):
+            if unreachable(error):
                 continue
             raise
         if not is_directory:
@@ -1253,7 +1292,7 @@ def worktree_ids(root: Path, settings: BoatSettings, algorithm: str) -> set[str]
         try:
             descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
         except OSError as error:
-            if missing(error):
+            if unreachable(error):
                 continue
             raise
         try:
@@ -1266,17 +1305,17 @@ def worktree_ids(root: Path, settings: BoatSettings, algorithm: str) -> set[str]
 
 
 def history_blobs(source: Source, settings: BoatSettings) -> set[str]:
-    commits = git(["rev-list", RUN_REF], git_dir=source.store)
-    changes = git(["--literal-pathspecs", "diff-tree", "--stdin", "-r", "-m", "--root", "--no-renames", "--no-commit-id",
-                   "--raw", "--no-abbrev", "--", *settings.exclude], git_dir=source.store, stdin_text=commits)
     blobs = set()
-    for line in changes.splitlines():
-        fields = line.split("\t", 1)[0].split()
-        if len(fields) < 4 or not line.startswith(":"):
-            continue
-        for mode, blob in ((fields[0][1:], fields[2]), (fields[1], fields[3])):
-            if mode not in ("000000", GITLINK_MODE) and COMMIT_ID.fullmatch(blob):
-                blobs.add(blob)
+    with git_lines(source.store, ["rev-list", RUN_REF],
+                   ["--literal-pathspecs", "diff-tree", "--stdin", "-r", "-m", "--root", "--no-renames", "--no-commit-id",
+                    "--raw", "--no-abbrev", "--", *settings.exclude]) as changes:
+        for line in changes:
+            fields = line.split("\t", 1)[0].split()
+            if len(fields) < 4 or not line.startswith(":"):
+                continue
+            for mode, blob in ((fields[0][1:], fields[2]), (fields[1], fields[3])):
+                if mode not in ("000000", GITLINK_MODE) and COMMIT_ID.fullmatch(blob):
+                    blobs.add(blob)
     return blobs
 
 
@@ -1300,9 +1339,9 @@ def check_exclude(source: Source, settings: BoatSettings, root: Path) -> None:
         return
     patterns = "".join(line + "\n" for line in settings.sparse_patterns())
     blob = git(["hash-object", "-w", "--stdin"], git_dir=source.store, stdin_text=patterns).strip()
-    objects = git(["rev-list", "--objects", "--filter=sparse:oid=" + blob, RUN_REF], git_dir=source.store)
-    elsewhere = sorted({line.split(" ", 1)[1] for line in objects.splitlines()
-                        if " " in line and line.split(" ", 1)[0] in excluded_blobs})
+    with git_lines(source.store, ["rev-list", "--objects", "--filter=sparse:oid=" + blob, RUN_REF]) as objects:
+        elsewhere = sorted({line.split(" ", 1)[1] for line in objects
+                            if " " in line and line.split(" ", 1)[0] in excluded_blobs})
     if elsewhere:
         shown = ", ".join(elsewhere[:5]) + ("" if len(elsewhere) <= 5 else ", and {} more".format(len(elsewhere) - 5))
         raise BoatUnavailable("excluded_elsewhere", "content from the excluded paths is also at {}, in the history or "
@@ -1346,9 +1385,9 @@ def make_plan(source: Source, settings: BoatSettings) -> Plan:
 def make_bundle(source: Source, settings: BoatSettings, basis: object, path: Path) -> bool:
     revs = [RUN_REF]
     if isinstance(basis, str) and COMMIT_ID.fullmatch(basis) and run_captured(
-            ["git", "--git-dir", str(source.store), "cat-file", "-e", basis + "^{commit}"]).returncode == 0:
+            ["git", "--git-dir", str(source.store), "cat-file", "-e", basis + "^{commit}"], env=scratch_env()).returncode == 0:
         if run_captured(["git", "--git-dir", str(source.store), "merge-base", "--is-ancestor", source.commit,
-                         basis]).returncode == 0:
+                         basis], env=scratch_env()).returncode == 0:
             return False
         revs.append("^" + basis)
     options = []
@@ -1360,20 +1399,15 @@ def make_bundle(source: Source, settings: BoatSettings, basis: object, path: Pat
     return True
 
 
-def python_files(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
-    if info.isdir():
-        return None if "__pycache__" in info.name else info
-    return info if info.isfile() and info.name.endswith(".py") and not may_hold_secret(info.name) else None
-
-
 def pack_upload(scratch: Path, spec: dict) -> Path:
     here = Path(__file__).resolve()
     vendor = here.parent / "_vendor"
     path = scratch / "upload.tgz"
     with tarfile.open(str(path), "w:gz") as archive:
         archive.add(str(here), "jobgate.py")
-        if vendor.is_dir():
-            archive.add(str(vendor), "_vendor", filter=python_files)
+        for name in VENDORED:
+            if (vendor / name).is_file():
+                archive.add(str(vendor / name), "_vendor/" + name)
         data = json.dumps(spec).encode()
         info = tarfile.TarInfo("run.json")
         info.size, info.mode, info.mtime = len(data), 0o644, int(time.time())
@@ -1471,6 +1505,7 @@ class Relay:
     def __init__(self, log: BoatLog) -> None:
         self.log = log
         self.partial = ""
+        self.continued = False
         self.results: list[str] = []
 
     def __call__(self, kind: str, data: str) -> None:
@@ -1482,12 +1517,18 @@ class Relay:
         self.partial = lines.pop()
         for line in lines:
             self.error_line(line + "\n")
+        if self.partial and (self.continued or len(self.partial) > RESULT_LINE_CHARS or not (
+                RESULT_PREFIX.startswith(self.partial) or self.partial.startswith(RESULT_PREFIX))):
+            self.emit(sys.stderr, self.partial)
+            self.partial = ""
+            self.continued = True
 
     def error_line(self, line: str) -> None:
-        if line.startswith("jobgate: time="):
+        if not self.continued and line.startswith(RESULT_PREFIX):
             self.results.append(line[len("jobgate: "):].strip())
         else:
             self.emit(sys.stderr, line)
+        self.continued = False
 
     def finish(self) -> None:
         if self.partial:
@@ -1536,9 +1577,15 @@ class Box:
             if failure is None and self.id is not None:
                 return from_snapshot
             if from_snapshot and failure is not None and failure.get("code") == "snapshot_not_found":
+                if self.id is not None:
+                    self.delete()
+                    self.id = None
                 continue
             failure = failure or {"code": "no_box", "error": "boat new printed no box id"}
-            raise BoatUnavailable(str(failure.get("code") or "boat_failed"), describe(failure), failure.get("status"))
+            code = str(failure.get("code") or "boat_failed")
+            if self.id is not None and failure.get("status") != BOAT_PAYMENT_STATUS and code not in BOAT_PAYMENT_CODES:
+                raise BoatDied("start", "boat created the box but could not start it: " + describe(failure))
+            raise BoatUnavailable(code, describe(failure), failure.get("status"))
         raise AssertionError("unreachable")
 
     def new(self, args: list[str], expected: tuple[str, ...]) -> tuple[subprocess.CompletedProcess, list[dict]]:
@@ -1611,7 +1658,7 @@ class Box:
     def follow(self, step: str, pid: int, relay: Relay) -> int:
         printed = {"stdout": 0, "stderr": 0}
         lost_since: float | None = None
-        ended = False
+        ended: dict | None = None
         killed: dict | None = None
         lost = float(test_readings().get("boat_lost_seconds") or BOAT_LOST_SECONDS)
         while True:
@@ -1626,6 +1673,8 @@ class Box:
                     if time.monotonic() - lost_since >= lost:
                         raise BoatDied(step, "lost contact with the box for {}".format(duration(lost)))
             except BoatDied as died:
+                if ended is not None:
+                    return self.exit_code(step, ended)
                 if step == "run" and killed is not None and killed.get("signal") == "SIGKILL":
                     raise BoatDied(step, "boat killed the run step with SIGKILL and did not say why ({}). It may have "
                                          "run out of memory".format(died.reason), True) from None
@@ -1635,9 +1684,9 @@ class Box:
                 if killed is not None:
                     return self.exit_code(step, dict(killed, **status))
                 if not status.get("running"):
-                    if ended:
+                    if ended is not None:
                         return self.exit_code(step, status)
-                    ended = True
+                    ended = status
             time.sleep(BOAT_PAUSE_SECONDS)
 
     def attach(self, pid: int, printed: dict, relay: Relay) -> dict | None:
@@ -1761,17 +1810,16 @@ class Box:
         self.call(["extend", str(self.id), "--ttl", str(BOAT_TTL_SECONDS), "--json"], 60)
 
     def delete(self) -> None:
-        with held_signals("jobgate stops after it deletes box {}".format(self.id)):
-            for attempt in range(BOAT_DELETE_TRIES):
-                if attempt:
-                    time.sleep(BOAT_PAUSE_SECONDS)
-                result, objects = self.call(["delete", str(self.id), "--yes", "--json"], BOAT_DELETE_SECONDS,
-                                            ("not_found",), new_session=True)
-                failure = boat_failure(result, objects)
-                if failure is None or failure.get("code") == "not_found":
-                    return
-            self.log.note("cannot delete box {}, so boat stops it within {}: {}".format(
-                self.id, duration(BOAT_TTL_SECONDS), describe(failure)))
+        for attempt in range(BOAT_DELETE_TRIES):
+            if attempt:
+                time.sleep(BOAT_PAUSE_SECONDS)
+            result, objects = self.call(["delete", str(self.id), "--yes", "--json"], BOAT_DELETE_SECONDS,
+                                        ("not_found",), new_session=True)
+            failure = boat_failure(result, objects)
+            if failure is None or failure.get("code") == "not_found":
+                return
+        self.log.note("cannot delete box {}, so boat stops it within {}: {}".format(
+            self.id, duration(BOAT_TTL_SECONDS), describe(failure)))
 
 
 @contextlib.contextmanager
@@ -1874,10 +1922,12 @@ def boat_attempt(cli: str, settings: BoatSettings, source: Source, plan: Plan, s
         unavailable.box, unavailable.step = box.id, step
         raise unavailable from error
     finally:
-        if heartbeat is not None:
-            heartbeat.stop()
-        if box.id is not None:
-            box.delete()
+        with held_signals("jobgate stops after it deletes box {}".format(box.id) if box.id is not None else
+                          "jobgate stops after it cleans up"):
+            if heartbeat is not None:
+                heartbeat.stop()
+            if box.id is not None:
+                box.delete()
 
 
 def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers: int | None,

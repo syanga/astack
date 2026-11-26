@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import unittest
 
@@ -349,8 +350,9 @@ class SourceTests(BoatTest):
         self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere")
         self.assertEqual(self.calls("new"), [])
 
-    def test_a_submodule_under_an_excluded_path_does_not_stop_the_run(self):
+    def test_a_submodule_under_an_excluded_path_does_not_stop_the_check(self):
         (self.repo / "private/sub").mkdir(parents=True)
+        (self.repo / "private/people.csv").write_text("name,email\nAda,ada@example.com\n")
         self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
         self.git("update-index", "--add", "--cacheinfo", "160000,{},private/sub".format("ab" * 20))
         self.commit("add a submodule under private")
@@ -358,6 +360,18 @@ class SourceTests(BoatTest):
         result = self.run_here(REPORT)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["where"], "boat", result.stderr)
+        shutil.copyfile(str(self.repo / "private/people.csv"), str(self.repo / "copy.csv"))
+        result = self.run_here(REPORT)
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere", result.stderr)
+
+    def test_git_variables_from_the_caller_leave_the_repository_unchanged(self):
+        git_dir = str(self.repo / ".git")
+        config = (self.repo / ".git/config").read_bytes()
+        result = self.gate("run", "test", "--", sys.executable, "-c", REPORT,
+                           env=dict(self.env, GIT_DIR=git_dir, GIT_COMMON_DIR=git_dir))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["where"], "boat", result.stderr)
+        self.assertEqual((self.repo / ".git/config").read_bytes(), config)
 
     def test_an_excluded_file_name_with_a_newline_is_checked(self):
         (self.repo / "private").mkdir()
@@ -534,25 +548,68 @@ class FallbackTests(BoatTest):
         self.assertEqual(len(logs), 1, result.stderr)
         self.assertRegex(logs[0].read_text(), r"boat new --type default .* exited with 127:\ncannot run ")
 
-    def test_a_box_that_boat_creates_but_cannot_start_is_reported_deleted_and_left_to_this_machine(self):
-        self.plan(new=[{"code": "boot_failed", "status": 500, "error": "the box did not boot", "after_created": True,
-                        "detail": "kernel panic in the box image"}])
+    def test_a_box_that_boat_creates_but_cannot_start_is_reported_and_replaced(self):
+        boot_failure = {"code": "boot_failed", "status": 500, "error": "the box did not boot", "after_created": True,
+                        "detail": "kernel panic in the box image"}
+        for failures, where in ((1, "boat"), (2, "local")):
+            with self.subTest(failures=failures):
+                self.plan(new=[boot_failure] * failures)
+                result = self.run_here(REPORT)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr.count("BOAT RUN FAILED during start on box bx_"), failures, result.stderr)
+                self.assertIn("could not start it: the box did not boot", result.stderr)
+                log = self.printed_logs(result.stderr)[0].read_text()
+                self.assertIn("kernel panic in the box image", log)
+                fields = self.result_fields(result.stderr)
+                self.assertEqual(fields["where"], where)
+                if where == "local":
+                    self.assertEqual(fields["fallback"], "died")
+                self.assertEqual(self.boxes_left(), [])
+
+    def test_a_box_that_boat_creates_before_it_reports_a_missing_snapshot_is_deleted(self):
+        self.plan(miss_after_created=[True])
         result = self.run_here(REPORT)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue((self.repo / "ran-here").exists())
-        self.assertRegex(result.stderr, r"BOAT RUN FAILED during start on box bx_\w+: the box did not boot")
-        log = self.printed_logs(result.stderr)[0].read_text()
-        self.assertIn("the box did not boot", log)
-        self.assertIn("kernel panic in the box image", log)
-        fields = self.result_fields(result.stderr)
-        self.assertEqual((fields["where"], fields["fallback"]), ("local", "boot_failed"))
+        self.assertEqual(self.result_fields(result.stderr)["where"], "boat")
+        self.assertEqual(self.boxes_left(), [])
+        self.assertEqual(len(self.calls("delete")), 2)
+
+    def test_a_command_result_that_boat_reported_is_kept_when_the_box_disappears(self):
+        self.plan(drop=["run", "run"], status_gone=[False, True])
+        result = self.run_here(REPORT, "7")
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertNotIn("BOAT RUN FAILED", result.stderr)
+        self.assertEqual(len([argv for argv in self.calls("new") if "--from" not in argv]), 1)
+        self.assertEqual(self.result_fields(result.stderr)["exit"], "7")
+
+    def test_error_output_without_a_newline_reaches_this_machine_while_the_command_runs(self):
+        started = self.root / "box started"
+        command = ("import pathlib, sys, time; sys.stderr.write('working' + chr(13)); sys.stderr.flush(); "
+                   "time.sleep(30)")
+        process = subprocess.Popen([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", command],
+                                   cwd=str(self.repo), env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                   start_new_session=True)
+        self.addCleanup(lambda: process.poll() is None and process.kill())
+        seen = []
+
+        def read():
+            for chunk in iter(lambda: os.read(process.stderr.fileno(), 4096), b""):
+                seen.append(chunk)
+                if b"working\r" in b"".join(seen):
+                    started.touch()
+
+        threading.Thread(target=read, daemon=True).start()
+        wait_for(started.exists)
+        self.assertIsNone(process.poll())
+        os.killpg(process.pid, signal.SIGINT)
+        process.wait(timeout=60)
         self.assertEqual(self.boxes_left(), [])
 
-    def test_the_upload_carries_only_the_python_files_of_jobgate(self):
+    def test_the_upload_carries_only_the_runtime_files_of_jobgate(self):
         copy = self.root / "jobgate copy"
         shutil.copytree(str(SCRIPT.parent), str(copy), ignore=shutil.ignore_patterns("__pycache__"))
-        (copy / "_vendor/.env").write_text("TOKEN=canary\n")
-        (copy / "_vendor/.env.py").write_text("TOKEN = 'canary'\n")
+        for name in (".env", ".env.py", "local_credentials.py", "tomllib/notes.py"):
+            (copy / "_vendor" / name).write_text("TOKEN = 'canary'\n")
         result = subprocess.run([sys.executable, str(copy / SCRIPT.name), "run", "test", "--", sys.executable, "-c",
                                  REPORT], cwd=str(self.repo), env=self.env, capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -560,16 +617,15 @@ class FallbackTests(BoatTest):
         with tarfile.open(str(uploads[0])) as archive:
             vendored = [member.name for member in archive.getmembers()
                         if member.name.startswith("_vendor/") and not member.isdir()]
-        self.assertIn("_vendor/tomllib/_parser.py", vendored)
-        self.assertEqual([name for name in vendored if not name.endswith(".py")], [])
-        self.assertNotIn("_vendor/.env.py", vendored)
+        self.assertEqual(sorted(vendored), ["_vendor/tomllib/__init__.py", "_vendor/tomllib/_parser.py",
+                                            "_vendor/tomllib/_re.py", "_vendor/tomllib/_types.py"])
 
     @unittest.skipIf(os.geteuid() == 0, "root reads files without read permission")
+    @unittest.skipIf(sys.version_info < (3, 11), "before 3.11 jobgate imports the vendored parser it needs to read")
     def test_a_file_error_on_this_machine_after_the_box_starts_is_reported_and_left_to_this_machine(self):
         copy = self.root / "jobgate copy"
         shutil.copytree(str(SCRIPT.parent), str(copy), ignore=shutil.ignore_patterns("__pycache__"))
-        unreadable = copy / "_vendor" / "unreadable.py"
-        unreadable.write_text("")
+        unreadable = copy / "_vendor/tomllib/_types.py"
         unreadable.chmod(0)
         self.addCleanup(unreadable.chmod, 0o644)
         result = subprocess.run([sys.executable, str(copy / SCRIPT.name), "run", "test", "--", sys.executable, "-c",

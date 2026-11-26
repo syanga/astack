@@ -395,7 +395,6 @@ is true:
   [When a box dies partway](#when-a-box-dies-partway), and deletes the box. It
   does not retry on a new box. These failures, with their `fallback` codes,
   are:
-  - boat reports an error before the box is ready (boat's error code).
   - Git cannot build the bundle (`git`).
   - jobgate on this machine hits a file error, such as a full disk
     (`local_error`).
@@ -427,6 +426,7 @@ and gives the reason in its `fallback` field.
 
 A box dies partway when one of these happens:
 
+- boat creates the box but reports an error before the box is ready.
 - The copy to the box fails.
 - The checkout or the setup script fails.
 - The box disappears.
@@ -445,15 +445,17 @@ jobgate: test retries once on a new box
 It deletes the box and tries once more on a new box. When the second box also
 dies partway, the command runs on this machine. A command that exits with an
 error on the box has not died. jobgate returns its exit code and does not run the
-command again.
+command again. When boat reports that the command ended and the box then
+disappears before jobgate gets the rest of the output, jobgate also returns the
+exit code that boat reported.
 
 When the box runs out of memory during the run step, jobgate prints the
 `BOAT RUN FAILED` and `boat log` lines, deletes the box, and exits with 137. It
 does not retry the command and does not run it on this machine, because the
 command would use the same memory here. jobgate does the same when boat kills
-the run step with SIGKILL and jobgate cannot learn why. That happens when the
-box disappears, or jobgate cannot reach the box for 10 minutes, before boat
-says whether the box ran out of memory.
+the run step with SIGKILL and boat does not say whether the box ran out of
+memory. One case is a box that disappears after the kill. Another is a box that
+jobgate cannot reach for 10 minutes after the kill.
 
 Each log holds everything that the box printed during one attempt, and
 jobgate's boat messages. It also holds the arguments, exit code, and output of
