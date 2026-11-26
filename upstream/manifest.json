@@ -499,7 +499,7 @@
     "repository": "https://github.com/graphed-inc/marketing-skills.git",
     "path": "skills/ugc-video",
     "commit": "ea5a17dc816faa1fc919bc3579124b1acbdddeeb",
-    "license": "MIT, kept in skills/ugc-video/LICENSE-graphed",
+    "license": "MIT, copied from repository-root LICENSE to skills/ugc-video/LICENSE-graphed",
     "note": "Calls fal and kie directly instead of the Graphed CLI, and fal storage, or a caller-supplied upload hook, replaces Graphed storage, so the skill needs no Graphed account or other credential. The presenter speaks for the brand and never claims to be a customer, because the FTC treats a synthetic customer testimonial as deceptive. Drops legacy_avatar.py and the bundled avatar, because presenters belong to each brand. kie's Seedance 2.5 schema has no negative_prompt, so its terms moved into the prompt's Look line. resize-grain.sh became resize_grain.py, because stock Linux lacks zsh. --clone-voice reads one TTS line after cloning, because fal deletes a clone that no TTS call uses within 7 days. fix_words.py diverges from upstream: it refuses a stutter cut that also removes a script word, because a dropped \"never\" flips an ad's meaning.",
     "files": {
       "SKILL.md": "skills/ugc-video/SKILL.md",

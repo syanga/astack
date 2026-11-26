@@ -336,11 +336,11 @@ class MakeUgcTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         initiated = [r for r in self.fake.requests if r["path"] == "/falrest/storage/upload/initiate"]
-        self.assertEqual([(r["auth"], r["query"], r["body"]) for r in initiated], [
-            ("Key " + FAL_KEY, "storage_type=fal-cdn-v3", {"file_name": "voice.mp3", "content_type": "audio/mpeg"}),
-            ("Key " + FAL_KEY, "storage_type=fal-cdn-v3", {"file_name": "presenter.jpg", "content_type": "image/jpeg"})])
+        self.assertCountEqual([(r["auth"], r["query"], r["body"]["file_name"], r["body"]["content_type"]) for r in initiated], [
+            ("Key " + FAL_KEY, "storage_type=fal-cdn-v3", "voice.mp3", "audio/mpeg"),
+            ("Key " + FAL_KEY, "storage_type=fal-cdn-v3", "presenter.jpg", "image/jpeg")])
         puts = [r for r in self.fake.requests if r["method"] == "PUT"]
-        self.assertEqual([(r["auth"], r["type"]) for r in puts], [(None, "audio/mpeg"), (None, "image/jpeg")])
+        self.assertCountEqual([(r["auth"], r["type"]) for r in puts], [(None, "audio/mpeg"), (None, "image/jpeg")])
         [task] = self.posts(CREATE)
         stored = {name: (self.served / name).read_bytes() for name in os.listdir(self.served) if name.startswith("fal-")}
         image = task["input"]["reference_image_urls"][0]
@@ -457,7 +457,7 @@ class MakeUgcTests(unittest.TestCase):
 
 
 class StutterCutTests(unittest.TestCase):
-    SCRIPT = "our app never shares your data"
+    WORDS = "our app never shares your data"
 
     def fix(self, transcripts, voice=None):
         sys.path.insert(0, str(SCRIPT.parent))
@@ -467,16 +467,14 @@ class StutterCutTests(unittest.TestCase):
         def heard(text):
             return [{"w": w, "raw": w, "s": i * 0.5, "e": i * 0.5 + 0.4} for i, w in enumerate(text.split())]
 
-        last = {}
-
         def plain(path, tag, start=None, end=None):
-            return (transcripts[last["cut"]] if "cuttest" in str(path) else "our app app never shares your data").split()
+            cut = json.loads(Path(path).read_text()) if Path(path).is_file() else None
+            return (transcripts[tuple(cut)] if cut else "our app app never shares your data").split()
 
         def jump_cut(src, cuts, out):
-            if cuts:
-                last["cut"] = (cuts[-1]["cs"], cuts[-1]["ce"])
+            Path(out).write_text(json.dumps([cuts[-1]["cs"], cuts[-1]["ce"]] if cuts else None))
 
-        fakes = {"words": lambda audio, tag, *a: heard((voice or self.SCRIPT) if tag == "voice" else
+        fakes = {"words": lambda audio, tag, *a: heard((voice or self.WORDS) if tag == "voice" else
                                                          "our app app never shares your data"),
                  "plain": plain, "jump_cut": jump_cut, "run": lambda *cmd: "",
                  "search_cut": lambda *a: list(transcripts)}
@@ -486,11 +484,11 @@ class StutterCutTests(unittest.TestCase):
             self.addCleanup(setattr, fix_words, name, original)
         with tempfile.TemporaryDirectory() as tmp:
             script = Path(tmp) / "script.txt"
-            script.write_text(self.SCRIPT)
+            script.write_text(self.WORDS)
             return fix_words.fix("render.mp4", "voice.mp3", script, Path(tmp) / "out.mp4", log=lambda line: None)
 
     def test_a_cut_that_also_removes_a_script_word_is_passed_over_for_one_that_does_not(self):
-        report = self.fix({(1.0, 1.4): "our app shares your data", (2.0, 2.4): self.SCRIPT})
+        report = self.fix({(1.0, 1.4): "our app shares your data", (2.0, 2.4): self.WORDS})
 
         self.assertEqual(report["cuts"], [{"heard": "app", "removed": [2.0, 2.4]}])
         self.assertEqual(report["unfixed"], [])

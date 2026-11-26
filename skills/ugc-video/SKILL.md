@@ -25,7 +25,7 @@ A real run needs `FAL_KEY` and `KIE_API_KEY`. Never print the keys. Input files 
 3. **Dry run first, always.** Tell the user the word count, the expected length and the cost. Over about 110 words is tight. Over about 115 does not fit 30 s, so show them what to cut. If `python3` is missing, show `brew install python` on macOS or `sudo apt install python3` on Linux, and wait. The dry run cannot start without it. If ffmpeg or whisper is missing, the dry run lists those install commands first. Show those to the user and wait. Do not add `--no-fix` yourself. That flag is only after the user says to skip the word check. The dry run also names any missing key, and an upload hook it cannot run.
 4. **Run for real in the background** (5 to 10 min).
 5. **Read the end of the output.** It lists every fix (`fixed:` or `cut:`) and anything **NOT FIXED** with its time in the video. Tell the user exactly where to listen.
-6. **Never re-render on your own.** If something is not fixed, tell the user the spot, the reason, and the cost of a new take (about $0.14 per second of video). Run `--rerender` **only if they say yes**. It keeps the old take and reuses the same MP3.
+6. **Never re-render on your own.** If something is not fixed, tell the user the spot, the reason, and the cost of a new take (about $0.14 per second of video). Run `--rerender` **only if they say yes**. It keeps the old take and reuses the same MP3, unless the presenter's voice id changed.
 7. Hand over `ugc-videos/<slug>/<slug>.mp4` and `check.json`. The caller stores and records the video. This skill keeps no record of it.
 
 ## What the script does
@@ -41,7 +41,7 @@ A real run needs `FAL_KEY` and `KIE_API_KEY`. Never print the keys. Input files 
 | 6 | Fix: wrong word, so the same word is spliced from the MP3 (video untouched). Stutter or extra words, so they are cut from video and audio as a jump cut. Each fix is tried at several timings and kept only if a whole-file transcript then reads right. A cut that also removes a script word is never kept. When every cut would, the spot is reported as NOT FIXED | local | free |
 | 7 | Upscale: `resize_grain.py` (Lanczos, light sharpen, phone grain) to 1080x1920 | local ffmpeg | free |
 
-Steps are resumable. An existing `voice.mp3` or `raw-480p.mp4` in the output folder is reused. A folder that holds a run for another script or presenter stops the run, so pass a new `--slug`. The kie task id is saved in `seedance.task.json` before polling. If polling times out, fails to connect, or the process stops, running the same command checks that task again instead of paying for a new take. To give up on that task, delete `seedance.task.json`. The next run then pays for a new take, so ask the user first.
+Steps are resumable. An existing `voice.mp3` or `raw-480p.mp4` in the output folder is reused, except that a new voice id makes a new MP3 and needs `--rerender` for a new take. A folder that holds a run for another script or presenter stops the run, so pass a new `--slug`. `seedance.task.json` is created before the submit and holds the kie task id. If polling times out, fails to connect, or the process stops, running the command again without `--rerender` or `--clone-voice` checks that task instead of paying for a new take. If the submit itself got no clear answer, the next run stops and asks you to check the kie dashboard first. To give up on that task, delete `seedance.task.json`. The next run then pays for a new take, so ask the user first.
 
 The script retries a submit that fal answers with HTTP 429 or kie with code 429 or 455, because a refused submit costs nothing. It never resubmits after a 5xx, a dropped connection, a failed take, or a timeout, because the vendor may have accepted the job. It prints the vendor's error and stops.
 
@@ -97,7 +97,7 @@ aws s3 presign "s3://<bucket>/$2" --expires-in 3600
 | `--caps` | none | Brand names to write in caps in the Seedance dialogue |
 | `--slug` / `--out-dir` | first words / `./ugc-videos` | |
 | `--upload-cmd` | `UGC_UPLOAD_CMD`, else fal storage | See [Uploads](#uploads) |
-| `--rerender` | off | New Seedance take with the same MP3. **Only after the user says yes** |
+| `--rerender` | off | New Seedance take, with the same MP3 unless the voice id changed. **Only after the user says yes** |
 | `--no-fix` | off | Skip the whisper check. Only after the user asks |
 | `--no-upscale` | off | Stop at 480p |
 | `--clone-voice` | off | New voice id from the presenter's `voice-ref.mp3` |
