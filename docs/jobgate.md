@@ -342,8 +342,8 @@ report, run with `--local`.
    worker count fit the box. The command runs
    under `setpriv --ambient-caps=-all --inh-caps=-all`, without Linux
    capabilities.
-6. jobgate prints the command's output as it arrives. Then it prints a result
-   line and deletes the box.
+6. jobgate prints the command's output as it arrives. Then it reads the result
+   of jobgate on the box, prints a result line, and deletes the box.
 
 The box runs each step as a background process (`boat exec --detach`). When
 this machine sleeps or loses its network, the step keeps running. jobgate then
@@ -410,6 +410,8 @@ is true:
   refusal, or `off` when it had none.
 - Before jobgate starts a box, one of these fails:
   - Git cannot read the repository (`git`).
+  - `exclude` is set, and this machine's Git is older than 2.36, which cannot
+    filter a bundle (`git`).
   - The repository has no commit (`no_commit`).
   - The commit has no setup script (`no_setup`).
   - The box would not get `jobgate.toml` or the directory where the command
@@ -530,9 +532,12 @@ like clean ones. On a boat run, the box gets the uncommitted changes as a
 temporary commit. The `commit` field names `HEAD`, so a line with `dirty=yes`
 does not describe the code that ran.
 
-On a boat run, `workers`, `peak`, `stated`, and `oom_kills` come from the
-result line of jobgate on the box. jobgate holds that line back and prints its
-own line with `where=boat`.
+On a boat run, `workers`, `peak`, `stated`, and `oom_kills` come from jobgate
+on the box. That jobgate writes its result to `~/.jobgate/run/result.json` on
+the box instead of printing it. After the run step, jobgate reads the file with
+`boat exec` and prints its own line with `where=boat`. When it cannot read the
+file, `workers`, `peak`, and `stated` are `unknown`, and the line has no
+`oom_kills`.
 
 ## Exit codes
 
@@ -564,7 +569,7 @@ code of `taskpolicy`.
 | `JOBGATE_RUN` | jobgate sets it to the path of the run's file. A nested call reads it to find the outer run. |
 | `HOME` | jobgate takes `~` from the password database instead, so runs under every `HOME` share one configuration, queue, and results log. It reads `HOME` only when the account has no entry there. jobgate also ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. |
 | `JOBGATE_HOME` | Tests only. Replaces the account's home directory, which holds the configuration, the queue, and the results log. With a real systemd user session, a run that sets it still sets the real `jobgate.slice` cap from the `memory_share` it finds there. That cap applies to all of the user's runs, so set this variable only with a stand-in `systemctl` on `PATH`, as jobgate's tests do. |
-| `JOBGATE_RESULT_TOKEN` | Internal. On a box, jobgate passes the run's random token to the box's `jobgate run --local` in this variable, which removes it before it starts the command. When it is set, jobgate prints its result line after `jobgate-result <token>` instead of `jobgate:`. |
+| `JOBGATE_RESULT_FILE` | Internal. On a box, jobgate sets it for the box's `jobgate run --local`. That run removes the variable before it starts the command. It writes its result to the named file as JSON instead of printing a result line. |
 | `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with readings that replace the OS readings: `memory`, `cores`, `psi` or `darwin_level`, and `meminfo` or `vm_stat` text. jobgate reads `memory` and `cores` once per run. It reads the pressure and available-memory readings before each admission attempt. A `cgroup` value names a directory that stands in for the scope's cgroup. A `boat_silent_seconds` value replaces the 60 seconds that jobgate waits for output from `boat exec --attach`. A `boat_lost_seconds` value replaces the 10 minutes after which jobgate stops trying to reach a box. With a real systemd user session, a run that uses this file still sets the real `jobgate.slice` cap from its `memory` reading. That cap applies to all of the user's runs, so use this file only with a stand-in `systemctl` on `PATH`, as jobgate's tests do. |
 
 ## Files

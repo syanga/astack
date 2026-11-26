@@ -118,8 +118,8 @@ GITLINK_MODE = "160000"
 GIT_SELECTORS = ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
                  "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX", "GIT_QUARANTINE_PATH")
 VENDORED = ("tomllib/__init__.py", "tomllib/_parser.py", "tomllib/_re.py", "tomllib/_types.py")
-RESULT_TOKEN_ENV = "JOBGATE_RESULT_TOKEN"
-RESULT_HOLD_CHARS = 2**20
+RESULT_FILE_ENV = "JOBGATE_RESULT_FILE"
+BOX_RESULT = ".jobgate/run/result.json"
 EXCLUDE_GIT = (2, 36)
 
 Dirty = Literal["yes", "no", "unknown"]
@@ -1006,13 +1006,15 @@ def logfmt(value: object) -> str:
     return json.dumps(text) if not text or re.search(r'[\s"=]', text) else text
 
 
-def result_mark(token: str) -> str:
-    return "jobgate-result {} ".format(token)
-
-
-def report(queue: Queue, entries: list[tuple[str, object]], token: str | None = None) -> None:
+def report(queue: Queue, entries: list[tuple[str, object]], result_file: str | None = None) -> None:
     line = " ".join("{}={}".format(key, logfmt(value)) for key, value in entries)
-    say(line, "jobgate: " if token is None else result_mark(token))
+    if result_file is None:
+        say(line)
+    else:
+        try:
+            write_json(Path(result_file), {key: str(value) for key, value in entries})
+        except OSError as error:
+            say("cannot write {}: {}".format(result_file, error.strerror or error))
     try:
         with open(queue.results, "a", errors="backslashreplace") as stream:
             stream.write(line + "\n")
@@ -1373,6 +1375,7 @@ def private_blobs(source: Source, settings: BoatSettings, root: Path) -> set[str
 def check_exclude(source: Source, settings: BoatSettings, root: Path) -> None:
     if not settings.exclude:
         return
+    check_exclude_git()
     excluded_blobs = private_blobs(source, settings, root)
     if not excluded_blobs:
         return
@@ -1395,7 +1398,7 @@ def check_exclude_git() -> None:
     version = (int(found.group(1)), int(found.group(2))) if found else (0, 0)
     if version < EXCLUDE_GIT:
         raise BoatUnavailable("git", "exclude needs Git {}.{} or newer, which can filter a bundle. This machine has {}"
-                              .format(*EXCLUDE_GIT, answer.strip()))
+                              .format(*EXCLUDE_GIT, answer.strip() or "a Git that prints no version"))
 
 
 def check_box_paths(source: Source, settings: BoatSettings, cwd: str) -> None:
@@ -1550,63 +1553,20 @@ class BoatLog:
 
 
 class Relay:
-    def __init__(self, log: BoatLog, mark: str) -> None:
+    def __init__(self, log: BoatLog) -> None:
         self.log = log
-        self.mark = mark
-        self.partial = ""
         self.open_line = False
-        self.results: list[str] = []
 
     def __call__(self, kind: str, data: str) -> None:
         self.log.write(data)
-        if kind == "stdout":
-            if self.mark not in self.partial:
-                self.error_text(self.partial)
-                self.partial = ""
-            self.emit(sys.stdout, data)
-            return
-        lines = (self.partial + data).split("\n")
-        rest = lines.pop()
-        for line in lines:
-            self.error_line(line + "\n")
-        held = self.held_from(rest)
-        if len(rest) - held > RESULT_HOLD_CHARS:
-            held = len(rest)
-        self.error_text(rest[:held])
-        self.partial = rest[held:]
-
-    def held_from(self, text: str) -> int:
-        found = text.find(self.mark)
-        if found >= 0:
-            return found
-        return next((len(text) - size for size in range(min(len(text), len(self.mark) - 1), 0, -1)
-                     if text.endswith(self.mark[:size])), len(text))
-
-    def error_line(self, line: str) -> None:
-        found = line.find(self.mark)
-        if found < 0:
-            self.error_text(line)
-            return
-        self.error_text(line[:found])
-        self.results.append(line[found + len(self.mark):].strip())
-
-    def error_text(self, text: str) -> None:
-        if text:
-            self.emit(sys.stderr, text)
-            self.open_line = not text.endswith("\n")
+        self.emit(sys.stdout if kind == "stdout" else sys.stderr, data)
+        if kind == "stderr" and data:
+            self.open_line = not data.endswith("\n")
 
     def finish(self) -> None:
-        if self.partial:
-            self.error_line(self.partial)
-            self.partial = ""
         if self.open_line:
-            self.error_text("\n")
-
-    def result(self) -> dict:
-        try:
-            return dict(field.split("=", 1) for field in shlex.split(self.results[-1]) if "=" in field)
-        except (IndexError, ValueError):
-            return {}
+            self.emit(sys.stderr, "\n")
+            self.open_line = False
 
     @staticmethod
     def emit(stream, text: str) -> None:
@@ -1695,8 +1655,8 @@ class Box:
             stderr += "\nboat new timed out after {}".format(duration(BOAT_NEW_SECONDS))
         return self.keep(subprocess.CompletedProcess(argv, process.returncode, "".join(lines), stderr), expected)
 
-    def state(self) -> dict:
-        _, objects = self.call(["exec", str(self.id), "--json", "--", "sh", "-c", 'cat "$HOME/.jobgate/state.json"'], 120)
+    def fetch(self, path: str) -> dict:
+        _, objects = self.call(["exec", str(self.id), "--json", "--", "sh", "-c", 'cat "$HOME/{}"'.format(path)], 120)
         for value in objects:
             if value.get("exitCode") == 0 and isinstance(value.get("stdout"), str):
                 with contextlib.suppress(ValueError):
@@ -1710,13 +1670,14 @@ class Box:
         if failure is not None:
             raise BoatDied("upload", "the copy to the box failed: " + describe(failure))
 
-    def phase(self, step: str, script: str, relay: Relay) -> int:
+    def phase(self, step: str, script: str) -> int:
         result, objects = self.call(["exec", str(self.id), "--detach", "--json", "--", "sh", "-c", script], 120)
         pid = next((value.get("pid") or value.get("processId") for value in objects
                     if isinstance(value.get("pid") or value.get("processId"), int)), None)
         failure = boat_failure(result, objects)
         if failure is not None or pid is None:
             raise BoatDied(step, "the box did not start it: " + describe(failure or {"error": "no process id"}))
+        relay = Relay(self.log)
         try:
             return self.follow(step, pid, relay)
         finally:
@@ -1966,13 +1927,13 @@ def boat_attempt(cli: str, settings: BoatSettings, source: Source, plan: Plan, s
             "from snapshot " + plan.name if from_snapshot else "new, so the setup script runs first"))
         heartbeat = Heartbeat(box)
         step = "upload"
-        basis = box.state().get("basis") if from_snapshot else None
+        basis = box.fetch(".jobgate/state.json").get("basis") if from_snapshot else None
         spec = dict(spec, bundle=make_bundle(source, settings, basis, scratch / "run.bundle"))
         upload = pack_upload(scratch, spec)
         log.note("boat copies {:.1f} MB to box {}".format(upload.stat().st_size / 1e6, box.id))
         box.upload(upload)
         step = "setup"
-        code = box.phase("setup", BOX_PREPARE, Relay(log, result_mark(spec["result_token"])))
+        code = box.phase("setup", BOX_PREPARE)
         if code == BOX_SETUP_FAILED:
             raise BoatDied("setup", "the setup script {} failed".format(settings.setup))
         if code == BOX_REFUSED:
@@ -1984,8 +1945,8 @@ def boat_attempt(cli: str, settings: BoatSettings, source: Source, plan: Plan, s
             box.save(plan.name, plan.prefix)
         step = "run"
         started = time.monotonic()
-        relay = Relay(log, result_mark(spec["result_token"]))
-        return BoatRun(box.phase("run", BOX_RUN, relay), relay.result(), started)
+        code = box.phase("run", BOX_RUN)
+        return BoatRun(code, box.fetch(BOX_RESULT), started)
     except BoatDied as died:
         died.box = box.id
         raise
@@ -2032,8 +1993,6 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
             check_exclude(source, settings, root)
             plan = make_plan(source, settings)
             check_box_paths(source, settings, cwd)
-            if settings.exclude:
-                check_exclude_git()
         except OSError as error:
             say("boat cannot run {}, so it runs here: jobgate on this machine failed: {}".format(profile.name, error))
             return Fallback("local_error")
@@ -2048,8 +2007,7 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
         spec = {"head": source.head, "commit": source.commit, "branch": source.branch,
                 "patterns": settings.sparse_patterns(), "setup": settings.setup, "setup_key": plan.setup_key,
                 "cwd": cwd, "path": repo_path_entries(root), "profile": profile.name,
-                "max_workers": max_workers, "command": command, "object_format": source.object_format,
-                "result_token": secrets.token_hex(16)}
+                "max_workers": max_workers, "command": command, "object_format": source.object_format}
         for attempt in (1, 2):
             log = BoatLog()
             try:
@@ -2148,7 +2106,7 @@ def box_prepare(spec: dict, run_dir: Path, repo: Path) -> int:
 def box_run(spec: dict, repo: Path) -> int:
     env = dict(os.environ, PATH=os.pathsep.join([str(repo / entry) for entry in spec["path"]] +
                                                 [os.environ.get("PATH", os.defpath)]),
-               **{RESULT_TOKEN_ENV: spec["result_token"]})
+               **{RESULT_FILE_ENV: str(Path.home() / BOX_RESULT)})
     argv = [sys.executable, str(Path(__file__).resolve()), "run", "--local",
             *(["--max-workers", str(spec["max_workers"])] if spec["max_workers"] else []),
             spec["profile"], "--", *spec["command"]]
@@ -2170,12 +2128,11 @@ def box_main(step: str, spec_path: Path) -> int:
     repo = Path.home() / "repo"
     if step == "prepare":
         return box_prepare(spec, spec_path.parent, repo)
-    spec_path.unlink()
     return box_run(spec, repo)
 
 
 def run(profile_name: str, max_workers: int | None, command: list[str], local: bool = False) -> int:
-    token = os.environ.pop(RESULT_TOKEN_ENV, None)
+    result_file = os.environ.pop(RESULT_FILE_ENV, None)
     config = find_config(Path.cwd())
     data = read_toml(config)
     profile = load_profile(config, data, profile_name)
@@ -2218,7 +2175,7 @@ def run(profile_name: str, max_workers: int | None, command: list[str], local: b
         ("dirty", dirty), ("workers", workers), ("wait", "{}s".format(round(waited))),
         ("peak", mebibytes(peak) if peak is not None else "unknown"), ("stated", mebibytes(stated)),
         *([("oom_kills", killed)] if killed else []), ("exit", outcome.code),
-    ], token)
+    ], result_file)
     return outcome.code
 
 
