@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import sys
+import tempfile
 import unicodedata
 from urllib.parse import unquote, urlencode, urlsplit, urlunsplit
 
 MAX_HEADLINE = 27
 MAX_NAME = 12
 SHOWN = 125
+PATH_CHARACTERS = {"/", "\\"}
+UMASK = os.umask(0)
+os.umask(UMASK)
 PLACEHOLDER = "<only when the user names a campaign>"
 EMOJI = re.compile("[\u231a\u231b\u23e9-\u23ec\u23f0\u23f3\u25fd\u25fe\u2600-\u27bf\u2b1b\u2b1c\u2b50\u2b55\u20e3\ufe0f\U0001f000-\U0001faff]")
 DASHES = {"\u2014": "em dash", "\u2015": "em dash", "\u2e3a": "em dash", "\u2e3b": "em dash", "\u2013": "en dash"}
@@ -27,6 +32,13 @@ def link(page, campaign, content):
     utm = urlencode([("utm_source", "meta"), ("utm_medium", "paid"), ("utm_campaign", campaign),
                      ("utm_content", content)])
     return urlunsplit(parts._replace(query="&".join(kept + [utm])))
+
+
+def valid_port(page):
+    try:
+        return page.port is None or page.port > 0
+    except ValueError:
+        return False
 
 
 def images(name, folder, rendered):
@@ -55,6 +67,8 @@ def problems(ad, folder, rendered):
         found.append("page is not an http or https URL")
     elif not page.hostname:
         found.append("page has no host")
+    elif not valid_port(page):
+        found.append("page has an invalid port")
     for field in ["name", "headline", "primary_text"]:
         text = unicodedata.normalize("NFKC", ad[field])
         for label in sorted({label for dash, label in DASHES.items() if dash in text}):
@@ -63,6 +77,9 @@ def problems(ad, folder, rendered):
             found.append("{} has an emoji".format(field))
     if not utm_content(name):
         found.append("name has no ASCII letters or digits for utm_content")
+    if PATH_CHARACTERS & set(name):
+        found.append("name has a path character")
+        return found
     for path in images(name, folder, rendered):
         if not path.is_file():
             found.append("no {}".format(path.relative_to(folder).as_posix()))
@@ -93,7 +110,8 @@ def main():
         refused = True
     campaign = campaign or args.folder.resolve().name
     rendered = any((args.folder / "{} {}.png".format(ad["name"], placement)).is_file()
-                   for ad in ads if isinstance(ad.get("name"), str) for placement in ["Feed", "Story"])
+                   for ad in ads if isinstance(ad.get("name"), str) and not PATH_CHARACTERS & set(ad["name"])
+                   for placement in ["Feed", "Story"])
     for ad in ads:
         found = problems(ad, args.folder, rendered)
         content = utm_content(ad["name"]) if isinstance(ad.get("name"), str) else ""
@@ -116,12 +134,17 @@ def main():
                   "- Before \"See more\": {}".format(" / ".join(
                       filter(None, (line.strip() for line in ad["primary_text"][:SHOWN].splitlines())))),
                   "", "Primary text:", "", ad["primary_text"], ""]
-    partial = target.with_name(".partial.copy.md")
+    partial = None
     try:
-        partial.write_bytes("\n".join(lines).encode("utf-8"))
-        partial.replace(target)
+        data = "\n".join(lines).encode("utf-8")
+        handle, partial = tempfile.mkstemp(prefix=".copy.md.", dir=args.folder)
+        os.fchmod(handle, 0o666 & ~UMASK)
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(data)
+        os.replace(partial, target)
     except (OSError, ValueError) as error:
-        partial.unlink(missing_ok=True)
+        if partial:
+            Path(partial).unlink(missing_ok=True)
         parser.exit(1, "ad_text.py: can't write {}: {}\n".format(target, error))
     print("wrote {} with {} ads".format(target, len(ads)))
     return 0

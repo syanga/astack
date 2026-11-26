@@ -177,7 +177,7 @@ Write `ad-text.json` in the run folder, with one entry per ad that passed the re
 - Put the primary text's point in its first 125 characters, which the feed shows before "See more". End the primary text with one ask, the ad's CTA.
 - Keep the headline to 27 characters, Meta's recommended length for Facebook Feed.
 - Write no description. Meta's is optional and often hidden.
-- The claims rules from step 3 apply to the headline and the primary text.
+- Step 3's claims rules apply to the headline and the primary text, except the notice rule. When the style guide records a notice, the image carries it, so the text leaves it out. The text also leaves out everything on the style guide's Off limits list.
 
 Then run:
 

@@ -674,6 +674,29 @@ class AdTextTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual([query["utm_campaign"] for query in self.links()], [["winter launch"]])
 
+    def test_copy_md_gets_the_mode_any_new_file_gets(self):
+        self.addCleanup(os.umask, os.umask(0o027))
+
+        result = self.write([self.ad("Fresh")])
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(stat.S_IMODE((self.run_folder / "copy.md").stat().st_mode), 0o640)
+
+    def test_a_name_with_a_path_does_not_change_how_the_other_ads_are_found(self):
+        ad = self.ad("Fresh")
+        for placement in ["Feed", "Story"]:
+            (self.run_folder / "Fresh {}.png".format(placement)).unlink()
+        (self.run_folder / "pages").mkdir()
+        (self.run_folder / "pages/Fresh.png").write_bytes(png_header(1472, 1840))
+        (self.run_folder.parent / "X Feed.png").write_bytes(png_header(1440, 1800))
+
+        result = self.write([ad, {**ad, "name": "..\\X"}, {**ad, "name": "../X"}])
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("../X: name has a path character", result.stdout)
+        self.assertIn("..\\X: name has a path character", result.stdout)
+        self.assertNotIn("Fresh:", result.stdout)
+
     def test_a_cited_page_keeps_its_own_query_but_not_its_old_utm_parameters(self):
         result = self.write([self.ad("Café", page="https://acme.example/beans?ref&size=1%2C2;kg&utm_source=mail&utm%5Fmedium=email#top")])
 
@@ -716,6 +739,8 @@ class AdTextTests(unittest.TestCase):
             "headline has an emoji": self.ad("Fresh", headline="Small \u25fd squares"),
             "primary_text has an emoji": self.ad("Fresh", primary_text="Step 1\u20e3 pick a roast."),
             "page has no host": self.ad("Fresh", page="https:/beans"),
+            "page has an invalid port": self.ad("Fresh", page="https://acme.example:65536/beans"),
+            "name has a path character": {**self.ad("Fresh"), "name": "../Fresh"},
             "no name": {**self.ad("Fresh"), "name": 5},
             "name has an em dash": self.ad("A\u2014B"),
             "primary_text has an em dash": self.ad("Fresh", primary_text="Fresh beans \ufe58 every week."),
