@@ -756,7 +756,7 @@ class GenerateTests(unittest.TestCase):
         self.assertEqual((self.run_folder / "1-proof.png").read_bytes(), composed)
         self.assertEqual(outside.read_text(encoding="utf-8"), "kept")
         self.assertEqual(json.loads((self.run_folder / "1-proof.type.json").read_text(encoding="utf-8"))["art"],
-                         "1-proof.art.png")
+                         "art/1-proof.png")
 
         self.write_ad("1-proof", "928x1152", headline="Read the sky")
         edited = self.generate_on_vertex()
@@ -826,26 +826,6 @@ class GenerateTests(unittest.TestCase):
             self.assertLine(run.stdout, "1-proof", "FAILED", "headline.ttf")
         self.assertEqual([prompt(request["body"]) for request in self.api.requests], ["Fine"])
 
-    @needs_ffmpeg
-    def test_an_ad_named_like_a_composed_ads_art_fails_before_any_image_request(self):
-        self.write_brand()
-        self.write_ad("1-proof", "928x1152")
-        self.write_request("1-proof.ART", {"prompt": "Clash"})
-        self.write_request("2-solo.art", {"prompt": "Alone"})
-        self.write_request("3-plain", {"prompt": "Plain"})
-        self.write_request("3-plain.art", {"prompt": "Plain art"})
-
-        checked = self.generate("--dry-run")
-        result = self.generate()
-
-        for run in [checked, result]:
-            self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
-            self.assertLine(run.stdout, "1-proof.ART", "FAILED", "1-proof")
-        for name in ["1-proof", "2-solo.art", "3-plain", "3-plain.art"]:
-            self.assertLine(result.stdout, name, "done")
-        self.assertEqual(sorted(prompt(request["body"]) for request in self.api.requests),
-                         ["Alone", "Night sky, no words, ART 928x1152", "Plain", "Plain art"])
-
     def test_a_compose_request_with_an_unusable_font_fails_before_any_image_request(self):
         self.write_request("2-plain", {"prompt": "Fine"})
         headline = self.run_folder / "fonts/headline.ttf"
@@ -874,7 +854,7 @@ class GenerateTests(unittest.TestCase):
                     self.assertLine(run.stdout, "1-proof", "FAILED", *parts)
                 self.assertLine(result.stdout, "2-plain", "done")
                 self.assertEqual([prompt(request["body"]) for request in self.api.requests[sent:]], ["Fine"])
-                self.assertFalse((self.run_folder / "1-proof.art.png").exists())
+                self.assertFalse((self.run_folder / "art/1-proof.png").exists())
 
     @needs_ffmpeg
     def test_a_compose_dry_run_prints_the_type_layout_or_why_it_does_not_fit_without_calling_anything(self):

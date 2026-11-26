@@ -101,7 +101,7 @@ python3 <skill-dir>/scripts/generate.py <run-folder>             # about 7 cents
 
 `--dry-run` reads the request files and prints each ad's output shape, prompt length, and reference count. It does not call the image API and does not spend money. That is the point: catch a bad request before the image run.
 
-The real run generates every ad in parallel. OpenAI uses `gpt-image-2.6-sunburst`, or `gpt-image-2.6-flare` for fast drafts. Gemini uses `gemini-3-pro-image` on Vertex, or `gemini-3.1-flash-image` for fast drafts. Pass a draft model with `--model`. A busy reply (HTTP 429, 500, 502, 503, or 504) gets up to two retries. An ad that still fails prints `FAILED` with its error, so the rest of the batch can finish. For each finished ad, the script prints `done` with the image size and saves `<n>-<name>.png`. It also saves the API's response, without the image, as `<n>-<name>.res.json`. It skips an ad that already has a PNG and prints `exists` with that file's size. For an ad with a `compose` block, it skips only the image call, as long as the ad's `.art.png` exists, as described under [With a layer file](#with-a-layer-file).
+The real run generates every ad in parallel. OpenAI uses `gpt-image-2.6-sunburst`, or `gpt-image-2.6-flare` for fast drafts. Gemini uses `gemini-3-pro-image` on Vertex, or `gemini-3.1-flash-image` for fast drafts. Pass a draft model with `--model`. A busy reply (HTTP 429, 500, 502, 503, or 504) gets up to two retries. An ad that still fails prints `FAILED` with its error, so the rest of the batch can finish. For each finished ad, the script prints `done` with the image size and saves `<n>-<name>.png`. It also saves the API's response, without the image, as `<n>-<name>.res.json`. It skips an ad that already has a PNG and prints `exists` with that file's size. For an ad with a `compose` block, it skips only the image call, as long as the ad's art is saved, as described under [With a layer file](#with-a-layer-file).
 
 Gemini reads its token from `gcloud auth application-default print-access-token` and its project from `GOOGLE_CLOUD_PROJECT`, else from `gcloud config get-value project`. When the token step fails, ask the user to run `gcloud auth application-default login`, adding `--impersonate-service-account=<account>` when their project grants Vertex access through a service account. Gemini takes an aspect ratio and a size tier instead of pixels. The script turns `1472x1840` into 4:5 at 2K, and the dry run prints `4:5 2K`. A size whose ratio Gemini does not offer fails in the dry run.
 
@@ -138,9 +138,9 @@ The compose step needs `ffmpeg` 6.1 or later with the `drawtext` filter. The dry
 
 A missing or wrong font file, a character the font lacks, or a line too long to stay 28 px tall at 1080 wide fails that ad in the dry run, before any image call. Shorten or split the line it names.
 
-The real run saves the art as `<n>-<name>.art.png`. It then fills the art's flat background with the exact hex, resets accent lines to their exact hex, lays the type over it, and writes the ad as `<n>-<name>.png` and its type settings as `<n>-<name>.type.json`. The type settings name each line's font file, weight, width, size, and box. The ad's output line reads `done <size>, composed`, or `exists <size>, skip render, composed` when the art was already saved. It ends in `, art background not filled` when the art's background was too far from the hex to fill.
+The real run saves the art as `art/<n>-<name>.png`. It then fills the art's flat background with the exact hex, resets accent lines to their exact hex, lays the type over it, and writes the ad as `<n>-<name>.png` and its type settings as `<n>-<name>.type.json`. The type settings name each line's font file, weight, width, size, and box. The ad's output line reads `done <size>, composed`, or `exists <size>, skip render, composed` when the art was already saved. It ends in `, art background not filled` when the art's background was too far from the hex to fill.
 
-The script composes the ad again on every run. It skips the image call while `<n>-<name>.art.png` exists, and the same art and request give the same PNG bytes. To change only the type, edit the `compose` block and rerun. To draw the art again, delete the `.art.png` and rerun.
+The script composes the ad again on every run. It skips the image call while `art/<n>-<name>.png` exists, and the same art and request give the same PNG bytes. To change only the type, edit the `compose` block and rerun. To draw the art again, delete `art/<n>-<name>.png` and rerun.
 
 ## 5. Review
 
@@ -150,7 +150,7 @@ View every PNG. Check for:
 - A wordmark that doesn't match
 - Copied customer logos
 - A size on the ad's `done` or `exists` line other than 1472x1840 from OpenAI or 1856x2304 from Gemini
-- On a composed ad, words or a logo drawn into the art, or art cut off at the top or bottom of its band. Delete the `.art.png` and rerun to draw it again.
+- On a composed ad, words or a logo drawn into the art, or art cut off at the top or bottom of its band. Delete `art/<n>-<name>.png` and rerun to draw it again.
 - A composed ad whose output line ends in `art background not filled`. The art's background was too far from the hex to fill, so the middle band keeps the art's own color. Draw the art again.
 
 Read the script output for `FAILED`. A failed ad can still leave the script looking finished.

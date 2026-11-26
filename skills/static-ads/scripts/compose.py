@@ -511,20 +511,21 @@ def encode(width, height, pixels):
 
 
 def render(plan, art, png, record):
+    shown = art.relative_to(png.parent).as_posix()
     info = png_info(art)
     if info is None:
-        raise ComposeError("compose needs PNG art, and {} is not a PNG".format(art.name))
+        raise ComposeError("compose needs PNG art, and {} is not a PNG".format(shown))
     width, height = info[:2]
     across, down = plan.copy.ratio
     if abs(width * down / (height * across) - 1) > ART_TOLERANCE:
         raise ComposeError("art {}x{} is not within {:.0%} of {}:{}".format(width, height, ART_TOLERANCE, across, down))
     brand, copy = plan.brand, plan.copy
     plan = layout(brand, copy, width, height)
-    pixels = ffmpeg("ffmpeg could not decode " + art.name, "-i", str(art.absolute()), "-frames:v", "1",
+    pixels = ffmpeg("ffmpeg could not decode " + shown, "-i", str(art.absolute()), "-frames:v", "1",
                     "-f", "rawvideo", "-pix_fmt", "rgb24", "-")
     stride = 3 * width
     if len(pixels) != stride * height:
-        raise ComposeError("ffmpeg decoded {} to {} bytes, not {}".format(art.name, len(pixels), stride * height))
+        raise ComposeError("ffmpeg decoded {} to {} bytes, not {}".format(shown, len(pixels), stride * height))
     target = rgb(copy.background)
     gap, fade = round(SCRIM_GAP * height), round(SCRIM_FADE * height)
     solid_top, solid_bottom = plan.top + gap, plan.bottom - gap
@@ -572,7 +573,7 @@ def render(plan, art, png, record):
     settings = record.with_name(record.name + ".partial")
     settings.write_text(json.dumps({
         "size": "{}x{}".format(width, height), "layout": "{}:{}".format(across, down), "background": copy.background,
-        "art": art.name, "art_background": "#" + base.hex() if base else None,
+        "art": shown, "art_background": "#" + base.hex() if base else None,
         "art_accents": {"#" + accent.hex(): "#" + seen.hex() for accent, seen in drawn.items()},
         "safe_box": list(plan.safe),
         "logo": {"file": brand.logo.file, "box": list(plan.logo)} if plan.logo else None,

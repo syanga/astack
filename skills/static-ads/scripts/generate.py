@@ -220,17 +220,7 @@ def wants_compose(request_path):
     return isinstance(request, dict) and "compose" in request
 
 
-def art_clash(request_path):
-    name = ad_name(request_path)
-    if name.lower().endswith(".art") and wants_compose(request_path.parent / (name[:-4] + ".req.json")):
-        return "ad {} would share a file with the art of ad {}; rename it".format(name, name[:-4])
-    return None
-
-
 def load(request_path):
-    clash = art_clash(request_path)
-    if clash:
-        raise ValueError(clash)
     request = json.loads(request_path.read_text(encoding="utf-8"))
     if not isinstance(request, dict) or not isinstance(request.get("prompt"), str) or not request["prompt"]:
         raise ValueError("the request has no prompt")
@@ -266,19 +256,20 @@ def generate(request_path, backend, session):
     folder = request_path.parent
     name = ad_name(request_path)
     png = folder / (name + ".png")
-    art = folder / (name + ".art.png")
+    art = folder / "art" / (name + ".png")
     try:
-        if png.is_file() and png.stat().st_size and not wants_compose(request_path) and not art_clash(request_path):
+        if png.is_file() and png.stat().st_size and not wants_compose(request_path):
             say("{}: exists {}, skip".format(name, png_size(png.read_bytes())))
             return True
         request, references, plan = load(request_path)
         if plan and art.is_file() and art.stat().st_size:
             image, status = art.read_bytes(), "exists {}, skip render"
         else:
+            saved = art if plan else png
+            saved.parent.mkdir(exist_ok=True)
             url, body = backend.build(session, request, references)
             image, response = backend.unpack(post(url, body, session.token))
-            saved = art if plan else png
-            partial = folder / (saved.name + ".partial")
+            partial = saved.with_name(saved.name + ".partial")
             partial.write_bytes(image)
             partial.replace(saved)
             (folder / (name + ".res.json")).write_text(json.dumps(response, indent=2) + "\n", encoding="utf-8")
