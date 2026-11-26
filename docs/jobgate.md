@@ -288,11 +288,13 @@ that read Git history therefore work on the box.
   but its checkout leaves the files out. A Git command on the box that reads
   their contents fails.
 - Before it starts a box, jobgate checks that no content that was ever under an
-  excluded path also lives at another path in the history, such as a file that a
-  commit moved into an excluded directory. If one does, the command runs here,
-  and jobgate prints a path to add to `exclude` for each such file. The check
-  covers the uncommitted changes that the box would get, such as an untracked
-  copy of an excluded file. Empty files do not count.
+  excluded path also lives at another path, in the history or in the
+  uncommitted changes that the box would get. Examples are a file that a commit
+  moved into an excluded directory, and an untracked copy of an excluded file.
+  If one does, the command runs here. jobgate prints up to 5 such paths to add
+  to `exclude`, and the number of the others. It names one path for each
+  content, so the next run can name another copy of the same content. Empty
+  files do not count.
 - When the box starts from a snapshot, the bundle holds only the commits that
   the snapshot lacks.
 
@@ -366,8 +368,8 @@ is true:
   jobgate prints `BOAT RUN FAILED` with the step, the box, and a log, as in
   [When a box dies partway](#when-a-box-dies-partway), and deletes the box. It
   does not retry on a new box.
-- Content under an excluded path also lives at another path in the history
-  (`excluded_elsewhere`).
+- Content under an excluded path also lives at another path, in the history or
+  in the uncommitted changes (`excluded_elsewhere`).
 - boat refused a start for payment less than an hour ago. After an HTTP 402
   error, such as `billing_required`, or after `trial_compute_limit_reached`,
   jobgate skips boat for an hour. It keeps the end time in

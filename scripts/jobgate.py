@@ -1119,8 +1119,10 @@ def check_exclude(source: Source, settings: BoatSettings) -> None:
                         if " " in line and line.split(" ", 1)[0] in excluded_blobs})
     if elsewhere:
         shown = ", ".join(elsewhere[:5]) + ("" if len(elsewhere) <= 5 else ", and {} more".format(len(elsewhere) - 5))
-        raise BoatUnavailable("excluded_elsewhere", "content from the excluded paths is also in the history at {}. "
-                              "Add {} to exclude".format(shown, "these paths" if len(elsewhere) > 1 else "this path"))
+        raise BoatUnavailable("excluded_elsewhere", "content from the excluded paths is also at {}, in the history or "
+                              "the uncommitted changes. Add {} to exclude. jobgate names one path for each content, so "
+                              "the next run can name other copies".format(
+                                  shown, "these paths" if len(elsewhere) > 1 else "this path"))
 
 
 def make_plan(source: Source, settings: BoatSettings) -> Plan:
