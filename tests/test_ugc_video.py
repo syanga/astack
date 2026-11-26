@@ -540,6 +540,19 @@ class MakeUgcTests(unittest.TestCase):
         self.assertEqual(len(self.posts(CREATE)), 1)
 
 
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_a_new_voice_with_rerender_after_a_stop_before_cleanup_makes_one_new_take(self):
+        self.assertEqual(self.run_script("--no-upscale").returncode, 0)
+        (self.out / "seedance.task.json").write_text(json.dumps({"taskId": "task-1"}))
+        (self.presenter / "presenter.json").write_text(json.dumps({**self.meta, "voice_id": "voice-new"}))
+
+        result = self.run_script("--no-upscale", "--rerender")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.posts(CREATE)), 2)
+        self.assertEqual(self.posts(TTS)[-1]["voice_setting"]["voice_id"], "voice-new")
+
+
 class StutterCutTests(unittest.TestCase):
     WORDS = "our app never shares your data"
 

@@ -175,6 +175,8 @@ def clone_voice(a, d, meta):
         saved.unlink(missing_ok=True)
         sys.exit(f"The voice clone failed: {e}")
     except VendorError as e:
+        if not saved.exists() or "status_url" not in saved.read_text():
+            sys.exit(f"The voice clone did not finish: {e}")
         sys.exit(f"The voice clone did not finish: {e}\nfal may still finish it. Run --clone-voice again to check that "
                  f"request; that does not pay for another clone. If fal no longer knows the request, delete {saved} "
                  "first; the next clone is paid for again.")
@@ -300,7 +302,8 @@ def main():
             sys.exit(f"{out} holds a run for another script or presenter. Pass a new --slug.")
     voice, raw_v, pending = out / "voice.mp3", out / "raw-480p.mp4", out / "seedance.task.json"
     again = "Run the command again without --rerender or --clone-voice"
-    if raw_v.exists() and pending.exists() and (a.rerender or a.clone_voice):
+    voice_changed = voice.exists() and voice_of(out) != meta.get("voice_id")
+    if raw_v.exists() and pending.exists() and (a.clone_voice or (a.rerender and not voice_changed)):
         sys.exit(f"The last run downloaded its take but stopped before finishing. {again} to finish it.")
     if pending.exists() and (a.rerender or a.clone_voice):
         sys.exit(f"A kie take is still pending. {again} to check it. To give it up, delete {pending} first; "
@@ -318,7 +321,7 @@ def main():
     (out / "script-spoken.txt").write_text(spoken + "\n")
 
     if voice.exists() and voice_of(out) != meta["voice_id"]:
-        if pending.exists():
+        if pending.exists() and not raw_v.exists():
             sys.exit(f"A take made with voice {voice_of(out)} is still pending, but {d / 'presenter.json'} now names "
                      f"{meta['voice_id']}. Put the old voice_id back and {again[0].lower() + again[1:]} to collect it, "
                      f"or delete {pending} to give it up.")
@@ -326,6 +329,7 @@ def main():
             sys.exit(new_take)
         if raw_v.exists():
             archive(raw_v)
+            pending.unlink(missing_ok=True)
         for name in ("voice.mp3", "voice-raw.mp3", "voice-trim.wav"):
             (out / name).unlink(missing_ok=True)
         log("2 MP3: the voice id changed, so the MP3 is made again")
