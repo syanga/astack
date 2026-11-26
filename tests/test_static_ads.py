@@ -4,6 +4,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
+import shutil
+import string
 import struct
 import subprocess
 import sys
@@ -16,14 +19,115 @@ import zlib
 SCRIPT = Path(__file__).resolve().parents[1] / "skills/static-ads/scripts/generate.py"
 
 
+def chunk(kind, data):
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+
 def png_header(width, height):
-    def chunk(kind, data):
-        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
     return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
             + chunk(b"IEND", b""))
 
 
+def png(width, rows, kind):
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, len(rows), 8, kind, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"".join(b"\0" + row for row in rows))) + chunk(b"IEND", b""))
+
+
 RENDER = png_header(1472, 1840)
+FFMPEG = shutil.which("ffmpeg")
+needs_ffmpeg = unittest.skipUnless(FFMPEG, "compose needs ffmpeg")
+BACKGROUND = bytes.fromhex("061521")
+ART_BACKGROUND = bytes.fromhex("0d1925")
+ART_SQUARE = bytes.fromhex("f0c040")
+LOGO = bytes.fromhex("ffc800")
+WHITE = bytes.fromhex("ffffff")
+PILL = bytes(round(back * (1 - 0.82) + fill * 0.82) for back, fill in zip(BACKGROUND, bytes.fromhex("026692")))
+WIDTH_CLASSES = {100: 5, 125: 7}
+BRAND = {
+    "backgrounds": ["#061521", "#5b86a8"],
+    "logo": "lockup.png",
+    "button": {"color": "#026692", "opacity": 0.82},
+    "type": {
+        "headline": {"font": "fonts/headline.ttf", "weight": 500, "width": 125, "case": "upper", "color": "#ffffff"},
+        "subline": {"font": "fonts/subline.ttf", "weight": 450, "width": 100, "color": "#ffffff"},
+        "cta": {"font": "fonts/cta.ttf", "weight": 700, "width": 100, "case": "upper", "color": "#ffffff"},
+    },
+}
+COPY = {"headline": "Read the sky you were\nborn under", "subline": "A written reading.", "cta": "Get your reading"}
+
+
+def square(width, height):
+    return round(0.42 * width), round(0.40 * height), round(0.58 * width), round(0.46 * height)
+
+
+def art(width, height):
+    x0, y0, x1, y1 = square(width, height)
+    plain = ART_BACKGROUND * width
+    marked = ART_BACKGROUND * x0 + ART_SQUARE * (x1 - x0) + ART_BACKGROUND * (width - x1)
+    return png(width, [marked if y0 <= y < y1 else plain for y in range(height)], 2)
+
+
+def image_for(prompt):
+    asked = re.search(r"ART ([0-9]+)x([0-9]+)", prompt)
+    return art(*map(int, asked.groups())) if asked else RENDER
+
+
+def sfnt(tables):
+    tags = sorted(tables)
+    power = 2 ** (len(tags).bit_length() - 1)
+    header = struct.pack(">IHHHH", 0x10000, len(tags), 16 * power, power.bit_length() - 1, 16 * (len(tags) - power))
+    directory, body = b"", b""
+    for tag in tags:
+        directory += struct.pack(">4sIII", tag, 0, 12 + 16 * len(tags) + len(body), len(tables[tag]))
+        body += tables[tag] + b"\0" * (-len(tables[tag]) % 4)
+    return header + directory + body
+
+
+def font(weight, width, chars=string.ascii_letters + string.digits + " .,!?'-", variable=False):
+    block = (struct.pack(">5hHH", 1, 50, 0, 550, 700, 3, 0) + bytes([1] * 4)
+             + struct.pack(">8h", 50, 0, 500, 0, 0, 700, 0, -700))
+    codes = sorted(map(ord, chars))
+    segments = [(code, ((1 if code == 32 else 2) - code) & 0xFFFF) for code in codes] + [(0xFFFF, 1)]
+    count = len(segments)
+    power = 2 ** (count.bit_length() - 1)
+    starts = struct.pack(">{}H".format(count), *(code for code, _ in segments))
+    cmap = (struct.pack(">HHHHI", 0, 1, 3, 1, 12)
+            + struct.pack(">7H", 4, 16 + 8 * count, 0, 2 * count, 2 * power, power.bit_length() - 1,
+                          2 * (count - power))
+            + starts + b"\0\0" + starts + struct.pack(">{}H".format(count), *(delta for _, delta in segments))
+            + bytes(2 * count))
+    os2 = bytearray(96)
+    struct.pack_into(">HhHH", os2, 0, 4, 600, weight, width)
+    struct.pack_into(">HHhhhHH", os2, 64, codes[0], codes[-1], 900, -200, 0, 900, 200)
+    struct.pack_into(">hh", os2, 86, 500, 700)
+    tables = {
+        b"head": struct.pack(">IIIIHHqq4hHHhhh", 0x10000, 0x10000, 0, 0x5F0F3CF5, 3, 1000, 0, 0, 0, 0, 550, 700,
+                             0, 8, 2, 1, 0),
+        b"hhea": struct.pack(">IhhhHhhhhhh4hhH", 0x10000, 900, -200, 0, 600, 0, 50, 550, 1, 0, 0, 0, 0, 0, 0, 0, 3),
+        b"maxp": struct.pack(">IH13H", 0x10000, 3, 4, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0),
+        b"OS/2": bytes(os2),
+        b"hmtx": struct.pack(">6h", 500, 0, 300, 0, 600, 50),
+        b"cmap": cmap,
+        b"loca": struct.pack(">4I", 0, 0, 0, len(block)),
+        b"glyf": block,
+        b"name": struct.pack(">3H", 0, 0, 6),
+        b"post": struct.pack(">IIhhIIIII", 0x30000, 0, -100, 50, 0, 0, 0, 0, 0),
+    }
+    if variable:
+        tables[b"fvar"] = b""
+    return sfnt(tables)
+
+
+def marks(path):
+    width, height = struct.unpack(">II", path.read_bytes()[16:24])
+    data = subprocess.run([FFMPEG, "-v", "error", "-i", str(path), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                          capture_output=True, check=True).stdout
+    found = {}
+    for y in range(height):
+        row = data[3 * width * y:3 * width * (y + 1)]
+        if row != BACKGROUND * width:
+            found.update(((x, y), row[3 * x:3 * x + 3]) for x in range(width) if row[3 * x:3 * x + 3] != BACKGROUND)
+    return width, height, found
 TOKEN = "ya29.fake-access-token"
 USAGE = {"promptTokenCount": 10, "candidatesTokenCount": 1120, "totalTokenCount": 1130}
 FAKE_GCLOUD = """#!{python}
@@ -54,7 +158,7 @@ def vertex_reply(model, prompt):
         return {"candidates": [{"finishReason": "IMAGE_SAFETY"}], "usageMetadata": USAGE, "modelVersion": model}
     return {"candidates": [{"content": {"role": "model", "parts": [
                 {"text": "Planning the layout.", "thought": True},
-                {"inlineData": {"mimeType": "image/png", "data": base64.b64encode(RENDER).decode()},
+                {"inlineData": {"mimeType": "image/png", "data": base64.b64encode(image_for(prompt)).decode()},
                  "thoughtSignature": "sig"}]},
             "finishReason": "STOP"}],
             "usageMetadata": USAGE, "modelVersion": model}
@@ -91,7 +195,7 @@ class FakeImagesAPI:
                 elif self.path.endswith(":generateContent"):
                     status, reply = 200, vertex_reply(self.path.rpartition("/")[2].partition(":")[0], asked)
                 else:
-                    image = RENDER[:16] if "SHORT" in asked else RENDER
+                    image = RENDER[:16] if "SHORT" in asked else image_for(asked)
                     status, reply = 200, {"created": 1, "data": [{"b64_json": base64.b64encode(image).decode()}],
                                           "usage": {"input_tokens": 10, "output_tokens": 6240}}
                 data = json.dumps(reply).encode()
@@ -131,6 +235,8 @@ class GenerateTests(unittest.TestCase):
         self.bin.mkdir()
         self.gcloud_log = self.home / "gcloud.log"
         self.write_gcloud()
+        if FFMPEG:
+            (self.bin / "ffmpeg").symlink_to(FFMPEG)
 
     def write_gcloud(self, token=(0, TOKEN + "\n", ""), project=(0, "brand-ads-test\n", "")):
         gcloud = self.bin / "gcloud"
@@ -143,6 +249,17 @@ class GenerateTests(unittest.TestCase):
 
     def write_request(self, name, request):
         (self.run_folder / "{}.req.json".format(name)).write_text(json.dumps(request), encoding="utf-8")
+
+    def write_brand(self):
+        (self.run_folder / "fonts").mkdir(exist_ok=True)
+        (self.run_folder / "layer.json").write_text(json.dumps(BRAND), encoding="utf-8")
+        for style in BRAND["type"].values():
+            (self.run_folder / style["font"]).write_bytes(font(style["weight"], WIDTH_CLASSES[style["width"]]))
+        (self.run_folder / "lockup.png").write_bytes(png(240, [(LOGO + b"\xff") * 240] * 60, 6))
+
+    def write_ad(self, name, art_size, size="1472x1840", **copy):
+        self.write_request(name, {"prompt": "Night sky, no words, ART " + art_size, "size": size,
+                                  "compose": {**COPY, **copy}})
 
     def assertLine(self, output, name, *parts):
         lines = [line for line in output.splitlines() if line.startswith(name + ":")]
@@ -534,6 +651,128 @@ class GenerateTests(unittest.TestCase):
         self.assertIn("not a Vertex model name", traversal.stderr)
         self.assertEqual(self.api.requests, [])
         self.assertFalse((self.run_folder / "1-proof.png").exists())
+
+    @needs_ffmpeg
+    def test_composed_ads_set_the_brand_type_on_the_exact_background_inside_each_safe_zone(self):
+        self.write_brand()
+        self.write_ad("1-portrait", "928x1152")
+        self.write_ad("2-story", "576x1024", size="1080x1920", headline="Read the sky\nyou were\nborn under",
+                      subline="A written reading\nof your chart.")
+
+        result = self.generate_on_vertex()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertLine(result.stdout, "1-portrait", "done 928x1152, composed")
+        self.assertLine(result.stdout, "2-story", "done 576x1024, composed")
+        for name, zone in [("1-portrait", (0.05, 0.05, 0.95, 0.95)), ("2-story", (0.06, 0.14, 0.94, 0.65))]:
+            with self.subTest(ad=name):
+                width, height, found = marks(self.run_folder / (name + ".png"))
+                left, top, right, bottom = square(width, height)
+                self.assertEqual(found.get(((left + right) // 2, (top + bottom) // 2)), ART_SQUARE)
+                self.assertNotIn((left - 10, (top + bottom) // 2), found)
+                self.assertNotIn((width // 2, (top + height) // 2), found)
+                upper = [(y, color) for (x, y), color in found.items() if y < top]
+                self.assertLess(min(y for y, color in upper if color == LOGO),
+                                min(y for y, color in upper if color == WHITE))
+                lower = {color for (x, y), color in found.items() if y >= bottom}
+                self.assertLessEqual({WHITE, PILL}, lower)
+                type_above = max(y for y, color in upper if color == WHITE)
+                type_below = min(y for (x, y), color in found.items() if y >= bottom and color == WHITE)
+                self.assertGreaterEqual(type_below - type_above, 0.2 * height)
+                self.assertEqual([(x, y) for x, y in found if not (zone[0] * width <= x and x + 1 <= zone[2] * width
+                                                                   and zone[1] * height <= y
+                                                                   and y + 1 <= zone[3] * height)], [])
+        settings = json.loads((self.run_folder / "1-portrait.layer.json").read_text(encoding="utf-8"))
+        self.assertEqual([(line["role"], line["text"], line["font"], line["weight"], line["width"])
+                          for line in settings["text"]], [
+            ("headline", "READ THE SKY YOU WERE", "fonts/headline.ttf", 500, 125),
+            ("headline", "BORN UNDER", "fonts/headline.ttf", 500, 125),
+            ("subline", "A written reading.", "fonts/subline.ttf", 450, 100),
+            ("cta", "GET YOUR READING", "fonts/cta.ttf", 700, 100),
+        ])
+
+    @needs_ffmpeg
+    def test_a_rerun_composes_the_same_bytes_from_the_saved_art_without_rendering_again(self):
+        self.write_brand()
+        self.write_ad("1-proof", "928x1152")
+        first = self.generate_on_vertex()
+        composed = (self.run_folder / "1-proof.png").read_bytes()
+        (self.run_folder / "1-proof.png").unlink()
+
+        again = self.generate_on_vertex()
+
+        self.assertLine(first.stdout, "1-proof", "done 928x1152, composed")
+        self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
+        self.assertLine(again.stdout, "1-proof", "exists 928x1152, skip render, composed")
+        self.assertEqual((self.run_folder / "1-proof.png").read_bytes(), composed)
+        self.assertEqual(len(self.api.requests), 1)
+
+    def test_a_compose_request_with_an_unusable_font_fails_before_any_image_request(self):
+        self.write_request("2-plain", {"prompt": "Fine"})
+        headline = self.run_folder / "fonts/headline.ttf"
+        for case, data, copy, parts in [
+                ("missing", None, {}, ["fonts/headline.ttf", "missing"]),
+                ("variable", font(500, 7, variable=True), {}, ["fonts/headline.ttf", "variable font",
+                                                               "weight 500 width 125"]),
+                ("wrong weight", font(400, 7), {}, ["fonts/headline.ttf", "weight 400", "weight 500"]),
+                ("missing glyph", font(500, 7), {"headline": "Read the sky → now"},
+                 ["headline", "fonts/headline.ttf", "U+2192"])]:
+            with self.subTest(case=case):
+                self.write_brand()
+                if data is None:
+                    headline.unlink()
+                else:
+                    headline.write_bytes(data)
+                self.write_ad("1-proof", "928x1152", **copy)
+                (self.run_folder / "2-plain.png").unlink(missing_ok=True)
+                sent = len(self.api.requests)
+
+                checked = self.generate_on_vertex("--dry-run")
+                result = self.generate_on_vertex()
+
+                for run in [checked, result]:
+                    self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+                    self.assertLine(run.stdout, "1-proof", "FAILED", *parts)
+                self.assertLine(result.stdout, "2-plain", "done")
+                self.assertEqual([prompt(request["body"]) for request in self.api.requests[sent:]], ["Fine"])
+                self.assertFalse((self.run_folder / "1-proof.art.png").exists())
+
+    @needs_ffmpeg
+    def test_a_compose_dry_run_prints_the_type_layout_or_why_it_does_not_fit_without_calling_anything(self):
+        self.write_brand()
+        self.write_ad("1-proof", "928x1152", background="#5B86A8")
+        self.write_ad("2-story", "576x1024", size="1080x1920", subline="A written reading\nof your chart.")
+        self.write_ad("3-long", "928x1152", headline="Read the sky you were born under tonight and every night")
+        before = sorted(path.name for path in self.run_folder.iterdir())
+
+        checked = self.generate_on_vertex("--dry-run")
+
+        self.assertEqual(checked.returncode, 1, checked.stdout + checked.stderr)
+        self.assertRegex(checked.stdout, r"(?m)^1-proof: compose 4:5 on #5b86a8, headline 2x[0-9]+px, "
+                                         r"subline 1x[0-9]+px, cta [0-9]+px, logo lockup\.png$")
+        self.assertRegex(checked.stdout, r"(?m)^2-story: compose 9:16 on #061521, headline 2x[0-9]+px, "
+                                         r"subline 2x[0-9]+px, cta [0-9]+px, logo lockup\.png$")
+        self.assertLine(checked.stdout, "3-long", "FAILED", "READ THE SKY YOU WERE BORN UNDER TONIGHT AND EVERY NIGHT",
+                        "minimum")
+        self.assertEqual(self.api.requests, [])
+        self.assertEqual(self.gcloud_calls(), [])
+        self.assertEqual(sorted(path.name for path in self.run_folder.iterdir()), before)
+
+    @needs_ffmpeg
+    def test_an_openai_compose_request_sends_only_the_image_fields_and_composes_the_reply(self):
+        self.write_brand()
+        self.write_request("1-proof", {"prompt": "Night sky ART 736x920", "size": "1472x1840", "quality": "high",
+                                       "compose": COPY})
+
+        result = self.generate()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([(request["path"], request["body"]) for request in self.api.requests], [
+            ("/v1/images/generations", {"model": "gpt-image-2.6-sunburst", "prompt": "Night sky ART 736x920",
+                                        "size": "1472x1840", "quality": "high"}),
+        ])
+        self.assertLine(result.stdout, "1-proof", "done 736x920, composed")
+        self.assertEqual(marks(self.run_folder / "1-proof.png")[:2], (736, 920))
 
 
 if __name__ == "__main__":
