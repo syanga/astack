@@ -662,13 +662,17 @@ class GenerateTests(unittest.TestCase):
         self.write_ad("1-portrait", "928x1152")
         self.write_ad("2-story", "576x1024", size="1080x1920", headline="Read the sky\nyou were\nborn under",
                       subline="A written reading\nof your chart.")
+        self.write_ad("3-square", "800x800", size="1080x1080")
 
         result = self.generate_on_vertex()
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertLine(result.stdout, "1-portrait", "done 928x1152, composed")
         self.assertLine(result.stdout, "2-story", "done 576x1024, composed")
-        for name, zone in [("1-portrait", (0.05, 0.05, 0.95, 0.95)), ("2-story", (0.06, 0.14, 0.94, 0.65))]:
+        self.assertLine(result.stdout, "3-square", "done 800x800, composed")
+        for name, zone, band in [("1-portrait", (0.05, 0.05, 0.95, 0.95), 0.3),
+                                 ("2-story", (0.06, 0.14, 0.94, 0.65), 0.2),
+                                 ("3-square", (0.05, 0.05, 0.95, 0.95), 0.3)]:
             with self.subTest(ad=name):
                 width, height, found = marks(self.run_folder / (name + ".png"))
                 left, top, right, bottom = square(width, height)
@@ -682,11 +686,11 @@ class GenerateTests(unittest.TestCase):
                 self.assertLessEqual({WHITE, PILL}, lower)
                 type_above = max(y for y, color in upper if color == WHITE)
                 type_below = min(y for (x, y), color in found.items() if y >= bottom and color == WHITE)
-                self.assertGreaterEqual(type_below - type_above, 0.2 * height)
+                self.assertGreaterEqual(type_below - type_above, band * height)
                 self.assertEqual([(x, y) for x, y in found if not (zone[0] * width <= x and x + 1 <= zone[2] * width
                                                                    and zone[1] * height <= y
                                                                    and y + 1 <= zone[3] * height)], [])
-        settings = json.loads((self.run_folder / "1-portrait.layer.json").read_text(encoding="utf-8"))
+        settings = json.loads((self.run_folder / "1-portrait.type.json").read_text(encoding="utf-8"))
         self.assertEqual([(line["role"], line["text"], line["font"], line["weight"], line["width"])
                           for line in settings["text"]], [
             ("headline", "READ THE SKY YOU WERE", "fonts/headline.ttf", 500, 125),
@@ -717,7 +721,7 @@ class GenerateTests(unittest.TestCase):
                 self.assertEqual(found.get(((left + right) // 2, middle)), inner)
                 drawn = found.get((left - 1, middle))
                 self.assertTrue(drawn and all(abs(a - b) <= 1 for a, b in zip(drawn, edge)), drawn)
-        settings = json.loads((self.run_folder / "1-accent.layer.json").read_text(encoding="utf-8"))
+        settings = json.loads((self.run_folder / "1-accent.type.json").read_text(encoding="utf-8"))
         self.assertEqual(settings["art_accents"], {"#ffd9c4": "#ffc5a0"})
 
     @needs_ffmpeg

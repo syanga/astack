@@ -274,7 +274,7 @@ def generate(request_path, backend, session):
             (folder / (name + ".res.json")).write_text(json.dumps(response, indent=2) + "\n", encoding="utf-8")
             status = "done {}"
         if plan:
-            compose.render(plan, art, png, folder / (name + ".layer.json"))
+            compose.render(plan, art, png, folder / (name + ".type.json"))
     except urllib.error.HTTPError as error:
         say("{}: FAILED ({})".format(name, api_error(error)))
         return False
