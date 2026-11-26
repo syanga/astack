@@ -38,7 +38,7 @@ type requestSpan struct {
 	Model string
 }
 
-func (d digest) localUsage(account router.AccountID, kind router.WindowKind, model string, currentUsed float64, currentResetsAt time.Time) (float64, bool) {
+func (d digest) localUsage(account router.AccountID, kind router.WindowKind, model string, currentUsed float64, currentResetsAt, asOf time.Time) (float64, bool) {
 	raw := d.QuotaSamples[windowID{Account: account, Kind: kind, Model: model}]
 	if len(raw) == 0 {
 		return 0, false
@@ -65,6 +65,9 @@ func (d digest) localUsage(account router.AccountID, kind router.WindowKind, mod
 		localUsed  float64
 	)
 	for _, s := range samples {
+		if !asOf.IsZero() && s.At.After(asOf) {
+			continue
+		}
 		if !currentResetsAt.IsZero() {
 			if !s.ResetsAt.IsZero() && !sameReset(s.ResetsAt, currentResetsAt) {
 				if s.ResetsAt.Before(currentResetsAt) {
@@ -105,8 +108,11 @@ func (d digest) localUsage(account router.AccountID, kind router.WindowKind, mod
 		if curReset.IsZero() && !s.ResetsAt.IsZero() {
 			curReset = s.ResetsAt
 		}
-		if (s.Used == 0 && peak > 0) || s.Used+manualResetDrop <= peak {
+		if s.Used+manualResetDrop <= peak {
 			localUsed = 0
+			if s.Used > 0 && hasLocalActivity(spans, model, lastAt, s.At) {
+				localUsed = s.Used
+			}
 			peak, lastAt = s.Used, s.At
 			continue
 		}

@@ -479,7 +479,7 @@ func writeAccountDetail(w io.Writer, r report, a claude.AccountStatus, width int
 		if r.Now.Sub(seen) > staleAfter {
 			age += ", stale"
 		}
-		fmt.Fprintf(w, "%s%-13s%-48sseen %s (%s)\n", pad, label, value, when(r.Now, seen), age)
+		fmt.Fprintf(w, "%s%-13s%-47s seen %s (%s)\n", pad, label, value, when(r.Now, seen), age)
 	}
 	used := func(u float64, local *float64, resetsAt time.Time) string {
 		value := fmt.Sprintf("%d%% used", percent(u))
@@ -495,7 +495,7 @@ func writeAccountDetail(w io.Writer, r report, a claude.AccountStatus, width int
 		value, seen := "no reading yet", time.Time{}
 		if rj, ok := activeRejection(r.Now, a, win.kind); ok {
 			here := ""
-			if local, ok := r.Digest.localUsage(a.ID, win.kind, "", 1, rj.ResetsAt); ok {
+			if local, ok := r.Digest.localUsage(a.ID, win.kind, "", 1, rj.ResetsAt, rj.At); ok {
 				here = fmt.Sprintf(" (%d%% here)", percent(local))
 			}
 			value, seen = fmt.Sprintf("rejected at %s%s, resets %s", when(r.Now, rj.At), here, resetLong(r.Now, rejectionEnd(rj))), rj.At
@@ -506,7 +506,7 @@ func writeAccountDetail(w io.Writer, r report, a claude.AccountStatus, width int
 			value, seen = "no limit on this plan", q.seen
 		} else if ok {
 			var local *float64
-			if l, ok := r.Digest.localUsage(a.ID, win.kind, "", q.used, q.resetsAt); ok {
+			if l, ok := r.Digest.localUsage(a.ID, win.kind, "", q.used, q.resetsAt, q.seen); ok {
 				local = &l
 			}
 			value, seen = used(q.used, local, q.resetsAt), q.seen
@@ -516,7 +516,7 @@ func writeAccountDetail(w io.Writer, r report, a claude.AccountStatus, width int
 	for _, m := range modelWindows(a) {
 		if m.Used != nil {
 			var local *float64
-			if l, ok := r.Digest.localUsage(a.ID, router.Weekly, m.Model, *m.Used, m.ResetsAt); ok {
+			if l, ok := r.Digest.localUsage(a.ID, router.Weekly, m.Model, *m.Used, m.ResetsAt, a.Usage.At); ok {
 				local = &l
 			}
 			reading(modelLabel(m), used(*m.Used, local, m.ResetsAt), a.Usage.At)

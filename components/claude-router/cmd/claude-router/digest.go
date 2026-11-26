@@ -113,17 +113,39 @@ func readDigestAt(path string, since, quotaSince time.Time) (digest, error) {
 	return d, d.read(f)
 }
 
+const maxEventLineBytes = 4 << 20
+
 func (d *digest) read(r io.Reader) error {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64<<10), 4<<20)
-	for sc.Scan() {
-		var e claude.Event
-		if json.Unmarshal(sc.Bytes(), &e) != nil {
-			continue
+	br := bufio.NewReaderSize(r, 64<<10)
+	var buf []byte
+	for {
+		chunk, err := br.ReadSlice('\n')
+		oversized := false
+		if errors.Is(err, bufio.ErrBufferFull) {
+			buf = append(buf[:0], chunk...)
+			for errors.Is(err, bufio.ErrBufferFull) {
+				chunk, err = br.ReadSlice('\n')
+				if !oversized && len(buf)+len(chunk) <= maxEventLineBytes {
+					buf = append(buf, chunk...)
+				} else {
+					oversized = true
+				}
+			}
+			chunk = buf
 		}
-		d.add(e)
+		if !oversized && len(chunk) > 0 {
+			var e claude.Event
+			if json.Unmarshal(chunk, &e) == nil {
+				d.add(e)
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 	}
-	return sc.Err()
 }
 
 func (d *digest) add(e claude.Event) {
@@ -138,29 +160,19 @@ func (d *digest) add(e claude.Event) {
 		}
 	case "attempt_failed":
 		if e.Account != "" && e.Class != router.ClassNetwork {
-			start, end := e.At, e.At
-			if e.Quota != nil && !e.Quota.At.IsZero() {
-				if e.Quota.At.Before(start) {
-					start = e.Quota.At
-				}
-				if e.Quota.At.After(end) {
-					end = e.Quota.At
-				}
+			start := e.At
+			if !e.AttemptStart.IsZero() && e.AttemptStart.Before(start) {
+				start = e.AttemptStart
 			}
-			d.addRequestSpan(e.Account, start, end, e.Model)
+			d.recordRequestSpan(e.Account, start, e.At, e.Quota, e.Model)
 		}
 	case "request":
-		if e.Account != "" && (e.Attempts > 0 || e.Status == http.StatusOK) {
-			start, end := requestStart(e), e.At
-			if e.Quota != nil && !e.Quota.At.IsZero() {
-				if e.Quota.At.Before(start) {
-					start = e.Quota.At
-				}
-				if e.Quota.At.After(end) {
-					end = e.Quota.At
-				}
+		if e.Account != "" && requestHitUpstream(e) {
+			start := e.AttemptStart
+			if start.IsZero() {
+				start = requestStart(e)
 			}
-			d.addRequestSpan(e.Account, start, end, e.Model)
+			d.recordRequestSpan(e.Account, start, e.At, e.Quota, e.Model)
 		}
 		if !e.At.Before(d.Cache.Since) && e.Account != "" {
 			d.Cache.count(e)
@@ -295,6 +307,32 @@ func (d *digest) addQuota(account router.AccountID, fallback time.Time, q *claud
 			ResetsAt: w.ResetsAt,
 		})
 	}
+}
+
+func requestHitUpstream(e claude.Event) bool {
+	if e.Status == http.StatusOK || e.Quota != nil {
+		return true
+	}
+	switch e.Outcome {
+	case "completed", "incomplete", "error_after_output", "served_mark_failed":
+		return true
+	}
+	return false
+}
+
+func (d *digest) recordRequestSpan(account router.AccountID, start, end time.Time, q *claude.UsageReading, model string) {
+	if end.Before(start) {
+		end = start
+	}
+	if q != nil && !q.At.IsZero() {
+		if q.At.Before(start) {
+			start = q.At
+		}
+		if q.At.After(end) {
+			end = q.At
+		}
+	}
+	d.addRequestSpan(account, start, end, model)
 }
 
 func (d *digest) addRequestSpan(account router.AccountID, start, end time.Time, model string) {

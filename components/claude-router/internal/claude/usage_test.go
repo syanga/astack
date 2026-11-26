@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/syanga/astack/components/claude-router/internal/router"
 )
@@ -232,12 +234,14 @@ func TestEventsLogModelAndQuotaFromUsageReadsResponsesAndRejections(t *testing.T
 				sawOverage = true
 			}
 		case "request":
-			if ev.Status == 200 && ev.Model == "claude-sonnet-4-6" && ev.Quota != nil && len(ev.Quota.Windows) == 1 &&
+			if ev.Status == 200 && ev.Model == "claude-sonnet-4-6" && !ev.AttemptStart.IsZero() && !ev.AttemptStart.After(ev.At) &&
+				ev.Quota != nil && len(ev.Quota.Windows) == 1 &&
 				ev.Quota.Windows[0].Kind == router.FiveHour && ev.Quota.Windows[0].Used != nil && *ev.Quota.Windows[0].Used == 0.25 {
 				sawRequest = true
 			}
 		case "attempt_failed":
-			if ev.Class == router.ClassExhausted && ev.Model == "claude-sonnet-4-6" && ev.Quota != nil && len(ev.Quota.Windows) == 1 &&
+			if ev.Class == router.ClassExhausted && ev.Model == "claude-sonnet-4-6" && !ev.AttemptStart.IsZero() && !ev.AttemptStart.After(ev.At) &&
+				ev.Quota != nil && len(ev.Quota.Windows) == 1 &&
 				ev.Quota.Windows[0].Kind == router.FiveHour && ev.Quota.Windows[0].Used != nil && *ev.Quota.Windows[0].Used == 1.0 {
 				sawFailed = true
 			}
@@ -245,5 +249,52 @@ func TestEventsLogModelAndQuotaFromUsageReadsResponsesAndRejections(t *testing.T
 	}
 	if !sawOverage || !sawRequest || !sawFailed {
 		t.Fatalf("missing logged quota events: overage=%v request=%v failed=%v\n%s", sawOverage, sawRequest, sawFailed, raw)
+	}
+}
+
+func TestOversizedModelNameIsBoundedInEvents(t *testing.T) {
+	e := newEnv(t, "acct-a")
+	e.start()
+	huge := "claude-" + string(bytes.Repeat([]byte("x"), 5<<20))
+	if r := e.send(msg{Session: sessionID(1), Model: huge}); r.Status <= 0 {
+		t.Fatalf("oversized ASCII model request failed: %s", r.ErrMsg)
+	}
+	utf8Boundary := strings.Repeat("a", maxEventModelLen-1) + "é-tail"
+	if r := e.send(msg{Session: sessionID(2), Model: utf8Boundary}); r.Status <= 0 {
+		t.Fatalf("oversized UTF-8 model request failed: %s", r.ErrMsg)
+	}
+	e.svc.Close()
+
+	raw, err := os.ReadFile(filepath.Join(e.dir, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawHuge, sawUTF8 bool
+	for _, line := range bytes.Split(raw, []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		if len(line) > 4096 {
+			t.Fatalf("events.jsonl line has %d bytes, want bounded model field", len(line))
+		}
+		var ev Event
+		if err := json.Unmarshal(line, &ev); err != nil {
+			t.Fatalf("invalid JSON line: %v", err)
+		}
+		if len(ev.Model) > maxEventModelLen {
+			t.Fatalf("event model length %d exceeds %d", len(ev.Model), maxEventModelLen)
+		}
+		if !utf8.ValidString(ev.Model) {
+			t.Fatalf("event model is not valid UTF-8: %q", ev.Model)
+		}
+		if ev.Kind == "request" && ev.Model == huge[:maxEventModelLen] {
+			sawHuge = true
+		}
+		if ev.Kind == "request" && ev.Model == strings.Repeat("a", maxEventModelLen-1) {
+			sawUTF8 = true
+		}
+	}
+	if !sawHuge || !sawUTF8 {
+		t.Fatalf("missing bounded request events: ascii=%v utf8=%v\n%s", sawHuge, sawUTF8, raw)
 	}
 }

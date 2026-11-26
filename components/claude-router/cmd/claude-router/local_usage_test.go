@@ -75,7 +75,7 @@ func TestLocalUsageAttributesLocalActivityAndIgnoresIdleIncreases(t *testing.T) 
 		quotaEvent(t0.Add(35*time.Minute), "request", "work", "claude-sonnet-4-6", 200, 1, 5_000, t0.Add(35*time.Minute-4*time.Second), claude.UsageWindow{Kind: router.Weekly, Used: util(0.45), ResetsAt: reset}),
 	)
 
-	got, ok := d.localUsage("work", router.Weekly, "", 0.45, reset)
+	got, ok := d.localUsage("work", router.Weekly, "", 0.45, reset, time.Time{})
 	if !ok {
 		t.Fatal("expected local usage to be tracked")
 	}
@@ -94,11 +94,28 @@ func TestLocalUsageIgnoresJitterBetweenHeadersAndUsageReads(t *testing.T) {
 		quotaEvent(t0.Add(5*time.Minute), "request", "work", "claude-sonnet-4-6", 200, 1, 5_000, t0.Add(5*time.Minute-4*time.Second), claude.UsageWindow{Kind: router.Weekly, Used: util(0.250), ResetsAt: reset}),
 	)
 
-	got, ok := d.localUsage("work", router.Weekly, "", 0.250, reset)
+	got, ok := d.localUsage("work", router.Weekly, "", 0.250, reset, time.Time{})
 	if !ok {
 		t.Fatal("expected local usage to be tracked")
 	}
 	assertNear(t, got, 0.050)
+}
+
+func TestLocalUsagePreservesSubPercentUsageAcrossRoundedZeroPoll(t *testing.T) {
+	reset := at(-3, 9, 0)
+	t0 := at(0, 10, 0)
+	d := feedEvents(t, time.Time{},
+		quotaEvent(t0, "overage_read", "work", "", 0, 0, 0, t0, claude.UsageWindow{Kind: router.Weekly, Used: util(0), ResetsAt: reset}),
+		quotaEvent(t0.Add(time.Minute), "request", "work", "claude-sonnet-4-6", 200, 1, 5_000, t0.Add(time.Minute), claude.UsageWindow{Kind: router.Weekly, Used: util(0.004), ResetsAt: reset}),
+		quotaEvent(t0.Add(2*time.Minute), "overage_read", "work", "", 0, 0, 0, t0.Add(2*time.Minute), claude.UsageWindow{Kind: router.Weekly, Used: util(0), ResetsAt: reset}),
+		quotaEvent(t0.Add(3*time.Minute), "overage_read", "work", "", 0, 0, 0, t0.Add(3*time.Minute), claude.UsageWindow{Kind: router.Weekly, Used: util(0.004), ResetsAt: reset}),
+	)
+
+	got, ok := d.localUsage("work", router.Weekly, "", 0.004, reset, time.Time{})
+	if !ok {
+		t.Fatal("expected local usage to be tracked")
+	}
+	assertNear(t, got, 0.004)
 }
 
 func TestLocalUsageSortsStreamingHeadersByReadingTimestamp(t *testing.T) {
@@ -112,7 +129,7 @@ func TestLocalUsageSortsStreamingHeadersByReadingTimestamp(t *testing.T) {
 		quotaEvent(t0.Add(14*time.Minute), "overage_read", "work", "", 0, 0, 0, t0.Add(14*time.Minute), claude.UsageWindow{Kind: router.Weekly, Used: util(0.40), ResetsAt: reset}),
 	)
 
-	got, ok := d.localUsage("work", router.Weekly, "", 0.40, reset)
+	got, ok := d.localUsage("work", router.Weekly, "", 0.40, reset, time.Time{})
 	if !ok {
 		t.Fatal("expected local usage to be tracked")
 	}
@@ -128,7 +145,7 @@ func TestLocalUsageResetsAcrossWindowBoundaryAndManualResets(t *testing.T) {
 			quotaEvent(at(0, 11, 55), "overage_read", "work", "", 0, 0, 0, at(0, 11, 55), claude.UsageWindow{Kind: router.FiveHour, Used: util(0.80), ResetsAt: oldReset}),
 			quotaEvent(at(0, 12, 2), "request", "work", "claude-sonnet-4-6", 200, 1, 5_000, at(0, 12, 2), claude.UsageWindow{Kind: router.FiveHour, Used: util(0.06), ResetsAt: newReset}),
 		)
-		got, ok := d.localUsage("work", router.FiveHour, "", 0.06, newReset)
+		got, ok := d.localUsage("work", router.FiveHour, "", 0.06, newReset, time.Time{})
 		if !ok {
 			t.Fatal("expected local usage to be tracked")
 		}
@@ -141,7 +158,7 @@ func TestLocalUsageResetsAcrossWindowBoundaryAndManualResets(t *testing.T) {
 			quotaEvent(at(0, 13, 55), "overage_read", "work", "", 0, 0, 0, at(0, 13, 55), claude.UsageWindow{Kind: router.FiveHour, Used: util(0)}),
 			quotaEvent(at(0, 14, 5), "request", "work", "claude-sonnet-4-6", 200, 1, 5_000, at(0, 14, 5), claude.UsageWindow{Kind: router.FiveHour, Used: util(0.04), ResetsAt: roundedReset}),
 		)
-		got, ok := d.localUsage("work", router.FiveHour, "", 0.04, roundedReset)
+		got, ok := d.localUsage("work", router.FiveHour, "", 0.04, roundedReset, time.Time{})
 		if !ok {
 			t.Fatal("expected local usage to be tracked")
 		}
@@ -153,7 +170,7 @@ func TestLocalUsageResetsAcrossWindowBoundaryAndManualResets(t *testing.T) {
 			quotaEvent(at(0, 11, 55), "request", "work", "claude-sonnet-4-6", 200, 1, 5_000, at(0, 11, 55), claude.UsageWindow{Kind: router.FiveHour, Used: util(0.80), ResetsAt: oldReset}),
 			quotaEvent(at(0, 12, 5), "overage_read", "work", "", 0, 0, 0, at(0, 12, 5), claude.UsageWindow{Kind: router.FiveHour, Used: util(0.20), ResetsAt: newReset}),
 		)
-		got, ok := d.localUsage("work", router.FiveHour, "", 0.20, newReset)
+		got, ok := d.localUsage("work", router.FiveHour, "", 0.20, newReset, time.Time{})
 		if !ok {
 			t.Fatal("expected local usage to be tracked")
 		}
@@ -168,12 +185,40 @@ func TestLocalUsageResetsAcrossWindowBoundaryAndManualResets(t *testing.T) {
 			quotaEvent(at(0, 10, 15), "overage_read", "work", "", 0, 0, 0, at(0, 10, 15), claude.UsageWindow{Kind: router.Weekly, Used: util(0), ResetsAt: reset}),
 			quotaEvent(at(0, 10, 20), "request", "work", "claude-sonnet-4-6", 200, 1, 5_000, at(0, 10, 20), claude.UsageWindow{Kind: router.Weekly, Used: util(0.15), ResetsAt: reset}),
 		)
-		got, ok := d.localUsage("work", router.Weekly, "", 0.15, reset)
+		got, ok := d.localUsage("work", router.Weekly, "", 0.15, reset, time.Time{})
 		if !ok {
 			t.Fatal("expected local usage to be tracked")
 		}
 		assertNear(t, got, 0.15)
 	})
+
+	t.Run("local request after manual reset without an intervening zero poll credits its jump", func(t *testing.T) {
+		reset := at(-3, 9, 0)
+		d := feedEvents(t, time.Time{},
+			quotaEvent(at(0, 10, 0), "overage_read", "work", "", 0, 0, 0, at(0, 10, 0), claude.UsageWindow{Kind: router.Weekly, Used: util(0.90), ResetsAt: reset}),
+			quotaEvent(at(0, 10, 6), "request", "work", "claude-sonnet-4-6", 200, 1, 5_000, at(0, 10, 6), claude.UsageWindow{Kind: router.Weekly, Used: util(0.04), ResetsAt: reset}),
+		)
+		got, ok := d.localUsage("work", router.Weekly, "", 0.04, reset, time.Time{})
+		if !ok {
+			t.Fatal("expected local usage to be tracked")
+		}
+		assertNear(t, got, 0.04)
+	})
+}
+
+func TestLocalUsageRespectsStatusReadingTimestampAcrossManualReset(t *testing.T) {
+	reset := at(-3, 9, 0)
+	d := feedEvents(t, time.Time{},
+		quotaEvent(at(0, 10, 0), "overage_read", "work", "", 0, 0, 0, at(0, 10, 0), claude.UsageWindow{Kind: router.Weekly, Used: util(0.00), ResetsAt: reset}),
+		quotaEvent(at(0, 10, 5), "request", "work", "claude-sonnet-4-6", 200, 1, 5_000, at(0, 10, 5), claude.UsageWindow{Kind: router.Weekly, Used: util(0.90), ResetsAt: reset}),
+		quotaEvent(at(0, 10, 6), "overage_read", "work", "", 0, 0, 0, at(0, 10, 6), claude.UsageWindow{Kind: router.Weekly, Used: util(0.00), ResetsAt: reset}),
+	)
+
+	got, ok := d.localUsage("work", router.Weekly, "", 0.90, reset, at(0, 10, 5))
+	if !ok {
+		t.Fatal("expected local usage to be tracked")
+	}
+	assertNear(t, got, 0.90)
 }
 
 func TestLocalUsageMatchesModelScopedWindowsByModelName(t *testing.T) {
@@ -194,7 +239,7 @@ func TestLocalUsageMatchesModelScopedWindowsByModelName(t *testing.T) {
 			claude.UsageWindow{Kind: router.Weekly, Model: "Fable", Used: util(0.42), ResetsAt: reset}),
 	)
 
-	fable, ok := d.localUsage("work", router.Weekly, "Fable", 0.42, reset)
+	fable, ok := d.localUsage("work", router.Weekly, "Fable", 0.42, reset, time.Time{})
 	if !ok {
 		t.Fatal("expected Fable local usage to be tracked")
 	}
@@ -209,7 +254,7 @@ func TestLocalUsageFirstReadingMidWindowDoesNotClaimPriorUsage(t *testing.T) {
 		quotaEvent(t0.Add(5*time.Minute), "request", "work", "claude-sonnet-4-6", 200, 1, 5_000, t0.Add(5*time.Minute), claude.UsageWindow{Kind: router.Weekly, Used: util(0.75), ResetsAt: reset}),
 	)
 
-	got, ok := d.localUsage("work", router.Weekly, "", 0.75, reset)
+	got, ok := d.localUsage("work", router.Weekly, "", 0.75, reset, time.Time{})
 	if !ok {
 		t.Fatal("expected local usage to be tracked")
 	}
@@ -220,7 +265,8 @@ func TestLocalUsageCreditsExhaustionFailureAndRespectsQuotaSince(t *testing.T) {
 	reset := at(0, 16, 40)
 	t0 := at(0, 13, 0)
 	d := feedEvents(t, at(0, 12, 0),
-		quotaEvent(at(9, 10, 0), "overage_read", "work", "", 0, 0, 0, at(9, 10, 0), claude.UsageWindow{Kind: router.FiveHour, Used: util(0.50), ResetsAt: at(9, 15, 0)}),
+		quotaEvent(at(0, 11, 0), "overage_read", "work", "", 0, 0, 0, at(0, 11, 0), claude.UsageWindow{Kind: router.FiveHour, Used: util(0.10), ResetsAt: reset}),
+		quotaEvent(at(0, 11, 30), "request", "work", "claude-sonnet-4-6", 200, 1, 5_000, at(0, 11, 30), claude.UsageWindow{Kind: router.FiveHour, Used: util(0.40), ResetsAt: reset}),
 		quotaEvent(t0, "overage_read", "work", "", 0, 0, 0, t0, claude.UsageWindow{Kind: router.FiveHour, Used: util(0.40), ResetsAt: reset}),
 		claude.Event{
 			At: t0.Add(50 * time.Minute), Kind: "attempt_failed", Account: "work", Model: "claude-sonnet-4-6",
@@ -229,17 +275,115 @@ func TestLocalUsageCreditsExhaustionFailureAndRespectsQuotaSince(t *testing.T) {
 		},
 	)
 
-	got, ok := d.localUsage("work", router.FiveHour, "", 1.0, reset)
+	got, ok := d.localUsage("work", router.FiveHour, "", 1.0, reset, time.Time{})
 	if !ok {
 		t.Fatal("expected local usage to be tracked")
 	}
 	assertNear(t, got, 0.60)
 
-	gotUnknown, ok := d.localUsage("work", router.FiveHour, "", 1.0, time.Time{})
+	gotUnknown, ok := d.localUsage("work", router.FiveHour, "", 1.0, time.Time{}, time.Time{})
 	if !ok {
 		t.Fatal("expected local usage to be tracked with unknown reset")
 	}
 	assertNear(t, gotUnknown, 0.60)
+}
+
+func TestLocalUsageIgnoresFailedMigrationRefusalOnUntriedAccount(t *testing.T) {
+	reset := at(-3, 9, 0)
+	t0 := at(0, 10, 0)
+	d := feedEvents(t, time.Time{},
+		quotaEvent(t0, "overage_read", "alumni", "", 0, 0, 0, t0, claude.UsageWindow{Kind: router.Weekly, Used: util(0.20), ResetsAt: reset}),
+		claude.Event{
+			At: t0.Add(5 * time.Minute), Kind: "request", Account: "alumni", Model: "claude-sonnet-4-6",
+			Decision: router.Refuse, Reason: string(router.ReasonOverageEnabled), Status: 503, Attempts: 1,
+		},
+		quotaEvent(t0.Add(10*time.Minute), "overage_read", "alumni", "", 0, 0, 0, t0.Add(10*time.Minute), claude.UsageWindow{Kind: router.Weekly, Used: util(0.45), ResetsAt: reset}),
+	)
+	got, ok := d.localUsage("alumni", router.Weekly, "", 0.45, reset, time.Time{})
+	if !ok {
+		t.Fatal("expected local usage to be tracked")
+	}
+	assertNear(t, got, 0)
+}
+
+func TestLocalUsageMigrationUsesDestinationAttemptStartNotPriorAccountDuration(t *testing.T) {
+	reset := at(-3, 9, 0)
+	t0 := at(0, 10, 0)
+	dur := int64((5 * time.Minute).Milliseconds())
+	d := feedEvents(t, time.Time{},
+		quotaEvent(t0.Add(time.Minute), "overage_read", "alumni", "", 0, 0, 0, t0.Add(time.Minute), claude.UsageWindow{Kind: router.Weekly, Used: util(0.20), ResetsAt: reset}),
+		quotaEvent(t0.Add(4*time.Minute), "overage_read", "alumni", "", 0, 0, 0, t0.Add(4*time.Minute), claude.UsageWindow{Kind: router.Weekly, Used: util(0.60), ResetsAt: reset}),
+		claude.Event{
+			At: t0.Add(5 * time.Minute), Kind: "request", Account: "alumni", Model: "claude-sonnet-4-6",
+			Decision: router.Migrate, Reason: string(router.ReasonExhausted), Status: 200,
+			Attempt: 2, Attempts: 2, AttemptStart: t0.Add(4*time.Minute + 30*time.Second),
+			DurationMS: &dur,
+			Quota:      &claude.UsageReading{At: t0.Add(4*time.Minute + 45*time.Second), Windows: []claude.UsageWindow{{Kind: router.Weekly, Used: util(0.61), ResetsAt: reset}}},
+		},
+	)
+	got, ok := d.localUsage("alumni", router.Weekly, "", 0.61, reset, time.Time{})
+	if !ok {
+		t.Fatal("expected local usage to be tracked")
+	}
+	assertNear(t, got, 0.01)
+}
+
+func TestDigestSkipsOversizedEventLineWithoutFailing(t *testing.T) {
+	reset := at(-3, 9, 0)
+	t0 := at(0, 10, 0)
+	var raw bytes.Buffer
+	enc := json.NewEncoder(&raw)
+	_ = enc.Encode(quotaEvent(t0, "overage_read", "work", "", 0, 0, 0, t0, claude.UsageWindow{Kind: router.Weekly, Used: util(0.10), ResetsAt: reset}))
+	raw.WriteString(`{"at":"2026-10-15T10:02:00Z","kind":"request","model":"`)
+	raw.Write(bytes.Repeat([]byte("x"), 5<<20))
+	raw.WriteString("\"}\n")
+	_ = enc.Encode(quotaEvent(t0.Add(5*time.Minute), "request", "work", "claude-sonnet-4-6", 200, 1, 5_000, t0.Add(5*time.Minute), claude.UsageWindow{Kind: router.Weekly, Used: util(0.25), ResetsAt: reset}))
+
+	d := digest{
+		Accounts:      map[router.AccountID]*usageTotals{},
+		Conversations: map[string]*conversationDigest{},
+		QuotaSamples:  map[windowID][]quotaSample{},
+		RequestSpans:  map[router.AccountID][]requestSpan{},
+	}
+	if err := d.read(&raw); err != nil {
+		t.Fatalf("digest.read failed on oversized line: %v", err)
+	}
+	got, ok := d.localUsage("work", router.Weekly, "", 0.25, reset, time.Time{})
+	if !ok {
+		t.Fatal("expected local usage to be tracked after skipping oversized line")
+	}
+	assertNear(t, got, 0.15)
+}
+
+func TestNarrowTerminalStackedBarPreservesOtherCells(t *testing.T) {
+	r := healthyReport()
+	work := &r.Status.Accounts[0]
+	reset := at(0, 16, 40)
+	work.Quota = router.Observation{At: at(0, 14, 15), Windows: []router.Window{
+		window(router.FiveHour, 0.49, reset),
+	}}
+	r.Status.Accounts = r.Status.Accounts[:1]
+	t0 := at(0, 13, 0)
+	d := feedEvents(t, time.Time{},
+		quotaEvent(t0, "overage_read", "work", "", 0, 0, 0, t0, claude.UsageWindow{Kind: router.FiveHour, Used: util(0.13), ResetsAt: reset}),
+		quotaEvent(t0.Add(30*time.Minute), "request", "work", "claude-sonnet-4-6", 200, 1, 5_000, t0.Add(30*time.Minute), claude.UsageWindow{Kind: router.FiveHour, Used: util(0.49), ResetsAt: reset}),
+	)
+	r.Digest.QuotaSamples = d.QuotaSamples
+	r.Digest.RequestSpans = d.RequestSpans
+
+	got := render(onScreen(r, 63, false))
+	var found bool
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "51% left   36% here") {
+			found = true
+			if !strings.Contains(line, "▒") || !strings.Contains(line, "╱") {
+				t.Fatalf("10-column bar for left=51%% local=36%% other=13%% should keep both ▒ and ╱: %q", line)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("status at 63 cols\n%s\nmissing expected 5-hour row", got)
+	}
 }
 
 func TestLocalUsageIncludesSubMillisecondRequestWhoseQuotaPrecedesTruncatedStart(t *testing.T) {
@@ -251,21 +395,22 @@ func TestLocalUsageIncludesSubMillisecondRequestWhoseQuotaPrecedesTruncatedStart
 		quotaEvent(t0, "overage_read", "work", "", 0, 0, 0, t0, claude.UsageWindow{Kind: router.FiveHour, Used: util(0.10), ResetsAt: reset}),
 		quotaEvent(evAt, "request", "work", "claude-sonnet-4-6", 200, 1, 0, qAt, claude.UsageWindow{Kind: router.FiveHour, Used: util(0.15), ResetsAt: reset}),
 	)
-	got, ok := d.localUsage("work", router.FiveHour, "", 0.15, reset)
+	got, ok := d.localUsage("work", router.FiveHour, "", 0.15, reset, time.Time{})
 	if !ok {
 		t.Fatal("expected local usage to be tracked")
 	}
 	assertNear(t, got, 0.05)
 }
 
-func withLocalUsage(r report) report {
+func withLocalUsage(t *testing.T, r report) report {
+	t.Helper()
 	r = withUsage(r)
 	work5h := at(0, 16, 40)
 	workWk := at(-3, 9, 0)
 	alumni5h := at(0, 17, 55)
 	alumniWk := at(-2, 6, 0)
 	t0 := at(0, 13, 0)
-	d := feedEvents(&testing.T{}, time.Time{},
+	d := feedEvents(t, time.Time{},
 		quotaEvent(t0, "overage_read", "work", "", 0, 0, 0, t0,
 			claude.UsageWindow{Kind: router.FiveHour, Used: util(0.20), ResetsAt: work5h},
 			claude.UsageWindow{Kind: router.Weekly, Used: util(0.00), ResetsAt: workWk},
@@ -289,7 +434,7 @@ func withLocalUsage(r report) report {
 }
 
 func TestStatusDrawsStackedLocalBarsLegendAndVerboseBreakdown(t *testing.T) {
-	r := withLocalUsage(healthyReport())
+	r := withLocalUsage(t, healthyReport())
 
 	got := render(onScreen(r, 100, false))
 	for _, want := range []string{

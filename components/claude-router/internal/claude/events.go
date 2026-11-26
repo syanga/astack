@@ -29,6 +29,7 @@ type Event struct {
 	Phase        string           `json:"phase,omitempty"`
 	Status       int              `json:"status,omitempty"`
 	Attempt      int              `json:"attempt,omitempty"`
+	AttemptStart time.Time        `json:"attempt_start,omitzero"`
 	Attempts     int              `json:"upstream_attempts,omitempty"`
 	Stream       *bool            `json:"stream,omitempty"`
 	Outcome      string           `json:"outcome,omitempty"`

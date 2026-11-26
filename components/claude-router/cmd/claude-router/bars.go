@@ -125,19 +125,19 @@ func limitRows(r report, a claude.AccountStatus) []limitRow {
 	for _, win := range limitWindows {
 		row := limitRow{label: win.label, short: win.short, period: win.kind.Period()}
 		var used float64
-		var resetForLocal time.Time
+		var resetForLocal, seen time.Time
 		hasReading := false
 		if rj, ok := activeRejection(r.Now, a, win.kind); ok {
 			row.out, row.resetsAt = true, rejectionEnd(rj)
-			used, resetForLocal, hasReading = 1, rj.ResetsAt, true
+			used, resetForLocal, seen, hasReading = 1, rj.ResetsAt, rj.At, true
 		} else if w, ok := shownWindow(a, win.kind); ok && w.none {
 			continue
 		} else if ok {
 			row.left, row.resetsAt = leftOf(w.used), w.resetsAt
-			used, resetForLocal, hasReading = w.used, w.resetsAt, true
+			used, resetForLocal, seen, hasReading = w.used, w.resetsAt, w.seen, true
 		}
 		if hasReading {
-			if local, ok := r.Digest.localUsage(a.ID, win.kind, "", used, resetForLocal); ok {
+			if local, ok := r.Digest.localUsage(a.ID, win.kind, "", used, resetForLocal, seen); ok {
 				row.local = &local
 			}
 		}
@@ -147,7 +147,7 @@ func limitRows(r report, a claude.AccountStatus) []limitRow {
 		row := limitRow{label: modelLabel(w), short: w.Model, resetsAt: w.ResetsAt, period: router.Weekly.Period()}
 		if w.Used != nil {
 			row.left = leftOf(*w.Used)
-			if local, ok := r.Digest.localUsage(a.ID, router.Weekly, w.Model, *w.Used, row.resetsAt); ok {
+			if local, ok := r.Digest.localUsage(a.ID, router.Weekly, w.Model, *w.Used, row.resetsAt, a.Usage.At); ok {
 				row.local = &local
 			}
 		}
@@ -425,7 +425,7 @@ func hereEndCell(left, local float64, leftCells, n int) int {
 	if left+local >= 1-1e-9 {
 		return n
 	}
-	return min(leftCells+int(local*float64(n)+0.5), n)
+	return max(leftCells, min(int((left+local)*float64(n)+0.5), n))
 }
 
 type poolWindow struct {
