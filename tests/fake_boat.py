@@ -99,7 +99,11 @@ def vanish(path):
             os.killpg(int(pid_file.name.split(".")[0]), signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             pass
-    shutil.rmtree(str(path), ignore_errors=True)
+    for _ in range(50):
+        shutil.rmtree(str(path), ignore_errors=True)
+        if not path.exists():
+            break
+        time.sleep(0.1)
 
 
 def attach(path, pid):

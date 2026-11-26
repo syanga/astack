@@ -162,6 +162,7 @@ class SourceTests(BoatTest):
         (self.repo / "app.py").write_text("version = 3\n")
         (self.repo / "new_module.py").write_text("fresh = True\n")
         (self.repo / ".env").write_text("TOKEN=secret\n")
+        (self.repo / ".envrc").write_text("export TOKEN=secret\n")
         (self.repo / "notes.txt~").write_text("backup\n")
         before = [self.git(*arguments) for arguments in (("rev-parse", "HEAD"), ("status", "--porcelain"),
                                                           ("diff", "--cached"))]
@@ -169,11 +170,11 @@ class SourceTests(BoatTest):
         os.utime(str(self.repo / "boat-setup.sh"), (later, later))
         index = (self.repo / ".git/index").read_bytes()
         show = ("import os; print(open('app.py').read().strip()); "
-                "print(*(os.path.exists(name) for name in ('new_module.py', '.env', 'notes.txt~')))")
+                "print(*(os.path.exists(name) for name in ('new_module.py', '.env', '.envrc', 'notes.txt~')))")
         result = self.run_here(show)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), ["version = 3", "True False False"])
-        self.assertIn("left out 2 untracked files that may hold secrets: .env, notes.txt~", result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["version = 3", "True False False False"])
+        self.assertIn("left out 3 untracked files that may hold secrets: .env, .envrc, notes.txt~", result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["dirty"], "yes")
         self.assertEqual((self.repo / ".git/index").read_bytes(), index)
         self.assertEqual([self.git(*arguments) for arguments in (("rev-parse", "HEAD"), ("status", "--porcelain"),
@@ -182,6 +183,8 @@ class SourceTests(BoatTest):
     def test_excluded_paths_never_leave_this_machine(self):
         (self.repo / "private").mkdir()
         (self.repo / "private/survey.csv").write_text("name,email\nAda,ada@example.com\n")
+        (self.repo / "private/.gitkeep").write_text("")
+        (self.repo / "empty.txt").write_text("")
         self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
         self.commit("add private data")
         committed = self.git("rev-parse", "HEAD:private/survey.csv").strip()
@@ -195,6 +198,20 @@ class SourceTests(BoatTest):
         uploaded = self.uploaded_blobs()
         self.assertIn(self.git("rev-parse", "HEAD:app.py").strip(), uploaded)
         self.assertEqual(uploaded & private, set())
+
+    def test_excluded_contents_that_also_live_at_another_path_keep_the_run_here(self):
+        (self.repo / "data").mkdir()
+        (self.repo / "data/people.csv").write_text("name,email\nAda,ada@example.com\n")
+        self.commit("add data")
+        self.git("mv", "data", "private")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
+        self.commit("move the data into private")
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.repo / "ran-here").exists())
+        self.assertIn("data/people.csv", result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere")
+        self.assertEqual(self.calls("new"), [])
 
     def test_a_saved_snapshot_skips_the_setup_until_a_setup_input_changes(self):
         (self.repo / "boat-setup.sh").write_text('od -An -N8 -tx1 /dev/urandom | tr -d " \\n" >> "$HOME/setup-runs"\n'
@@ -238,7 +255,7 @@ class FallbackTests(BoatTest):
         result = self.run_here(REPORT)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.repo / "ran-here").exists())
-        self.assertRegex(result.stderr, r"BOAT RUN FAILED .*on box bx_\w+: the box did not boot")
+        self.assertRegex(result.stderr, r"BOAT RUN FAILED during start on box bx_\w+: the box did not boot")
         logs = re.findall(r"^jobgate: boat log: (.+)$", result.stderr, re.MULTILINE)
         self.assertIn("the box did not boot", Path(logs[0]).read_text())
         fields = self.result_fields(result.stderr)

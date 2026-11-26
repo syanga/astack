@@ -278,13 +278,19 @@ that read Git history therefore work on the box.
   scratch repository, so the repository's index, refs, and objects do not
   change. The result line says `dirty=yes`.
 - jobgate leaves out untracked files whose names match `.env`, `.env.*`,
-  `*.env`, `*~`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `.netrc`, `.npmrc`,
-  `.pypirc`, `id_rsa*`, `id_dsa*`, `id_ecdsa*`, or `id_ed25519*`. It prints
-  their paths.
+  `*.env`, `.envrc`, `*~`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `.netrc`,
+  `.npmrc`, `.pypirc`, `.pgpass`, `.git-credentials`, `credentials.json`,
+  `*.tfvars`, `*.tfstate`, `*.tfstate.*`, `id_rsa*`, `id_dsa*`, `id_ecdsa*`, or
+  `id_ed25519*`. It prints their paths.
 - With `exclude`, the bundle leaves out the contents of every file under the
   excluded paths, in every commit of the history. The box gets the file names,
   but its checkout leaves the files out. A Git command on the box that reads
   their contents fails.
+- Before it starts a box, jobgate checks that no content that was ever under an
+  excluded path also lives at another path in the history, such as a file that a
+  commit moved into an excluded directory. If one does, the command runs here,
+  and jobgate prints the other paths to add to `exclude`. Empty files do not
+  count.
 - When the box starts from a snapshot, the bundle holds only the commits that
   the snapshot lacks.
 
@@ -320,7 +326,9 @@ The box runs each step as a background process (`boat exec --detach`). When
 this machine sleeps or loses its network, the step keeps running. jobgate then
 attaches again and prints the output it missed. While jobgate follows a box, it
 keeps the box's auto-stop an hour away. When jobgate dies, the box stops within
-an hour. Ctrl-C, SIGTERM, and SIGHUP delete the box.
+an hour. Ctrl-C, SIGTERM, and SIGHUP delete the box. When one of them arrives
+before `boat new` prints the new box's id, jobgate cannot delete the box, and
+the box stops within an hour.
 
 ### Snapshots
 
@@ -350,14 +358,18 @@ is true:
 - boat refuses to start a box. Examples: no login (`unauthorized`), a full start
   limit (`rate_limited`), no ready machine (`no_ready_machine`), or a box type
   that the plan lacks (`trial_machine_class_not_allowed`).
-- boat creates a box but reports an error before the box is ready. jobgate
-  prints `BOAT RUN FAILED` with the box and a log, as in
-  [When a box dies partway](#when-a-box-dies-partway), and deletes the box.
+- A step fails after boat creates the box, without the box dying. Examples:
+  boat reports an error before the box is ready, or Git cannot build the bundle.
+  jobgate prints `BOAT RUN FAILED` with the step, the box, and a log, as in
+  [When a box dies partway](#when-a-box-dies-partway), and deletes the box. It
+  does not retry on a new box.
+- Content under an excluded path also lives at another path in the history
+  (`excluded_elsewhere`).
 - boat refused a start for payment less than an hour ago. After an HTTP 402
   error, such as `billing_required`, or after `trial_compute_limit_reached`,
   jobgate skips boat for an hour. It keeps the end time in
   `~/.cache/jobgate/boat-off.json`.
-- Git cannot build the bundle, or the commit has no setup script.
+- Git cannot read the repository, or the commit has no setup script.
 - The run died partway on two boxes in a row.
 
 jobgate prints why. The result line says `where=local` and gives the reason in
@@ -373,6 +385,7 @@ A box dies partway when one of these happens:
 - boat kills a step's process, or the box runs out of memory during the setup
   step.
 - jobgate cannot reach the box for 10 minutes.
+- jobgate on this machine hits a file or process error, such as a full disk.
 
 jobgate then prints the step, the box, the reason, and a log:
 
@@ -439,12 +452,12 @@ time=2026-11-17T18:00:00Z profile=test where=local repo=/src/app commit=4f0c2d9e
 | `profile` | The profile name |
 | `where` | Where the run ran: `local` or `boat` |
 | `box` | On a boat run, the box type |
-| `fallback` | On a run that went to this machine instead of boat, the reason: a boat error code, `boat_failed` when the `boat` CLI exited with an error and no code, `no_box` when `boat new` printed no box id, `no_cli`, `git`, `no_commit`, `no_setup`, `died`, or `off` when the payment refusal that turned boat off had no code |
+| `fallback` | On a run that went to this machine instead of boat, the reason: a boat error code, `boat_failed` when the `boat` CLI exited with an error and no code, `no_box` when `boat new` printed no box id, `no_cli`, `git`, `no_commit`, `no_setup`, `excluded_elsewhere`, `died`, or `off` when the payment refusal that turned boat off had no code |
 | `repo` | The directory that contains `jobgate.toml` |
 | `commit` | `git rev-parse HEAD` when the run started, or `none` |
 | `dirty` | `yes` when `git status --porcelain` printed anything when the run started, `no` when it printed nothing, `unknown` outside Git |
 | `workers` | The worker count |
-| `wait` | Seconds from arrival to start. On a boat run, the time to create, copy to, and set up the box |
+| `wait` | Seconds from arrival to start. On a boat run, the time to create, copy to, and set up the box. `unknown` when the box ran out of memory during the run step |
 | `peak` | Peak memory in MiB, or `unknown` when jobgate could not measure it, such as for a command that ended before the first sample |
 | `stated` | `base_mem + workers × worker_mem` in MiB |
 | `oom_kills` | On Linux in a scope, the number of the run's processes that the kernel OOM-killed, from the scope's `memory.events`. jobgate writes this field only when the number is above 0. |

@@ -98,7 +98,8 @@ BOX_PREPARE = ('set -e; run="$HOME/.jobgate/run"; rm -rf "$run"; mkdir -p "$run"
 BOX_RUN = 'exec python3 "$HOME/.jobgate/run/jobgate.py" _box run "$HOME/.jobgate/run/run.json"'
 RUN_REF = "refs/jobgate/run"
 GIT_SECONDS = 600
-SECRET_NAMES = (".env", ".env.*", "*.env", "*~", "*.pem", "*.key", "*.p12", "*.pfx", ".netrc", ".npmrc", ".pypirc",
+SECRET_NAMES = (".env", ".env.*", "*.env", ".envrc", "*~", "*.pem", "*.key", "*.p12", "*.pfx", ".netrc", ".npmrc",
+                ".pypirc", ".pgpass", ".git-credentials", "credentials.json", "*.tfvars", "*.tfstate", "*.tfstate.*",
                 "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*")
 REPO_PATH = re.compile(r"[^*?\[\]!#\\\n]+")
 COMMIT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
@@ -1011,6 +1012,7 @@ class BoatUnavailable(Exception):
         self.reason = reason
         self.status = status
         self.box: str | None = None
+        self.step = "start"
 
 
 class BoatDied(Exception):
@@ -1096,6 +1098,29 @@ def commit_worktree(root: Path, scratch: Path, store: Path, objects: str, head: 
     if tree == git(["rev-parse", head + "^{tree}"], cwd=root, env=env).strip():
         return head, left_out
     return git(["commit-tree", tree, "-p", head, "-m", "jobgate: uncommitted changes"], cwd=root, env=env).strip(), left_out
+
+
+def check_exclude(source: Source, settings: BoatSettings) -> None:
+    if not settings.exclude:
+        return
+    changes = git(["--literal-pathspecs", "log", "--format=", "--raw", "--no-abbrev", "-m", "--no-renames", RUN_REF,
+                   "--", *settings.exclude], git_dir=source.store)
+    private = {field for line in changes.splitlines() if line.startswith(":") for field in line.split()[2:4]
+               if COMMIT_ID.fullmatch(field) and field.strip("0")}
+    private.discard(git(["hash-object", "--stdin"], git_dir=source.store, stdin_text="").strip())
+    if not private:
+        return
+    patterns = "".join(line + "\n" for line in settings.sparse_patterns())
+    blob = git(["hash-object", "-w", "--stdin"], git_dir=source.store, stdin_text=patterns).strip()
+    objects = git(["rev-list", "--objects", "--filter=sparse:oid=" + blob, RUN_REF], git_dir=source.store)
+    elsewhere = sorted({line.split(" ", 1)[1] for line in objects.splitlines()
+                        if " " in line and line.split(" ", 1)[0] in private})
+    if elsewhere:
+        raise BoatUnavailable("excluded_elsewhere", "the contents of files under exclude also live at {} in the "
+                              "history. Add {} to exclude in [boat]".format(
+                                  ", ".join(elsewhere[:5]) + (" and {} more".format(len(elsewhere) - 5)
+                                                              if len(elsewhere) > 5 else ""),
+                                  "these paths" if len(elsewhere) > 1 else "this path"))
 
 
 def make_plan(source: Source, settings: BoatSettings) -> Plan:
@@ -1301,7 +1326,8 @@ class Box:
                     argv, 127, "", "cannot run {}: {}".format(argv[0], error.strerror or error)), []
             output = process.stdout
             assert output is not None
-            timer = threading.Timer(BOAT_NEW_SECONDS, process.kill)
+            fired = threading.Event()
+            timer = threading.Timer(BOAT_NEW_SECONDS, lambda: (fired.set(), process.kill()))
             timer.start()
             try:
                 for line in output:
@@ -1319,6 +1345,8 @@ class Box:
                 output.close()
             errors.seek(0)
             stderr = errors.read().decode("utf-8", "replace")
+        if fired.is_set():
+            stderr += "\nboat new timed out after {}".format(duration(BOAT_NEW_SECONDS))
         result = subprocess.CompletedProcess(argv, process.returncode, "".join(lines), stderr)
         return result, boat_objects(result)
 
@@ -1510,17 +1538,20 @@ def boat_attempt(cli: str, settings: BoatSettings, source: Source, plan: Plan, s
                  log: BoatLog, profile: Profile) -> BoatRun:
     box = Box(cli, log)
     heartbeat = None
+    step = "start"
     try:
         from_snapshot = box.create(settings.type, plan.name)
         log.note("{} runs on boat: {} box {}, {}".format(
             profile.name, settings.type, box.id,
             "from snapshot " + plan.name if from_snapshot else "new, so the setup script runs first"))
         heartbeat = Heartbeat(box)
+        step = "upload"
         basis = box.state().get("basis") if from_snapshot else None
         spec = dict(spec, bundle=make_bundle(source, settings, basis, scratch / "run.bundle"))
         upload = pack_upload(scratch, spec)
         log.note("boat copies {:.1f} MB to box {}".format(upload.stat().st_size / 1e6, box.id))
         box.upload(upload)
+        step = "setup"
         code = box.phase("setup", BOX_PREPARE, Relay(log))
         if code == BOX_SETUP_FAILED:
             raise BoatDied("setup", "the setup script {} failed".format(settings.setup))
@@ -1528,12 +1559,20 @@ def boat_attempt(cli: str, settings: BoatSettings, source: Source, plan: Plan, s
             raise BoatDied("setup", "the box could not check out the commit (exit {})".format(code))
         if not from_snapshot:
             box.save(plan.name, plan.prefix)
+        step = "run"
         started = time.monotonic()
         relay = Relay(log)
         return BoatRun(box.phase("run", BOX_RUN, relay), relay.result(), started)
-    except (BoatDied, BoatUnavailable) as failure:
-        failure.box = box.id
+    except BoatDied as died:
+        died.box = box.id
         raise
+    except BoatUnavailable as unavailable:
+        unavailable.box, unavailable.step = box.id, step
+        raise
+    except OSError as error:
+        died = BoatDied(step, "jobgate on this machine failed: {}".format(error))
+        died.box = box.id
+        raise died from error
     finally:
         if heartbeat is not None:
             heartbeat.stop()
@@ -1563,6 +1602,7 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
     try:
         try:
             source = take_source(root, scratch, dirty)
+            check_exclude(source, settings)
             plan = make_plan(source, settings)
         except BoatUnavailable as unavailable:
             say("boat cannot run {}, so it runs here: {}".format(profile.name, unavailable.reason))
@@ -1583,7 +1623,8 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
                 outcome = boat_attempt(cli, settings, source, plan, spec, scratch, log, profile)
             except BoatUnavailable as unavailable:
                 if unavailable.box is not None:
-                    log.note("BOAT RUN FAILED on box {}: {}".format(unavailable.box, unavailable.reason))
+                    log.note("BOAT RUN FAILED during {} on box {}: {}".format(
+                        unavailable.step, unavailable.box, unavailable.reason))
                     log.note("boat log: {}".format(log.where))
                 log.note("boat cannot run {}, so it runs here: {}".format(profile.name, unavailable.reason))
                 if unavailable.status == BOAT_PAYMENT_STATUS or unavailable.code in BOAT_PAYMENT_CODES:
@@ -1596,8 +1637,8 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
                     log.note("{} retries once on a new box".format(profile.name) if attempt == 1 else
                              "{} runs here instead".format(profile.name))
                     continue
-                log.note("jobgate does not retry a command that ran out of memory, and does not run it here. "
-                         "Set a larger type in [boat], or a larger worker_mem")
+                log.note("jobgate does not retry a command that ran out of memory, and does not run it here")
+                log.note("to give it more memory, set a larger type in [boat], or a larger worker_mem in the profile")
                 outcome = BoatRun(128 + signal.SIGKILL, {}, None)
             finally:
                 log.close()
