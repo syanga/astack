@@ -1,17 +1,15 @@
 # Hook formulas
 
-Each formula is a headline shape, with an example and the formula's trap, the most common way it fails. The examples are for a made-up roaster that roasts and grinds every Monday, prints the roast date on each bag, ships within 48 hours of roasting, and sells a light roast at $14 a bag. Each example assumes its cited page states the fact it uses.
+Each formula is a headline shape, with an example and the formula's trap, the most common way it fails. The examples are for a made-up roaster that roasts every Monday, prints the roast date on each bag, ships within 48 hours of roasting, and sells a light roast at $14 a bag with no subscription needed. Each example assumes its cited page states the fact it uses.
 
-Two rules cover every formula:
-- **Say the number.** When the headline states an amount, a time, or a price, use the number the cited page gives. "Fast" and "a lot" are not numbers.
-- **Make it this brand's.** Build the headline on an item from the style guide's Only us list. If the headline would work for any other brand in the niche, it isn't this brand's hook.
+**Say the number.** When the headline states an amount, a time, or a price, give it as a number. "Fast" and "a lot" are not numbers. Step 3 of SKILL.md builds each idea on an item from the style guide's Only us list.
 
 | Formula | Headline shape | Example | Trap |
 | --- | --- | --- | --- |
-| Stop | Stop {common habit}. | STOP BUYING BEANS ROASTED IN MAY | A habit nobody has. The reader has to recognize it in themselves. |
-| Permission | You don't need {thing everyone says you need}. | YOU DON'T NEED A GRINDER. WE GRIND MONDAYS. | Taking away the blocker and offering nothing in its place. The sub-line gives the replacement. |
-| Wrong way | {Doing it wrong}? Not your fault. | UNDATED BEANS? NOT YOUR FAULT | Blaming the reader. Without the absolution, it reads as an insult. |
-| Situation | {Specific situation}? | OUT OF BEANS ON A MONDAY? | A situation so broad it qualifies nobody. "Want better coffee?" is not a situation. |
+| Stop | Stop {common habit}. | STOP BUYING BEANS ROASTED BEFORE MONDAY | A habit nobody has. The reader has to recognize it in themselves. |
+| Permission | You don't need {thing everyone says you need}. | YOU DON'T NEED A SUBSCRIPTION FOR MONDAY'S ROAST | Taking away the blocker and offering nothing in its place. The sub-line gives the replacement. The cited page has to say the thing isn't needed. |
+| Wrong way | {Doing it wrong}? Not your fault. | BEANS OLDER THAN MONDAY? NOT YOUR FAULT | Blaming the reader. Without the absolution, it reads as an insult. |
+| Situation | {Specific situation}? | OUT OF BEANS BEFORE MONDAY'S ROAST? | A situation so broad it qualifies nobody. "Want better coffee?" is not a situation. |
 | Callout | {Specific group}: {what this is}. | POUR-OVER PEOPLE: MONDAY'S LIGHT ROAST IS YOURS | A group too large to be a callout. "Coffee lovers" is not a group. |
 | Objection | "{Objection, in the customer's words}" | "SUBSCRIPTIONS ALWAYS PILE UP" | Inventing the objection. Take it from pasted ads, reviews, or the site's FAQ. |
 | Question | {Question as customers type it}? | WHEN WAS MY BAG ROASTED? | Tidying the question until it no longer sounds like a person asked it. |
