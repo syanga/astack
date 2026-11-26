@@ -108,14 +108,13 @@ class GenerateTests(unittest.TestCase):
         lines = [line for line in output.splitlines() if line.startswith(name + ":")]
         self.assertTrue(any(all(part in line for part in parts) for line in lines), output)
 
-    def generate(self, *arguments, key="sk-test", paths=None):
+    def generate(self, *arguments, key="sk-test", path=None):
         env = {name: value for name, value in os.environ.items()
                if not name.startswith("OPENAI_") and not name.lower().endswith("_proxy")}
         env.update(HOME=str(self.home), OPENAI_BASE_URL=self.api.url, no_proxy="*")
         if key:
             env["OPENAI_API_KEY"] = key
-        paths = [str(path) for path in paths or [self.run_folder]]
-        return subprocess.run([sys.executable, str(SCRIPT), *paths, *arguments],
+        return subprocess.run([sys.executable, str(SCRIPT), str(path or self.run_folder), *arguments],
                               capture_output=True, text=True, env=env, timeout=60)
 
     def test_an_ad_with_a_reference_is_generated_from_that_reference(self):
@@ -169,7 +168,7 @@ class GenerateTests(unittest.TestCase):
         self.write_request("1-proof", {"prompt": "Failed earlier"})
         self.write_request("2-pain", {"prompt": "Redo"})
 
-        result = self.generate(paths=[self.run_folder / "2-pain.req.json"])
+        result = self.generate(path=self.run_folder / "2-pain.req.json")
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual([request["body"]["prompt"] for request in self.api.requests], ["Redo"])
@@ -178,12 +177,15 @@ class GenerateTests(unittest.TestCase):
 
     def test_a_path_that_is_not_a_folder_or_a_request_stops_before_any_request(self):
         self.write_request("1-proof", {"prompt": "Fine"})
+        (self.run_folder / "1-proof.json").write_text(json.dumps({"prompt": "Fine"}), encoding="utf-8")
 
-        result = self.generate(paths=[self.run_folder / "1-proof.png", self.run_folder / "1-proof.req.json"])
+        for name in ["1-proof.json", "2-gone.req.json"]:
+            with self.subTest(name):
+                result = self.generate(path=self.run_folder / name)
 
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("1-proof.png is not a folder or a .req.json file", result.stderr)
-        self.assertEqual(self.api.requests, [])
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn(name, result.stderr)
+                self.assertEqual(self.api.requests, [])
 
     def test_a_rejected_ad_fails_while_the_others_finish(self):
         self.write_request("1-proof", {"prompt": "REJECT this one"})
