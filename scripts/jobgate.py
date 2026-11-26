@@ -274,6 +274,9 @@ class BoatSettings:
     def sparse_patterns(self) -> list[str]:
         return ["/*"] + ["!/" + path for path in self.exclude]
 
+    def excludes(self, path: str) -> bool:
+        return any(path == excluded or path.startswith(excluded + "/") for excluded in self.exclude)
+
 
 def repo_path(value: object, where: str) -> str:
     parts = value.rstrip("/").split("/") if isinstance(value, str) else []
@@ -1126,6 +1129,17 @@ def check_exclude(source: Source, settings: BoatSettings) -> None:
                                   shown, "these paths" if len(elsewhere) > 1 else "this path"))
 
 
+def check_start_dir(source: Source, settings: BoatSettings, cwd: str) -> None:
+    if cwd == ".":
+        return
+    listing = run_captured(["git", "--git-dir", str(source.store), "ls-tree", "-r", "-z", "--name-only",
+                            "{}:{}".format(source.commit, cwd)], GIT_SECONDS)
+    names = listing.stdout.split("\0") if listing.returncode == 0 else []
+    if not any(name and not settings.excludes("{}/{}".format(cwd, name)) for name in names):
+        raise BoatUnavailable("no_start_dir", "the box would have no {}, where the command starts. The commit lacks "
+                              "it, or exclude leaves it out".format(cwd))
+
+
 def make_plan(source: Source, settings: BoatSettings) -> Plan:
     digest = hashlib.sha256(BOX_FORMAT.encode())
     for path in (settings.setup, *settings.setup_inputs):
@@ -1298,12 +1312,15 @@ class Box:
         self.log = log
         self.id: str | None = None
 
-    def call(self, args: list[str], timeout: float) -> tuple[subprocess.CompletedProcess, list[dict]]:
-        return self.keep(run_captured([self.cli, *args], timeout, env=boat_env()))
+    def call(self, args: list[str], timeout: float,
+             expected: tuple[str, ...] = ()) -> tuple[subprocess.CompletedProcess, list[dict]]:
+        return self.keep(run_captured([self.cli, *args], timeout, env=boat_env()), expected)
 
-    def keep(self, result: subprocess.CompletedProcess) -> tuple[subprocess.CompletedProcess, list[dict]]:
+    def keep(self, result: subprocess.CompletedProcess,
+             expected: tuple[str, ...] = ()) -> tuple[subprocess.CompletedProcess, list[dict]]:
         objects = boat_objects(result)
-        if boat_failure(result, objects) is not None:
+        failure = boat_failure(result, objects)
+        if failure is not None and failure.get("code") not in expected:
             output = "".join(text if text.endswith("\n") else text + "\n" for text in (result.stdout, result.stderr) if text)
             self.log.write("boat {} exited with {}:\n{}".format(shlex.join(result.args[1:]), result.returncode, output))
         return result, objects
@@ -1313,7 +1330,7 @@ class Box:
             args = ["new", "--type", box_type, "--no-env", "--fail-fast", "--ttl", str(BOAT_TTL_SECONDS), "--json"]
             if from_snapshot:
                 args += ["--from", name, "--no-snapshots"]
-            result, objects = self.new(args)
+            result, objects = self.new(args, ("snapshot_not_found",) if from_snapshot else ())
             failure = boat_failure(result, objects)
             if failure is None and self.id is not None:
                 return from_snapshot
@@ -1323,7 +1340,7 @@ class Box:
             raise BoatUnavailable(str(failure.get("code") or "boat_failed"), describe(failure), failure.get("status"))
         raise AssertionError("unreachable")
 
-    def new(self, args: list[str]) -> tuple[subprocess.CompletedProcess, list[dict]]:
+    def new(self, args: list[str], expected: tuple[str, ...]) -> tuple[subprocess.CompletedProcess, list[dict]]:
         argv = [self.cli, *args]
         lines: list[str] = []
         with tempfile.TemporaryFile() as errors:
@@ -1331,8 +1348,8 @@ class Box:
                 process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors,
                                            env=boat_env(), text=True, encoding="utf-8", errors="replace")
             except OSError as error:
-                return subprocess.CompletedProcess(
-                    argv, 127, "", "cannot run {}: {}".format(argv[0], error.strerror or error)), []
+                return self.keep(subprocess.CompletedProcess(
+                    argv, 127, "", "cannot run {}: {}".format(argv[0], error.strerror or error)), expected)
             output = process.stdout
             assert output is not None
             fired = threading.Event()
@@ -1361,7 +1378,7 @@ class Box:
             stderr = errors.read().decode("utf-8", "replace")
         if fired.is_set():
             stderr += "\nboat new timed out after {}".format(duration(BOAT_NEW_SECONDS))
-        return self.keep(subprocess.CompletedProcess(argv, process.returncode, "".join(lines), stderr))
+        return self.keep(subprocess.CompletedProcess(argv, process.returncode, "".join(lines), stderr), expected)
 
     def state(self) -> dict:
         _, objects = self.call(["exec", str(self.id), "--json", "--", "sh", "-c", 'cat "$HOME/.jobgate/state.json"'], 120)
@@ -1415,11 +1432,12 @@ class Box:
 
     def attach(self, pid: int, printed: dict, relay: Relay) -> dict | None:
         # `boat exec --attach` replays a process's output from offset 0 on every attach.
+        argv = [self.cli, "exec", str(self.id), "--attach", str(pid), "--json"]
         exit_frame = None
+        other: list[str] = []
         with tempfile.TemporaryFile() as errors:
-            process = subprocess.Popen([self.cli, "exec", str(self.id), "--attach", str(pid), "--json"],
-                                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors, env=boat_env(),
-                                       text=True, encoding="utf-8", errors="replace")
+            process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors,
+                                       env=boat_env(), text=True, encoding="utf-8", errors="replace")
             output = process.stdout
             assert output is not None
             try:
@@ -1427,10 +1445,8 @@ class Box:
                     try:
                         frame = json.loads(line)
                     except ValueError:
-                        continue
-                    if not isinstance(frame, dict):
-                        continue
-                    kind = frame.get("type")
+                        frame = None
+                    kind = frame.get("type") if isinstance(frame, dict) else None
                     if kind in ("stdout", "stderr") and isinstance(frame.get("data"), str):
                         end = frame.get("nextOffset")
                         if isinstance(end, int):
@@ -1440,11 +1456,17 @@ class Box:
                         relay(kind, frame["data"])
                     elif kind == "exit":
                         exit_frame = frame
+                    else:
+                        other.append(line)
             finally:
                 if process.poll() is None:
                     process.kill()
                 process.wait()
                 output.close()
+            if exit_frame is None:
+                errors.seek(0)
+                self.keep(subprocess.CompletedProcess(argv, process.returncode, "".join(other),
+                                                      errors.read().decode("utf-8", "replace")))
         return exit_frame
 
     def status(self, step: str, pid: int) -> dict | None:
@@ -1503,7 +1525,7 @@ class Box:
         self.call(["extend", str(self.id), "--ttl", str(BOAT_TTL_SECONDS), "--json"], 60)
 
     def delete(self) -> None:
-        result, objects = self.call(["delete", str(self.id), "--yes", "--json"], 120)
+        result, objects = self.call(["delete", str(self.id), "--yes", "--json"], 120, ("not_found",))
         failure = boat_failure(result, objects)
         if failure is not None and failure.get("code") != "not_found":
             self.log.note("cannot delete box {}, so boat stops it within {}: {}".format(
@@ -1614,12 +1636,15 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
     queue = Queue.open()
     root = config.parent
     _, dirty = git_state(root)
+    here = os.path.relpath(os.path.realpath(os.getcwd()), os.path.realpath(str(root)))
+    cwd = "." if here == os.pardir or here.startswith(os.pardir + os.sep) else here
     scratch: Path | None = None
     try:
         try:
             scratch = Path(tempfile.mkdtemp(prefix="jobgate-boat-"))
             source = take_source(root, scratch, dirty)
             check_exclude(source, settings)
+            check_start_dir(source, settings, cwd)
             plan = make_plan(source, settings)
         except OSError as error:
             say("boat cannot run {}, so it runs here: jobgate on this machine failed: {}".format(profile.name, error))
@@ -1632,10 +1657,9 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
         if source.left_out:
             say("left out {} that may hold secrets: {}".format(
                 plural(len(source.left_out), "untracked file"), ", ".join(source.left_out)))
-        cwd = os.path.relpath(os.path.realpath(os.getcwd()), os.path.realpath(str(root)))
         spec = {"head": source.head, "commit": source.commit, "branch": source.branch,
                 "patterns": settings.sparse_patterns(), "setup": settings.setup, "setup_key": plan.setup_key,
-                "cwd": "." if cwd.startswith("..") else cwd, "path": repo_path_entries(root), "profile": profile.name,
+                "cwd": cwd, "path": repo_path_entries(root), "profile": profile.name,
                 "max_workers": max_workers, "command": command}
         for attempt in (1, 2):
             log = BoatLog()
@@ -1645,8 +1669,8 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
                 if unavailable.box is not None:
                     log.note("BOAT RUN FAILED during {} on box {}: {}".format(
                         unavailable.step, unavailable.box, unavailable.reason))
-                    log.note("boat log: {}".format(log.where))
                 log.note("boat cannot run {}, so it runs here: {}".format(profile.name, unavailable.reason))
+                log.note("boat log: {}".format(log.where))
                 if unavailable.status == BOAT_PAYMENT_STATUS or unavailable.code in BOAT_PAYMENT_CODES:
                     turn_boat_off(unavailable)
                 return Fallback(unavailable.code)
@@ -1709,9 +1733,6 @@ def box_prepare(spec: dict, run_dir: Path, repo: Path) -> int:
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text("memory_share = {}\n".format(BOX_MEMORY_SHARE))
     try:
-        if not (repo / spec["cwd"]).is_dir():
-            raise Refusal("the box has no {}, where the command starts. The commit lacks it, or exclude leaves it "
-                          "out".format(spec["cwd"]))
         profile_config = find_config(repo / spec["cwd"])
         profile = load_profile(profile_config, read_toml(profile_config), spec["profile"])
         host = machine()

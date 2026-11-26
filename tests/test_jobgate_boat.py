@@ -82,6 +82,12 @@ class BoatTest(JobgateTest):
     def on_box(self, report):
         return report["cwd"].startswith(os.path.realpath(str(self.boat_dir)))
 
+    def boat_logs(self):
+        return sorted((Path(self.env["JOBGATE_HOME"]) / ".cache/jobgate/boat").glob("*.log"))
+
+    def printed_logs(self, stderr):
+        return [Path(path) for path in re.findall(r"^jobgate: boat log: (.+)$", stderr, re.MULTILINE)]
+
     def result_fields(self, stderr):
         lines = [line[len("jobgate: "):] for line in stderr.splitlines() if line.startswith("jobgate: time=")]
         self.assertEqual(len(lines), 1, stderr)
@@ -121,6 +127,13 @@ class RoutingTests(BoatTest):
         for argv in self.calls("new"):
             self.assertIn("--no-env", argv)
             self.assertFalse({"-e", "--env"} & set(argv), argv)
+
+    def test_a_run_without_a_snapshot_leaves_no_failure_in_its_log(self):
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        logs = self.boat_logs()
+        self.assertEqual(len(logs), 1)
+        self.assertNotIn("No saved snapshot", logs[0].read_text())
 
     def test_local_flag_keeps_the_command_here(self):
         result = self.gate("run", "--local", "test", "--", sys.executable, "-c", REPORT)
@@ -281,6 +294,19 @@ class FallbackTests(BoatTest):
                 fields = self.result_fields(result.stderr)
                 self.assertEqual((fields["where"], fields["fallback"]), ("local", code))
                 self.assertIn(message, result.stderr)
+                logs = self.printed_logs(result.stderr)
+                self.assertEqual(len(logs), 1, result.stderr)
+                self.assertIn('"code": "{}"'.format(code), logs[0].read_text())
+
+    def test_a_boat_cli_that_cannot_start_leaves_the_run_here_and_logs_why(self):
+        (self.fake_bin / "boat").write_text("#!/nonexistent/interpreter\n")
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.repo / "ran-here").exists())
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "boat_failed")
+        logs = self.printed_logs(result.stderr)
+        self.assertEqual(len(logs), 1, result.stderr)
+        self.assertRegex(logs[0].read_text(), r"boat new --type default .* exited with 127:\ncannot run ")
 
     def test_a_box_that_boat_creates_but_cannot_start_is_reported_deleted_and_left_to_this_machine(self):
         self.plan(new=[{"code": "boot_failed", "status": 500, "error": "the box did not boot", "after_created": True,
@@ -353,18 +379,24 @@ class FallbackTests(BoatTest):
         self.assertEqual(len(self.calls("delete")), 1)
         self.assertEqual(self.boxes_left(), [])
 
-    def test_a_command_that_starts_in_a_directory_the_box_lacks_is_reported_and_left_to_this_machine(self):
+    def test_a_command_that_starts_in_a_directory_the_box_would_lack_runs_here_without_a_box(self):
         (self.repo / ".gitignore").write_text("build/\n")
-        self.commit("ignore build")
+        for name in ("private/people.csv", "src/secret/key.txt"):
+            (self.repo / name).parent.mkdir(parents=True)
+            (self.repo / name).write_text("private\n")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private", "src/secret"]\n')
+        self.commit("add private data")
         (self.repo / "build").mkdir()
-        result = subprocess.run([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", REPORT],
-                                cwd=str(self.repo / "build"), env=self.env, capture_output=True, text=True, timeout=60)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue((self.repo / "build/ran-here").exists())
-        self.assertRegex(result.stderr, r"the box has no build, where the command starts"
-                                        r"[\s\S]*BOAT RUN FAILED during setup on box bx_\w+")
-        self.assertEqual(self.result_fields(result.stderr)["fallback"], "box_refused")
-        self.assertEqual(self.boxes_left(), [])
+        for start in ("build", "private", "src"):
+            with self.subTest(start=start):
+                result = subprocess.run([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c",
+                                         REPORT], cwd=str(self.repo / start), env=self.env, capture_output=True,
+                                        text=True, timeout=60)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue((self.repo / start / "ran-here").exists())
+                self.assertIn("the box would have no {}, where the command starts".format(start), result.stderr)
+                self.assertEqual(self.result_fields(result.stderr)["fallback"], "no_start_dir")
+                self.assertEqual(self.calls("new"), [])
 
     def test_the_setup_script_output_stays_out_of_the_command_output(self):
         (self.repo / "boat-setup.sh").write_text('echo installing the tools\n')
@@ -402,10 +434,12 @@ class FallbackTests(BoatTest):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.repo / "ran-here").exists())
         self.assertEqual(result.stderr.count("BOAT RUN FAILED during run"), 2, result.stderr)
-        logs = re.findall(r"^jobgate: boat log: (.+)$", result.stderr, re.MULTILINE)
+        logs = self.printed_logs(result.stderr)
         self.assertEqual(len(logs), 2, result.stderr)
         for log in logs:
-            self.assertIn("BOAT RUN FAILED during run", Path(log).read_text())
+            text = log.read_text()
+            self.assertIn("BOAT RUN FAILED during run", text)
+            self.assertIn("the connection to the box closed", text)
         fields = self.result_fields(result.stderr)
         self.assertEqual((fields["where"], fields["fallback"]), ("local", "died"))
         self.assertEqual(self.boxes_left(), [])

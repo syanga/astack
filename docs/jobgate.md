@@ -364,7 +364,9 @@ is true:
 - The `boat` CLI is not on `PATH` (`no_cli`).
 - boat refuses to start a box. Examples: no login (`unauthorized`), a full start
   limit (`rate_limited`), no ready machine (`no_ready_machine`), or a box type
-  that the plan lacks (`trial_machine_class_not_allowed`).
+  that the plan lacks (`trial_machine_class_not_allowed`). The `fallback` code is
+  boat's error code. It is `boat_failed` when the `boat` CLI exits with an error
+  and no code, and `no_box` when `boat new` prints no box id.
 - A step fails after boat creates the box, without the box dying. jobgate
   prints `BOAT RUN FAILED` with the step, the box, and a log, as in
   [When a box dies partway](#when-a-box-dies-partway), and deletes the box. It
@@ -374,10 +376,8 @@ is true:
   - Git cannot build the bundle (`git`).
   - jobgate on this machine hits a file error, such as a full disk
     (`local_error`).
-  - jobgate on the box refuses the profile (`box_refused`), and the box prints
-    why. One reason is a profile that needs more memory for 1 worker than 90%
-    of the box's memory. Another is a missing start directory: the command
-    starts in a directory that the commit lacks or that `exclude` leaves out.
+  - jobgate on the box refuses a profile that needs more memory for 1 worker
+    than 90% of the box's memory (`box_refused`). The box prints why.
 - Content under an excluded path also lives at another path, in the history or
   in the uncommitted changes (`excluded_elsewhere`).
 - boat refused a start for payment less than an hour ago. After an HTTP 402
@@ -389,11 +389,14 @@ is true:
   - Git cannot read the repository (`git`).
   - The repository has no commit (`no_commit`).
   - The commit has no setup script (`no_setup`).
+  - The box would not get the directory where the command starts, because the
+    commit lacks it or `exclude` leaves out all of its files (`no_start_dir`).
   - jobgate on this machine hits a file error (`local_error`).
 - The run died partway on two boxes in a row (`died`).
 
-jobgate prints why. The result line says `where=local` and gives the reason in
-its `fallback` field.
+jobgate prints why. When it tried to start a box, it also prints a `boat log`
+line with the path of that attempt's log. The result line says `where=local`
+and gives the reason in its `fallback` field.
 
 ### When a box dies partway
 
@@ -424,8 +427,11 @@ When the box runs out of memory during the run step, jobgate prints the
 does not retry the command and does not run it on this machine, because the
 command would use the same memory here.
 
-Each log holds everything that the box printed during one attempt, and
-jobgate's boat messages. `~/.cache/jobgate/boat/` keeps the last 20 logs.
+Each log holds everything that the box printed during one attempt, jobgate's
+boat messages, and the arguments, exit code, and output of each `boat` call that
+failed. It leaves out the two failures that jobgate expects: a missing snapshot,
+and the delete of a box that is already gone. `~/.cache/jobgate/boat/` keeps the
+last 20 logs.
 
 ## Results
 
@@ -471,7 +477,7 @@ time=2026-11-17T18:00:00Z profile=test where=local repo=/src/app commit=4f0c2d9e
 | `profile` | The profile name |
 | `where` | Where the run ran: `local` or `boat` |
 | `box` | On a boat run, the box type |
-| `fallback` | On a run that went to this machine instead of boat, the reason: a boat error code, `boat_failed` when the `boat` CLI exited with an error and no code, `no_box` when `boat new` printed no box id, `no_cli`, `git`, `no_commit`, `no_setup`, `excluded_elsewhere`, `local_error`, `box_refused`, `died`, or `off` when the payment refusal that turned boat off had no code |
+| `fallback` | On a run that went to this machine instead of boat, the reason: a boat error code, `boat_failed` when the `boat` CLI exited with an error and no code, `no_box` when `boat new` printed no box id, `no_cli`, `git`, `no_commit`, `no_setup`, `no_start_dir`, `excluded_elsewhere`, `local_error`, `box_refused`, `died`, or `off` when the payment refusal that turned boat off had no code |
 | `repo` | The directory that contains `jobgate.toml` |
 | `commit` | `git rev-parse HEAD` when the run started, or `none` |
 | `dirty` | `yes` when `git status --porcelain` printed anything when the run started, `no` when it printed nothing, `unknown` outside Git |

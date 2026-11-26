@@ -160,7 +160,8 @@ the box, and the reason, and a `boat log` line with a path. It retries once on a
 new box. After a second failure, the command runs on this machine.
 
 1. Open the file that the `boat log` line names. It holds jobgate's messages
-   with their times, and everything that the box printed during that attempt.
+   with their times, everything that the box printed during that attempt, and
+   the output of each `boat` call that failed.
 2. If the reason says the setup script failed, fix the script and run the
    command again. A changed script makes the next run set up a new box.
 3. If the reason says the box ran out of memory, set a larger `type` in
