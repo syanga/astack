@@ -27,7 +27,7 @@ This replaces hillclimb steps 1 to 3 and hillclimb-council's "Set up the vote".
 
 1. Make a run folder outside any Git checkout, such as `~/Downloads/<brand>-refine-<date>/`. Give each version its own subfolder: `v0` for the starting ad, then `v1`, `v2`, and so on. A version folder holds the image as `ad.png`, `ad.jpg`, `ad.jpeg`, or `ad.webp`, the ad's text as `copy.txt`, any render request, and `text.txt`. Write `text.txt` as `copy.txt` followed by every word the image shows, as rendered, misspellings included. Keep judge prompts and outputs in the run folder too. The run folder is the decision trail.
 2. Write the judge brief from the craft brief. A failed gate check is a major flaw, and every other flaw is minor. Ask for the rubric's scores in place of hillclimb-council's score out of 10, and for each flaw's check id. The caller's rubric is already approved, so skip setup step 4's approval and freeze the brief.
-3. Write the quote check per setup step 3. It reads each version's `text.txt`. When a version's `text.txt` is empty, the check keeps that version's flaws, because no quote can match.
+3. Write the quote check per setup step 3. It reads each version's `text.txt`. When a version's `text.txt` has no words, the check lists none of that version's flaws that have no quote.
 4. Run the baseline vote per setup step 5 on `v0` alone. Write the craft file described below, then run:
 
    ```bash
@@ -35,7 +35,7 @@ This replaces hillclimb steps 1 to 3 and hillclimb-council's "Set up the vote".
      --panel-command '<template>' --margin <margin>
    ```
 
-   `<skill-dir>` is the folder this SKILL.md is in. For a budget below 5 rounds, add `--rounds <n>`. Each member in the craft file must stay in every later craft file.
+   `<skill-dir>` is the folder this SKILL.md is in. For a budget below 5 rounds, add `--rounds <n>`.
 
 The craft file maps each council member to its flaws per version. List only flaws that pass the quote check. Write `null` for a member that gave no score after its retries.
 
@@ -48,7 +48,7 @@ The craft file maps each council member to its flaws per version. List only flaw
 
 ## Run each round
 
-These steps replace hillclimb steps 4 to 6 and hillclimb-council's vote steps as named.
+These steps replace hillclimb steps 4 and 5 and hillclimb-council's vote steps as named.
 
 1. Build the bundle per vote step 7 from the current best's flaws: three fixes, or every queued flaw if fewer. If the current best has a major flaw, put every queued major flaw in the bundle instead, because `rounds.py` keeps no version with a major flaw. Each fix edits the render request or `copy.txt`. Write all of them into one new version yourself, with no parts, implementers, or worktrees. Render it with the current best image as a reference, so the render keeps what the fixes leave alone. Leave the reference out when a fix changes the type, colors, or layout of the whole ad. After a round reverts on a conclusive vote, pivot per vote step 8. After an inconclusive vote, skip the pivot as hillclimb-council says.
 2. View the render before the vote. If the image is blank, has the wrong size, or garbles text that the request spelled out, render again. Write the new version's `text.txt`.
@@ -62,7 +62,7 @@ These steps replace hillclimb steps 4 to 6 and hillclimb-council's vote steps as
 
    This replaces vote step 5. `rounds.py` runs the panels, applies the keep rule, prints the round table, and ends with `next:` and the current best, or `stop:` and the reasons. If a panel command fails, `rounds.py` exits 1, records nothing, and names the saved stderr. Fix the cause and run the same command again.
 
-Skip vote step 6's trim instead. Each render redraws the whole image, so dropping one fix also changes what the other fixes left alone.
+Skip vote step 6's trim. Each render redraws the whole image, so dropping one fix also changes what the other fixes left alone.
 
 ### Keep rule
 
