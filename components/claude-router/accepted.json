@@ -1,46 +1,38 @@
 {
- "head": "b4b7f9d5d02705912869be9e3d1a04889f5a5278",
- "code_sha256": "676bff11bfca9e31e33bf11094f726fc423707251257346c260b6bc77b761c76",
- "binary_sha256": "85cc2de681f0af358a060ed352649e0cb0d56dbc2151106747b4522abf1a7cc3",
+ "head": "946e4f2fc9d19fa68c78a79983fd0f9d1933afec",
+ "code_sha256": "08b342d6aa88f1876acdcc2060151c6e34d794a6facbae1bfd49fd51a4d28132",
+ "binary_sha256": "e1c765e06ee65ad54490f40acaee3ee9ca6e7903f13907c9e24402ccfdab8779",
  "helpers_sha256": "91ec69daf66a7ac317dcd4261552a269c88f68940a6e638df1149e1e0db7fd98",
  "sdk": "v8.0.11",
- "go": "go1.27.4",
- "platform": "linux/amd64",
+ "go": "go1.27.3",
+ "platform": "darwin/arm64",
  "clients": {
   "claude_code": "2.1.331"
  },
  "result": "pass",
- "scope": "PR 221, the pool line in claude-router status. A foreground lane router on port 18797 ran this code on Linux 7.0 x86_64, beside the daily router, with its state on the machine's ext4 disk (lane.py). Real accounts: copies of the dobby and work logins, with capacities 3 and 1, whose tokens expired more than 4.5 h later, read paid overflow, usage, and resets through the real API. The lane sent no request, because the change only draws a status line from readings the router already reports, and routing does not read it. lane.py recomputed the pool line from the lane's readings as CONTRACT.md's status row specifies and compared it with claude-router status on a pseudo-terminal at 100, 80, and 70 columns. Both accounts had used all of their weekly windows and none of their Fable windows, with weekly resets 4d 20h and 2d 12h away, so the live rows check capacity weighting of the tick but not of the fill. With stdout a pipe, status printed the account lines and no pool line. These two accounts have no 5-hour window, so the pool line fits at every width where the boxes draw. The Go tests named in CONTRACT.md check fill weighting, the 10-column rule, and the tie to the boxes. record.py built the record. Unchanged historical scenarios are references and were not rerun.",
- "evidence_root": "/home/alany/.local/state/astack/claude-router-lanes/pr221/evidence",
+ "scope": "Per-machine quota logging and stacked status bars at 946e4f2. A foreground lane router built at 946e4f2 ran beside the daily router on darwin/arm64 with copies of the crookshanks and work logins (both >7 h from token expiry, capacities 1 and 1). Both accounts verified paid overflow disabled and logged quota windows on startup overage_read. One live POST /v1/messages (claude-sonnet-4-6, max_tokens 16) hit 429 on work, migrated to crookshanks, answered 200, and logged model and response-header quota windows in events.jsonl. claude-router status rendered stacked bars, % here, and the legend at 100 and 80 columns, (% here) in status -v, and compact account lines when piped. Offline gofmt, go vet, and go test -race passed at the same head, and a 2-machine fake-upstream end-to-end simulation verified exact additive attribution across both routers. Unchanged historical scenarios are references and were not rerun.",
+ "evidence_root": "/Users/alan/GitHub/astack/.scratch/router-per-machine-usage/evidence/946e4f2",
  "matrix": [
   {
-   "scenario": "dobby token expires more than 4.5 h from now, outside the four-hour refresh lead",
+   "scenario": "crookshanks token expires more than 4.5 h from now, outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 355,
-    "evidence": [
-     "results.json",
-     "lane.py"
-    ]
+    "expires_in_min": 434.2
    }
   },
   {
    "scenario": "work token expires more than 4.5 h from now, outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 355,
-    "evidence": [
-     "results.json",
-     "lane.py"
-    ]
+    "expires_in_min": 420.9
    }
   },
   {
-   "scenario": "Lane code, executable, and SDK match the build at b4b7f9d and go.mod",
+   "scenario": "Lane code, executable, and SDK match the build at 946e4f2 and go.mod",
    "status": "pass",
    "detail": {
-    "code_sha256": "676bff11bfca9e31e33bf11094f726fc423707251257346c260b6bc77b761c76",
-    "binary_sha256": "85cc2de681f0af358a060ed352649e0cb0d56dbc2151106747b4522abf1a7cc3",
+    "code_sha256": "08b342d6aa88f1876acdcc2060151c6e34d794a6facbae1bfd49fd51a4d28132",
+    "binary_sha256": "e1c765e06ee65ad54490f40acaee3ee9ca6e7903f13907c9e24402ccfdab8779",
     "sdk": "v8.0.11",
     "evidence": [
      "status-start.json"
@@ -48,124 +40,55 @@
    }
   },
   {
-   "scenario": "Both lane accounts are signed in with paid overflow disabled and a usage reading at start",
+   "scenario": "Both lane accounts are signed in with paid overflow disabled and quota windows logged on startup overage_read",
    "status": "pass",
    "detail": {
-    "overage": {
-     "dobby": "disabled",
-     "work": "disabled"
-    },
-    "capacity": {
-     "dobby": 3,
-     "work": 1
-    },
+    "overage_read_with_quota": 2,
     "evidence": [
      "status-start.json",
-     "lane-config.json"
+     "events.jsonl"
     ]
    }
   },
   {
-   "scenario": "With no request sent, every limit reading comes from the usage read",
+   "scenario": "One live request completes 200 and logs model and response-header quota reading in events.jsonl",
    "status": "pass",
    "detail": {
-    "quota_windows": {
-     "dobby": 0,
-     "work": 0
-    },
-    "rejections": {
-     "dobby": 0,
-     "work": 0
-    },
+    "request_events_with_quota": 1,
     "evidence": [
-     "status-start.json"
+     "events.jsonl"
     ]
    }
   },
   {
-   "scenario": "At 100 columns, the pool line under the router line equals the capacity-weighted share left and even pace recomputed from the lane's readings",
+   "scenario": "At 100 and 80 columns, status renders stacked local bars, % here column, legend line, and verbose (% here) breakdown",
    "status": "pass",
    "detail": {
-    "exit": 0,
-    "boxes": true,
-    "actual": "pool    wk \u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2502\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571   0%   Fable \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2502\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 100%",
-    "expected": [
-     "pool    wk \u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2502\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571   0%   Fable \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2502\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 100%"
-    ],
     "evidence": [
-     "status-text-100.txt",
-     "pool-100.json",
-     "lane.py"
-    ],
-    "method": "lane.py's expected_pool_line computed the line from the lane's GET /claude-router/status readings, fetched just before and just after claude-router status ran on a pseudo-terminal with NO_COLOR=1, for both bracketing times: for each window, the sum of capacity times share left over the sum of capacity, and the same mean of each account's time to reset over the window's period, drawn in eighth-block cells with the tick at min(int(share x n + 0.5), n - 1). Both readings were the same. The printed line, the second line of the output, equals the computed line. The wk bar has 35 cells. dobby (capacity 3) resets in 4d 20h and work (capacity 1) in 2d 12h, so the weighted tick share is (3 x 0.6918 + 0.3585) / 4 = 0.6085, cell 21 from 0. An unweighted mean, 0.5251, would put it in cell 18."
-   }
-  },
-  {
-   "scenario": "At 80 columns, the pool line under the router line equals the capacity-weighted share left and even pace recomputed from the lane's readings",
-   "status": "pass",
-   "detail": {
-    "exit": 0,
-    "boxes": true,
-    "actual": "pool    wk \u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2502\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571   0%   Fable \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2502\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 100%",
-    "expected": [
-     "pool    wk \u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2502\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571   0%   Fable \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2502\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588 100%"
-    ],
-    "evidence": [
-     "status-text-80.txt",
-     "pool-80.json",
-     "lane.py"
-    ],
-    "method": "lane.py's expected_pool_line computed the line from the lane's GET /claude-router/status readings, fetched just before and just after claude-router status ran on a pseudo-terminal with NO_COLOR=1, for both bracketing times: for each window, the sum of capacity times share left over the sum of capacity, and the same mean of each account's time to reset over the window's period, drawn in eighth-block cells with the tick at min(int(share x n + 0.5), n - 1). Both readings were the same. The printed line, the second line of the output, equals the computed line."
-   }
-  },
-  {
-   "scenario": "At 70 columns, the pool line under the router line equals the capacity-weighted share left and even pace recomputed from the lane's readings",
-   "status": "pass",
-   "detail": {
-    "exit": 0,
-    "boxes": true,
-    "actual": "pool    wk \u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2502\u2571\u2571\u2571\u2571\u2571\u2571\u2571   0%   Fable \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2502\u2588\u2588\u2588\u2588\u2588\u2588\u2588 100%",
-    "expected": [
-     "pool    wk \u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2571\u2502\u2571\u2571\u2571\u2571\u2571\u2571\u2571   0%   Fable \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2502\u2588\u2588\u2588\u2588\u2588\u2588\u2588 100%"
-    ],
-    "evidence": [
-     "status-text-70.txt",
-     "pool-70.json",
-     "lane.py"
-    ],
-    "method": "lane.py's expected_pool_line computed the line from the lane's GET /claude-router/status readings, fetched just before and just after claude-router status ran on a pseudo-terminal with NO_COLOR=1, for both bracketing times: for each window, the sum of capacity times share left over the sum of capacity, and the same mean of each account's time to reset over the window's period, drawn in eighth-block cells with the tick at min(int(share x n + 0.5), n - 1). Both readings were the same. The printed line, the second line of the output, equals the computed line."
-   }
-  },
-  {
-   "scenario": "With stdout a pipe, status prints the account lines and no pool line",
-   "status": "pass",
-   "detail": {
-    "exit": 0,
-    "evidence": [
-     "status-text-piped.txt"
+     "status-100.txt",
+     "status-80.txt",
+     "status-verbose.txt"
     ]
    }
   },
   {
-   "scenario": "Identity is the same at the start and the end",
+   "scenario": "With stdout a pipe, status prints compact account lines with no pool or legend line",
    "status": "pass",
    "detail": {
-    "code_sha256": "676bff11bfca9e31e33bf11094f726fc423707251257346c260b6bc77b761c76",
-    "binary_sha256": "85cc2de681f0af358a060ed352649e0cb0d56dbc2151106747b4522abf1a7cc3",
+    "evidence": [
+     "status-piped.txt"
+    ]
+   }
+  },
+  {
+   "scenario": "Identity and disabled paid-overflow state are unchanged at the end",
+   "status": "pass",
+   "detail": {
+    "code_sha256": "08b342d6aa88f1876acdcc2060151c6e34d794a6facbae1bfd49fd51a4d28132",
+    "binary_sha256": "e1c765e06ee65ad54490f40acaee3ee9ca6e7903f13907c9e24402ccfdab8779",
     "sdk": "v8.0.11",
     "evidence": [
      "status-start.json",
-     "status-end.json"
-    ]
-   }
-  },
-  {
-   "scenario": "Paid overflow remains disabled",
-   "status": "pass",
-   "detail": {
-    "dobby": "disabled",
-    "work": "disabled",
-    "evidence": [
      "status-end.json"
     ]
    }
@@ -174,21 +97,8 @@
    "scenario": "The daily router kept running in the same process during the lane run",
    "status": "pass",
    "detail": {
-    "before": {
-     "ActiveState": "active",
-     "ActiveEnterTimestamp": "Tue 2026-11-24 09:02:36 PST",
-     "MainPID": "2072704",
-     "NRestarts": "0"
-    },
-    "after": {
-     "ActiveState": "active",
-     "ActiveEnterTimestamp": "Tue 2026-11-24 09:02:36 PST",
-     "MainPID": "2072704",
-     "NRestarts": "0"
-    },
-    "evidence": [
-     "daily-router.json"
-    ]
+    "before_pid": 27613,
+    "after_pid": 27613
    }
   },
   {
@@ -198,58 +108,36 @@
     "credential_refresh_events": 0,
     "refresh_unchanged": true,
     "evidence": [
-     "events.jsonl",
-     "results.json",
-     "lane.py"
-    ],
-    "method": "lane.py hashed each refresh token in the daily login before it copied it, and again in the lane's copy after the lane stopped. It then deleted the copies. events.jsonl holds no credential_refresh event."
-   }
-  },
-  {
-   "scenario": "The lane sent no request",
-   "status": "pass",
-   "detail": {
-    "requests": 0,
-    "evidence": [
      "events.jsonl"
     ]
    }
   },
   {
-   "scenario": "Evidence contains no copied access token",
+   "scenario": "Evidence contains no copied access token or secret pattern",
    "status": "pass",
    "detail": {
-    "files_scanned": 14,
-    "hits": [],
-    "method": "Exact client token and the tokens in the lane's login copies, plus sk-ant-, JWT, and Bearer patterns, before the copies were deleted.",
-    "evidence": [
-     "results.json",
-     "lane.py"
-    ]
+    "files_scanned": 10,
+    "hits": []
    }
   }
  ],
  "open": [],
  "incidents": [],
  "prior_acceptance": {
-  "record": "components/claude-router/accepted.json from PR #209, code_sha256 d604746a\u2026",
+  "record": "components/claude-router/accepted.json from PR #221, code_sha256 676bff11\u2026",
   "status": "historical reference, not rerun at this code"
  },
  "offline_verification": {
-  "head": "b4b7f9d5d02705912869be9e3d1a04889f5a5278",
-  "note": "The lane and this run used the same head. The commit that adds this record changes only accepted.json, which is not router code.",
+  "head": "946e4f2fc9d19fa68c78a79983fd0f9d1933afec",
+  "note": "The lane and offline checks ran on the same head. The commit that adds this record changes only accepted.json, which is not router code.",
   "gofmt": "pass",
   "go_test_race": "pass",
   "go_vet": "pass",
-  "tmpdir": "ext4, under the lane directory, so the journal tests ran on the machine's own disk",
   "evidence": [
-   "/home/alany/.local/state/astack/claude-router-lanes/pr221/evidence/offline/offline.sh",
-   "/home/alany/.local/state/astack/claude-router-lanes/pr221/evidence/offline/head.txt",
-   "/home/alany/.local/state/astack/claude-router-lanes/pr221/evidence/offline/env.txt",
-   "/home/alany/.local/state/astack/claude-router-lanes/pr221/evidence/offline/gofmt.txt",
-   "/home/alany/.local/state/astack/claude-router-lanes/pr221/evidence/offline/vet.log",
-   "/home/alany/.local/state/astack/claude-router-lanes/pr221/evidence/offline/go-race.log"
+   "/Users/alan/GitHub/astack/.scratch/router-per-machine-usage/evidence/946e4f2/offline/gofmt.txt",
+   "/Users/alan/GitHub/astack/.scratch/router-per-machine-usage/evidence/946e4f2/offline/vet.log",
+   "/Users/alan/GitHub/astack/.scratch/router-per-machine-usage/evidence/946e4f2/offline/go-race.log"
   ]
  },
- "written": "2026-11-24T20:51:50.893722+00:00"
+ "written": "2026-11-26T00:46:13.423269+00:00"
 }
