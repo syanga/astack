@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, hashlib, json, math, os, re, shlex, shutil, subprocess, sys
+import argparse, atexit, hashlib, json, math, os, re, shlex, shutil, subprocess, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -107,6 +107,28 @@ def archive(raw_v):
     log(f"  kept the old take as raw-480p-take{n}.mp4")
 
 
+def lock(out):
+    path = out / ".lock"
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                pid = int(path.read_text().strip())
+                os.kill(pid, 0)
+            except PermissionError:
+                pass
+            except (OSError, ValueError):
+                path.unlink(missing_ok=True)
+                continue
+            sys.exit(f"Another run (pid {pid}) is using {out}. Let it finish.")
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        atexit.register(path.unlink, missing_ok=True)
+        return
+    sys.exit(f"Could not lock {out}.")
+
+
 def slugify(s):
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:40]
 
@@ -147,17 +169,23 @@ def tts_body(text, voice_id):
 
 def clone_voice(a, d, meta):
     key = api_key("FAL_KEY")
-    url = upload(a.upload_cmd, d / "voice-ref.mp3", "voice-ref.mp3")
-    log(f"clone: {CLONE}, about ${CLONE_USD:.2f}")
+    saved = d / ".clone-request.json"
+    url = None if saved.exists() else upload(a.upload_cmd, d / "voice-ref.mp3", "voice-ref.mp3")
+    log(f"clone: {CLONE}, about ${CLONE_USD:.2f}" if url else f"clone: checking the request in {saved} again")
     try:
-        res = vendors.fal_run(CLONE, {"audio_url": url}, key=key, base=FAL_BASE, timeout=600)
-    except VendorError as e:
+        res = vendors.fal_run(CLONE, {"audio_url": url}, key=key, base=FAL_BASE, timeout=600, saved=saved)
+    except vendors.TakeFailed as e:
+        saved.unlink(missing_ok=True)
         sys.exit(f"The voice clone failed: {e}")
+    except VendorError as e:
+        sys.exit(f"The voice clone did not finish: {e}\nfal may still finish it. Run --clone-voice again to check that "
+                 "request; that does not pay for another clone.")
     vid = res.get("custom_voice_id")
     if not vid:
         sys.exit(f"fal's clone reply has no custom_voice_id (fields: {', '.join(sorted(res))})")
     meta["voice_id"] = vid
     (d / "presenter.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False) + "\n")
+    saved.unlink(missing_ok=True)
     log(f"new voice id {vid} saved to {d / 'presenter.json'}")
     try:
         vendors.fal_run(TTS, tts_body(CLONE_LINE, vid), key=key, base=FAL_BASE, timeout=300)
@@ -221,6 +249,8 @@ def main():
     slug = a.slug or slugify(" ".join(spoken.split()[:6]))
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", slug):
         ap.error("the slug may hold only letters, digits, dots, dashes, and underscores; pass --slug")
+    if re.fullmatch(r"(raw|fixed)-480p(-take\d+)?", slug):
+        ap.error(f"the slug {slug} names a working file; pass another --slug")
     out = Path(a.out_dir).expanduser().resolve() / slug
     template = PROMPT.read_text()
 
@@ -261,7 +291,9 @@ def main():
         sys.exit("Missing before a real run:\n" + "\n".join(missing))
     run = {"spoken": spoken, "presenter": str(d)}
     record = out / "run.json"
-    if out.is_dir() and any(out.iterdir()):
+    out.mkdir(parents=True, exist_ok=True)
+    lock(out)
+    if any(p.name != ".lock" for p in out.iterdir()):
         try:
             earlier = json.loads(record.read_text())
         except (OSError, ValueError):
@@ -271,9 +303,9 @@ def main():
     voice, raw_v, pending = out / "voice.mp3", out / "raw-480p.mp4", out / "seedance.task.json"
     again = "Run the command again without --rerender or --clone-voice"
     if raw_v.exists() and pending.exists():
-        pending.unlink()
         if a.rerender or a.clone_voice:
             sys.exit(f"The last run downloaded its take but stopped before finishing. {again} to finish it.")
+        pending.unlink()
     if pending.exists() and (a.rerender or a.clone_voice):
         sys.exit(f"A kie take is still pending. {again} to check it. To give it up, delete {pending} first; "
                  "the next take is paid for again.")
@@ -290,6 +322,10 @@ def main():
     (out / "script-spoken.txt").write_text(spoken + "\n")
 
     if voice.exists() and voice_of(out) != meta["voice_id"]:
+        if pending.exists():
+            sys.exit(f"A take made with voice {voice_of(out)} is still pending, but {d / 'presenter.json'} now names "
+                     f"{meta['voice_id']}. Put the old voice_id back and {again[0].lower() + again[1:]} to collect it, "
+                     f"or delete {pending} to give it up.")
         if raw_v.exists() and not a.rerender:
             sys.exit(new_take)
         if raw_v.exists():
@@ -324,7 +360,8 @@ def main():
             sys.exit(f"The read is {trim:.1f}s; fitting 29 s needs {tempo:.3f}x, over the {MAX_TEMPO}x limit. "
                      f"Cut about {math.ceil((trim - TARGET * MAX_TEMPO) * WORDS_PER_SEC)} words and run again.")
         sh(["ffmpeg", "-y", "-i", out / "voice-trim.wav", "-af", f"atempo={tempo:.4f}", "-c:a", "libmp3lame",
-            "-b:a", "192k", voice])
+            "-b:a", "192k", out / "voice.partial.mp3"])
+        (out / "voice.partial.mp3").replace(voice)
         log(f"2 MP3: {raw:.2f}s -> pause trim {trim:.2f}s -> atempo {tempo:.3f} -> {dur(voice):.2f}s")
     else:
         log(f"2 MP3: reusing {voice.name} ({dur(voice):.2f}s)")
@@ -372,7 +409,7 @@ def main():
         except vendors.TakeFailed as e:
             pending.unlink()
             sys.exit(f"Seedance failed: {e}\nNot resubmitted. A new take costs about ${take_usd:.2f}. Ask the person first; "
-                     "if they say yes, run the same command again (it reuses voice.mp3).")
+                     f"if they say yes, {again[0].lower() + again[1:]}. It reuses voice.mp3.")
         except VendorError as e:
             sys.exit(f"{e}\nkie may still finish task {task}. {again} to check it; that does not pay for a new take.")
         (out / "seedance.result.json").write_text(json.dumps(rec, indent=1))
@@ -382,7 +419,7 @@ def main():
         if not urls:
             sys.exit(f"kie finished the take with no resultUrls. See {out / 'seedance.result.json'}")
         try:
-            vendors.fetch(urls[0], raw_v)
+            vendors.fetch(urls[0], raw_v, check=dur)
             length = dur(raw_v)
         except (VendorError, RuntimeError, ValueError) as e:
             raw_v.unlink(missing_ok=True)
@@ -401,7 +438,12 @@ def main():
     else:
         import fix_words
         log("5-6 check/fix:")
-        report = fix_words.fix(raw_v, voice, out / "script-spoken.txt", fixed, log=lambda m: log("  " + m))
+        try:
+            report = fix_words.fix(raw_v, voice, out / "script-spoken.txt", fixed, log=lambda m: log("  " + m))
+        except (RuntimeError, OSError, ValueError) as e:
+            shutil.copy(raw_v, fixed)
+            report = {"splices": [], "cuts": [], "unfixed": [
+                {"kind": "check", "heard": "", "at": 0.0, "why": f"the fixer stopped, so nothing was checked: {e}"}]}
         (out / "check.json").write_text(json.dumps(report, indent=1))
 
     final = fixed

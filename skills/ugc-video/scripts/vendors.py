@@ -14,6 +14,7 @@ FAL_REST = "https://rest.fal.ai"
 KIE_BASE = "https://api.kie.ai"
 REFUSED = (429,)
 KIE_REFUSED = (429, 455)
+KIE_DECLINED = (401, 402, 422)
 UNANSWERED = (OSError, http.client.HTTPException, ValueError)
 SCALE = float(os.environ.get("UGC_RETRY_SCALE") or 1)
 
@@ -64,7 +65,7 @@ def submit(vendor, url, headers, body, refused):
         try:
             reply = call("POST", url, headers, body)
         except urllib.error.HTTPError as error:
-            if error.code >= 500:
+            if not 400 <= error.code < 500:
                 raise VendorError(f"{vendor} submit got {http_error(error)}. Not resubmitted, "
                                   "because the job may have been accepted") from None
             if error.code not in REFUSED or attempt == 2:
@@ -103,14 +104,30 @@ def poll(url, headers, deadline, job, done):
 
 
 def fal_failure(job, reply):
-    return VendorError(f"{job} failed: {reply.get('error_type') or reply.get('status') or 'error'}: {reply.get('error')}")
+    return TakeFailed(f"{job} failed: {reply.get('error_type') or reply.get('status') or 'error'}: {reply.get('error')}")
 
 
-def fal_run(model, body, *, key, base=FAL_BASE, timeout=1800):
+def fal_run(model, body, *, key, base=FAL_BASE, timeout=1800, saved=None):
     base = base.rstrip("/")
     auth = {"Authorization": f"Key {key}"}
     deadline = time.monotonic() + timeout
-    job = submit("fal", f"{base}/{model}", {**auth, "Content-Type": "application/json"}, body, lambda reply: None)
+    if saved and Path(saved).exists():
+        job = json.loads(Path(saved).read_text())
+        if not job.get("status_url"):
+            raise VendorError(f"an earlier submit to fal got no clear answer, so fal may have accepted it. Check the fal "
+                              f"dashboard. To submit again, delete {saved} first; that pays again.")
+    else:
+        if saved:
+            with open(saved, "x") as marker:
+                marker.write("{}\n")
+        try:
+            job = submit("fal", f"{base}/{model}", {**auth, "Content-Type": "application/json"}, body, lambda reply: None)
+        except Refused:
+            if saved:
+                Path(saved).unlink()
+            raise
+        if saved:
+            Path(saved).write_text(json.dumps({k: job.get(k) for k in ("request_id", "status_url", "response_url")}) + "\n")
     name = f"fal request {job.get('request_id')}"
     for url in (job.get("status_url"), job.get("response_url")):
         if not isinstance(url, str) or not url.startswith(base + "/"):
@@ -136,7 +153,7 @@ def kie_submit(model, input, *, key, base=KIE_BASE):
                    {"model": model, "input": input},
                    lambda reply: f"code {reply.get('code')}" if reply.get("code") in KIE_REFUSED else None)
     task = (reply.get("data") or {}).get("taskId")
-    if reply.get("code") in (401, 402, 422) + KIE_REFUSED:
+    if reply.get("code") in KIE_DECLINED + KIE_REFUSED:
         raise Refused(f"kie refused the task: code {reply.get('code')}: {reply.get('msg')}")
     if reply.get("code") != 200 or not isinstance(task, str) or not task:
         raise VendorError(f"kie gave no task id: code {reply.get('code')}: {reply.get('msg')}")
@@ -199,7 +216,7 @@ def fal_upload(path, name, *, key, rest=FAL_REST):
     return url
 
 
-def fetch(url, dest):
+def fetch(url, dest, check=None):
     if not isinstance(url, str) or not url.startswith(("http://", "https://")):
         raise VendorError(f"not downloading {url!r}, which is not an http or https URL")
     dest = Path(dest)
@@ -210,6 +227,11 @@ def fetch(url, dest):
             expected = reply.headers.get("Content-Length")
         if expected is not None and partial.stat().st_size != int(expected):
             raise VendorError(f"download stopped at {partial.stat().st_size} of {expected} bytes")
+        if check:
+            try:
+                check(partial)
+            except Exception as error:
+                raise VendorError(f"the file is not readable: {error}") from None
     except (OSError, http.client.HTTPException, ValueError, VendorError) as error:
         partial.unlink(missing_ok=True)
         raise VendorError(f"download failed: {error}") from None

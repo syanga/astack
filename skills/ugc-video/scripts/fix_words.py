@@ -256,6 +256,14 @@ def errors(path, script_words, mp3_raw, tag, W=None):
     return bad
 
 
+def lost(script_words, W, mp3_raw, a1, a2, b1, b2):
+    want, got = canon(script_words[a1:a2]), canon([h["raw"] for h in W[b1:b2]])
+    if a1 == a2 or b1 == b2 or not want:
+        return True
+    mp3 = canon(sum((mp3_raw.get(i, []) for i in range(a1, a2)), []))
+    return got != want and not (mp3 and got == mp3)
+
+
 def search_cut(render, lo_t, hi_t, want, expect):
     """Try removing [gap_i start, gap_j end] for every pair of quiet gaps near the stutter. Whisper the same
     window for each try; return the cuts that read like the script, closest to the extra words' length first."""
@@ -266,7 +274,7 @@ def search_cut(render, lo_t, hi_t, want, expect):
     for i in range(len(G)):
         for j in range(i, len(G)):
             cs, ce = G[i][0], G[j][1]
-            if not 0.1 <= ce - cs <= 1.6:
+            if cs < 0.05 or not 0.1 <= ce - cs <= 1.6:
                 continue
             wav = f"{TMP}/try.wav"
             run("ffmpeg", "-y", "-ss", f"{w0:.3f}", "-t", f"{w1 - w0:.3f}", "-i", render, "-filter_complex",
@@ -333,12 +341,12 @@ def fix(render, voice, script_path, out, check_only=False, log=print):
     global TMP, LOG
     TMP, LOG = tempfile.mkdtemp(), log
     try:
-        return checked(render, voice, script_path, out, check_only)
+        return check_and_fix(render, voice, script_path, out, check_only)
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
 
 
-def checked(render, voice, script_path, out, check_only):
+def check_and_fix(render, voice, script_path, out, check_only):
     script_words = [norm(w) for w in Path(script_path).read_text().split() if norm(w)]
     unfixed = []
     R, V = words(render, "render"), words(voice, "voice")
@@ -383,7 +391,7 @@ def checked(render, voice, script_path, out, check_only):
             W = [{"w": norm(x), "raw": x} for x in plain(test, "cutcheck") if norm(x)]
             now = errors(test, script_words, mp3_raw, "cutcheck", W)
             near = [(a1, a2) for _, a1, a2, b1, b2 in align(script_words, W)[1]
-                    if a1 <= c["a2"] and a2 >= c["a1"] and canon([h["raw"] for h in W[b1:b2]]) != canon(script_words[a1:a2])]
+                    if a1 <= c["a2"] and a2 >= c["a1"] and lost(script_words, W, mp3_raw, a1, a2, b1, b2)]
             clean = not near and len(now) < len(base)
             LOG(f"    cut '{c['heard']}' {cs:.2f}-{ce:.2f}: "
                 f"{'clean' if clean else 'extra or missing words there' if near else 'new error'}")

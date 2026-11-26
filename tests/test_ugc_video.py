@@ -48,7 +48,7 @@ class FakeVendors:
     def __init__(self, test, served):
         self.requests, self.served = [], served
         self.refuse_fal, self.refuse_kie, self.kie_fail, self.poll_base = [], [], None, None
-        self.poll_errors, self.short, self.drop_create = [], set(), 0
+        self.poll_errors, self.short, self.drop_create, self.status_errors = [], set(), 0, []
         self.jobs, self.polls = {}, {}
         fake = self
 
@@ -99,6 +99,8 @@ class FakeVendors:
         if path.startswith("/fal/requests/"):
             rid = path.split("/")[3]
             if path.endswith("/status"):
+                if self.status_errors:
+                    return self.send(handler, self.status_errors.pop(0), {"detail": "unauthorized"})
                 return self.send(handler, 200, {"status": "IN_PROGRESS" if polls == 1 else "COMPLETED"})
             if self.jobs.get(rid) == CLONE:
                 return self.send(handler, 200, {"custom_voice_id": "voice-new"})
@@ -382,9 +384,11 @@ class MakeUgcTests(unittest.TestCase):
         (self.out / "seedance.task.json").write_text(json.dumps({"taskId": "task-1"}))
 
         rerender = self.run_script("--no-upscale", "--rerender")
+        again = self.run_script("--no-upscale", "--rerender")
         plain = self.run_script("--no-upscale")
 
         self.assertNotEqual(rerender.returncode, 0)
+        self.assertNotEqual(again.returncode, 0)
         self.assertIn("without --rerender", rerender.stderr)
         self.assertEqual(plain.returncode, 0, plain.stdout + plain.stderr)
         self.assertEqual(len(self.posts(CREATE)), 1)
@@ -456,10 +460,55 @@ class MakeUgcTests(unittest.TestCase):
         self.assertTrue((self.out / "raw-480p-take1.mp4").is_file())
 
 
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_a_folder_in_use_by_a_live_run_is_refused_and_a_dead_runs_lock_is_taken_over(self):
+        self.out.mkdir(parents=True)
+        (self.out / ".lock").write_text(str(os.getpid()))
+        busy = self.run_script("--no-upscale")
+        dead = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"],
+                              capture_output=True, text=True, check=True).stdout.strip()
+        (self.out / ".lock").write_text(dead)
+        free = self.run_script("--no-upscale")
+
+        self.assertNotEqual(busy.returncode, 0)
+        self.assertIn("Another run", busy.stderr)
+        self.assertEqual(free.returncode, 0, free.stdout + free.stderr)
+        self.assertEqual(len(self.posts(CREATE)), 1)
+        self.assertFalse((self.out / ".lock").exists())
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_a_new_voice_while_a_take_is_pending_stops_before_a_new_mp3(self):
+        self.fake.poll_errors = [401]
+        self.assertNotEqual(self.run_script("--no-upscale").returncode, 0)
+        (self.presenter / "presenter.json").write_text(json.dumps({**self.meta, "voice_id": "voice-new"}))
+
+        result = self.run_script("--no-upscale")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("still pending", result.stderr)
+        self.assertEqual([body["voice_setting"]["voice_id"] for body in self.posts(TTS)], ["voice-abc"])
+        self.assertEqual(len(self.posts(CREATE)), 1)
+
+    def test_a_clone_left_unfinished_is_checked_again_not_paid_for_twice(self):
+        del self.meta["voice_id"]
+        (self.presenter / "presenter.json").write_text(json.dumps(self.meta))
+        self.fake.status_errors = [401]
+
+        first = self.make("--clone-voice")
+        second = self.make("--clone-voice")
+
+        self.assertNotEqual(first.returncode, 0)
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        self.assertEqual(len(self.posts(CLONE)), 1)
+        self.assertEqual(json.loads((self.presenter / "presenter.json").read_text())["voice_id"], "voice-new")
+        self.assertFalse((self.presenter / ".clone-request.json").exists())
+
+
 class StutterCutTests(unittest.TestCase):
     WORDS = "our app never shares your data"
 
-    def fix(self, transcripts, voice=None):
+    def fix(self, transcripts, voice=None, words=None, render="our app app never shares your data"):
+        words = words or self.WORDS
         sys.path.insert(0, str(SCRIPT.parent))
         self.addCleanup(sys.path.remove, str(SCRIPT.parent))
         import fix_words
@@ -469,13 +518,12 @@ class StutterCutTests(unittest.TestCase):
 
         def plain(path, tag, start=None, end=None):
             cut = json.loads(Path(path).read_text()) if Path(path).is_file() else None
-            return (transcripts[tuple(cut)] if cut else "our app app never shares your data").split()
+            return (transcripts[tuple(cut)] if cut else render).split()
 
         def jump_cut(src, cuts, out):
             Path(out).write_text(json.dumps([cuts[-1]["cs"], cuts[-1]["ce"]] if cuts else None))
 
-        fakes = {"words": lambda audio, tag, *a: heard((voice or self.WORDS) if tag == "voice" else
-                                                         "our app app never shares your data"),
+        fakes = {"words": lambda audio, tag, *a: heard((voice or words) if tag == "voice" else render),
                  "plain": plain, "jump_cut": jump_cut, "run": lambda *cmd: "",
                  "search_cut": lambda *a: list(transcripts)}
         for name, fake in fakes.items():
@@ -484,7 +532,7 @@ class StutterCutTests(unittest.TestCase):
             self.addCleanup(setattr, fix_words, name, original)
         with tempfile.TemporaryDirectory() as tmp:
             script = Path(tmp) / "script.txt"
-            script.write_text(self.WORDS)
+            script.write_text(words)
             return fix_words.fix("render.mp4", "voice.mp3", script, Path(tmp) / "out.mp4", log=lambda line: None)
 
     def test_a_cut_that_also_removes_a_script_word_is_passed_over_for_one_that_does_not(self):
@@ -498,6 +546,20 @@ class StutterCutTests(unittest.TestCase):
 
         self.assertEqual(report["cuts"], [])
         self.assertEqual([u["kind"] for u in report["unfixed"]], ["extra words"])
+
+    def test_a_cut_that_drops_a_number_is_refused(self):
+        report = self.fix({(1.0, 1.4): "you get points today"}, words="you get 1000000 points today",
+                          render="you get get 1000000 points today")
+
+        self.assertEqual(report["cuts"], [])
+        self.assertEqual([u["kind"] for u in report["unfixed"]], ["extra words"])
+
+    def test_a_clean_cut_is_kept_when_a_nearby_name_is_misheard_the_same_way_in_the_mp3(self):
+        report = self.fix({(2.0, 2.4): "our app never chairs your data"}, voice="our app never chairs your data",
+                          render="our app app never chairs your data")
+
+        self.assertEqual(report["cuts"], [{"heard": "app", "removed": [2.0, 2.4]}])
+        self.assertEqual(report["unfixed"], [])
 
     def test_a_stutter_with_only_word_losing_cuts_is_reported_not_fixed(self):
         report = self.fix({(1.0, 1.4): "our app shares your data"})
