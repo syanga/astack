@@ -121,15 +121,21 @@ def generate(request_path, model, base_url, key):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate every <name>.req.json in a folder with GPT Image.")
-    parser.add_argument("folder", type=Path)
+    parser = argparse.ArgumentParser(description="Generate <name>.req.json files with GPT Image.")
+    parser.add_argument("path", type=Path,
+                        help="a folder, to generate every <name>.req.json in it, or one <name>.req.json file")
     parser.add_argument("--dry-run", action="store_true", help="check the request files without calling OpenAI")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     args = parser.parse_args()
     sys.stdout.reconfigure(errors="backslashreplace")
-    requests = sorted(args.folder.glob("*.req.json"))
+    if args.path.is_dir():
+        requests = sorted(args.path.glob("*.req.json"))
+    elif args.path.name.endswith(".req.json") and args.path.is_file():
+        requests = [args.path]
+    else:
+        parser.exit(1, "generate.py: {} is not a folder or a .req.json file\n".format(args.path))
     if not requests:
-        parser.exit(1, "generate.py: no .req.json files in {}\n".format(args.folder))
+        parser.exit(1, "generate.py: no .req.json files in {}\n".format(args.path))
     if args.dry_run:
         say("dry-run: checking request files only. Not calling OpenAI.")
         say("a real run would use {}".format(args.model))
