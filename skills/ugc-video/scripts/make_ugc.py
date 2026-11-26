@@ -237,9 +237,6 @@ def main():
                        "only after the user says yes")
     if missing:
         sys.exit("Missing before a real run:\n" + "\n".join(missing))
-    if a.clone_voice:
-        clone_voice(a, d, meta)
-    fal_key, kie_key = api_key("FAL_KEY"), api_key("KIE_API_KEY")
     run = {"spoken": spoken, "presenter": str(d)}
     record = out / "run.json"
     if out.is_dir() and any(out.iterdir()):
@@ -249,6 +246,9 @@ def main():
             earlier = None
         if earlier != run:
             sys.exit(f"{out} holds a run for another script or presenter. Pass a new --slug.")
+    if a.clone_voice:
+        clone_voice(a, d, meta)
+    fal_key, kie_key = api_key("FAL_KEY"), api_key("KIE_API_KEY")
     out.mkdir(parents=True, exist_ok=True)
     record.write_text(json.dumps(run, indent=1, ensure_ascii=False) + "\n")
     (out / "script.txt").write_text(original + "\n")
@@ -291,6 +291,8 @@ def main():
 
     raw_v = out / "raw-480p.mp4"
     pending = out / "seedance.task.json"
+    if raw_v.exists():
+        pending.unlink(missing_ok=True)
     if raw_v.exists() and a.rerender:
         n = 1
         while (out / f"raw-480p-take{n}.mp4").exists():

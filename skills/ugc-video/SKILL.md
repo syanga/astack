@@ -41,7 +41,7 @@ A real run needs `FAL_KEY`, `KIE_API_KEY`, and an [upload hook](#upload-hook). N
 | 6 | Fix: wrong word, so the same word is spliced from the MP3 (video untouched). Stutter or extra words, so they are cut from video and audio as a jump cut. Each fix is tried at several timings and kept only if a whole-file transcript then reads right | local | free |
 | 7 | Upscale: `resize_grain.py` (Lanczos, light sharpen, phone grain) to 1080x1920 | local ffmpeg | free |
 
-Steps are resumable. An existing `voice.mp3` or `raw-480p.mp4` in the output folder is reused. A folder that holds a run for another script or presenter stops the run, so pass a new `--slug`. The kie task id is saved in `seedance.task.json` before polling. If polling times out, fails to connect, or the process stops, running the same command checks that task again instead of paying for a new take.
+Steps are resumable. An existing `voice.mp3` or `raw-480p.mp4` in the output folder is reused. A folder that holds a run for another script or presenter stops the run, so pass a new `--slug`. The kie task id is saved in `seedance.task.json` before polling. If polling times out, fails to connect, or the process stops, running the same command checks that task again instead of paying for a new take. To give up on that task, delete `seedance.task.json`. The next run then pays for a new take, so ask the user first.
 
 The script retries a submit that fal answers with HTTP 429 or kie with code 429 or 455, because a refused submit costs nothing. It never resubmits after a 5xx, a dropped connection, a failed take, or a timeout, because the vendor may have accepted the job. It prints the vendor's error and stops.
 
@@ -102,7 +102,7 @@ aws s3 presign "s3://<bucket>/$2" --expires-in 3600
 
 ## Output (`ugc-videos/<slug>/`)
 
-`<slug>.mp4` (final, 1080x1920), `raw-480p.mp4` (Seedance take), `fixed-480p.mp4`, `voice.mp3` (the fitted MP3), `script.txt`, `script-spoken.txt`, `check.json` (splices, cuts, and anything not fixed), `run.json` (the script and presenter this folder belongs to), `tts.body.json`, `tts.result.json`, `seedance.body.json`, and `seedance.result.json` (kie's task record, with the credits it charged). A re-render keeps the old take as `raw-480p-take<n>.mp4`.
+`<slug>.mp4` (final, 1080x1920), `raw-480p.mp4` (Seedance take), `fixed-480p.mp4`, `voice.mp3` (the fitted MP3), `script.txt`, `script-spoken.txt`, `check.json` (splices, cuts, and anything not fixed), `run.json` (the script and presenter this folder belongs to), `seedance.task.json` (the kie task id while a take is unfinished), `tts.body.json`, `tts.result.json`, `seedance.body.json`, and `seedance.result.json` (kie's task record, with the credits it charged). A re-render keeps the old take as `raw-480p-take<n>.mp4`.
 
 ## Requirements
 
