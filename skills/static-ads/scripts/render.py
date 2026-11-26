@@ -114,6 +114,8 @@ def capture(binary, scratch, width, height, url, target, network=False):
         size = png_size(partial)
         if size is None:
             raise RuntimeError("Chrome wrote no screenshot")
+        if size != (width, height):
+            raise RuntimeError("the screenshot is {}x{}, not {}x{}".format(*size, width, height))
         partial.replace(target)
         return size
     except BaseException:
@@ -131,7 +133,7 @@ def render(page, folder, binary, scratch):
     for placement, width, height in PLACEMENTS:
         png = folder / "{} {}.png".format(name, placement)
         try:
-            size = capture(binary, scratch, width, height, page.resolve().as_uri(), png)
+            capture(binary, scratch, width, height, page.resolve().as_uri(), png)
             check = scratch / "check.html"
             check.write_text(CHECK_PAGE.replace("{src}", html.escape(page.resolve().as_uri()))
                              .replace("{width}", str(width)).replace("{height}", str(height)), encoding="utf-8")
@@ -143,11 +145,10 @@ def render(page, folder, binary, scratch):
             checked = json.loads(html.unescape(report[1]))
         except (OSError, RuntimeError, ValueError) as error:
             print("{} {}: FAILED ({})".format(name, placement, error))
+            for other, _, _ in PLACEMENTS:
+                (folder / "{} {}.png".format(name, other)).unlink(missing_ok=True)
             return False
-        if size != (width, height):
-            found.append("{} {}: the image is {}, not {}x{}".format(
-                name, placement, "x".join(map(str, size)) if size else "missing", width, height))
-        sizes.append("{} {}".format(placement, "x".join(map(str, size)) if size else "missing"))
+        sizes.append("{} {}x{}".format(placement, width, height))
         found += ["{} {}: {}".format(name, placement, problem)
                   for problem in problems(checked["text"], placement, width, height)]
         found += ["{} {}: image failed to load: {}".format(name, placement, src) for src in checked["broken"]]

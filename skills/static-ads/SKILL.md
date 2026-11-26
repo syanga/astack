@@ -1,13 +1,13 @@
 ---
 name: static-ads
-description: Make five on-brand static Meta ads for a brand from its website and, optionally, its repo, as HTML screenshots or GPT Image renders.
+description: Make five on-brand static Meta ads from a brand's website and, optionally, its repo, with GPT Image and headless Chrome.
 argument-hint: "<brand url> [repo]"
 disable-model-invocation: true
 ---
 
 # static-ads
 
-Brand URL and repo → style guide → 5 ideas → HTML pages, with GPT Image when there's no repo → Feed and Story PNGs in `~/Downloads/<slug>-ads-<date>/`.
+Brand URL and repo → style guide → 5 ideas → GPT Image scenes or ads → HTML pages → Feed and Story PNGs in `~/Downloads/<slug>-ads-<date>/`.
 
 Put every file from this run in that folder: the style guide, the reference image, the ad pages and their files, and the ads. `<slug>` is the brand's name in lowercase with hyphens, such as `acme-coffee`. `<date>` is today's date as `YYYY-MM-DD`. A GPT Image run needs `OPENAI_API_KEY` in the environment. Never print the key.
 
@@ -39,7 +39,7 @@ Copy the font files, the logo, and the product images the ads will use into `pag
   - `font-family`, and the size/weight/letter-spacing combos
   - `<h1>`–`<h3>` text
   - `og:image`
-- Download the og image into the run folder as `site-og-image` with its own extension. It is the style reference for every GPT Image ad. When the page has no og:image, `site-screenshot.png` from the next section is the reference.
+- Download the og image into the run folder as `site-og-image.<ext>`, with the og image's own extension. It is the style reference for every GPT Image ad. When the page has no og:image, `site-screenshot.png` from the next section is the reference.
 
 ### Both
 
@@ -90,7 +90,7 @@ Copy the reference image into `pages/`. Write one `pages/<Name>.req.json` per ad
 }
 ```
 
-`images` names reference files in `pages/`: `site-og-image`, or `site-screenshot.png` when the page has no og:image.
+`images` names reference files in `pages/`: `site-og-image.<ext>`, or `site-screenshot.png` when the page has no og:image.
 
 The style block, filled from the guide:
 - Brand colors with hex values
@@ -125,8 +125,9 @@ It screenshots every `pages/<Name>.html` with headless Chrome and prints each ad
 - A name over 12 characters
 - Text cut off at an edge
 - Story text in the top 320 px or the bottom 693 px, which Instagram covers
+- An image that failed to load
 
-It reads the text in the page, not text drawn inside an image, so place an image that holds text by eye. Fix the page and run `render.py` again until it prints no problem. It overwrites the PNGs each time. Without Chrome or Chromium, hand over each GPT Image ad's `pages/<Name>.png` as its Feed image, and tell the user the Story files are missing.
+It reads the text in the page, not text drawn inside an image, so place an image that holds text by eye. Fix the page and run `render.py` again until it prints no problem. It replaces the PNGs each time, and deletes both of an ad's PNGs when it prints `FAILED` for the ad. Without Chrome or Chromium, hand over each GPT Image ad's `pages/<Name>.png` as its Feed image, and tell the user the Story files are missing.
 
 ## 5. Review
 
@@ -144,5 +145,5 @@ Read the script output for `FAILED`. A failed ad can still leave the script look
 
 ## Gotchas
 
-- **Size:** Meta recommends 1440×1800 for 4:5 feed images and 1440×2560 for 9:16, and `render.py` writes exactly those. OpenAI needs both sides in multiples of 16, which 1800 isn't, so GPT Image makes 1472×1840, exactly 4:5, and the Feed screenshot scales it to 1440×1800.
+- **Size:** Meta recommends 1440×1800 for 4:5 feed images and 1440×2560 for 9:16, and `render.py` writes exactly those. OpenAI needs both sides in multiples of 16, which 1800 isn't, so GPT Image makes 1472×1840, exactly 4:5, and the Feed screenshot scales it to 1440×1800. A scene is 1152×2048, 9:16, and the page crops it to fill either size.
 - **Deliverables:** text-only answers when the user asks for just the text. Short md files, not HTML reports.

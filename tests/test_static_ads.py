@@ -500,6 +500,35 @@ class RenderTests(unittest.TestCase):
         self.assertNotEqual((self.run_folder / "Proof Feed.png").read_bytes(), old)
         self.assertEqual(self.size("Proof Feed.png"), (1440, 1800))
 
+    def fake_chrome(self, screenshot):
+        self.chrome.write_text("#!{}\nimport sys\nfor argument in sys.argv[1:]:\n"
+                               "    if argument.startswith('--screenshot='):\n"
+                               "        open(argument.split('=', 1)[1], 'wb').write({!r})\nsys.exit({})\n"
+                               .format(sys.executable, screenshot or b"", 0 if screenshot else 1), encoding="utf-8")
+
+    def test_a_failed_render_leaves_neither_screenshot_from_an_earlier_run(self):
+        self.write_page("Proof", SAFE)
+        for placement in ["Feed", "Story"]:
+            (self.run_folder / "Proof {}.png".format(placement)).write_bytes(png_image(1440, 1800))
+        self.fake_chrome(None)
+
+        result = self.render()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("Proof Feed: FAILED", result.stdout)
+        self.assertEqual(sorted(path.name for path in self.run_folder.glob("Proof *.png")), [])
+
+    def test_a_screenshot_of_the_wrong_size_fails_and_leaves_no_screenshot(self):
+        self.write_page("Proof", SAFE)
+        (self.run_folder / "Proof Feed.png").write_bytes(png_image(1440, 1800))
+        self.fake_chrome(png_header(800, 600))
+
+        result = self.render()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("800x600", result.stdout)
+        self.assertFalse((self.run_folder / "Proof Feed.png").exists())
+
     def test_an_image_that_does_not_load_is_reported(self):
         self.write_page("Proof", ad_page("<img src=\"missing.png\"><p style=\"top: 900px\">Fits both</p>"))
 
