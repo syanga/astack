@@ -13,6 +13,7 @@ PROMPT = SKILL / "prompts" / "seedance.txt"
 MODEL = os.path.expanduser(os.environ.get("WHISPER_MODEL", "~/whisper-models/ggml-small.bin"))
 FAL_BASE = os.environ.get("FAL_QUEUE_URL") or vendors.FAL_BASE
 KIE_BASE = os.environ.get("KIE_API_URL") or vendors.KIE_BASE
+FAL_REST = os.environ.get("FAL_REST_URL") or vendors.FAL_REST
 
 TTS = "fal-ai/minimax/speech-02-hd"
 CLONE = "fal-ai/minimax/voice-clone"
@@ -76,9 +77,7 @@ def hook_runs(cmd):
 def missing_setup(a, d):
     names = ["FAL_KEY"] + (["KIE_API_KEY"] if a.script else [])
     missing = [f"  {name}: not set, or not on one line" for name in names if not api_key(name)]
-    if not a.upload_cmd:
-        missing.append("  upload hook: pass --upload-cmd or set UGC_UPLOAD_CMD (see Upload hook in SKILL.md)")
-    elif not hook_runs(a.upload_cmd):
+    if a.upload_cmd and not hook_runs(a.upload_cmd):
         missing.append("  upload hook: its program is not found or not executable")
     if a.clone_voice and not (d / "voice-ref.mp3").is_file():
         missing.append(f"  {d / 'voice-ref.mp3'}: 10 s or more of the voice to clone")
@@ -86,6 +85,11 @@ def missing_setup(a, d):
 
 
 def upload(cmd, path, name):
+    if not cmd:
+        try:
+            return vendors.fal_upload(path, name, key=api_key("FAL_KEY"), rest=FAL_REST)
+        except VendorError as e:
+            sys.exit(f"Upload failed: {e}")
     key = f"ugc-video/{hashlib.sha256(Path(path).read_bytes()).hexdigest()[:16]}/{name}"
     r = subprocess.run(shlex.split(cmd) + [str(path), key], capture_output=True, text=True, errors="replace")
     lines = [line.strip() for line in r.stdout.splitlines() if line.strip()]
@@ -119,6 +123,13 @@ def load_presenter(path, need_still):
         if absent:
             sys.exit(f"{meta_path} needs {' and '.join(absent)} for the prompt.")
     return d, meta, image
+
+
+def voice_of(out):
+    try:
+        return json.loads((out / "tts.body.json").read_text())["voice_setting"]["voice_id"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def tts_body(text, voice_id):
@@ -157,7 +168,8 @@ def main():
     ap.add_argument("--slug", help="output folder name")
     ap.add_argument("--out-dir", default="ugc-videos", help="parent folder for output (default ./ugc-videos)")
     ap.add_argument("--upload-cmd", default=os.environ.get("UGC_UPLOAD_CMD", ""),
-                    help="command run as <cmd> <path> <key> that prints a public URL last (default $UGC_UPLOAD_CMD)")
+                    help="command run as <cmd> <path> <key> that prints a public URL last (default $UGC_UPLOAD_CMD; "
+                         "without one, files go to fal storage)")
     ap.add_argument("--dry-run", action="store_true", help="length, cost and prompt only; no upload, no spend")
     ap.add_argument("--rerender", action="store_true", help="new Seedance take with the same MP3 (only after the person says yes)")
     ap.add_argument("--no-fix", action="store_true", help="skip the whisper check and fixes; keep the raw take")
@@ -246,6 +258,12 @@ def main():
             earlier = None
         if earlier != run:
             sys.exit(f"{out} holds a run for another script or presenter. Pass a new --slug.")
+    voice, raw_v, pending = out / "voice.mp3", out / "raw-480p.mp4", out / "seedance.task.json"
+    taken = raw_v.exists() or pending.exists()
+    new_take = (f"{out} has a take made with the old voice, so a new voice needs a new take. Pass --rerender "
+                f"(about ${est_secs * SEEDANCE_USD_PER_SEC:.2f}) only after the user says yes.")
+    if a.clone_voice and taken and not a.rerender:
+        sys.exit(new_take)
     if a.clone_voice:
         clone_voice(a, d, meta)
     fal_key, kie_key = api_key("FAL_KEY"), api_key("KIE_API_KEY")
@@ -254,7 +272,13 @@ def main():
     (out / "script.txt").write_text(original + "\n")
     (out / "script-spoken.txt").write_text(spoken + "\n")
 
-    voice = out / "voice.mp3"
+    if voice.exists() and voice_of(out) != meta["voice_id"]:
+        if taken and not a.rerender:
+            sys.exit(new_take)
+        for name in ("voice.mp3", "voice-raw.mp3", "voice-trim.wav"):
+            (out / name).unlink(missing_ok=True)
+        pending.unlink(missing_ok=True)
+        log("2 MP3: the voice id changed, so the MP3 is made again")
     if not voice.exists():
         body = tts_body(spoken, meta["voice_id"])
         (out / "tts.body.json").write_text(json.dumps(body, indent=1))
@@ -289,8 +313,6 @@ def main():
     seconds = min(30, max(4, math.ceil(dur(voice))))
     take_usd = seconds * SEEDANCE_USD_PER_SEC
 
-    raw_v = out / "raw-480p.mp4"
-    pending = out / "seedance.task.json"
     if raw_v.exists():
         pending.unlink(missing_ok=True)
     if raw_v.exists() and a.rerender:

@@ -48,7 +48,7 @@ class FakeVendors:
     def __init__(self, test, served):
         self.requests, self.served = [], served
         self.refuse_fal, self.refuse_kie, self.kie_fail, self.poll_base = [], [], None, None
-        self.poll_errors = []
+        self.poll_errors, self.short = [], set()
         self.jobs, self.polls = {}, {}
         fake = self
 
@@ -58,6 +58,9 @@ class FakeVendors:
 
             def do_POST(self):
                 fake.handle(self, json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+
+            def do_PUT(self):
+                fake.handle(self, self.rfile.read(int(self.headers["Content-Length"])))
 
             def log_message(self, *args):
                 pass
@@ -74,7 +77,17 @@ class FakeVendors:
                               "auth": handler.headers.get("Authorization"), "body": body})
         polls = self.polls[path] = self.polls.get(path, 0) + 1
         if path.startswith("/files/") and (self.served / path[len("/files/"):]).is_file():
-            return self.send(handler, 200, (self.served / path[len("/files/"):]).read_bytes())
+            data = (self.served / path[len("/files/"):]).read_bytes()
+            if path in self.short:
+                return self.send(handler, 200, data[:len(data) // 2], length=len(data))
+            return self.send(handler, 200, data)
+        if path == "/falrest/storage/upload/initiate":
+            name = "fal-{}-{}".format(len(self.requests), body["file_name"])
+            return self.send(handler, 200, {"upload_url": self.url + "/put/" + name,
+                                            "file_url": self.url + "/files/" + name})
+        if handler.command == "PUT" and path.startswith("/put/"):
+            (self.served / path[len("/put/"):]).write_bytes(body)
+            return self.send(handler, 200, b"")
         if handler.command == "POST" and path.startswith("/fal/"):
             if self.refuse_fal:
                 return self.send(handler, self.refuse_fal.pop(0), {"detail": "busy"})
@@ -106,10 +119,10 @@ class FakeVendors:
         self.send(handler, 404, {})
 
     @staticmethod
-    def send(handler, status, payload):
+    def send(handler, status, payload, length=None):
         data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
         handler.send_response(status)
-        handler.send_header("Content-Length", str(len(data)))
+        handler.send_header("Content-Length", str(len(data) if length is None else length))
         handler.end_headers()
         handler.wfile.write(data)
 
@@ -145,11 +158,13 @@ class MakeUgcTests(unittest.TestCase):
                                 self.fake.url + "/files", str(self.hook_log)])
         self.out = self.home / "ugc-videos" / "test-ad"
 
-    def make(self, *args, fal_key=FAL_KEY):
+    def make(self, *args, fal_key=FAL_KEY, hook=True):
         env = {name: value for name, value in os.environ.items()
                if not name.startswith(("FAL_", "KIE_", "UGC_")) and not name.lower().endswith("_proxy")}
-        env.update(HOME=str(self.home), no_proxy="*", UGC_RETRY_SCALE="0.001", UGC_UPLOAD_CMD=self.hook,
+        env.update(HOME=str(self.home), no_proxy="*", UGC_RETRY_SCALE="0.001", FAL_REST_URL=self.fake.url + "/falrest",
                    FAL_QUEUE_URL=self.fake.url + "/fal", KIE_API_URL=self.fake.url + "/kie", KIE_API_KEY=KIE_KEY)
+        if hook:
+            env["UGC_UPLOAD_CMD"] = self.hook
         if fal_key:
             env["FAL_KEY"] = fal_key
         return subprocess.run([sys.executable, str(SCRIPT), "--presenter", str(self.presenter), *args],
@@ -310,6 +325,132 @@ class MakeUgcTests(unittest.TestCase):
         self.assertEqual(other.requests, [])
         self.assertEqual([r["path"] for r in self.fake.requests], [TTS])
 
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_without_a_hook_files_go_to_fal_storage_with_the_fal_key_only(self):
+        result = self.run_script("--no-upscale", hook=False)
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        initiated = [r for r in self.fake.requests if r["path"] == "/falrest/storage/upload/initiate"]
+        self.assertEqual([(r["auth"], r["body"]["file_name"]) for r in initiated],
+                         [("Key " + FAL_KEY, "voice.mp3"), ("Key " + FAL_KEY, "presenter.jpg")])
+        puts = [r for r in self.fake.requests if r["method"] == "PUT"]
+        self.assertEqual([r["auth"] for r in puts], [None, None])
+        [task] = self.posts(CREATE)
+        stored = {name: (self.served / name).read_bytes() for name in os.listdir(self.served) if name.startswith("fal-")}
+        image = task["input"]["reference_image_urls"][0]
+        self.assertEqual(stored[image.rsplit("/", 1)[1]], b"still")
+        audio = task["input"]["reference_audio_urls"][0]
+        self.assertEqual(stored[audio.rsplit("/", 1)[1]], (self.out / "voice.mp3").read_bytes())
+        self.assertEqual(self.uploads(), {})
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_a_short_download_is_refused_and_the_next_run_fetches_the_same_take(self):
+        self.fake.short = {"/files/render.mp4"}
+
+        first = self.run_script("--no-upscale")
+        self.fake.short = set()
+        second = self.run_script("--no-upscale")
+
+        self.assertNotEqual(first.returncode, 0)
+        self.assertIn("download", first.stderr)
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        self.assertEqual(len(self.posts(CREATE)), 1)
+        self.assertEqual((self.out / "raw-480p.mp4").read_bytes(), (self.served / "render.mp4").read_bytes())
+        self.assertEqual([p.name for p in self.out.glob("*.partial")], [])
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_clone_voice_on_a_folder_holding_another_script_stops_before_the_clone(self):
+        self.assertEqual(self.run_script("--no-upscale").returncode, 0)
+
+        result = self.make("--clone-voice", "--script", "A different ad for another brand.", "--slug", "test-ad",
+                           "--no-fix")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--slug", result.stderr)
+        self.assertEqual(self.posts(CLONE), [])
+        self.assertEqual(json.loads((self.presenter / "presenter.json").read_text()), self.meta)
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_a_rerender_after_a_crash_before_cleanup_submits_a_new_take(self):
+        self.assertEqual(self.run_script("--no-upscale").returncode, 0)
+        (self.out / "seedance.task.json").write_text(json.dumps({"taskId": "task-1"}))
+
+        result = self.run_script("--no-upscale", "--rerender")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.posts(CREATE)), 2)
+        self.assertTrue((self.out / "raw-480p-take1.mp4").is_file())
+        self.assertFalse((self.out / "seedance.task.json").exists())
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_a_new_voice_on_a_finished_folder_needs_a_rerender_before_any_spend(self):
+        self.assertEqual(self.run_script("--no-upscale").returncode, 0)
+
+        result = self.run_script("--no-upscale", "--clone-voice")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--rerender", result.stderr)
+        self.assertEqual(self.posts(CLONE), [])
+        self.assertEqual(len(self.posts(TTS)), 1)
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_a_new_voice_with_rerender_makes_the_mp3_again_with_that_voice(self):
+        self.assertEqual(self.run_script("--no-upscale").returncode, 0)
+
+        result = self.run_script("--no-upscale", "--clone-voice", "--rerender")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        voices = [body["voice_setting"]["voice_id"] for body in self.posts(TTS) if body["text"] == SPOKEN]
+        self.assertEqual(voices, ["voice-abc", "voice-new"])
+        self.assertEqual(len(self.posts(CREATE)), 2)
+        self.assertTrue((self.out / "raw-480p-take1.mp4").is_file())
+
+
+class StutterCutTests(unittest.TestCase):
+    SCRIPT = "our app never shares your data"
+
+    def fix(self, transcripts):
+        sys.path.insert(0, str(SCRIPT.parent))
+        self.addCleanup(sys.path.remove, str(SCRIPT.parent))
+        import fix_words
+
+        def heard(text):
+            return [{"w": w, "raw": w, "s": i * 0.5, "e": i * 0.5 + 0.4} for i, w in enumerate(text.split())]
+
+        last = {}
+
+        def plain(path, tag, start=None, end=None):
+            return (transcripts[last["cut"]] if "cuttest" in str(path) else "our app app never shares your data").split()
+
+        def jump_cut(src, cuts, out):
+            if cuts:
+                last["cut"] = (cuts[-1]["cs"], cuts[-1]["ce"])
+
+        fakes = {"words": lambda audio, tag, *a: heard(self.SCRIPT if tag == "voice" else
+                                                         "our app app never shares your data"),
+                 "plain": plain, "jump_cut": jump_cut, "run": lambda *cmd: "",
+                 "search_cut": lambda *a: list(transcripts)}
+        for name, fake in fakes.items():
+            original = getattr(fix_words, name)
+            setattr(fix_words, name, fake)
+            self.addCleanup(setattr, fix_words, name, original)
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "script.txt"
+            script.write_text(self.SCRIPT)
+            return fix_words.fix("render.mp4", "voice.mp3", script, Path(tmp) / "out.mp4", log=lambda line: None)
+
+    def test_a_cut_that_also_removes_a_script_word_is_passed_over_for_one_that_does_not(self):
+        report = self.fix({(1.0, 1.4): "our app shares your data", (2.0, 2.4): self.SCRIPT})
+
+        self.assertEqual(report["cuts"], [{"heard": "app", "removed": [2.0, 2.4]}])
+        self.assertEqual(report["unfixed"], [])
+
+    def test_a_stutter_with_only_word_losing_cuts_is_reported_not_fixed(self):
+        report = self.fix({(1.0, 1.4): "our app shares your data"})
+
+        self.assertEqual(report["cuts"], [])
+        self.assertEqual([(u["kind"], u["heard"]) for u in report["unfixed"]], [("extra words", "app")])
 
 if __name__ == "__main__":
     unittest.main()

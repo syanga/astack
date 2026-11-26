@@ -368,17 +368,19 @@ def fix(render, voice, script_path, out, check_only=False, log=print):
         else:
             report["splices"].append({"script": f["script"], "heard": f["heard"], "at": round(kept[-1]["rs"], 2)})
 
-    # stutter cuts: try candidates in order; keep the first one after which the whole file has no extra words there
     kept = []
     for c in cuts:
         for cs, ce in c["options"][:6]:
             test = f"{TMP}/cuttest.mp4"
             jump_cut(spliced, kept + [{"cs": cs, "ce": ce}], test)
-            W = [{"w": norm(x), "raw": x} for x in plain(test, "cutcheck") if norm(x)]
-            left = [w for w in align(script_words, W)[1] if w[0] == "insert" and c["a1"] <= w[1] <= c["a2"]]
-            LOG(f"    cut '{c['heard']}' {cs:.2f}-{ce:.2f}: {'clean' if not left else 'extra words still there'}")
-            if not left:
+            now = errors(test, script_words, mp3_raw, "cutcheck")
+            near = [r for r in now if r[0] <= c["a2"] and r[1] >= c["a1"]]
+            clean = not near and len(now) < len(base)
+            LOG(f"    cut '{c['heard']}' {cs:.2f}-{ce:.2f}: "
+                f"{'clean' if clean else 'extra or missing words there' if near else 'new error'}")
+            if clean:
                 kept.append({"cs": cs, "ce": ce, "heard": c["heard"]})
+                base = now
                 break
         else:
             unfixed.append({"kind": "extra words", "heard": c["heard"], "at": round(c["at"], 2),

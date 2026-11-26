@@ -1,5 +1,6 @@
 import http.client
 import json
+import mimetypes
 import os
 from pathlib import Path
 import shutil
@@ -9,6 +10,7 @@ import urllib.parse
 import urllib.request
 
 FAL_BASE = "https://queue.fal.run"
+FAL_REST = "https://rest.fal.ai"
 KIE_BASE = "https://api.kie.ai"
 REFUSED = (429,)
 KIE_REFUSED = (429, 455)
@@ -163,6 +165,32 @@ def kie_wait(task, *, key, base=KIE_BASE, timeout=1800):
 
     query = urllib.parse.urlencode({"taskId": task})
     return poll(f"{base}/api/v1/jobs/recordInfo?{query}", auth, deadline, name, finished)
+
+
+def fal_upload(path, name, *, key, rest=FAL_REST):
+    path = Path(path)
+    kind = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    try:
+        target = call("POST", f"{rest.rstrip('/')}/storage/upload/initiate?storage_type=fal-cdn-v3",
+                      {"Authorization": f"Key {key}", "Content-Type": "application/json"},
+                      {"file_name": name, "content_type": kind})
+    except urllib.error.HTTPError as error:
+        raise VendorError(f"fal storage refused {name}: {http_error(error)}") from None
+    except UNANSWERED as error:
+        raise VendorError(f"fal storage did not answer for {name}: {error}") from None
+    put, url = target.get("upload_url"), target.get("file_url")
+    for link in (put, url):
+        if not isinstance(link, str) or not link.startswith(("https://", "http://")):
+            raise VendorError(f"fal storage gave no usable upload_url and file_url for {name}")
+    request = urllib.request.Request(put, data=path.read_bytes(), method="PUT", headers={"Content-Type": kind})
+    try:
+        with OPENER.open(request, timeout=300) as reply:
+            reply.read()
+    except urllib.error.HTTPError as error:
+        raise VendorError(f"fal storage upload of {name} failed: {http_error(error)}") from None
+    except UNANSWERED as error:
+        raise VendorError(f"fal storage upload of {name} failed: {error}") from None
+    return url
 
 
 def fetch(url, dest):

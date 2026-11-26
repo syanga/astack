@@ -16,13 +16,13 @@ python3 <skill-dir>/scripts/make_ugc.py --script script.txt --presenter <dir>   
 
 `<skill-dir>` is the folder this SKILL.md is in. `<dir>` is a presenter folder in the brand's directory, described in [Presenters](#presenters). Output: `./ugc-videos/<slug>/<slug>.mp4`.
 
-A real run needs `FAL_KEY`, `KIE_API_KEY`, and an [upload hook](#upload-hook). Never print the keys.
+A real run needs `FAL_KEY` and `KIE_API_KEY`. Never print the keys. Input files go to fal storage unless an [upload hook](#uploads) is set.
 
 ## Workflow
 
 1. **Write the script as the brand's presenter.** The presenter explains or demonstrates the product and speaks for the brand, to the viewer as "you". The presenter never claims to be a customer, describes results of their own, or reads a review as their own. The FTC treats those as fake testimonials. State only claims the brand can back, from its claims file when it has one.
 2. **Write the script clean.** Periods, commas, question marks and apostrophes only. **No quotation marks** (the script removes any it finds). Numbers can be digits. They are spelled out for speech (`24/7` becomes twenty-four seven, `2am` becomes two a.m., `9:45 p.m.` becomes nine forty-five p.m.). Write `twelve hundred dollars` if that is how it should be said. `$1,200` is read "one thousand two hundred dollars".
-3. **Dry run first, always.** Tell the user the word count, the expected length and the cost. Over about 110 words is tight. Over about 115 does not fit 30 s, so show them what to cut. If `python3` is missing, show `brew install python` on macOS or `sudo apt install python3` on Linux, and wait. The dry run cannot start without it. If ffmpeg or whisper is missing, the dry run lists those install commands first. Show those to the user and wait. Do not add `--no-fix` yourself. That flag is only after the user says to skip the word check. The dry run also names any missing key or upload hook.
+3. **Dry run first, always.** Tell the user the word count, the expected length and the cost. Over about 110 words is tight. Over about 115 does not fit 30 s, so show them what to cut. If `python3` is missing, show `brew install python` on macOS or `sudo apt install python3` on Linux, and wait. The dry run cannot start without it. If ffmpeg or whisper is missing, the dry run lists those install commands first. Show those to the user and wait. Do not add `--no-fix` yourself. That flag is only after the user says to skip the word check. The dry run also names any missing key, and an upload hook it cannot run.
 4. **Run for real in the background** (5 to 10 min).
 5. **Read the end of the output.** It lists every fix (`fixed:` or `cut:`) and anything **NOT FIXED** with its time in the video. Tell the user exactly where to listen.
 6. **Never re-render on your own.** If something is not fixed, tell the user the spot, the reason, and the cost of a new take (about $0.14 per second of video). Run `--rerender` **only if they say yes**. It keeps the old take and reuses the same MP3.
@@ -32,13 +32,13 @@ A real run needs `FAL_KEY`, `KIE_API_KEY`, and an [upload hook](#upload-hook). N
 
 | # | Step | Where | Cost |
 |---|---|---|---|
-| 0 | Preflight: `ffmpeg`, `whisper-cli`, the whisper model, `FAL_KEY`, `KIE_API_KEY`, the upload hook. Prints install commands for anything missing | local | free |
+| 0 | Preflight: `ffmpeg`, `whisper-cli`, the whisper model, `FAL_KEY`, `KIE_API_KEY`, the upload hook when one is set. Prints install commands for anything missing | local | free |
 | 1 | Quotes removed, numbers spelled out, word count, length and cost estimate | local | free |
 | 2 | MP3: `fal-ai/minimax/speech-02-hd` with the presenter's cloned voice, speed 1.0 | fal | about $0.10 per 1,000 characters |
 | 3 | Fit: pauses over 0.3 s trimmed to 0.25 s, then `atempo` to 29.0 s or less (limit 1.10x). Over the limit it stops and says how many words to cut | local ffmpeg | free |
-| 4 | Seedance: `bytedance/seedance-2-5`, 480p, 9:16, `[Image1]` = presenter still, `[Audio1]` = the MP3, `generate_audio: true`, duration = MP3 length rounded up. The upload hook puts the still and the MP3 at URLs kie can fetch. Prompt: `prompts/seedance.txt` | kie | about $0.14 per second |
+| 4 | Seedance: `bytedance/seedance-2-5`, 480p, 9:16, `[Image1]` = presenter still, `[Audio1]` = the MP3, `generate_audio: true`, duration = MP3 length rounded up. The still and the MP3 go to fal storage, or the upload hook, for URLs kie can fetch. Prompt: `prompts/seedance.txt` | kie | about $0.14 per second |
 | 5 | Check: local whisper on the render and on our MP3, compared with the script | local whisper | free |
-| 6 | Fix: wrong word, so the same word is spliced from the MP3 (video untouched). Stutter or extra words, so they are cut from video and audio as a jump cut. Each fix is tried at several timings and kept only if a whole-file transcript then reads right | local | free |
+| 6 | Fix: wrong word, so the same word is spliced from the MP3 (video untouched). Stutter or extra words, so they are cut from video and audio as a jump cut. Each fix is tried at several timings and kept only if a whole-file transcript then reads right. A cut that also removes a script word is refused, and the spot is reported as NOT FIXED | local | free |
 | 7 | Upscale: `resize_grain.py` (Lanczos, light sharpen, phone grain) to 1080x1920 | local ffmpeg | free |
 
 Steps are resumable. An existing `voice.mp3` or `raw-480p.mp4` in the output folder is reused. A folder that holds a run for another script or presenter stops the run, so pass a new `--slug`. The kie task id is saved in `seedance.task.json` before polling. If polling times out, fails to connect, or the process stops, running the same command checks that task again instead of paying for a new take. To give up on that task, delete `seedance.task.json`. The next run then pays for a new take, so ask the user first.
@@ -74,9 +74,11 @@ A presenter is a synthetic person made for one brand. Each one is a folder in th
 
 **Voice clone.** `make_ugc.py --clone-voice --presenter <dir>` uploads `voice-ref.mp3`, clones it with `fal-ai/minimax/voice-clone` (about $1.50), reads one short line with the new voice, and saves `voice_id` in `presenter.json`. fal deletes a clone that no TTS call uses within 7 days of cloning, so the short line keeps it. Run it for a new presenter, or when the TTS step fails on the voice id. Run it only after the user says yes, then commit `presenter.json` in the brand's repository.
 
-## Upload hook
+## Uploads
 
-kie and fal fetch the MP3, the still, and the voice sample from URLs. The upload hook is a command that uploads one file and prints a URL that anyone can fetch for at least an hour. `make_ugc.py` runs it with two arguments, the local path and a storage key such as `ugc-video/<hash>/voice.mp3`, and reads the URL from the last line of its output. `<hash>` is the start of the file's SHA-256, so two runs never share a key for different files. Set it with `--upload-cmd` or `UGC_UPLOAD_CMD`. A hook for S3:
+kie and fal fetch the MP3, the still, and the voice sample from URLs. By default `make_ugc.py` uploads each file to fal storage with `FAL_KEY` (`rest.fal.ai/storage/upload/initiate`, then a PUT of the bytes). Anyone with a fal storage URL can fetch the file, and fal keeps it for the account's retention period.
+
+To keep the files in your own storage, set an upload hook. The upload hook is a command that uploads one file and prints a URL that anyone can fetch for at least an hour. `make_ugc.py` runs it with two arguments, the local path and a storage key such as `ugc-video/<hash>/voice.mp3`, and reads the URL from the last line of its output. `<hash>` is the start of the file's SHA-256, so two runs never share a key for different files. Set it with `--upload-cmd` or `UGC_UPLOAD_CMD`. A hook for S3:
 
 ```sh
 #!/bin/sh
@@ -94,7 +96,7 @@ aws s3 presign "s3://<bucket>/$2" --expires-in 3600
 | `--dry-run` | off | Length, cost and the full prompt. No upload, no network call, no spend |
 | `--caps` | none | Brand names to write in caps in the Seedance dialogue |
 | `--slug` / `--out-dir` | first words / `./ugc-videos` | |
-| `--upload-cmd` | `UGC_UPLOAD_CMD` | See [Upload hook](#upload-hook) |
+| `--upload-cmd` | `UGC_UPLOAD_CMD`, else fal storage | See [Uploads](#uploads) |
 | `--rerender` | off | New Seedance take with the same MP3. **Only after the user says yes** |
 | `--no-fix` | off | Skip the whisper check. Only after the user asks |
 | `--no-upscale` | off | Stop at 480p |
