@@ -18,7 +18,7 @@ The caller supplies these. Ask for any that is missing.
 - The ad: one image and the text that runs with it, such as the primary text and headline.
 - The craft brief: a rubric whose gate checks define a major flaw, and the brand guide and claims file it names.
 - How to render a new version, such as a static-ads request file and image backend.
-- The panel command template. `rounds.py` replaces `{panel}` with `A` or `B`, `{image}` with the version's image, and `{copy}` with its `copy.txt`, each shell-quoted. The command prints, as its last line, a JSON object whose `purchase_intent.mean` is the panel's mean purchase intent. Panel A is the metric. Panel B uses another model, other personas, and other reference statements, and confirms a keep between two passing versions. Each panel must draw the same personas on every run, so the new version and the current best face the same buyers.
+- The panel command template. `rounds.py` replaces `{panel}` with `A` or `B`, `{image}` with the version's image, and `{copy}` with its `copy.txt`, each shell-quoted. Leave the placeholders unquoted in the template. The command prints, as its last line, a JSON object whose `purchase_intent.mean` is the panel's mean purchase intent. Panel A is the metric. Panel B uses another model, other personas, and other reference statements, and confirms a keep between two passing versions. Each panel must draw the same personas on every run, so the new version and the current best face the same buyers.
 - The margin: the largest change in panel A's mean that repeated runs on one unchanged ad produce.
 
 ## Set up the run

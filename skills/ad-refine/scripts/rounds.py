@@ -252,11 +252,11 @@ def load_state(run):
 
 
 def record(run, state):
+    text = report(state)
+    (run / "table.md").write_text(text, encoding="utf-8")
     pending = run / "run.json.tmp"
     pending.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     os.replace(pending, run / "run.json")
-    text = report(state)
-    (run / "table.md").write_text(text, encoding="utf-8")
     return text
 
 

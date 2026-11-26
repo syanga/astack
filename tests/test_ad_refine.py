@@ -98,6 +98,9 @@ class RoundsTests(unittest.TestCase):
     def assertCalls(self, expected):
         self.assertEqual(self.calls(), sorted(expected))
 
+    def assertRefusedOrFailed(self, result):
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def assertRefused(self, result):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertNotIn("Traceback", result.stderr)
@@ -384,6 +387,19 @@ class RoundsTests(unittest.TestCase):
         self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
         self.assertCalls(["A v3", "A v0", "B v3", "B v0"])
         self.assertEqual(self.round("v3", self.vote(v3=["minor"], v1=["minor"])).returncode, 1)
+
+    def test_a_round_whose_table_cannot_be_written_records_nothing(self):
+        self.version("v0", 2.5, 2.5)
+        self.version("v1", 3.0, 3.0)
+        self.start(self.vote(v0=["minor"]))
+        (self.run_folder / "table.md").unlink()
+        (self.run_folder / "table.md").mkdir()
+        craft = self.vote(v1=[], v0=["minor"])
+
+        self.assertRefusedOrFailed(self.round("v1", craft))
+        (self.run_folder / "table.md").rmdir()
+
+        self.assertStatus(self.round("v1", craft), "stop: empty flaw queue")
 
     def test_a_second_start_is_refused(self):
         self.version("v0", 2.5, 2.5)
