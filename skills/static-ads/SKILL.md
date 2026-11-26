@@ -76,7 +76,7 @@ For each ad, write `pages/scene-<Name>.req.json` in the JSON shape the next sect
 - The scene never shows the product. The page shows the real product image from the repo, so no product page is ever drawn.
 - `size` is `1152x2048`, so one scene fills both the Feed and the Story. Leave out `images`.
 
-Run `generate.py` on `pages/`, first with `--dry-run`. Each scene costs about $0.07.
+Run `generate.py` on `pages/`, first with `--dry-run`. Each scene costs about 7 cents.
 
 Then copy `<skill-dir>/starter/ad.html` to `pages/<Name>.html` for each ad. The starter lays out one ad for both sizes: a CSS media query moves the content into the part of a Story that Instagram leaves uncovered. Then:
 - Point the `scene` image at `scene-<Name>.png`.
@@ -117,7 +117,7 @@ Then run:
 
 ```bash
 python3 <skill-dir>/scripts/generate.py <run-folder>/pages --dry-run   # local check, no OpenAI call
-python3 <skill-dir>/scripts/generate.py <run-folder>/pages             # about $0.07 per ad
+python3 <skill-dir>/scripts/generate.py <run-folder>/pages             # about 7 cents per ad
 ```
 
 `--dry-run` reads the request files and prints each ad's size, quality, prompt length, and reference count. It does not call OpenAI and does not spend money. That is the point: catch a bad request before the image run.
