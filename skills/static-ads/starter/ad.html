@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+:root {
+  --paper: #F6F1E9;
+  --ink: #2B1D14;
+  --scrim: rgba(43, 29, 20, 0.82);
+  --on-scene: #FFFFFF;
+  --accent: #B4532A;
+  --on-accent: #FFFFFF;
+  --headline-font: Georgia, "Times New Roman", serif;
+  --body-font: system-ui, "Helvetica Neue", Arial, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: var(--ink); }
+.scene { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.scrim {
+  position: absolute; inset: 0;
+  background: linear-gradient(to bottom, var(--scrim) 0%, var(--scrim) 40%, transparent 56%, transparent 64%, var(--scrim) 86%);
+}
+main {
+  position: relative; height: 100%; display: flex; flex-direction: column; padding: 160px;
+  font-family: var(--body-font); color: var(--on-scene); -webkit-font-smoothing: antialiased;
+}
+.brand { display: flex; align-items: center; gap: 24px; font-size: 50px; font-weight: 700; }
+.brand img { width: 88px; height: 88px; }
+h1 {
+  margin-top: 64px; font-family: var(--headline-font); font-size: 120px; line-height: 1.02;
+  font-weight: 800; letter-spacing: -0.01em; text-wrap: balance;
+}
+.sub { margin-top: 32px; font-size: 54px; line-height: 1.3; }
+.product { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; margin: 48px 0; }
+.product img {
+  max-width: 70%; max-height: 100%; object-fit: contain; padding: 28px; border-radius: 28px;
+  background: var(--paper); box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.55);
+}
+.cta {
+  align-self: flex-start; padding: 28px 56px; border-radius: 999px;
+  background: var(--accent); color: var(--on-accent); font-size: 54px; font-weight: 700;
+}
+footer { margin-top: 40px; font-size: 44px; line-height: 1.4; }
+@media (max-aspect-ratio: 2/3) {
+  main { padding: 360px 160px 733px; }
+  .scrim { background: var(--scrim); opacity: 0.7; }
+}
+</style>
+</head>
+<body>
+<img class="scene" src="assets/scene.svg" alt="">
+<div class="scrim"></div>
+<main>
+  <div class="brand"><img src="assets/logo.svg" alt="">Larkspur Coffee</div>
+  <h1>FRESH BEANS IN 48 HOURS</h1>
+  <p class="sub">Roasted on Monday, at your door by Wednesday.</p>
+  <div class="product"><img src="assets/product.svg" alt=""></div>
+  <div class="cta">Order a bag</div>
+  <footer>larkspur.example · Not affiliated with any coffee chain.</footer>
+</main>
+</body>
+</html>

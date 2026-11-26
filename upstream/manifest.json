@@ -504,6 +504,6 @@
       "SKILL.md": "skills/static-ads/SKILL.md",
       "generate.sh": "skills/static-ads/scripts/generate.py"
     },
-    "note": "Graphed needs its own account and CLI, so images come from the OpenAI Images API, which renders Meta's 4:5 at 1472x1840. The script then needs no polling, crop, or upload, and runs on Linux, which lacks sips. The Ad Library pull needs a paid scraping service, so the user pastes their current ads instead. User-invoked because each run spends money."
+    "note": "Graphed needs its own account and CLI, so images come from the OpenAI Images API, which renders Meta's 4:5 at 1472x1840. The script then needs no polling, crop, or upload, and runs on Linux, which lacks sips. The Ad Library pull needs a paid scraping service, so the user pastes their current ads instead. User-invoked because each run spends money. With the brand's repo, GPT Image draws only a scene with no text, and an HTML page that headless Chrome screenshots puts the exact words, logo, and product images on top. Model-drawn ads in a live run drifted in color and showed made-up product pages, and pure HTML ads lost a blind comparison to model-drawn ones on looks."
   }
 }
