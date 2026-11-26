@@ -16,11 +16,11 @@ Downloading the CLI or Mirage's skills accepts [Mirage's terms](https://github.c
 
 ## Install the pinned release
 
-These steps are for Linux on `x86_64` with glibc 2.35 or newer. Check with `uname -m` and `getconf GNU_LIBC_VERSION`. On other hosts, download `tesseract.zip` and `tesseract.zip.sha256` from the release below into a new empty directory and verify the checksum. Then follow `tesseract/skills/tesseract-motion/references/installation.md` from the extracted archive instead of this section. Use that `tesseract-motion` skill and the executable path its guide names in place of the paths below.
+These steps are for Linux on `x86_64` with glibc 2.35 or newer. Check with `uname -m` and `getconf GNU_LIBC_VERSION`. On other hosts, download `tesseract.zip` and `tesseract.zip.sha256` from the release below into a new empty directory and verify the checksum. Extract it into a new empty directory, then follow `tesseract/skills/tesseract-motion/references/installation.md` from it instead of this section. Use that `tesseract-motion` skill in place of the skill path below. In every later block, replace the `tsrct=` line with the executable path that guide names, in double quotes, and leave out the `VK_ICD_FILENAMES` line.
 
 The pin is 0.3.1, because Mirage's skills from a release expect the CLI from the same release. Shell variables do not carry between shell calls, so each block below sets the variables it uses.
 
-1. Run this block in one shell call. It downloads each archive into its own new empty directory, verifies both checksums, and installs the CLI and Mirage's skills under Mirage's data folder. It stops at the first failed command, including a failed checksum, and deletes its download directories when it exits. The installer needs no root.
+1. Run this block in one shell call. It downloads each archive into its own new empty directory, verifies both checksums, and installs the CLI and Mirage's skills under Mirage's data folder. It stops at the first failed command, including a failed checksum, and deletes its temporary directories when it exits. The installer needs no root.
 
    ```sh
    (
@@ -30,16 +30,16 @@ The pin is 0.3.1, because Mirage's skills from a release expect the CLI from the
      data=${XDG_DATA_HOME:-$HOME/.local/share}/Tesseract
      skills_dl=$(mktemp -d)
      cli_dl=$(mktemp -d)
-     cli_x=$(mktemp -d)
-     trap 'rm -rf "$skills_dl" "$cli_dl" "$cli_x"' EXIT
+     cli_unpacked=$(mktemp -d)
+     trap 'rm -rf "$skills_dl" "$cli_dl" "$cli_unpacked"' EXIT
      cd "$skills_dl"
      curl -fL --remote-name-all "$base/tesseract.zip" "$base/tesseract.zip.sha256"
      sha256sum -c tesseract.zip.sha256
      cd "$cli_dl"
      curl -fL --remote-name-all "$base/tesseract-$v-linux-x86_64.zip" "$base/tesseract-$v-linux-x86_64.zip.sha256"
      sha256sum -c "tesseract-$v-linux-x86_64.zip.sha256"
-     unzip -q "tesseract-$v-linux-x86_64.zip" -d "$cli_x"
-     bash "$cli_x/tesseract-$v-linux-x86_64/install.sh"
+     unzip -q "tesseract-$v-linux-x86_64.zip" -d "$cli_unpacked"
+     bash "$cli_unpacked/tesseract-$v-linux-x86_64/install.sh"
      mkdir -p "$data/skills-$v"
      unzip -qo "$skills_dl/tesseract.zip" -d "$data/skills-$v"
    )
@@ -73,12 +73,12 @@ The CLI renders through Vulkan. Its Linux bundle has no H.264 encoder.
    tsrct=${XDG_DATA_HOME:-$HOME/.local/share}/Tesseract/bin/tsrct
    ```
 
-   To use a working GPU driver instead, leave out the first line.
+   To use a working GPU driver instead, leave out every `VK_ICD_FILENAMES` line.
 
 ## Author, export, and check
 
 1. Read Mirage's `tesseract-motion` skill at the path above and follow it, with `"$tsrct"` in place of `tsrct` in its commands. Keep telemetry off.
-2. Export every MP4 through the system ffmpeg. Without these flags, `tsrct export` fails with `No usable H.264 encoder`. A ProRes overlay export (`--format prores`) needs no extra flags.
+2. Export every MP4 through the system ffmpeg. Without these flags, `tsrct export` fails with `No usable H.264 encoder`. An overlay MOV (`--format prores`) needs no extra flags.
 
    ```sh
    export VK_ICD_FILENAMES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | paste -sd: -)
@@ -87,5 +87,5 @@ The CLI renders through Vulkan. Its Linux bundle has no H.264 encoder.
      --encoder-backend external-ffmpeg-command --ffmpeg-path "$(command -v ffmpeg)"
    ```
 
-3. Check each export with `ffprobe -v error -show_entries stream=codec_name,pix_fmt,width,height:format=duration -of compact ad.mp4`, naming the file you exported. Expect the canvas's aspect ratio and the planned duration. Expect `h264` for an MP4, or `prores` with a `yuva` pixel format for an overlay MOV.
-4. Deliver the `.tsrct` project with the checked export.
+3. Check each export with `ffprobe -v error -show_entries stream=codec_name,pix_fmt,width,height:format=duration -of compact ad.mp4`, with `ad.mp4` replaced by each file you exported. An MP4 shows `h264` and the planned duration. An overlay MOV shows `prores`, a `yuva` pixel format, and the duration of the exported layer. Both keep the canvas's aspect ratio.
+4. Deliver the `.tsrct` project with the MP4, and with the overlay MOV when the user asked for one.
