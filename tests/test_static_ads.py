@@ -39,6 +39,7 @@ needs_ffmpeg = unittest.skipUnless(FFMPEG, "compose needs ffmpeg")
 BACKGROUND = bytes.fromhex("061521")
 ART_BACKGROUND = bytes.fromhex("0d1925")
 ART_SQUARE = bytes.fromhex("f0c040")
+ART_ACCENT = bytes.fromhex("ffc5a0")
 LOGO = bytes.fromhex("ffc800")
 WHITE = bytes.fromhex("ffffff")
 PILL = bytes(round(back * (1 - 0.82) + fill * 0.82) for back, fill in zip(BACKGROUND, bytes.fromhex("026692")))
@@ -60,16 +61,19 @@ def square(width, height):
     return round(0.42 * width), round(0.40 * height), round(0.58 * width), round(0.46 * height)
 
 
-def art(width, height):
+def art(width, height, color=ART_SQUARE):
     x0, y0, x1, y1 = square(width, height)
+    edge = bytes((a + b) // 2 for a, b in zip(ART_BACKGROUND, color))
     plain = ART_BACKGROUND * width
-    marked = ART_BACKGROUND * x0 + ART_SQUARE * (x1 - x0) + ART_BACKGROUND * (width - x1)
+    marked = ART_BACKGROUND * (x0 - 1) + edge + color * (x1 - x0) + edge + ART_BACKGROUND * (width - x1 - 1)
     return png(width, [marked if y0 <= y < y1 else plain for y in range(height)], 2)
 
 
 def image_for(prompt):
     asked = re.search(r"ART ([0-9]+)x([0-9]+)", prompt)
-    return art(*map(int, asked.groups())) if asked else RENDER
+    if not asked:
+        return RENDER
+    return art(*map(int, asked.groups()), ART_ACCENT if "ACCENT" in prompt else ART_SQUARE)
 
 
 def sfnt(tables):
@@ -690,6 +694,31 @@ class GenerateTests(unittest.TestCase):
             ("subline", "A written reading.", "fonts/subline.ttf", 450, 100),
             ("cta", "GET YOUR READING", "fonts/cta.ttf", 700, 100),
         ])
+
+    @needs_ffmpeg
+    def test_art_drawn_near_a_brand_accent_is_set_in_the_exact_accent_over_the_exact_background(self):
+        self.write_brand()
+        (self.run_folder / "layer.json").write_text(json.dumps({**BRAND, "accents": ["#ffd9c4"]}), encoding="utf-8")
+        self.write_request("1-accent", {"prompt": "Gold wheel, no words, ACCENT, ART 928x1152", "size": "1472x1840",
+                                        "compose": COPY})
+        self.write_ad("2-other", "928x1152")
+
+        result = self.generate_on_vertex()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        accent = bytes.fromhex("ffd9c4")
+        for name, inner, edge in [
+                ("1-accent", accent, bytes(round(t + (a - t) / 2) for t, a in zip(BACKGROUND, accent))),
+                ("2-other", ART_SQUARE, bytes((a + b) // 2 for a, b in zip(ART_BACKGROUND, ART_SQUARE)))]:
+            with self.subTest(ad=name):
+                width, height, found = marks(self.run_folder / (name + ".png"))
+                left, top, right, bottom = square(width, height)
+                middle = (top + bottom) // 2
+                self.assertEqual(found.get(((left + right) // 2, middle)), inner)
+                drawn = found.get((left - 1, middle))
+                self.assertTrue(drawn and all(abs(a - b) <= 1 for a, b in zip(drawn, edge)), drawn)
+        settings = json.loads((self.run_folder / "1-accent.layer.json").read_text(encoding="utf-8"))
+        self.assertEqual(settings["art_accents"], {"#ffd9c4": "#ffc5a0"})
 
     @needs_ffmpeg
     def test_a_rerun_composes_the_same_bytes_from_the_saved_art_without_rendering_again(self):

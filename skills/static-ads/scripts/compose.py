@@ -72,6 +72,7 @@ class Logo:
 @dataclass(frozen=True)
 class Brand:
     backgrounds: tuple[str, ...]
+    accents: tuple[str, ...]
     logo: Logo | None
     button: str
     opacity: float
@@ -236,6 +237,10 @@ def read_brand(folder):
     if not isinstance(backgrounds, list) or not backgrounds:
         raise ComposeError("layer.json backgrounds must be a non-empty list of #rrggbb colors")
     backgrounds = tuple(hex_color(value, "layer.json backgrounds") for value in backgrounds)
+    accents = brand.get("accents", [])
+    if not isinstance(accents, list):
+        raise ComposeError("layer.json accents must be a list of #rrggbb colors")
+    accents = tuple(hex_color(value, "layer.json accents") for value in accents)
     logo = None
     if brand.get("logo") is not None:
         path = inside(folder, brand["logo"], "layer.json logo")
@@ -251,7 +256,7 @@ def read_brand(folder):
     styles = brand.get("type")
     if not isinstance(styles, dict) or set(styles) != set(MAX_LINES):
         raise ComposeError("layer.json type needs exactly headline, subline, and cta")
-    return Brand(backgrounds, logo, fill, opacity,
+    return Brand(backgrounds, accents, logo, fill, opacity,
                  {role: read_style(folder, role, styles[role]) for role in MAX_LINES})
 
 
@@ -422,31 +427,58 @@ def describe(plan):
         plan.brand.logo.file if plan.brand.logo else "none")
 
 
-def key(pixels, target, start, end):
-    t0, t1, t2 = target
-    near = [pixel for pixel in (pixels[at:at + 3] for at in range(0, len(pixels), 21))
-            if abs(pixel[0] - t0) <= 32 and abs(pixel[1] - t1) <= 32 and abs(pixel[2] - t2) <= 32]
+def near(samples, color, reach):
+    return [pixel for pixel in samples if max(abs(a - b) for a, b in zip(pixel, color)) <= reach]
+
+
+def middle(pixels):
+    return bytes(statistics.median_low(pixel[channel] for pixel in pixels) for channel in range(3))
+
+
+def snap(pixel, base, target, drawn):
+    best = None
+    for accent, seen in drawn.items():
+        line = [b - a for a, b in zip(base, seen)]
+        t = min(max(sum((p - a) * v for p, a, v in zip(pixel, base, line)) / sum(v * v for v in line), 0), 1)
+        miss = max(abs(p - a - t * v) for p, a, v in zip(pixel, base, line))
+        if miss <= 24 and (best is None or miss < best[0]):
+            best = miss, t, accent
+    if best is None:
+        return None, 0
+    miss, t, accent = best
+    return [value + t * (color - value) for value, color in zip(target, accent)], min((24 - miss) / 12, 1)
+
+
+def key(pixels, target, accents, start, end):
+    samples = [pixels[at:at + 3] for at in range(0, len(pixels), 21)]
+    flat = near(samples, target, 32)
     out = bytearray(pixels)
-    if len(near) < 0.05 * math.ceil(len(pixels) / 21):
-        return out, None
-    base = bytes(statistics.median_low(pixel[channel] for pixel in near) for channel in range(3))
-    b0, b1, b2 = base
+    if len(flat) < 0.05 * len(samples):
+        return out, None, {}
+    base = middle(flat)
+    drawn = {}
+    for accent in map(rgb, accents):
+        found = near(samples, accent, 48)
+        if len(found) >= 20 and middle(found) != base:
+            drawn[accent] = middle(found)
     done = {}
     for at in range(start, end, 3):
         pixel = pixels[at:at + 3]
         keyed = done.get(pixel)
         if keyed is None:
-            distance = max(abs(pixel[0] - b0), abs(pixel[1] - b1), abs(pixel[2] - b2))
+            distance = max(abs(a - b) for a, b in zip(pixel, base))
             if distance <= 8:
                 keyed = target
-            elif distance >= 40:
-                keyed = pixel
             else:
-                alpha = (distance - 8) / 32
-                keyed = bytes(round(value + (old - value) * alpha) for old, value in zip(pixel, target))
+                alpha = min((distance - 8) / 32, 1)
+                mixed = [value + (old - value) * alpha for old, value in zip(pixel, target)]
+                snapped, weight = snap(pixel, base, target, drawn)
+                if snapped:
+                    mixed = [a + (b - a) * weight for a, b in zip(mixed, snapped)]
+                keyed = bytes(round(value) for value in mixed)
             done[pixel] = keyed
         out[at:at + 3] = keyed
-    return out, base
+    return out, base, drawn
 
 
 def tint(out, start, end, target, alpha):
@@ -486,7 +518,7 @@ def render(plan, art, png, record):
     target = rgb(copy.background)
     gap, fade = round(0.02 * height), round(0.05 * height)
     solid_top, solid_bottom = plan.top + gap, plan.bottom - gap
-    out, base = key(pixels, target, stride * solid_top, stride * solid_bottom)
+    out, base, drawn = key(pixels, target, brand.accents, stride * solid_top, stride * solid_bottom)
     out[:stride * solid_top] = target * width * solid_top
     out[stride * solid_bottom:] = target * width * (height - solid_bottom)
     for step in range(fade):
@@ -529,7 +561,9 @@ def render(plan, art, png, record):
     partial.replace(png)
     record.write_text(json.dumps({
         "size": "{}x{}".format(width, height), "layout": "{}:{}".format(across, down), "background": copy.background,
-        "art": art.name, "art_background": "#" + base.hex() if base else None, "safe_box": list(plan.safe),
+        "art": art.name, "art_background": "#" + base.hex() if base else None,
+        "art_accents": {"#" + accent.hex(): "#" + seen.hex() for accent, seen in drawn.items()},
+        "safe_box": list(plan.safe),
         "logo": {"file": brand.logo.file, "box": list(plan.logo)} if plan.logo else None,
         "button": {"color": brand.button, "opacity": brand.opacity, "box": list(plan.pill)},
         "text": [{"role": line.role, "text": line.text, "font": brand.styles[line.role].font.file,
