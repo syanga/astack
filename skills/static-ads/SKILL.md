@@ -19,13 +19,13 @@ If the user pasted the text of the ads they run, or attached screenshots, note w
 
 ### From a brand directory
 
-A brand directory holds `brand_guide.md` (fonts, colors, logo, voice, and rules for ads), `claims.json`, and an optional `references/` folder of images. `claims.json` reads `{"brand": "<slug>", "claims": [{"id": 1, "text": "...", "source": "..."}]}` and lists the only facts an ad may state.
+A brand directory holds `brand_guide.md` (fonts, colors, logo, voice, and rules for ads), `claims.json`, an optional `references/` folder of images, and an optional layer file, `layer.json`, with the font files and logo it names. `claims.json` reads `{"brand": "<slug>", "claims": [{"id": 1, "text": "...", "source": "..."}]}` and lists the only facts an ad may state.
 
 - Name the run folder after the directory's `brand` slug.
 - Copy `brand_guide.md` into the run folder as `ad-style-guide.md`. It replaces the site scrape below.
 - Copy each PNG, JPEG, or WebP from `references/` into the run folder. They are the style references for every render. With no such images, take the og:image from the brand's site, as below.
 - Every rule in the guide's rules for ads applies to every idea.
-- If the directory has `layer.json`, copy it into the run folder, with the `fonts/` folder and the logo it names, keeping their paths. Every ad then uses the compose step in step 4.
+- If the directory has `layer.json`, copy it into the run folder, with the font files and the logo it names, keeping their paths. Every ad then uses the compose step in step 4.
 
 `layer.json` is the guide's type, colors, and logo in a form the script reads. Paths are relative to the directory:
 
@@ -123,7 +123,7 @@ Add a `compose` block to each request, and write the prompt for the art alone:
 }
 ```
 
-- `headline` takes 1 to 3 lines, `subline` 1 or 2, and `cta` 1. Break lines with `\n` where a reader would pause. The script picks the largest size that fits each line.
+- `headline` takes 1 to 3 lines, `subline` 1 or 2, and `cta` 1. Break lines with `\n` where a reader would pause. All lines of one role share a size. The script starts at the layout's size for the role and shrinks it until the widest line fits. It shrinks the headline further when the type would leave too little room for the art.
 - `background` is one of the layer file's `backgrounds`. Leave it out for the first.
 - The prompt asks for no text of any kind: no letters, words, numbers, logos, buttons, or frames. It names the background hex as one flat color, edge to edge, and keeps the subject inside the art band that the dry run prints for that ad, such as `art 33-70%` of the height. The band depends on the ratio and the number of lines. Art outside it fades under the type's background. Write each `compose` block, run the dry run, then write the band into the prompt.
 - Leave the headline, wordmark, font, CTA pill, and "Render all text exactly as written" out of the style block.
@@ -149,7 +149,7 @@ View every PNG. Check for:
 - Made-up handles or URLs, such as a fake `@brand` or `shop.brand.ai`. Flag those to the user.
 - A wordmark that doesn't match
 - Copied customer logos
-- A size on the ad's `done` or `exists` line other than 1472x1840 from OpenAI or 1856x2304 from Gemini
+- On a 4:5 ad, a size on the ad's `done` or `exists` line other than 1472x1840 from OpenAI or 1856x2304 from Gemini
 - On a composed ad, words or a logo drawn into the art, or art cut off at the top or bottom of its band. Delete `art/<n>-<name>.png` and rerun to draw it again.
 - A composed ad whose output line ends in `art background not filled`. The art's background was too far from the hex to fill, so the middle band keeps the art's own color. Draw the art again.
 

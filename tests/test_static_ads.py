@@ -762,6 +762,9 @@ class GenerateTests(unittest.TestCase):
         edited = self.generate_on_vertex()
 
         self.assertEqual(edited.returncode, 0, edited.stdout + edited.stderr)
+        self.assertLine(edited.stdout, "1-proof", "exists 928x1152, skip render, composed")
+        settings = json.loads((self.run_folder / "1-proof.type.json").read_text(encoding="utf-8"))
+        self.assertEqual([line["text"] for line in settings["text"] if line["role"] == "headline"], ["READ THE SKY"])
         self.assertNotEqual((self.run_folder / "1-proof.png").read_bytes(), composed)
         self.assertEqual(len(self.api.requests), 1)
 
@@ -876,6 +879,11 @@ class GenerateTests(unittest.TestCase):
         self.assertEqual(self.api.requests, [])
         self.assertEqual(self.gcloud_calls(), [])
         self.assertEqual(sorted(path.name for path in self.run_folder.iterdir()), before)
+
+        self.generate_on_vertex()
+
+        self.assertEqual(sorted(prompt(request["body"]) for request in self.api.requests),
+                         ["Night sky, no words, ART 576x1024", "Night sky, no words, ART 928x1152"])
 
     @needs_ffmpeg
     def test_an_openai_compose_request_sends_only_the_image_fields_and_composes_the_reply(self):
