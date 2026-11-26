@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, fields, replace
 import datetime
 import fcntl
 import fnmatch
+import functools
 import hashlib
 import io
 import json
@@ -29,13 +30,14 @@ import secrets
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
 import threading
 import time
-from typing import Callable, Literal, NamedTuple
+from typing import BinaryIO, Callable, ContextManager, Iterator, Literal, NamedTuple, NoReturn
 
 sys.dont_write_bytecode = True
 try:
@@ -1052,6 +1054,7 @@ class Source:
     commit: str
     branch: str
     left_out: tuple[str, ...]
+    object_format: str
 
 
 class Plan(NamedTuple):
@@ -1088,14 +1091,15 @@ def take_source(root: Path, scratch: Path, dirty: Dirty) -> Source:
         raise BoatUnavailable("no_commit", "the repository has no commit yet")
     branch = run_captured(["git", "-C", str(root), "symbolic-ref", "--short", "-q", "HEAD"]).stdout.strip()
     objects = git(["rev-parse", "--path-format=absolute", "--git-path", "objects"], cwd=root).strip()
+    object_format = git(["rev-parse", "--show-object-format"], cwd=root).strip()
     store = scratch / "store.git"
-    git(["init", "-q", "--bare", str(store)])
+    git(["init", "-q", "--bare", "--object-format=" + object_format, str(store)])
     (store / "objects/info/alternates").write_text(objects + "\n")
     commit, left_out = head.stdout.strip(), ()
     if dirty != "no":
         commit, left_out = commit_worktree(root, scratch, store, objects, commit)
     git(["update-ref", RUN_REF, commit], git_dir=store)
-    return Source(store, head.stdout.strip(), commit, branch, left_out)
+    return Source(store, head.stdout.strip(), commit, branch, left_out, object_format)
 
 
 def commit_worktree(root: Path, scratch: Path, store: Path, objects: str, head: str) -> tuple[str, tuple[str, ...]]:
@@ -1122,38 +1126,65 @@ def commit_worktree(root: Path, scratch: Path, store: Path, objects: str, head: 
     return git(["commit-tree", tree, "-p", head, "-m", "jobgate: uncommitted changes"], cwd=root, env=env).strip(), left_out
 
 
-def lf_chunks(path: str):
-    with open(path, "rb") as stream:
-        held = b""
-        for chunk in iter(lambda: stream.read(READ_BYTES), b""):
-            data = held + chunk
-            held = b"\r" if data.endswith(b"\r") else b""
-            yield data[:len(data) - len(held)].replace(b"\r\n", b"\n")
-        yield held
+def lf_chunks(stream: BinaryIO) -> Iterator[bytes]:
+    held = b""
+    for chunk in iter(lambda: stream.read(READ_BYTES), b""):
+        data = held + chunk
+        held = b"\r" if data.endswith(b"\r") else b""
+        yield data[:len(data) - len(held)].replace(b"\r\n", b"\n")
+    yield held
 
 
-def lf_object_id(path: str, algorithm: str) -> str | None:
-    size = sum(len(chunk) for chunk in lf_chunks(path))
-    if size == os.path.getsize(path):
+def lf_object_id(read: Callable[[], ContextManager[BinaryIO]], size: int, algorithm: str) -> str | None:
+    with read() as stream:
+        normalized = sum(len(chunk) for chunk in lf_chunks(stream))
+    if normalized == size:
         return None
-    digest = hashlib.new(algorithm, b"blob %d\0" % size)
-    for chunk in lf_chunks(path):
-        digest.update(chunk)
+    digest = hashlib.new(algorithm, b"blob %d\0" % normalized)
+    with read() as stream:
+        for chunk in lf_chunks(stream):
+            digest.update(chunk)
     return digest.hexdigest()
 
 
-def worktree_blobs(root: Path, settings: BoatSettings) -> set[str]:
-    files: list[str] = []
+@contextlib.contextmanager
+def blob_stream(store: Path, blob: str) -> Iterator[BinaryIO]:
+    process = subprocess.Popen(["git", "--git-dir", str(store), "cat-file", "blob", blob], stdin=subprocess.DEVNULL,
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    assert process.stdout is not None
+    try:
+        yield process.stdout
+    finally:
+        process.stdout.close()
+        code = process.wait()
+    if code != 0:
+        raise BoatUnavailable("git", "git cat-file could not read blob {}".format(blob))
+
+
+def stat_if_present(path: str) -> os.stat_result | None:
+    try:
+        return os.stat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            return None
+        raise
+
+
+def worktree_files(root: Path, settings: BoatSettings) -> list[tuple[str, int]]:
+    files: list[tuple[str, int]] = []
     walked: set[tuple[int, int]] = set()
 
-    def fail(error: OSError) -> None:
+    def fail(error: OSError) -> NoReturn:
         raise error
 
     for excluded in settings.exclude:
         top = str(root / excluded)
-        if os.path.isfile(top):
-            files.append(top)
-        if not os.path.isdir(top):
+        info = stat_if_present(top)
+        if info is not None and stat.S_ISREG(info.st_mode):
+            files.append((top, info.st_size))
+        if info is None or not stat.S_ISDIR(info.st_mode):
             continue
         for directory, subdirectories, names in os.walk(top, onerror=fail, followlinks=True):
             identity = os.stat(directory)
@@ -1161,25 +1192,39 @@ def worktree_blobs(root: Path, settings: BoatSettings) -> set[str]:
                 subdirectories.clear()
                 continue
             walked.add((identity.st_dev, identity.st_ino))
-            files += [path for path in (os.path.join(directory, name) for name in names) if os.path.isfile(path)]
-    if not files:
-        return set()
-    blobs = set(git(["hash-object", "--no-filters", "--stdin-paths"], cwd=root,
-                    stdin_text="".join(path + "\n" for path in files)).split())
-    algorithm = git(["rev-parse", "--show-object-format"], cwd=root).strip()
-    blobs.update(blob for blob in (lf_object_id(path, algorithm) for path in files) if blob)
+            for name in names:
+                path = os.path.join(directory, name)
+                info = stat_if_present(path)
+                if info is not None and stat.S_ISREG(info.st_mode):
+                    files.append((path, info.st_size))
+    return files
+
+
+def private_blobs(source: Source, settings: BoatSettings, root: Path) -> set[str]:
+    commits = git(["rev-list", RUN_REF], git_dir=source.store)
+    changes = git(["--literal-pathspecs", "diff-tree", "--stdin", "-r", "-m", "--root", "--no-renames", "--no-commit-id",
+                   "--raw", "--no-abbrev", "--", *settings.exclude], git_dir=source.store, stdin_text=commits)
+    history = sorted({field for line in changes.splitlines() if line.startswith(":") for field in line.split()[2:4]
+                      if COMMIT_ID.fullmatch(field) and field.strip("0")})
+    sizes = git(["cat-file", "--batch-check=%(objectname) %(objectsize)"], git_dir=source.store,
+                stdin_text="".join(blob + "\n" for blob in history)).split() if history else []
+    sources = [(functools.partial(blob_stream, source.store, blob), int(size))
+               for blob, size in zip(sizes[::2], sizes[1::2])]
+    files = worktree_files(root, settings)
+    blobs = set(history)
+    if files:
+        blobs.update(git(["hash-object", "--no-filters", "--stdin-paths"], cwd=root,
+                         stdin_text="".join(path + "\n" for path, _ in files)).split())
+        sources += [(functools.partial(open, path, "rb"), size) for path, size in files]
+    blobs.update(blob for blob in (lf_object_id(read, size, source.object_format) for read, size in sources) if blob)
+    blobs.discard(git(["hash-object", "--stdin"], git_dir=source.store, stdin_text="").strip())
     return blobs
 
 
 def check_exclude(source: Source, settings: BoatSettings, root: Path) -> None:
     if not settings.exclude:
         return
-    commits = git(["rev-list", RUN_REF], git_dir=source.store)
-    changes = git(["--literal-pathspecs", "diff-tree", "--stdin", "-r", "-m", "--root", "--no-renames", "--no-commit-id",
-                   "--raw", "--no-abbrev", "--", *settings.exclude], git_dir=source.store, stdin_text=commits)
-    excluded_blobs = {field for line in changes.splitlines() if line.startswith(":") for field in line.split()[2:4]
-                      if COMMIT_ID.fullmatch(field) and field.strip("0")} | worktree_blobs(root, settings)
-    excluded_blobs.discard(git(["hash-object", "--stdin"], git_dir=source.store, stdin_text="").strip())
+    excluded_blobs = private_blobs(source, settings, root)
     if not excluded_blobs:
         return
     patterns = "".join(line + "\n" for line in settings.sparse_patterns())
@@ -1247,7 +1292,7 @@ def make_bundle(source: Source, settings: BoatSettings, basis: object, path: Pat
 def python_files(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
     if info.isdir():
         return None if "__pycache__" in info.name else info
-    return info if info.isfile() and info.name.endswith(".py") else None
+    return info if info.isfile() and info.name.endswith(".py") and not may_hold_secret(info.name) else None
 
 
 def pack_upload(scratch: Path, spec: dict) -> Path:
@@ -1496,19 +1541,27 @@ class Box:
         printed = {"stdout": 0, "stderr": 0}
         lost_since: float | None = None
         ended = False
+        killed: dict | None = None
         while True:
             frame = self.attach(pid, printed, relay)
             if frame is not None and not (frame.get("signal") and "oomKilled" not in frame):
                 return self.exit_code(step, frame)
-            status = self.status(step, pid)
-            if status is None:
-                lost_since = lost_since or time.monotonic()
-                if time.monotonic() - lost_since >= BOAT_LOST_SECONDS:
-                    raise BoatDied(step, "lost contact with the box for {}".format(duration(BOAT_LOST_SECONDS)))
-            else:
+            killed = frame or killed
+            try:
+                status = self.status(step, pid)
+                if status is None:
+                    lost_since = lost_since or time.monotonic()
+                    if time.monotonic() - lost_since >= BOAT_LOST_SECONDS:
+                        raise BoatDied(step, "lost contact with the box for {}".format(duration(BOAT_LOST_SECONDS)))
+            except BoatDied as died:
+                if step == "run" and killed is not None and killed.get("signal") == "SIGKILL":
+                    raise BoatDied(step, "boat killed the run step with SIGKILL and did not say why ({}). It may have "
+                                         "run out of memory".format(died.reason), True) from None
+                raise
+            if status is not None:
                 lost_since = None
-                if frame is not None:
-                    return self.exit_code(step, dict(frame, **status))
+                if killed is not None:
+                    return self.exit_code(step, dict(killed, **status))
                 if not status.get("running"):
                     if ended:
                         return self.exit_code(step, status)
@@ -1797,7 +1850,7 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
         spec = {"head": source.head, "commit": source.commit, "branch": source.branch,
                 "patterns": settings.sparse_patterns(), "setup": settings.setup, "setup_key": plan.setup_key,
                 "cwd": cwd, "path": repo_path_entries(root), "profile": profile.name,
-                "max_workers": max_workers, "command": command}
+                "max_workers": max_workers, "command": command, "object_format": source.object_format}
         for attempt in (1, 2):
             log = BoatLog()
             try:
@@ -1818,7 +1871,7 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
                     log.note("{} retries once on a new box".format(profile.name) if attempt == 1 else
                              "{} runs here instead".format(profile.name))
                     continue
-                log.note("jobgate does not retry a command that ran out of memory, and does not run it here")
+                log.note("jobgate does not run the command again, on a new box or here")
                 log.note("to give it more memory, set a larger type in [boat], or a larger worker_mem in the profile")
                 outcome = BoatRun(128 + signal.SIGKILL, {}, None)
             finally:
@@ -1853,7 +1906,8 @@ def box_prepare(spec: dict, run_dir: Path, repo: Path) -> int:
     bundle = run_dir / "run.bundle"
     steps: list[list[str]] = []
     if not (repo / ".git").is_dir():
-        if subprocess.run(["git", "init", "-q", str(repo)], stdin=subprocess.DEVNULL).returncode != 0:
+        if subprocess.run(["git", "init", "-q", "--object-format=" + spec["object_format"], str(repo)],
+                          stdin=subprocess.DEVNULL).returncode != 0:
             return 1
         steps += [["config", "core.repositoryformatversion", "1"], ["config", "extensions.partialClone", "jobgate"],
                   ["config", "remote.jobgate.url", str(bundle)], ["config", "remote.jobgate.promisor", "true"],

@@ -295,17 +295,17 @@ that read Git history therefore work on the box.
   content is what any commit ever had under an excluded path, and every file
   under an excluded path now. That includes files that `.gitignore` hides and
   files that a symbolic link leads to. Examples are a file that a commit moved
-  into an excluded directory, and an untracked copy of an excluded file. jobgate
-  reads each file under the excluded paths on every run. It compares the file's
-  bytes, and also the bytes with each CRLF line ending turned into LF, as Git
-  stores text files. A copy that another Git filter changes, such as
-  `working-tree-encoding` or a clean filter, can still reach the box. When
-  jobgate cannot read a directory under an excluded path, the command runs on
-  this machine.
+  into an excluded directory, and an untracked copy of an excluded file.
+  jobgate compares private content as it is, and also with each CRLF line
+  ending turned into LF, as Git stores text files. It reads each file under the
+  excluded paths on every run.
   If it finds such content, the command runs on this machine. jobgate prints up
   to 5 such paths to add to `exclude`, and the number of the others. It names
   one path for each such content. After you add those paths, the next run can
-  name another path with the same content. Empty files do not count.
+  name another path with the same content. Empty files do not count. When
+  jobgate cannot read a file or directory under an excluded path, the command
+  also runs on this machine. A copy that another Git filter changes, such as
+  `working-tree-encoding` or a clean filter, can still reach the box.
 - When the box starts from a snapshot, the bundle holds only the commits that
   the snapshot lacks.
 - The box checks out no submodules. A submodule's directory is empty on the
@@ -446,7 +446,9 @@ command again.
 When the box runs out of memory during the run step, jobgate prints the
 `BOAT RUN FAILED` and `boat log` lines, deletes the box, and exits with 137. It
 does not retry the command and does not run it on this machine, because the
-command would use the same memory here.
+command would use the same memory here. jobgate does the same when boat kills
+the run step with SIGKILL and does not say why before the box disappears or
+jobgate loses contact with it for 10 minutes.
 
 Each log holds everything that the box printed during one attempt, and
 jobgate's boat messages. It also holds the arguments, exit code, and output of

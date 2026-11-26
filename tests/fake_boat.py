@@ -152,7 +152,7 @@ def attach(path, pid):
             if data:
                 offsets[kind] += len(data)
                 emit({"data": data.decode("utf-8", "replace"), "nextOffset": offsets[kind], "type": kind})
-                if stall:
+                if stall and kind == "stdout":
                     time.sleep(600)
         if finished:
             code = int((procs / "{}.exit".format(pid)).read_text())
@@ -166,6 +166,8 @@ def attach(path, pid):
 def status(path, pid):
     if take("status_fail"):
         fail("unavailable", 503, "the box did not answer")
+    if take("status_gone"):
+        fail("not_found", 404, "not found (404)")
     if (path / "procs" / "{}.oom".format(pid)).exists():
         emit({"running": False, "exitCode": None, "oomKilled": True, "signal": "SIGKILL"})
         return

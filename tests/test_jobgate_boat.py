@@ -282,22 +282,67 @@ class SourceTests(BoatTest):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["where"], "boat", result.stderr)
 
-    @unittest.skipIf(os.geteuid() == 0, "root lists directories without read permission")
-    def test_a_directory_that_jobgate_cannot_list_under_an_excluded_path_keeps_the_run_here(self):
-        (self.repo / ".gitignore").write_text("private\n")
-        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
-        self.commit("ignore private")
-        (self.repo / "private/raw").mkdir(parents=True)
-        (self.repo / "private/raw/people.csv").write_text("name,email\nAda,ada@example.com\n")
-        shutil.copyfile(str(self.repo / "private/raw/people.csv"), str(self.repo / "copy.csv"))
-        (self.repo / "private/raw").chmod(0o311)
-        self.addCleanup((self.repo / "private/raw").chmod, 0o755)
+    def assert_an_unreadable_path_keeps_the_run_here(self, excluded, locked, mode):
+        top = excluded.split("/")[0]
+        (self.repo / ".gitignore").write_text(top + "\n")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["{}"]\n'.format(excluded))
+        self.commit("ignore " + top)
+        (self.repo / excluded / "raw").mkdir(parents=True)
+        private = self.repo / excluded / "raw/people.csv"
+        private.write_text("name,email\nAda,ada@example.com\n")
+        shutil.copyfile(str(private), str(self.repo / "copy.csv"))
+        (self.repo / locked).chmod(mode)
+        self.addCleanup((self.repo / locked).chmod, 0o755)
         result = self.run_here(REPORT)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.repo / "ran-here").exists())
         self.assertIn("Permission denied", result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["fallback"], "local_error")
         self.assertEqual(self.calls("new"), [])
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads directories without permission")
+    def test_a_directory_that_jobgate_cannot_list_under_an_excluded_path_keeps_the_run_here(self):
+        self.assert_an_unreadable_path_keeps_the_run_here("private", "private/raw", 0o311)
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads directories without permission")
+    def test_a_directory_that_jobgate_cannot_enter_under_an_excluded_path_keeps_the_run_here(self):
+        self.assert_an_unreadable_path_keeps_the_run_here("private", "private/raw", 0o644)
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads directories without permission")
+    def test_an_excluded_path_inside_a_directory_that_jobgate_cannot_enter_keeps_the_run_here(self):
+        self.assert_an_unreadable_path_keeps_the_run_here("sealed/private", "sealed", 0o600)
+
+    def test_an_excluded_path_that_does_not_exist_does_not_stop_the_run(self):
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["absent"]\n')
+        self.commit("exclude a path that is not there")
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["where"], "boat", result.stderr)
+
+    def test_private_content_that_a_later_commit_stores_with_lf_endings_keeps_the_run_here(self):
+        (self.repo / ".gitattributes").write_text("*.txt text\nprivate.txt -text\n")
+        (self.repo / "private.txt").write_bytes(b"name,email\r\nAda,ada@example.com\r\n")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private.txt"]\n')
+        self.commit("add private data")
+        shutil.copyfile(str(self.repo / "private.txt"), str(self.repo / "copy.txt"))
+        self.git("rm", "-q", "private.txt")
+        self.commit("move the data to a text path")
+        self.assertNotEqual(self.git("rev-parse", "HEAD:copy.txt"), self.git("rev-parse", "HEAD~1:private.txt"))
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("copy.txt", result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere")
+        self.assertEqual(self.calls("new"), [])
+
+    def test_a_sha256_repository_runs_on_the_box(self):
+        shutil.rmtree(str(self.repo / ".git"))
+        self.git("init", "-q", "--object-format=sha256")
+        self.commit("first in sha256")
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = self.report_of(result.stdout)
+        self.assertTrue(self.on_box(report), result.stderr)
+        self.assertEqual(report["commits"], "1")
 
     def test_a_copy_of_a_file_behind_symlinks_under_an_excluded_path_keeps_the_run_here(self):
         outside, nested = self.root / "outside", self.root / "nested"
@@ -470,6 +515,7 @@ class FallbackTests(BoatTest):
         copy = self.root / "jobgate copy"
         shutil.copytree(str(SCRIPT.parent), str(copy), ignore=shutil.ignore_patterns("__pycache__"))
         (copy / "_vendor/.env").write_text("TOKEN=canary\n")
+        (copy / "_vendor/.env.py").write_text("TOKEN = 'canary'\n")
         result = subprocess.run([sys.executable, str(copy / SCRIPT.name), "run", "test", "--", sys.executable, "-c",
                                  REPORT], cwd=str(self.repo), env=self.env, capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -479,6 +525,7 @@ class FallbackTests(BoatTest):
                         if member.name.startswith("_vendor/") and not member.isdir()]
         self.assertIn("_vendor/tomllib/_parser.py", vendored)
         self.assertEqual([name for name in vendored if not name.endswith(".py")], [])
+        self.assertNotIn("_vendor/.env.py", vendored)
 
     @unittest.skipIf(os.geteuid() == 0, "root reads files without read permission")
     def test_a_file_error_on_this_machine_after_the_box_starts_is_reported_and_left_to_this_machine(self):
@@ -648,14 +695,14 @@ class FallbackTests(BoatTest):
         self.assertEqual(result.stderr.count("test starts with"), 1, result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["where"], "boat")
         log = self.boat_logs()[-1].read_text()
-        self.assertIn("printed nothing for 1s, so jobgate checks the step", log)
+        self.assertRegex(log, r"printed nothing for 1s, so jobgate checks the step and attaches again\n.*\"attached\"")
         self.assertNotIn("exited with", log)
 
     def test_a_box_that_keeps_printing_is_not_checked_as_silent(self):
         self.set_machine(memory=64 * GIB, cores=8, psi=CALM, boat_silent_seconds=1)
         result = self.run_here("import time\nfor n in range(5):\n    print(n, flush=True)\n    time.sleep(0.4)")
         self.assertEqual((result.returncode, result.stdout), (0, "0\n1\n2\n3\n4\n"), result.stderr)
-        self.assertNotIn("printed nothing", self.boat_logs()[-1].read_text())
+        self.assertEqual(len([argv for argv in self.calls("exec") if "--attach" in argv]), 2)
 
     def test_replayed_output_that_is_not_utf8_is_never_cut(self):
         self.set_machine(memory=64 * GIB, cores=8, psi=CALM, boat_silent_seconds=1)
@@ -677,6 +724,15 @@ class FallbackTests(BoatTest):
         self.assertEqual(result.returncode, 128 + signal.SIGKILL, result.stderr)
         self.assertFalse((self.repo / "ran-here").exists())
         self.assertRegex(result.stderr, r"BOAT RUN FAILED during run on box bx_\w+: .*ran out of memory")
+        self.assertNotIn("retries once", result.stderr)
+
+    def test_a_kill_that_boat_cannot_explain_is_not_retried(self):
+        self.plan(oom=["run"], status_gone=[True])
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 128 + signal.SIGKILL, result.stderr)
+        self.assertFalse((self.repo / "ran-here").exists())
+        self.assertRegex(result.stderr, r"BOAT RUN FAILED during run on box bx_\w+: boat killed the run step with SIGKILL "
+                                        r"and did not say why \(the box is gone\)")
         self.assertNotIn("retries once", result.stderr)
 
     def test_a_command_that_runs_out_of_memory_on_the_box_is_reported_and_not_run_again(self):
