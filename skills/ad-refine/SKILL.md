@@ -27,7 +27,7 @@ This replaces hillclimb steps 1 to 3 and hillclimb-council's "Set up the vote".
 
 1. Make a run folder outside any Git checkout, such as `~/Downloads/<brand>-refine-<date>/`. Give each version its own subfolder: `v0` for the starting ad, then `v1`, `v2`, and so on. A version folder holds the image as `ad.png`, `ad.jpg`, `ad.jpeg`, or `ad.webp`, the ad's text as `copy.txt`, any render request, and `text.txt`. Write `text.txt` as `copy.txt` followed by every word the image shows, as rendered, misspellings included. Keep judge prompts and outputs in the run folder too. The run folder is the decision trail.
 2. Write the judge brief from the craft brief. A failed gate check is a major flaw, and every other flaw is minor. Ask for the rubric's scores in place of hillclimb-council's score out of 10, and for each flaw's check id. The caller's rubric is already approved, so skip setup step 4's approval and freeze the brief.
-3. Write the quote check per setup step 3. It reads each version's `text.txt`.
+3. Write the quote check per setup step 3. It reads each version's `text.txt`. When a version's `text.txt` is empty, the check keeps that version's flaws, because no quote can match.
 4. Run the baseline vote per setup step 5 on `v0` alone. Write the craft file described below, then run:
 
    ```bash

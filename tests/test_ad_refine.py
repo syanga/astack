@@ -136,6 +136,18 @@ class RoundsTests(unittest.TestCase):
         self.assertEqual(row(result.stdout, 1)["Decision"], "revert: panel A +0.250 <= 0.250")
         self.assertCalls(["A v1", "A v0"])
 
+    def test_a_rise_that_equals_a_decimal_margin_reverts(self):
+        self.version("v0", 2.0, 2.0)
+        self.version("v1", 2.2, 3.0)
+        self.rounds("start", str(self.run_folder), "--version", "v0", "--craft", str(self.vote(v0=["minor"])),
+                    "--panel-command", self.template, "--margin", "0.2")
+
+        result = self.round("v1", self.vote(v1=[], v0=["minor"]))
+
+        self.assertStatus(result, "next: round 2 against v0")
+        self.assertEqual(row(result.stdout, 1)["Decision"], "revert: panel A +0.200 <= 0.200")
+        self.assertCalls(["A v1", "A v0"])
+
     def test_panel_b_without_a_rise_reverts(self):
         self.version("v0", 2.5, 2.5)
         self.version("v1", 3.0, 2.5)

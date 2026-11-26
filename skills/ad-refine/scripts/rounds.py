@@ -39,7 +39,7 @@ class Means:
 
     @property
     def delta(self) -> float:
-        return self.new - self.best
+        return round(self.new - self.best, 9)
 
 
 @dataclass(frozen=True)
