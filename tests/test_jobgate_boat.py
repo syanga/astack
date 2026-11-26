@@ -258,6 +258,47 @@ class SourceTests(BoatTest):
         (self.repo / "private").mkdir()
         self.assert_a_copy_keeps_the_run_here(self.repo / "private", "* text=auto\n")
 
+    def test_a_copy_of_an_ignored_excluded_file_keeps_the_run_here(self):
+        (self.repo / ".gitignore").write_text("secret.csv\n")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["secret.csv"]\n')
+        self.commit("ignore the secret")
+        (self.repo / "secret.csv").write_text("name,email\nAda,ada@example.com\n")
+        shutil.copyfile(str(self.repo / "secret.csv"), str(self.repo / "copy.csv"))
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("copy.csv", result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere")
+        self.assertEqual(self.calls("new"), [])
+
+    def test_a_symlink_loop_under_an_excluded_path_does_not_stop_the_run(self):
+        (self.repo / ".gitignore").write_text("private\n")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
+        self.commit("ignore private")
+        (self.repo / "private").mkdir()
+        (self.repo / "private/people.csv").write_text("name,email\nAda,ada@example.com\n")
+        for name in ("here", "again"):
+            (self.repo / "private" / name).symlink_to(".")
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["where"], "boat", result.stderr)
+
+    @unittest.skipIf(os.geteuid() == 0, "root lists directories without read permission")
+    def test_a_directory_that_jobgate_cannot_list_under_an_excluded_path_keeps_the_run_here(self):
+        (self.repo / ".gitignore").write_text("private\n")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
+        self.commit("ignore private")
+        (self.repo / "private/raw").mkdir(parents=True)
+        (self.repo / "private/raw/people.csv").write_text("name,email\nAda,ada@example.com\n")
+        shutil.copyfile(str(self.repo / "private/raw/people.csv"), str(self.repo / "copy.csv"))
+        (self.repo / "private/raw").chmod(0o311)
+        self.addCleanup((self.repo / "private/raw").chmod, 0o755)
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.repo / "ran-here").exists())
+        self.assertIn("Permission denied", result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "local_error")
+        self.assertEqual(self.calls("new"), [])
+
     def test_a_copy_of_a_file_behind_symlinks_under_an_excluded_path_keeps_the_run_here(self):
         outside, nested = self.root / "outside", self.root / "nested"
         outside.mkdir()
@@ -609,6 +650,22 @@ class FallbackTests(BoatTest):
         log = self.boat_logs()[-1].read_text()
         self.assertIn("printed nothing for 1s, so jobgate checks the step", log)
         self.assertNotIn("exited with", log)
+
+    def test_a_box_that_keeps_printing_is_not_checked_as_silent(self):
+        self.set_machine(memory=64 * GIB, cores=8, psi=CALM, boat_silent_seconds=1)
+        result = self.run_here("import time\nfor n in range(5):\n    print(n, flush=True)\n    time.sleep(0.4)")
+        self.assertEqual((result.returncode, result.stdout), (0, "0\n1\n2\n3\n4\n"), result.stderr)
+        self.assertNotIn("printed nothing", self.boat_logs()[-1].read_text())
+
+    def test_replayed_output_that_is_not_utf8_is_never_cut(self):
+        self.set_machine(memory=64 * GIB, cores=8, psi=CALM, boat_silent_seconds=1)
+        self.plan(stall=["run"])
+        result = self.run_here("import sys, time; sys.stdout.buffer.write(b'\\xfffirst\\n'); sys.stdout.flush(); "
+                               "time.sleep(1.5); print('second')")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(lines[-2:], ["\ufffdfirst", "second"], result.stdout)
+        self.assertEqual(set(lines), {"\ufffdfirst", "second"}, result.stdout)
 
     def test_output_that_is_not_utf8_reaches_this_machine_whole(self):
         result = self.run_here("import sys; sys.stdout.buffer.write(b'abc\\xffdef\\n')")

@@ -297,9 +297,11 @@ that read Git history therefore work on the box.
   files that a symbolic link leads to. Examples are a file that a commit moved
   into an excluded directory, and an untracked copy of an excluded file. jobgate
   reads each file under the excluded paths on every run. It compares the file's
-  bytes, and for a file up to 64 MiB also the bytes that Git would store for it
-  at its own path. A copy that Git stores with other line endings can still
-  reach the box.
+  bytes, and also the bytes with each CRLF line ending turned into LF, as Git
+  stores text files. A copy that another Git filter changes, such as
+  `working-tree-encoding` or a clean filter, can still reach the box. When
+  jobgate cannot read a directory under an excluded path, the command runs on
+  this machine.
   If it finds such content, the command runs on this machine. jobgate prints up
   to 5 such paths to add to `exclude`, and the number of the others. It names
   one path for each such content. After you add those paths, the next run can
@@ -349,8 +351,9 @@ box stops within an hour.
 
 Ctrl-C, SIGTERM, and SIGHUP delete the box. jobgate tries the delete up to 3
 times. A Ctrl-C, SIGTERM, or SIGHUP that arrives during the delete waits until
-the delete ends, and then jobgate stops. When one of the signals arrives before `boat new` prints the new box's
-id, jobgate cannot delete the box, and the box stops within an hour.
+the delete ends, and then jobgate stops. When one of the signals arrives before
+`boat new` prints the new box's id, jobgate cannot delete the box, and the box
+stops within an hour.
 
 ### Snapshots
 

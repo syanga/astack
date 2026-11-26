@@ -89,7 +89,7 @@ BOAT_PAUSE_SECONDS = 5
 BOAT_SILENT_SECONDS = 60
 BOAT_DELETE_TRIES = 3
 BOAT_DELETE_SECONDS = 60
-FILTERED_HASH_BYTES = 64 * 2**20
+READ_BYTES = 2**20
 BOAT_LOGS_KEPT = 20
 BOAT_PAYMENT_STATUS = 402
 BOAT_PAYMENT_CODES = ("trial_compute_limit_reached",)
@@ -1122,26 +1122,52 @@ def commit_worktree(root: Path, scratch: Path, store: Path, objects: str, head: 
     return git(["commit-tree", tree, "-p", head, "-m", "jobgate: uncommitted changes"], cwd=root, env=env).strip(), left_out
 
 
+def lf_chunks(path: str):
+    with open(path, "rb") as stream:
+        held = b""
+        for chunk in iter(lambda: stream.read(READ_BYTES), b""):
+            data = held + chunk
+            held = b"\r" if data.endswith(b"\r") else b""
+            yield data[:len(data) - len(held)].replace(b"\r\n", b"\n")
+        yield held
+
+
+def lf_object_id(path: str, algorithm: str) -> str | None:
+    size = sum(len(chunk) for chunk in lf_chunks(path))
+    if size == os.path.getsize(path):
+        return None
+    digest = hashlib.new(algorithm, b"blob %d\0" % size)
+    for chunk in lf_chunks(path):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
 def worktree_blobs(root: Path, settings: BoatSettings) -> set[str]:
     files: list[str] = []
     walked: set[tuple[int, int]] = set()
+
+    def fail(error: OSError) -> None:
+        raise error
+
     for excluded in settings.exclude:
         top = str(root / excluded)
         if os.path.isfile(top):
             files.append(top)
-        for directory, subdirectories, names in os.walk(top, followlinks=True):
+        if not os.path.isdir(top):
+            continue
+        for directory, subdirectories, names in os.walk(top, onerror=fail, followlinks=True):
             identity = os.stat(directory)
             if (identity.st_dev, identity.st_ino) in walked:
                 subdirectories.clear()
                 continue
             walked.add((identity.st_dev, identity.st_ino))
             files += [path for path in (os.path.join(directory, name) for name in names) if os.path.isfile(path)]
-    small = [path for path in files if os.path.getsize(path) <= FILTERED_HASH_BYTES]
-    blobs: set[str] = set()
-    for options, paths in ((["--no-filters"], files), ([], small)):
-        if paths:
-            blobs.update(git(["hash-object", *options, "--stdin-paths"], cwd=root,
-                             stdin_text="".join(path + "\n" for path in paths)).split())
+    if not files:
+        return set()
+    blobs = set(git(["hash-object", "--no-filters", "--stdin-paths"], cwd=root,
+                    stdin_text="".join(path + "\n" for path in files)).split())
+    algorithm = git(["rev-parse", "--show-object-format"], cwd=root).strip()
+    blobs.update(blob for blob in (lf_object_id(path, algorithm) for path in files) if blob)
     return blobs
 
 
@@ -1276,6 +1302,10 @@ def boat_failure(result: subprocess.CompletedProcess, objects: list[dict]) -> di
     return None
 
 
+def output_of(result: subprocess.CompletedProcess) -> str:
+    return "".join(text if text.endswith("\n") else text + "\n" for text in (result.stdout, result.stderr) if text)
+
+
 def describe(failure: dict) -> str:
     text = failure.get("error") or failure.get("message") or failure.get("code") or "unknown error"
     return str(text).strip().splitlines()[0]
@@ -1376,8 +1406,8 @@ class Box:
         objects = boat_objects(result)
         failure = boat_failure(result, objects)
         if failure is not None and failure.get("code") not in expected:
-            output = "".join(text if text.endswith("\n") else text + "\n" for text in (result.stdout, result.stderr) if text)
-            self.log.write("boat {} exited with {}:\n{}".format(shlex.join(result.args[1:]), result.returncode, output))
+            self.log.write("boat {} exited with {}:\n{}".format(shlex.join(result.args[1:]), result.returncode,
+                                                               output_of(result)))
         return result, objects
 
     def create(self, box_type: str, name: str) -> bool:
@@ -1538,13 +1568,16 @@ class Box:
                     process.kill()
                 process.wait()
                 output.close()
-            if fired.is_set() and exit_frame is None:
-                self.log.entry("boat exec {} --attach {} printed nothing for {}, so jobgate checks the step and "
-                               "attaches again".format(self.id, pid, duration(silent)))
-            elif exit_frame is None:
+            if exit_frame is None:
                 errors.seek(0)
-                self.keep(subprocess.CompletedProcess(argv, process.returncode, "".join(other),
-                                                      errors.read().decode("utf-8", "replace")))
+                result = subprocess.CompletedProcess(argv, process.returncode, "".join(other),
+                                                     errors.read().decode("utf-8", "replace"))
+                if fired.is_set():
+                    self.log.entry("boat exec {} --attach {} printed nothing for {}, so jobgate checks the step and "
+                                   "attaches again".format(self.id, pid, duration(silent)))
+                    self.log.write(output_of(result))
+                else:
+                    self.keep(result)
         return exit_frame
 
     def status(self, step: str, pid: int) -> dict | None:
