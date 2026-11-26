@@ -6,6 +6,7 @@ from pathlib import Path
 import shlex
 import shutil
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -365,6 +366,17 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(self.size("Proof Feed.png"), (1440, 1800))
         self.assertEqual(self.size("Proof Story.png"), (1440, 2560))
         self.assertEqual(self.problems(result.stdout, "Proof"), [])
+
+    def test_screenshots_get_the_mode_any_new_file_gets(self):
+        self.write_page("Proof", SAFE)
+        self.addCleanup(os.umask, os.umask(0o022))
+
+        result = self.render()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for placement in ["Feed", "Story"]:
+            mode = (self.run_folder / "Proof {}.png".format(placement)).stat().st_mode
+            self.assertEqual(stat.S_IMODE(mode), 0o644)
 
     def test_pages_with_photos_are_checked_like_any_other(self):
         (self.run_folder / "pages/photo.png").write_bytes(png_image(1200, 900))

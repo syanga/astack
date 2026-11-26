@@ -18,6 +18,8 @@ STORY_BOTTOM = 693
 MAX_NAME = 12
 TIMEOUT_SECONDS = 60
 PAGE_WAIT_MS = 15000
+UMASK = os.umask(0)
+os.umask(UMASK)
 CHROME_NAMES = ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")
 MAC_CHROMES = (Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
                Path("/Applications/Chromium.app/Contents/MacOS/Chromium"))
@@ -75,10 +77,12 @@ def chrome(binary, scratch, width, height, *arguments, network=False):
                                env=env, start_new_session=True)
     try:
         stdout, stderr = process.communicate(timeout=TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
+    except BaseException as error:
         os.killpg(process.pid, signal.SIGKILL)
         process.communicate()
-        raise RuntimeError("Chrome took over {} s".format(TIMEOUT_SECONDS))
+        if isinstance(error, subprocess.TimeoutExpired):
+            raise RuntimeError("Chrome took over {} s".format(TIMEOUT_SECONDS))
+        raise
     if process.returncode != 0:
         lines = stderr.strip().splitlines() or [""]
         raise RuntimeError("Chrome exited {}: {}".format(process.returncode, lines[-1]))
@@ -106,8 +110,9 @@ def problems(text, placement, width, height):
 
 
 def capture(binary, scratch, width, height, url, target, network=False):
-    partial = target.with_name(".partial." + target.name)
-    partial.unlink(missing_ok=True)
+    handle, name = tempfile.mkstemp(prefix=".partial.", suffix=".png", dir=target.parent)
+    os.close(handle)
+    partial = Path(name)
     extra = ["--timeout={}".format(PAGE_WAIT_MS)] if network else []
     try:
         chrome(binary, scratch, width, height, *extra, "--screenshot=" + str(partial), url, network=network)
@@ -116,6 +121,7 @@ def capture(binary, scratch, width, height, url, target, network=False):
             raise RuntimeError("Chrome wrote no screenshot")
         if size != (width, height):
             raise RuntimeError("the screenshot is {}x{}, not {}x{}".format(*size, width, height))
+        partial.chmod(0o666 & ~UMASK)
         partial.replace(target)
         return size
     except BaseException:
@@ -179,6 +185,7 @@ def main():
                         help="only screenshot the live page's first screen as site-screenshot.png")
     args = parser.parse_args()
     sys.stdout.reconfigure(errors="backslashreplace")
+    signal.signal(signal.SIGTERM, lambda number, frame: sys.exit(128 + number))
     pages = sorted((args.folder / "pages").glob("*.html"))
     if not pages and not args.page:
         parser.exit(1, "render.py: no .html files in {}\n".format(args.folder / "pages"))
