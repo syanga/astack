@@ -50,7 +50,7 @@ The craft file maps each council member to its flaws per version. List only flaw
 
 These steps replace hillclimb-council's vote steps as named.
 
-1. Build the bundle per vote step 7 from the current best's flaws: three fixes, or every queued flaw if fewer. Each fix edits the render request or `copy.txt`. Write all of them into one new version yourself, with no parts, implementers, or worktrees. Render it with the current best image as a reference, so the render keeps what the fixes leave alone. After a revert, pivot per vote step 8.
+1. Build the bundle per vote step 7 from the current best's flaws: three fixes, or every queued flaw if fewer. If the current best has a major flaw, put every queued major flaw in the bundle instead, because `rounds.py` keeps no version with a major flaw. Each fix edits the render request or `copy.txt`. Write all of them into one new version yourself, with no parts, implementers, or worktrees. Render it with the current best image as a reference, so the render keeps what the fixes leave alone. Leave the reference out when a fix changes the type, colors, or layout of the whole ad. After a revert, pivot per vote step 8.
 2. View the render before the vote. Render again if the image is blank, has the wrong size, or garbles text that the request spelled out. Write the new version's `text.txt`.
 3. Vote per vote steps 2 to 4. The ballot holds the image and `copy.txt` of the new version and the current best, and nothing else. Panel B replaces the confirm ballot, so make none.
 4. Write the craft file with both versions for each member, then run:
