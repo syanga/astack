@@ -527,6 +527,19 @@ class MakeUgcTests(unittest.TestCase):
         self.assertFalse((self.presenter / ".clone-request.json").exists())
 
 
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_a_marker_left_empty_by_a_stop_mid_write_stops_the_rerun_without_paying(self):
+        self.fake.poll_errors = [401]
+        self.assertNotEqual(self.run_script("--no-upscale").returncode, 0)
+        (self.out / "seedance.task.json").write_text("")
+
+        result = self.run_script("--no-upscale")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("kie dashboard", result.stderr)
+        self.assertEqual(len(self.posts(CREATE)), 1)
+
+
 class StutterCutTests(unittest.TestCase):
     WORDS = "our app never shares your data"
 

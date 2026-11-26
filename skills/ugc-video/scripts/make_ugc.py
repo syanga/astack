@@ -176,7 +176,8 @@ def clone_voice(a, d, meta):
         sys.exit(f"The voice clone failed: {e}")
     except VendorError as e:
         sys.exit(f"The voice clone did not finish: {e}\nfal may still finish it. Run --clone-voice again to check that "
-                 "request; that does not pay for another clone.")
+                 f"request; that does not pay for another clone. If fal no longer knows the request, delete {saved} "
+                 "first; the next clone is paid for again.")
     vid = res.get("custom_voice_id")
     if not vid:
         sys.exit(f"fal's clone reply has no custom_voice_id (fields: {', '.join(sorted(res))})")
@@ -290,7 +291,7 @@ def main():
     record = out / "run.json"
     out.mkdir(parents=True, exist_ok=True)
     lock(out)
-    if any(p.name != ".lock" for p in out.iterdir()):
+    if any(p.name != ".lock" and not p.name.endswith(".partial") for p in out.iterdir()):
         try:
             earlier = json.loads(record.read_text())
         except (OSError, ValueError):
@@ -299,10 +300,8 @@ def main():
             sys.exit(f"{out} holds a run for another script or presenter. Pass a new --slug.")
     voice, raw_v, pending = out / "voice.mp3", out / "raw-480p.mp4", out / "seedance.task.json"
     again = "Run the command again without --rerender or --clone-voice"
-    if raw_v.exists() and pending.exists():
-        if a.rerender or a.clone_voice:
-            sys.exit(f"The last run downloaded its take but stopped before finishing. {again} to finish it.")
-        pending.unlink()
+    if raw_v.exists() and pending.exists() and (a.rerender or a.clone_voice):
+        sys.exit(f"The last run downloaded its take but stopped before finishing. {again} to finish it.")
     if pending.exists() and (a.rerender or a.clone_voice):
         sys.exit(f"A kie take is still pending. {again} to check it. To give it up, delete {pending} first; "
                  "the next take is paid for again.")
@@ -371,7 +370,10 @@ def main():
         archive(raw_v)
     if not raw_v.exists():
         if pending.exists():
-            task = json.loads(pending.read_text()).get("taskId")
+            try:
+                task = json.loads(pending.read_text()).get("taskId")
+            except ValueError:
+                task = None
             if not task:
                 sys.exit("An earlier submit to kie got no clear answer, so kie may have accepted a paid take. Check "
                          f"the kie dashboard. To submit again, delete {pending} first; that pays for a new take.")

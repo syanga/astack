@@ -112,7 +112,10 @@ def fal_run(model, body, *, key, base=FAL_BASE, timeout=1800, saved=None):
     auth = {"Authorization": f"Key {key}"}
     deadline = time.monotonic() + timeout
     if saved and Path(saved).exists():
-        job = json.loads(Path(saved).read_text())
+        try:
+            job = json.loads(Path(saved).read_text())
+        except ValueError:
+            job = {}
         if not job.get("status_url"):
             raise VendorError(f"an earlier submit to fal got no clear answer, so fal may have accepted it. Check the fal "
                               f"dashboard. To submit again, delete {saved} first; that pays again.")
