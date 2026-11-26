@@ -12,7 +12,7 @@ import tempfile
 import time
 import unittest
 
-from test_jobgate import SCRIPT, JobgateTest, wait_for
+from test_jobgate import CALM, GIB, SCRIPT, JobgateTest, wait_for
 
 FAKE_BOAT = Path(__file__).resolve().parent / "fake_boat.py"
 PROFILE = '[test]\nbase_mem = "1G"\nworker_mem = "1G"\nmax_workers = 4\nworkers_env = "TEST_WORKERS"\n'
@@ -128,12 +128,16 @@ class RoutingTests(BoatTest):
             self.assertIn("--no-env", argv)
             self.assertFalse({"-e", "--env"} & set(argv), argv)
 
-    def test_a_run_without_a_snapshot_leaves_no_failure_in_its_log(self):
+    def test_a_run_without_a_snapshot_logs_boat_failures_but_not_the_snapshot_miss(self):
+        self.plan(new=[{"code": "no_ready_machine", "status": 503, "error": "no machine is ready"}])
         result = self.run_here(REPORT)
         self.assertEqual(result.returncode, 0, result.stderr)
-        logs = self.boat_logs()
-        self.assertEqual(len(logs), 1)
-        self.assertNotIn("No saved snapshot", logs[0].read_text())
+        self.assertIn("--from", self.calls("new")[0])
+        logs = self.printed_logs(result.stderr)
+        self.assertEqual(len(logs), 1, result.stderr)
+        text = logs[0].read_text()
+        self.assertIn('"code": "no_ready_machine"', text)
+        self.assertNotIn("No saved snapshot", text)
 
     def test_local_flag_keeps_the_command_here(self):
         result = self.gate("run", "--local", "test", "--", sys.executable, "-c", REPORT)
@@ -160,7 +164,11 @@ class RoutingTests(BoatTest):
         cases = [('setup = "/etc/setup.sh"\n', "setup"), ('setup = "boat-setup.sh"\ntype = "huge"\n', "type"),
                  ('setup = "boat-setup.sh"\ncolor = "red"\n', "color"), ('type = "large"\n', "setup"),
                  ('setup = "boat-setup.sh"\nexclude = "private"\n', "exclude"),
-                 ('setup = "boat-setup.sh"\nexclude = ["../outside"]\n', "exclude")]
+                 ('setup = "boat-setup.sh"\nexclude = ["../outside"]\n', "exclude"),
+                 ('setup = "boat-setup.sh"\nsetup_inputs = ["a\\u0000b"]\n', "setup_inputs"),
+                 ('setup = "boat-setup.sh"\nexclude = ["boat-setup.sh"]\n', "covers boat-setup.sh"),
+                 ('setup = "boat-setup.sh"\nsetup_inputs = ["deps/lock"]\nexclude = ["deps"]\n', "covers deps/lock"),
+                 ('setup = "boat-setup.sh"\nexclude = ["jobgate.toml"]\n', "covers jobgate.toml")]
         for table, named in cases:
             with self.subTest(table=table):
                 self.boat_settings(table)
@@ -213,6 +221,51 @@ class SourceTests(BoatTest):
         uploaded = self.uploaded_blobs()
         self.assertIn(self.git("rev-parse", "HEAD:app.py").strip(), uploaded)
         self.assertEqual(uploaded & private, set())
+
+    def test_a_copy_of_an_ignored_file_under_an_excluded_path_keeps_the_run_here(self):
+        (self.repo / ".gitignore").write_text("private/\n")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
+        self.commit("ignore private")
+        (self.repo / "private").mkdir()
+        (self.repo / "private/people.csv").write_text("name,email\nAda,ada@example.com\n")
+        shutil.copyfile(str(self.repo / "private/people.csv"), str(self.repo / "copy.csv"))
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.repo / "ran-here").exists())
+        self.assertIn("copy.csv", result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere")
+        self.assertEqual(self.calls("new"), [])
+
+    def test_a_dirty_run_adds_no_file_to_a_split_index_repository(self):
+        self.git("config", "core.splitIndex", "true")
+        self.git("config", "splitIndex.maxPercentChange", "0")
+        self.git("update-index", "--split-index")
+        (self.repo / "app.py").write_text("version = 3\n")
+        before = sorted(os.listdir(str(self.repo / ".git")))
+        result = self.run_here("print(open('app.py').read().strip())")
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "version = 3"), result.stderr)
+        self.assertEqual(sorted(os.listdir(str(self.repo / ".git"))), before)
+
+    def test_an_edit_that_keeps_the_size_and_time_that_the_index_records_reaches_the_box(self):
+        self.git("config", "core.trustctime", "false")
+        app = self.repo / "app.py"
+        recorded = os.stat(str(app))
+        app.write_text("version = 3\n")
+        for path in (app, self.repo / ".git/index"):
+            os.utime(str(path), ns=(recorded.st_atime_ns, recorded.st_mtime_ns))
+        time.sleep(1.1)
+        result = self.run_here("print(open('app.py').read().strip())")
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "version = 3"), result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["where"], "boat")
+
+    def test_untracked_files_reach_the_box_when_git_status_hides_them(self):
+        self.git("config", "status.showUntrackedFiles", "no")
+        (self.repo / "new_test.py").write_text("found = True\n")
+        (self.repo / "a\rb.txt").write_text("odd name\n")
+        result = self.run_here("import os; print(os.path.exists('new_test.py'), os.path.exists('a' + chr(13) + 'b.txt'))")
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "True True"), result.stderr)
+        fields = self.result_fields(result.stderr)
+        self.assertEqual((fields["where"], fields["dirty"]), ("boat", "yes"))
 
     def test_excluded_contents_that_also_live_at_another_path_keep_the_run_here(self):
         (self.repo / "data").mkdir()
@@ -277,6 +330,21 @@ class SourceTests(BoatTest):
         self.assertEqual(len(self.saved_snapshots()), 1)
         self.assertNotEqual(self.saved_snapshots(), saved)
 
+    def test_a_change_behind_a_symlinked_setup_input_runs_the_setup_again(self):
+        (self.repo / "boat-setup.sh").write_text('od -An -N8 -tx1 /dev/urandom | tr -d " \\n" >> "$HOME/setup-runs"\n'
+                                                 'echo >> "$HOME/setup-runs"\n')
+        self.boat_settings('setup = "boat-setup.sh"\nsetup_inputs = ["requirements.txt"]\n')
+        (self.repo / "deps").mkdir()
+        (self.repo / "deps/pinned.txt").write_text("pytest==8\n")
+        (self.repo / "requirements.txt").symlink_to("deps/pinned.txt")
+        self.commit("pin through a link")
+        first = self.run_here(SETUP_RUNS)
+        (self.repo / "deps/pinned.txt").write_text("pytest==9\n")
+        self.commit("bump behind the link")
+        second = self.run_here(SETUP_RUNS)
+        self.assertEqual([len(result.stdout.split()) for result in (first, second)], [1, 1], second.stderr)
+        self.assertNotEqual(second.stdout, first.stdout)
+
 
 class FallbackTests(BoatTest):
     def test_runs_here_when_boat_cannot_start_a_box(self):
@@ -315,19 +383,31 @@ class FallbackTests(BoatTest):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.repo / "ran-here").exists())
         self.assertRegex(result.stderr, r"BOAT RUN FAILED during start on box bx_\w+: the box did not boot")
-        logs = re.findall(r"^jobgate: boat log: (.+)$", result.stderr, re.MULTILINE)
-        log = Path(logs[0]).read_text()
+        log = self.printed_logs(result.stderr)[0].read_text()
         self.assertIn("the box did not boot", log)
         self.assertIn("kernel panic in the box image", log)
         fields = self.result_fields(result.stderr)
         self.assertEqual((fields["where"], fields["fallback"]), ("local", "boot_failed"))
         self.assertEqual(self.boxes_left(), [])
 
+    def test_the_upload_carries_only_the_python_files_of_jobgate(self):
+        copy = self.root / "jobgate copy"
+        shutil.copytree(str(SCRIPT.parent), str(copy), ignore=shutil.ignore_patterns("__pycache__"))
+        (copy / "_vendor/.env").write_text("TOKEN=canary\n")
+        result = subprocess.run([sys.executable, str(copy / SCRIPT.name), "run", "test", "--", sys.executable, "-c",
+                                 REPORT], cwd=str(self.repo), env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        uploads = sorted((self.boat_dir / "uploads").glob("*.tgz"))
+        with tarfile.open(str(uploads[0])) as archive:
+            names = archive.getnames()
+        self.assertIn("_vendor/tomllib/_parser.py", names)
+        self.assertEqual([name for name in names if name.endswith(".env")], [])
+
     @unittest.skipIf(os.geteuid() == 0, "root reads files without read permission")
     def test_a_file_error_on_this_machine_after_the_box_starts_is_reported_and_left_to_this_machine(self):
         copy = self.root / "jobgate copy"
         shutil.copytree(str(SCRIPT.parent), str(copy), ignore=shutil.ignore_patterns("__pycache__"))
-        unreadable = copy / "_vendor" / "unreadable"
+        unreadable = copy / "_vendor" / "unreadable.py"
         unreadable.write_text("")
         unreadable.chmod(0)
         self.addCleanup(unreadable.chmod, 0o644)
@@ -365,6 +445,9 @@ class FallbackTests(BoatTest):
         off_file.write_text(json.dumps(dict(off, until=time.time() - 1)))
         third = self.run_here(REPORT)
         self.assertEqual(self.result_fields(third.stderr)["where"], "boat", third.stderr)
+        off_file.write_text("[]")
+        fourth = self.run_here(REPORT)
+        self.assertEqual(self.result_fields(fourth.stderr)["where"], "boat", fourth.stderr)
 
     def test_a_profile_too_big_for_the_box_is_reported_and_left_to_this_machine(self):
         box_machine = self.root / "box-machine.json"
@@ -381,22 +464,40 @@ class FallbackTests(BoatTest):
 
     def test_a_command_that_starts_in_a_directory_the_box_would_lack_runs_here_without_a_box(self):
         (self.repo / ".gitignore").write_text("build/\n")
-        for name in ("private/people.csv", "src/secret/key.txt"):
-            (self.repo / name).parent.mkdir(parents=True)
-            (self.repo / name).write_text("private\n")
-        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private", "src/secret"]\n')
-        self.commit("add private data")
-        (self.repo / "build").mkdir()
-        for start in ("build", "private", "src"):
+        for name in ("private/people.csv", "src/secret/key.txt", "mixed/secret/key.txt", "mixed/kept.txt"):
+            (self.repo / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.repo / name).write_text(name + "\n")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private", "src/secret", "mixed/secret"]\n')
+        for name in ("build", "vendored/lib"):
+            (self.repo / name).mkdir(parents=True)
+        head = self.git("rev-parse", "HEAD").strip()
+        self.git("update-index", "--add", "--cacheinfo", "160000,{},vendored/lib".format(head))
+        self.commit("add private data and a submodule")
+        self.assertIn("160000 commit", self.git("ls-tree", "HEAD", "vendored/lib"))
+        for start in ("build", "private", "src", "vendored", "mixed"):
             with self.subTest(start=start):
                 result = subprocess.run([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c",
                                          REPORT], cwd=str(self.repo / start), env=self.env, capture_output=True,
                                         text=True, timeout=60)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertTrue((self.repo / start / "ran-here").exists())
-                self.assertIn("the box would have no {}, where the command starts".format(start), result.stderr)
-                self.assertEqual(self.result_fields(result.stderr)["fallback"], "no_start_dir")
-                self.assertEqual(self.calls("new"), [])
+                fields = self.result_fields(result.stderr)
+                if start == "mixed":
+                    self.assertEqual(fields["where"], "boat", result.stderr)
+                    continue
+                (self.repo / start / "ran-here").unlink()
+                self.assertIn("the box would not get {}, which the run needs".format(start), result.stderr)
+                self.assertEqual(fields["fallback"], "missing_on_box")
+        self.assertEqual(len(self.calls("delete")), 1)
+
+    def test_a_jobgate_toml_that_git_ignores_keeps_the_run_here_without_a_box(self):
+        self.git("rm", "-q", "--cached", "jobgate.toml")
+        (self.repo / ".gitignore").write_text("jobgate.toml\n")
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.repo / "ran-here").exists())
+        self.assertIn("the box would not get jobgate.toml", result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "missing_on_box")
+        self.assertEqual(self.calls("new"), [])
 
     def test_the_setup_script_output_stays_out_of_the_command_output(self):
         (self.repo / "boat-setup.sh").write_text('echo installing the tools\n')
@@ -452,9 +553,24 @@ class FallbackTests(BoatTest):
         self.assertTrue((self.repo / "ran-here").exists())
         self.assertEqual(result.stderr.count("BOAT RUN FAILED during setup"), 2, result.stderr)
         self.assertIn("cannot install the toolchain", result.stderr)
-        logs = re.findall(r"^jobgate: boat log: (.+)$", result.stderr, re.MULTILINE)
-        self.assertIn("cannot install the toolchain", Path(logs[0]).read_text())
+        self.assertIn("cannot install the toolchain", self.printed_logs(result.stderr)[0].read_text())
         self.assertEqual(self.boxes_left(), [])
+
+    def test_a_box_that_stops_sending_output_is_checked_and_its_output_printed_once(self):
+        self.set_machine(memory=64 * GIB, cores=8, psi=CALM, boat_silent_seconds=1)
+        self.plan(stall=["run"])
+        result = self.run_here("import time; print('first', flush=True); time.sleep(1.5); print('second')")
+        self.assertEqual((result.returncode, result.stdout), (0, "first\nsecond\n"), result.stderr)
+        self.assertEqual(result.stderr.count("test starts with"), 1, result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["where"], "boat")
+
+    def test_an_out_of_memory_kill_is_not_retried_when_the_box_answers_late(self):
+        self.plan(oom=["run"], status_fail=[True])
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 128 + signal.SIGKILL, result.stderr)
+        self.assertFalse((self.repo / "ran-here").exists())
+        self.assertRegex(result.stderr, r"BOAT RUN FAILED during run on box bx_\w+: .*ran out of memory")
+        self.assertNotIn("retries once", result.stderr)
 
     def test_a_command_that_runs_out_of_memory_on_the_box_is_reported_and_not_run_again(self):
         self.plan(oom=["run"])
@@ -474,6 +590,22 @@ class FallbackTests(BoatTest):
                                    text=True, start_new_session=True)
         self.addCleanup(lambda: process.poll() is None and process.kill())
         wait_for((self.boat_dir / "new-held").exists)
+        os.killpg(process.pid, signal.SIGINT)
+        _, stderr = process.communicate(timeout=60)
+        self.assertEqual(process.returncode, 128 + signal.SIGINT, stderr)
+        self.assertEqual(self.boxes_left(), [])
+
+    def test_a_second_stop_while_jobgate_deletes_the_box_still_deletes_it(self):
+        started = self.root / "box started"
+        self.plan(hold_delete=[2])
+        hold = "import pathlib, sys, time; pathlib.Path(sys.argv[1]).touch(); time.sleep(60)"
+        process = subprocess.Popen([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", hold,
+                                    str(started)], cwd=str(self.repo), env=self.env, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.PIPE, text=True, start_new_session=True)
+        self.addCleanup(lambda: process.poll() is None and process.kill())
+        wait_for(started.exists)
+        os.killpg(process.pid, signal.SIGINT)
+        wait_for((self.boat_dir / "delete-held").exists)
         os.killpg(process.pid, signal.SIGINT)
         _, stderr = process.communicate(timeout=60)
         self.assertEqual(process.returncode, 128 + signal.SIGINT, stderr)

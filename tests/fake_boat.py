@@ -115,9 +115,16 @@ def attach(path, pid):
     command = (procs / "{}.command".format(pid)).read_text()
     step = next((name for marker, name in STEPS.items() if marker in command), None)
     emit({"processId": int(pid), "stdoutOffset": 0, "stderrOffset": 0, "type": "attached"})
+    if (procs / "{}.oom".format(pid)).exists():
+        emit({"exitCode": None, "signal": "SIGKILL", "status": "exited", "type": "exit"})
+        sys.exit(137)
     offsets = {"stdout": 0, "stderr": 0}
     plan_path = STATE / "plan.json"
     planned = json.loads(plan_path.read_text()).get("vanish", []) if plan_path.exists() else []
+    stalls = json.loads(plan_path.read_text()).get("stall", []) if plan_path.exists() else []
+    stall = bool(stalls) and stalls[0] == step
+    if stall:
+        take("stall")
     if planned and planned[0] == step:
         take("vanish")
         time.sleep(0.2)
@@ -145,6 +152,8 @@ def attach(path, pid):
             if data:
                 offsets[kind] += len(data)
                 emit({"data": data.decode("utf-8", "replace"), "nextOffset": offsets[kind], "type": kind})
+                if stall:
+                    time.sleep(600)
         if finished:
             code = int((procs / "{}.exit".format(pid)).read_text())
             emit({"exitCode": code, "signal": None, "status": "exited", "type": "exit"})
@@ -155,6 +164,8 @@ def attach(path, pid):
 
 
 def status(path, pid):
+    if take("status_fail"):
+        fail("unavailable", 503, "the box did not answer")
     if (path / "procs" / "{}.oom".format(pid)).exists():
         emit({"running": False, "exitCode": None, "oomKilled": True, "signal": "SIGKILL"})
         return
@@ -231,6 +242,10 @@ def main(argv):
         box(args[1])
         emit({"ok": True})
     elif args[0] == "delete":
+        hold = take("hold_delete")
+        if hold:
+            (STATE / "delete-held").touch()
+            time.sleep(hold)
         vanish(box(args[1]))
         emit({"operation": {"status": "pending", "targetId": args[1]}})
     elif args[0] == "snapshot":
