@@ -1,6 +1,6 @@
 ---
 name: tesseract-motion
-description: Add optional motion graphics, such as a lower third, to a video ad with Mirage's Tesseract CLI, installed from Mirage's 0.3.1 release with telemetry off.
+description: Add optional motion graphics, such as a lower third, to a video ad on Linux with Mirage's Tesseract CLI, installed from Mirage's 0.3.1 release with telemetry off.
 disable-model-invocation: true
 ---
 
@@ -16,7 +16,7 @@ Downloading the CLI or Mirage's skills accepts [Mirage's terms](https://github.c
 
 ## Install the pinned release
 
-These steps are for Linux on `x86_64` with glibc 2.35 or newer. Check with `uname -m` and `getconf GNU_LIBC_VERSION`. On other hosts, download `tesseract.zip` and `tesseract.zip.sha256` from the release below into a new empty directory and verify the checksum. Extract it into a new empty directory, then follow `tesseract/skills/tesseract-motion/references/installation.md` from it instead of this section. Use that `tesseract-motion` skill in place of the skill path below. In every later block, replace the `tsrct=` line with the executable path that guide names, in double quotes, and leave out the `VK_ICD_FILENAMES` line.
+This skill supports Linux on `x86_64` with glibc 2.35 or newer. Check with `uname -m` and `getconf GNU_LIBC_VERSION`. On another host, stop, report that the host is unsupported, and deliver the ad without motion graphics.
 
 The pin is 0.3.1, because Mirage's skills from a release expect the CLI from the same release. Shell variables do not carry between shell calls, so each block below sets the variables it uses.
 
@@ -87,5 +87,5 @@ The CLI renders through Vulkan. Its Linux bundle has no H.264 encoder.
      --encoder-backend external-ffmpeg-command --ffmpeg-path "$(command -v ffmpeg)"
    ```
 
-3. Check each export with `ffprobe -v error -show_entries stream=codec_name,pix_fmt,width,height:format=duration -of compact ad.mp4`, with `ad.mp4` replaced by each file you exported. An MP4 shows `h264` and the planned duration. An overlay MOV shows `prores`, a `yuva` pixel format, and the duration of the exported layer. Both keep the canvas's aspect ratio.
-4. Deliver the `.tsrct` project with the MP4, and with the overlay MOV when the user asked for one.
+3. Check each export with `ffprobe -v error -show_entries stream=codec_name,pix_fmt,width,height:format=duration -of compact ad.mp4`, with `ad.mp4` replaced by each file you exported. An MP4 shows `h264` and the planned duration. An overlay MOV shows `prores`, a `yuva` pixel format, and the active window of the layer or group passed to `--fx-solo`. Both keep the canvas's aspect ratio.
+4. Deliver the `.tsrct` project with the MP4. When the user asked for an overlay, also deliver the overlay MOV.
