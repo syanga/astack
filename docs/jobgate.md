@@ -263,8 +263,8 @@ type = "large"
 | `type` | The box size: `small`, `default`, `large`, or `xlarge`. Default: `default`. |
 
 Each path is relative to the repository root. A path cannot contain `*`, `?`,
-`[`, `]`, `!`, `#`, `\`, a newline, or a NUL character, and cannot step outside
-the repository. `exclude` cannot cover `jobgate.toml`, the `setup` script, or a
+`[`, `]`, `!`, `#`, `\`, a newline, a carriage return, or a NUL character, and
+cannot step outside the repository. `exclude` cannot cover `jobgate.toml`, the `setup` script, or a
 `setup_inputs` file, because the box needs them.
 
 A boat run needs the `boat` CLI on `PATH`, signed in, and Git 2.31 or newer.
@@ -302,10 +302,11 @@ that read Git history therefore work on the box.
   an excluded file. jobgate reads each file under the excluded paths on every
   run.
   In this check, a path in a commit matches an excluded path without regard to
-  the case of ASCII letters, so `Private/` counts for `private`. Git compares
-  other letters by case, so `Ärea/` does not count for `ärea`. The bundle
-  filter matches paths with case, on every system. So the check names such a
-  path, and the command runs here until `exclude` lists that path too.
+  the case of ASCII letters, so `Private/` counts for `private`. The bundle
+  filter matches paths with case, on every system. So the check names a path
+  such as `Private/`, and the command runs here until `exclude` lists that path
+  too. Git compares other letters by case, so `Ärea/` does not count for
+  `ärea`.
   If it finds a copy, the command runs on this machine. jobgate prints up to 5
   such paths to add to `exclude`, and the number of the others. It names one
   path for each such content. After you add those paths, the next run can name
@@ -373,10 +374,11 @@ stops within an hour.
 A snapshot is a saved copy of a box's disk. It holds the checkout, its history,
 and what the setup script installed. Its name is `jobgate-R-K`. `R` is the
 first 12 hex digits of the repository's root commit. `K` is the first 12 hex
-digits of the setup key, a SHA-256 hash of the setup script, the
-`setup_inputs` files, and the `exclude` paths in the commit that the box checks
-out. When the setup script or a `setup_inputs` file is a symbolic link to a file
-in the repository, the hash covers that file.
+digits of the setup key, a SHA-256 hash of the setup script and the
+`setup_inputs` files in the commit that the box checks out, and of the
+sparse-checkout patterns that `exclude` gives. When the setup script or a
+`setup_inputs` file is a symbolic link to a file in the repository, the hash
+covers that file.
 
 A run whose snapshot exists starts from it and skips the setup script. A run
 whose snapshot is missing sets up a new box and saves it under the new name

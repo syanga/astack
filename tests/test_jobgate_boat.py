@@ -184,6 +184,7 @@ class RoutingTests(BoatTest):
                  ('setup = "boat-setup.sh"\nexclude = "private"\n', "exclude"),
                  ('setup = "boat-setup.sh"\nexclude = ["../outside"]\n', "exclude"),
                  ('setup = "boat-setup.sh"\nsetup_inputs = ["a\\u0000b"]\n', "setup_inputs"),
+                 ('setup = "boat-setup.sh"\nexclude = ["private\\r"]\n', "exclude"),
                  ('setup = "boat-setup.sh"\nexclude = ["boat-setup.sh"]\n', "covers boat-setup.sh"),
                  ('setup = "boat-setup.sh"\nsetup_inputs = ["deps/lock"]\nexclude = ["deps"]\n', "covers deps/lock"),
                  ('setup = "boat-setup.sh"\nexclude = ["jobgate.toml"]\n', "covers jobgate.toml")]
@@ -419,6 +420,7 @@ class SourceTests(BoatTest):
         self.commit("private data")
         self.git("mv", "private/people.csv", "public.csv")
         self.commit("move it out")
+        (self.repo / "notes.txt").write_text("an uncommitted change, so the scratch commit runs too\n")
         for variable in ("GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS"):
             with self.subTest(variable):
                 result = self.gate("run", "test", "--", sys.executable, "-c", REPORT, env=dict(self.env, **{variable: "1"}))
@@ -699,6 +701,7 @@ class FallbackTests(BoatTest):
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertRegex(result.stderr, r"working\njobgate: the run step on box bx_\w+ ended, but jobgate may have missed")
 
+    @unittest.skipIf(os.geteuid() == 0, "root writes to directories without write permission")
     def test_a_file_error_here_before_jobgate_sees_the_command_s_end_keeps_its_exit_code(self):
         temporary = self.root / "tmp"
         temporary.mkdir()

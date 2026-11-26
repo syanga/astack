@@ -112,7 +112,7 @@ SECRET_NAMES = (".env", ".env.*", "*.env", ".envrc", "*~", "*.pem", "*.key", "*.
                 ".pypirc", ".yarnrc.yml", ".pgpass", ".git-credentials", "credentials", "credentials.json",
                 "application_default_credentials.json", "*.tfvars", "*.tfstate", "*.tfstate.*", "*.jks", "*.keystore",
                 "*.ppk", "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*")
-REPO_PATH = re.compile(r"[^*?\[\]!#\\\n\x00]+")
+REPO_PATH = re.compile(r"[^*?\[\]!#\\\n\r\x00]+")
 COMMIT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 GITLINK_MODE = "160000"
 GIT_SELECTORS = ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
@@ -1436,7 +1436,7 @@ def make_plan(source: Source, settings: BoatSettings) -> Plan:
         else:
             content = answer if answer.startswith("symlink ") else ""
         digest.update("{}\0{}\n".format(path, content).encode(errors="surrogateescape"))
-    digest.update("\0".join(settings.exclude).encode(errors="surrogateescape"))
+    digest.update("\0".join(settings.sparse_patterns()).encode(errors="surrogateescape"))
     roots = sorted(git(["rev-list", "--max-parents=0", source.commit], git_dir=source.store).split())
     prefix = "jobgate-{}-".format(roots[0][:12])
     key = digest.hexdigest()
