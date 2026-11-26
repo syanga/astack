@@ -185,6 +185,9 @@ class SourceTests(BoatTest):
         (self.repo / "private/survey.csv").write_text("name,email\nAda,ada@example.com\n")
         (self.repo / "private/.gitkeep").write_text("")
         (self.repo / "empty.txt").write_text("")
+        (self.repo / "logs").mkdir()
+        for ignore in ("private/.gitignore", "logs/.gitignore"):
+            (self.repo / ignore).write_text("*.tmp\n")
         self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
         self.commit("add private data")
         committed = self.git("rev-parse", "HEAD:private/survey.csv").strip()
@@ -209,6 +212,23 @@ class SourceTests(BoatTest):
         result = self.run_here(REPORT)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.repo / "ran-here").exists())
+        self.assertIn("data/people.csv", result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere")
+        self.assertEqual(self.calls("new"), [])
+
+    def test_the_exclude_check_reads_the_root_commit_whatever_the_git_config_says(self):
+        self.git("checkout", "-q", "--orphan", "fresh")
+        for name in ("data", "private"):
+            (self.repo / name).mkdir()
+            (self.repo / name / "people.csv").write_text("name,email\nAda,ada@example.com\n")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
+        self.commit("root with a copy of the data")
+        self.git("rm", "-q", "data/people.csv")
+        self.commit("drop the copy")
+        self.env.update(GIT_CONFIG_COUNT="2", GIT_CONFIG_KEY_0="log.showRoot", GIT_CONFIG_VALUE_0="false",
+                        GIT_CONFIG_KEY_1="log.diffMerges", GIT_CONFIG_VALUE_1="combined")
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("data/people.csv", result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere")
         self.assertEqual(self.calls("new"), [])

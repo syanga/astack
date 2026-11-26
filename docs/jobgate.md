@@ -279,9 +279,10 @@ that read Git history therefore work on the box.
   change. The result line says `dirty=yes`.
 - jobgate leaves out untracked files whose names match `.env`, `.env.*`,
   `*.env`, `.envrc`, `*~`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `.netrc`,
-  `.npmrc`, `.pypirc`, `.pgpass`, `.git-credentials`, `credentials.json`,
-  `*.tfvars`, `*.tfstate`, `*.tfstate.*`, `id_rsa*`, `id_dsa*`, `id_ecdsa*`, or
-  `id_ed25519*`. It prints their paths.
+  `.npmrc`, `.pypirc`, `.yarnrc.yml`, `.pgpass`, `.git-credentials`,
+  `credentials`, `credentials.json`, `application_default_credentials.json`,
+  `*.tfvars`, `*.tfstate`, `*.tfstate.*`, `*.jks`, `*.keystore`, `*.ppk`,
+  `id_rsa*`, `id_dsa*`, `id_ecdsa*`, or `id_ed25519*`. It prints their paths.
 - With `exclude`, the bundle leaves out the contents of every file under the
   excluded paths, in every commit of the history. The box gets the file names,
   but its checkout leaves the files out. A Git command on the box that reads
@@ -290,7 +291,8 @@ that read Git history therefore work on the box.
   excluded path also lives at another path in the history, such as a file that a
   commit moved into an excluded directory. If one does, the command runs here,
   and jobgate prints the other paths to add to `exclude`. Empty files do not
-  count.
+  count, and neither does content that the checked-out commit also has outside
+  the excluded paths, such as one `.gitignore` in two directories.
 - When the box starts from a snapshot, the bundle holds only the commits that
   the snapshot lacks.
 
@@ -385,7 +387,6 @@ A box dies partway when one of these happens:
 - boat kills a step's process, or the box runs out of memory during the setup
   step.
 - jobgate cannot reach the box for 10 minutes.
-- jobgate on this machine hits a file or process error, such as a full disk.
 
 jobgate then prints the step, the box, the reason, and a log:
 
@@ -466,7 +467,10 @@ time=2026-11-17T18:00:00Z profile=test where=local repo=/src/app commit=4f0c2d9e
 Values that are empty or contain whitespace, a double quote, or `=` are JSON
 strings. A byte that is not valid UTF-8, such as in a directory name, appears as
 `\udcXX`, where `XX` is the byte in hex. All of a user's runs append their lines
-to one log in the order they end. jobgate runs dirty worktrees like clean ones.
+to one log in the order they end. On this machine, jobgate runs dirty worktrees
+like clean ones. On boat, the box gets the uncommitted changes as a temporary
+commit. A line with `dirty=yes` does not describe the commit in its `commit`
+field.
 
 On a boat run, `workers`, `peak`, `stated`, and `oom_kills` come from the
 result line of jobgate on the box. jobgate holds that line back and prints its

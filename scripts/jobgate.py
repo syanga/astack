@@ -99,8 +99,9 @@ BOX_RUN = 'exec python3 "$HOME/.jobgate/run/jobgate.py" _box run "$HOME/.jobgate
 RUN_REF = "refs/jobgate/run"
 GIT_SECONDS = 600
 SECRET_NAMES = (".env", ".env.*", "*.env", ".envrc", "*~", "*.pem", "*.key", "*.p12", "*.pfx", ".netrc", ".npmrc",
-                ".pypirc", ".pgpass", ".git-credentials", "credentials.json", "*.tfvars", "*.tfstate", "*.tfstate.*",
-                "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*")
+                ".pypirc", ".yarnrc.yml", ".pgpass", ".git-credentials", "credentials", "credentials.json",
+                "application_default_credentials.json", "*.tfvars", "*.tfstate", "*.tfstate.*", "*.jks", "*.keystore",
+                "*.ppk", "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*")
 REPO_PATH = re.compile(r"[^*?\[\]!#\\\n]+")
 COMMIT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
@@ -1103,24 +1104,30 @@ def commit_worktree(root: Path, scratch: Path, store: Path, objects: str, head: 
 def check_exclude(source: Source, settings: BoatSettings) -> None:
     if not settings.exclude:
         return
-    changes = git(["--literal-pathspecs", "log", "--format=", "--raw", "--no-abbrev", "-m", "--no-renames", RUN_REF,
-                   "--", *settings.exclude], git_dir=source.store)
-    private = {field for line in changes.splitlines() if line.startswith(":") for field in line.split()[2:4]
-               if COMMIT_ID.fullmatch(field) and field.strip("0")}
-    private.discard(git(["hash-object", "--stdin"], git_dir=source.store, stdin_text="").strip())
-    if not private:
+    commits = git(["rev-list", RUN_REF], git_dir=source.store)
+    changes = git(["--literal-pathspecs", "diff-tree", "--stdin", "-r", "-m", "--root", "--no-renames", "--no-commit-id",
+                   "--raw", "--no-abbrev", "--", *settings.exclude], git_dir=source.store, stdin_text=commits)
+    excluded_blobs = {field for line in changes.splitlines() if line.startswith(":") for field in line.split()[2:4]
+                      if COMMIT_ID.fullmatch(field) and field.strip("0")}
+    excluded_blobs.discard(git(["hash-object", "--stdin"], git_dir=source.store, stdin_text="").strip())
+    if not excluded_blobs:
         return
+    tree = git(["ls-tree", "-r", "-z", "--full-tree", RUN_REF], git_dir=source.store)
+    excluded_blobs -= {entry.split("\t", 1)[0].split()[2] for entry in tree.split("\0")
+                       if "\t" in entry and not under_exclude(entry.split("\t", 1)[1], settings)}
     patterns = "".join(line + "\n" for line in settings.sparse_patterns())
     blob = git(["hash-object", "-w", "--stdin"], git_dir=source.store, stdin_text=patterns).strip()
     objects = git(["rev-list", "--objects", "--filter=sparse:oid=" + blob, RUN_REF], git_dir=source.store)
     elsewhere = sorted({line.split(" ", 1)[1] for line in objects.splitlines()
-                        if " " in line and line.split(" ", 1)[0] in private})
+                        if " " in line and line.split(" ", 1)[0] in excluded_blobs})
     if elsewhere:
-        raise BoatUnavailable("excluded_elsewhere", "the contents of files under exclude also live at {} in the "
-                              "history. Add {} to exclude in [boat]".format(
-                                  ", ".join(elsewhere[:5]) + (" and {} more".format(len(elsewhere) - 5)
-                                                              if len(elsewhere) > 5 else ""),
-                                  "these paths" if len(elsewhere) > 1 else "this path"))
+        shown = ", ".join(elsewhere[:5]) + ("" if len(elsewhere) <= 5 else ", and {} more".format(len(elsewhere) - 5))
+        raise BoatUnavailable("excluded_elsewhere", "content from the excluded paths is also in the history at {}. "
+                              "Add {} to exclude".format(shown, "them" if len(elsewhere) > 1 else "it"))
+
+
+def under_exclude(path: str, settings: BoatSettings) -> bool:
+    return any(path == excluded or path.startswith(excluded + "/") for excluded in settings.exclude)
 
 
 def make_plan(source: Source, settings: BoatSettings) -> Plan:
@@ -1327,7 +1334,12 @@ class Box:
             output = process.stdout
             assert output is not None
             fired = threading.Event()
-            timer = threading.Timer(BOAT_NEW_SECONDS, lambda: (fired.set(), process.kill()))
+
+            def expire() -> None:
+                fired.set()
+                process.kill()
+
+            timer = threading.Timer(BOAT_NEW_SECONDS, expire)
             timer.start()
             try:
                 for line in output:
@@ -1569,10 +1581,6 @@ def boat_attempt(cli: str, settings: BoatSettings, source: Source, plan: Plan, s
     except BoatUnavailable as unavailable:
         unavailable.box, unavailable.step = box.id, step
         raise
-    except OSError as error:
-        died = BoatDied(step, "jobgate on this machine failed: {}".format(error))
-        died.box = box.id
-        raise died from error
     finally:
         if heartbeat is not None:
             heartbeat.stop()
