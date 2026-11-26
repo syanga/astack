@@ -50,7 +50,7 @@ The craft file maps each council member to its flaws per version. List only flaw
 
 These steps replace hillclimb steps 4 and 5 and hillclimb-council's vote steps as named.
 
-1. Build the bundle per vote step 7 from the current best's flaws: three fixes, or every queued flaw if fewer. If the current best has a major flaw, put every queued major flaw in the bundle instead, because `rounds.py` keeps no version with a major flaw. Each fix edits the render request or `copy.txt`. Write all of them into one new version yourself, with no parts, implementers, or worktrees. Render it with the current best image as a reference, so the render keeps what the fixes leave alone. Leave the reference out when a fix changes the type, colors, or layout of the whole ad. After a round reverts on a conclusive vote, pivot per vote step 8. After an inconclusive vote, skip the pivot as hillclimb-council says.
+1. Build the bundle per vote step 7 from the current best's flaws: three fixes, or every queued flaw if fewer. If the current best has a major flaw, put every queued major flaw in the bundle instead, because only a version without major flaws reaches the panels. Each fix edits the render request or `copy.txt`. Write all of them into one new version yourself, with no parts, implementers, or worktrees. Render it with the current best image as a reference, so the render keeps what the fixes leave alone. Leave the reference out when a fix changes the type, colors, or layout of the whole ad. After a round reverts on a conclusive vote, pivot per vote step 8. After an inconclusive vote, skip the pivot as hillclimb-council says.
 2. View the render before the vote. If the image is blank, has the wrong size, or garbles text that the request spelled out, render again. Write the new version's `text.txt`.
 3. Vote per vote steps 2 to 4. The ballot holds the image and `copy.txt` of the new version and the current best, and nothing else. Panel B replaces the confirm ballot, so make none.
 4. Write the craft file with both versions for each member, then run:
@@ -66,7 +66,12 @@ Skip vote step 6's trim. Each render redraws the whole image, so dropping one fi
 
 ### Keep rule
 
-`rounds.py round` reverts when the vote is inconclusive or any member lists a major flaw in the new version. Otherwise it runs panel A on the new version and the current best. Panel A favors the new version when its mean rises by more than the margin. If the current best has a major flaw in this vote, the round is a gate fix, and panel A favors the new version unless its mean falls by more than the margin. Only then does `rounds.py` run panel B. Panel B confirms when its mean rises at all, or, for a gate fix, falls by no more than the margin. The round keeps the new version only when panel B confirms.
+`rounds.py round` reverts when the vote is inconclusive. Otherwise it compares the craft verdicts of the new version and the current best:
+
+- Both fail. The round keeps the new version when no member lists more major flaws in it than in the current best, and at least one member lists fewer. This is vote step 5's favor rule, counted on major flaws. No panel runs.
+- The new version fails and the current best passes. The round reverts.
+- The new version passes and the current best fails. The round keeps the new version and runs panel A on it alone. Its mean is the panel baseline for later rounds.
+- Both pass. `rounds.py` runs panel A on both. Panel A favors the new version when its mean rises by more than the margin. Only then does `rounds.py` run panel B on both. Panel B confirms when its mean rises at all. The round keeps the new version only when panel B confirms.
 
 ## Stop
 

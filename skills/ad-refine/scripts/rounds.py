@@ -14,7 +14,7 @@ import sys
 
 IMAGE_NAMES = ("ad.png", "ad.jpg", "ad.jpeg", "ad.webp")
 PLACEHOLDER = re.compile(r"\{(panel|image|copy)\}")
-COLUMNS = ("Round", "Targets", "New", "Best", "Craft", "Panel A", "Panel B", "Decision")
+COLUMNS = ("Round", "Targets", "New", "Best", "Craft", "Majors", "Panel A", "Panel B", "Decision")
 
 
 class Refusal(Exception):
@@ -35,7 +35,7 @@ class Panel(Enum):
 @dataclass(frozen=True)
 class Means:
     new: float
-    best: float
+    best: float | None
 
     @property
     def delta(self) -> float:
@@ -43,52 +43,74 @@ class Means:
 
 
 @dataclass(frozen=True)
+class Request:
+    panel: Panel
+    on_best: bool
+
+
+@dataclass(frozen=True)
 class Decision:
     keep: bool
-    gate_fix: bool
     reason: str
 
     def __str__(self):
-        return "{}{}: {}".format("keep" if self.keep else "revert", " (gate fix)" if self.gate_fix else "", self.reason)
+        return "{}: {}".format("keep" if self.keep else "revert", self.reason)
 
 
-def compare(panel: Panel, means: Means, bound: float, inclusive: bool) -> tuple[bool, str]:
+Majors = dict[str, int | None]
+
+
+def compare(panel: Panel, means: Means, bound: float) -> tuple[bool, str]:
     delta = means.delta
-    passed = delta >= bound if inclusive else delta > bound
-    sign = (">=" if passed else "<") if inclusive else (">" if passed else "<=")
+    passed = delta > bound
     shown = "0" if bound == 0 else "{:.3f}".format(bound)
-    return passed, "panel {} {:+.3f} {} {}".format(panel.value, delta, sign, shown)
+    return passed, "panel {} {:+.3f} {} {}".format(panel.value, delta, ">" if passed else "<=", shown)
 
 
-def decide(new: Verdict, best: Verdict, margin: float, means: dict[Panel, Means]) -> Decision | Panel:
-    if new is Verdict.INCONCLUSIVE:
-        return Decision(False, False, "craft inconclusive")
-    if new is Verdict.FAIL:
-        return Decision(False, False, "craft fail")
-    gate_fix = best is Verdict.FAIL
+def decide(new: Majors, best: Majors, margin: float, means: dict[Panel, Means]) -> Decision | Request:
+    match verdict(new), verdict(best):
+        case Verdict.INCONCLUSIVE, _:
+            return Decision(False, "craft inconclusive")
+        case Verdict.FAIL, Verdict.FAIL:
+            pairs = [(new[member], best[member]) for member in new]
+            if all(ours <= theirs for ours, theirs in pairs) and any(ours < theirs for ours, theirs in pairs):
+                return Decision(True, "fewer major flaws")
+            return Decision(False, "major flaws not fewer")
+        case Verdict.FAIL, Verdict.PASS:
+            return Decision(False, "craft fail")
+        case Verdict.PASS, Verdict.FAIL:
+            if Panel.A not in means:
+                return Request(Panel.A, on_best=False)
+            return Decision(True, "craft pass vs fail, panel A baseline")
     if Panel.A not in means:
-        return Panel.A
-    favors, a = compare(Panel.A, means[Panel.A], -margin if gate_fix else margin, gate_fix)
+        return Request(Panel.A, on_best=True)
+    favors, a = compare(Panel.A, means[Panel.A], margin)
     if not favors:
-        return Decision(False, gate_fix, a)
+        return Decision(False, a)
     if Panel.B not in means:
-        return Panel.B
-    confirms, b = compare(Panel.B, means[Panel.B], -margin if gate_fix else 0, gate_fix)
+        return Request(Panel.B, on_best=True)
+    confirms, b = compare(Panel.B, means[Panel.B], 0)
     if not confirms:
-        return Decision(False, gate_fix, b)
-    return Decision(True, gate_fix, a + ", " + b)
+        return Decision(False, b)
+    return Decision(True, a + ", " + b)
 
 
 def conclusive(craft):
     return all(listed is not None for listed in craft.values())
 
 
-def verdict(craft, version) -> Verdict:
-    if not conclusive(craft):
+def major_count(flaws) -> int:
+    return sum(flaw["severity"] == "major" for flaw in flaws)
+
+
+def majors(craft, version) -> Majors:
+    return {member: None if listed is None else major_count(listed[version]) for member, listed in craft.items()}
+
+
+def verdict(counts: Majors) -> Verdict:
+    if None in counts.values():
         return Verdict.INCONCLUSIVE
-    if any(flaw["severity"] == "major" for listed in craft.values() for flaw in listed[version]):
-        return Verdict.FAIL
-    return Verdict.PASS
+    return Verdict.FAIL if any(counts.values()) else Verdict.PASS
 
 
 def flaw_count(craft, version):
@@ -194,17 +216,25 @@ def shown(means):
     if means is None:
         return "-"
     means = Means(**means)
+    if means.best is None:
+        return "{:.3f}".format(means.new)
     return "{:.3f} vs {:.3f} ({:+.3f})".format(means.new, means.best, means.delta)
+
+
+def tally(craft, versions):
+    return ", ".join("{} {}".format(member, "-" if listed is None else " vs ".join(
+        str(major_count(listed[version])) for version in versions)) for member, listed in craft.items())
 
 
 def report(state):
     start = state["start"]
-    rows = [["0", "", start["version"], "", verdict(start["craft"], start["version"]).value, "-", "-", "start"]]
+    rows = [["0", "", start["version"], "", verdict(majors(start["craft"], start["version"])).value,
+             tally(start["craft"], [start["version"]]), "-", "-", "start"]]
     for number, entry in enumerate(state["rounds"], 1):
         craft, new, best = entry["craft"], entry["version"], entry["best"]
         rows.append([str(number), entry["targets"], new, best,
-                     "{} vs {}".format(verdict(craft, new).value, verdict(craft, best).value),
-                     shown(entry["panels"].get("A")), shown(entry["panels"].get("B")),
+                     "{} vs {}".format(verdict(majors(craft, new)).value, verdict(majors(craft, best)).value),
+                     tally(craft, [new, best]), shown(entry["panels"].get("A")), shown(entry["panels"].get("B")),
                      str(Decision(**entry["decision"]))])
     lines = ["| " + " | ".join(COLUMNS) + " |", "|" + "---|" * len(COLUMNS)]
     lines += ["| " + " | ".join(cell(value) for value in row) + " |" for row in rows]
@@ -256,10 +286,11 @@ def run_round(args):
             args.craft, ", ".join(sorted(state["start"]["craft"]))))
     number = len(state["rounds"]) + 1
     means = {}
-    while isinstance(outcome := decide(verdict(craft, new), verdict(craft, best), state["margin"], means), Panel):
-        means[outcome] = Means(
-            new=run_panel(run, state["panel_command"], number, outcome, new, files[new]),
-            best=run_panel(run, state["panel_command"], number, outcome, best, files[best]))
+    while isinstance(outcome := decide(majors(craft, new), majors(craft, best), state["margin"], means), Request):
+        means[outcome.panel] = Means(
+            new=run_panel(run, state["panel_command"], number, outcome.panel, new, files[new]),
+            best=run_panel(run, state["panel_command"], number, outcome.panel, best, files[best])
+            if outcome.on_best else None)
     state["rounds"].append({"version": new, "best": best, "targets": args.targets, "craft": craft,
                             "panels": {panel.value: asdict(pair) for panel, pair in means.items()},
                             "decision": asdict(outcome)})

@@ -64,10 +64,12 @@ class RoundsTests(unittest.TestCase):
 
     def vote(self, silent=(), **flaws):
         self.votes += 1
+        by_member = {version: severities if isinstance(severities, dict) else {"opus": severities}
+                     for version, severities in flaws.items()}
         craft = {member: None if member in silent else {
             version: [{"severity": severity, "check": "claims", "quote": "US$36"}
-                      for severity in (severities if member == "opus" else [])]
-            for version, severities in flaws.items()} for member in ("opus", "sol")}
+                      for severity in severities.get(member, [])]
+            for version, severities in by_member.items()} for member in ("opus", "sol")}
         path = self.home / "craft {}.json".format(self.votes)
         path.write_text(json.dumps(craft), encoding="utf-8")
         return path
@@ -115,7 +117,7 @@ class RoundsTests(unittest.TestCase):
         self.assertStatus(kept, "next: round 2 against v1")
         self.assertEqual(row(kept.stdout, 1), {
             "Round": "1", "Targets": "headline \\| price", "New": "v1", "Best": "v0", "Craft": "pass vs pass",
-            "Panel A": "3.000 vs 2.500 (+0.500)", "Panel B": "2.750 vs 2.500 (+0.250)",
+            "Majors": "opus 0 vs 0, sol 0 vs 0", "Panel A": "3.000 vs 2.500 (+0.500)", "Panel B": "2.750 vs 2.500 (+0.250)",
             "Decision": "keep: panel A +0.500 > 0.250, panel B +0.250 > 0"})
         self.assertEqual((self.run_folder / "table.md").read_text(encoding="utf-8"), kept.stdout)
         self.assertCalls(["A v1", "A v0", "B v1", "B v0"])
@@ -170,31 +172,89 @@ class RoundsTests(unittest.TestCase):
         self.assertStatus(failed, "next: round 2 against v0")
         self.assertEqual(row(failed.stdout, 1), {
             "Round": "1", "Targets": "headline", "New": "v1", "Best": "v0", "Craft": "fail vs pass",
-            "Panel A": "-", "Panel B": "-", "Decision": "revert: craft fail"})
+            "Majors": "opus 1 vs 0, sol 0 vs 0", "Panel A": "-", "Panel B": "-", "Decision": "revert: craft fail"})
         self.assertEqual(self.calls(), [])
 
         self.round("v2", self.vote(v2=["minor"], v0=["minor"]))
 
         self.assertCalls(["A v2", "A v0", "B v2", "B v0"])
 
-    def test_a_gate_fix_keeps_drops_within_the_margin_and_reverts_a_drop_beyond_it(self):
+    def test_the_baseline_row_counts_each_members_major_flaws_and_marks_a_member_without_a_score(self):
         self.version("v0", 2.5, 2.5)
-        self.version("v1", 2.125, 3.0)
-        self.version("v2", 2.25, 2.375)
+
+        started = self.start(self.vote(silent=("sol",), v0=["major", "minor", "major"]))
+
+        self.assertStatus(started, "next: round 1 against v0")
+        self.assertEqual(row(started.stdout, 0), {
+            "Round": "0", "Targets": "", "New": "v0", "Best": "", "Craft": "inconclusive",
+            "Majors": "opus 2, sol -", "Panel A": "-", "Panel B": "-", "Decision": "start"})
+
+    def test_both_failing_keeps_without_a_panel_when_one_member_lists_fewer_major_flaws_and_none_more(self):
+        self.version("v0", 2.5, 2.5)
+        self.version("v1", 2.0, 2.0)
+        self.version("v2", 2.25, 2.25)
+        self.start(self.vote(v0={"opus": ["major", "major"], "sol": ["major"]}))
+
+        kept = self.round("v1", self.vote(v1={"opus": ["major", "minor", "minor"], "sol": ["major"]},
+                                          v0={"opus": ["major", "major"], "sol": ["major"]}))
+
+        self.assertStatus(kept, "next: round 2 against v1")
+        self.assertEqual(row(kept.stdout, 1), {
+            "Round": "1", "Targets": "headline", "New": "v1", "Best": "v0", "Craft": "fail vs fail",
+            "Majors": "opus 1 vs 2, sol 1 vs 1", "Panel A": "-", "Panel B": "-",
+            "Decision": "keep: fewer major flaws"})
+        self.assertEqual(self.calls(), [])
+
+        self.round("v2", self.vote(v2=["minor"], v1={"opus": ["major"], "sol": ["major"]}))
+
+        self.assertCalls(["A v2"])
+
+    def test_both_failing_reverts_when_one_member_lists_fewer_major_flaws_and_another_more(self):
+        self.version("v0", 2.5, 2.5)
+        self.version("v1", 3.0, 3.0)
+        self.start(self.vote(v0={"opus": ["major", "major"], "sol": ["major"]}))
+
+        result = self.round("v1", self.vote(v1={"opus": ["major"], "sol": ["major", "major"]},
+                                            v0={"opus": ["major", "major"], "sol": ["major"]}))
+
+        self.assertStatus(result, "next: round 2 against v0")
+        self.assertEqual(row(result.stdout, 1)["Majors"], "opus 1 vs 2, sol 2 vs 1")
+        self.assertEqual(row(result.stdout, 1)["Decision"], "revert: major flaws not fewer")
+        self.assertEqual(self.calls(), [])
+
+    def test_both_failing_reverts_when_every_member_lists_as_many_major_flaws(self):
+        self.version("v0", 2.5, 2.5)
+        self.version("v1", 3.0, 3.0)
+        self.start(self.vote(v0={"opus": ["major"], "sol": ["major", "major"]}))
+
+        result = self.round("v1", self.vote(v1={"opus": ["major"], "sol": ["major", "major"]},
+                                            v0={"opus": ["major"], "sol": ["major", "major"]}))
+
+        self.assertStatus(result, "next: round 2 against v0")
+        self.assertEqual(row(result.stdout, 1)["Majors"], "opus 1 vs 1, sol 2 vs 2")
+        self.assertEqual(row(result.stdout, 1)["Decision"], "revert: major flaws not fewer")
+        self.assertEqual(self.calls(), [])
+
+    def test_passing_against_a_failing_best_keeps_with_a_panel_a_baseline_that_the_next_round_must_beat(self):
+        self.version("v0", 2.5, 2.5)
+        self.version("v1", 2.4, 3.0)
+        self.version("v2", 3.0, 3.25)
         self.assertStatus(self.start(self.vote(v0=["major"])), "next: round 1 against v0")
 
-        dropped = self.round("v1", self.vote(v1=["minor"], v0=["major"]))
+        kept = self.round("v1", self.vote(v1=["minor"], v0=["major"]))
 
-        self.assertStatus(dropped, "next: round 2 against v0")
-        self.assertEqual(row(dropped.stdout, 1)["Craft"], "pass vs fail")
-        self.assertEqual(row(dropped.stdout, 1)["Decision"], "revert (gate fix): panel A -0.375 < -0.250")
-        self.assertCalls(["A v1", "A v0"])
+        self.assertStatus(kept, "next: round 2 against v1")
+        self.assertEqual(row(kept.stdout, 1), {
+            "Round": "1", "Targets": "headline", "New": "v1", "Best": "v0", "Craft": "pass vs fail",
+            "Majors": "opus 0 vs 1, sol 0 vs 0", "Panel A": "2.400", "Panel B": "-",
+            "Decision": "keep: craft pass vs fail, panel A baseline"})
+        self.assertCalls(["A v1"])
 
-        held = self.round("v2", self.vote(v2=["minor"], v0=["major"]))
+        faced = self.round("v2", self.vote(v2=["minor"], v1=["minor"]))
 
-        self.assertStatus(held, "next: round 3 against v2")
-        self.assertEqual(row(held.stdout, 2)["Decision"],
-                         "keep (gate fix): panel A -0.250 >= -0.250, panel B -0.125 >= -0.250")
+        self.assertStatus(faced, "next: round 3 against v2")
+        self.assertEqual(row(faced.stdout, 2)["Decision"], "keep: panel A +0.600 > 0.250, panel B +0.250 > 0")
+        self.assertCalls(["A v1", "A v2", "A v1", "B v2", "B v1"])
 
     def test_an_inconclusive_vote_reverts_without_running_a_panel(self):
         self.version("v0", 2.5, 2.5)
@@ -206,6 +266,7 @@ class RoundsTests(unittest.TestCase):
 
         self.assertStatus(result, "next: round 2 against v0")
         self.assertEqual(row(result.stdout, 1)["Craft"], "inconclusive vs inconclusive")
+        self.assertEqual(row(result.stdout, 1)["Majors"], "opus 0 vs 0, sol -")
         self.assertEqual(row(result.stdout, 1)["Panel A"], "-")
         self.assertEqual(row(result.stdout, 1)["Decision"], "revert: craft inconclusive")
         self.assertEqual(self.calls(), [])
