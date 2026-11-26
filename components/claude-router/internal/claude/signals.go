@@ -2,6 +2,7 @@ package claude
 
 import (
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -38,6 +39,36 @@ func observationFrom(h http.Header, at time.Time) (router.Observation, bool) {
 		obs.Windows = append(obs.Windows, win)
 	}
 	return obs, len(obs.Windows) > 0
+}
+
+// Anthropic's utilization header can carry non-finite values, which
+// encoding/json cannot marshal, and a 429 rejection can omit utilization.
+func quotaFrom(h http.Header, at time.Time) *UsageReading {
+	obs, ok := observationFrom(h, at)
+	if !ok {
+		return nil
+	}
+	var windows []UsageWindow
+	for _, w := range obs.Windows {
+		if len(w.Models) > 0 || w.Kind.Period() == 0 {
+			continue
+		}
+		var used float64
+		switch {
+		case w.Utilization != nil && !math.IsNaN(*w.Utilization) && !math.IsInf(*w.Utilization, 0):
+			used = min(max(*w.Utilization, 0), 1)
+		case w.Rejected:
+			used = 1
+		default:
+			continue
+		}
+		u := used
+		windows = append(windows, UsageWindow{Kind: w.Kind, Used: &u, ResetsAt: w.ResetsAt})
+	}
+	if len(windows) == 0 {
+		return nil
+	}
+	return &UsageReading{At: at, Windows: windows}
 }
 
 // overageFrom reads the paid-overflow state a response reports. Paid use is

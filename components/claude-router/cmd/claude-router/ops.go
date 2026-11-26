@@ -94,7 +94,7 @@ func statusReport(in installation, now time.Time) (report, error) {
 			r.SaveErr = fmt.Sprintf("cannot record a start in %s: %v", filepath.Join(dir, supervisionFile), err)
 		}
 	}
-	r.Digest, err = readDigest(filepath.Join(in.State, "events.jsonl"), now.Add(-statusCacheWindow))
+	r.Digest, err = readDigestAt(filepath.Join(in.State, "events.jsonl"), now.Add(-statusCacheWindow), now.Add(-quotaHistoryWindow))
 	return r, err
 }
 

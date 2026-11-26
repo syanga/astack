@@ -29,7 +29,19 @@ const (
 	maxRequestBody         = 64 << 20
 	maxRoutingSteps        = 8
 	unknownResetRetryAfter = 5 * time.Minute
+	maxEventModelLen       = 128
 )
+
+func eventModel(model string) string {
+	if len(model) <= maxEventModelLen {
+		return model
+	}
+	cut := maxEventModelLen
+	for cut > 0 && (model[cut]&0xc0) == 0x80 {
+		cut--
+	}
+	return model[:cut]
+}
 
 func (s *Service) handler() http.Handler {
 	e := gin.New()
@@ -157,6 +169,7 @@ type outcome struct {
 	Attempts     int
 	Result       string
 	Usage        Usage
+	Quota        *UsageReading
 }
 
 func (s *Service) messages(c *gin.Context) {
@@ -184,14 +197,15 @@ func (s *Service) messages(c *gin.Context) {
 	upstream := 0
 	rechecked := map[router.AccountID]bool{}
 	var tried router.AccountID
+	model := eventModel(id.Model)
 	finish := func(kind string, account router.AccountID, d router.Decision, status int, out *outcome) {
 		dur := s.now().Sub(start).Milliseconds()
-		e := Event{Kind: kind, Conversation: conv, Account: account, Decision: d.Kind, Reason: string(d.Reason), Status: status, Attempt: req.Attempt, Attempts: upstream, Stream: &stream, DurationMS: &dur}
+		e := Event{Kind: kind, Conversation: conv, Account: account, Model: model, Decision: d.Kind, Reason: string(d.Reason), Status: status, Attempt: req.Attempt, Attempts: upstream, Stream: &stream, DurationMS: &dur}
 		if d.Kind == router.Wait {
 			e.Until = d.Until
 		}
 		if out != nil {
-			e.Outcome, e.Class = out.Result, out.Class
+			e.Outcome, e.Class, e.Quota, e.AttemptStart = out.Result, out.Class, out.Quota, out.AttemptAt
 			if out.Usage.known() {
 				u := out.Usage
 				e.Usage = &u
@@ -303,7 +317,7 @@ func (s *Service) messages(c *gin.Context) {
 			Observation:  exhaustionEvidence(out.Header, attemptAt, out.Class),
 		})
 		if class != router.ClassNetwork {
-			s.events.emit(Event{Kind: "attempt_failed", Conversation: conv, Account: account, Class: class, Status: out.Status, Attempt: req.Attempt})
+			s.events.emit(Event{Kind: "attempt_failed", Conversation: conv, Account: account, Model: model, Class: class, Status: out.Status, Attempt: req.Attempt, AttemptStart: out.AttemptAt, Quota: out.Quota})
 		}
 		if class == router.ClassRequestScoped {
 			status := out.Status
@@ -459,17 +473,26 @@ func (s *Service) dispatch(c *gin.Context, info callInfo, authID string, id Iden
 			out.Violation = "the SDK attempted another account than the pinned one"
 		}
 	}
-	if n := len(tried); n > 0 && !out.Delivered && !out.ClientGone {
+	if n := len(tried); n > 0 {
 		last := tried[n-1]
-		out.AttemptAt = last.Start
-		if out.Header == nil {
-			out.Header = last.Header
+		out.AttemptAt = tried[0].Start
+		for i := n - 1; i >= 0; i-- {
+			if q := quotaFrom(tried[i].Header, tried[i].End); q != nil {
+				out.Quota = q
+				break
+			}
 		}
-		if last.Phase != "" {
-			out.Class, out.Phase, out.Err, out.Status = router.ClassNetwork, last.Phase, last.Err, 0
-		}
-		if out.Class == "" {
-			out.Class = classify(last.Status, out.Status, out.Err, last.Header)
+		if !out.Delivered && !out.ClientGone {
+			out.AttemptAt = last.Start
+			if out.Header == nil {
+				out.Header = last.Header
+			}
+			if last.Phase != "" {
+				out.Class, out.Phase, out.Err, out.Status = router.ClassNetwork, last.Phase, last.Err, 0
+			}
+			if out.Class == "" {
+				out.Class = classify(last.Status, out.Status, out.Err, last.Header)
+			}
 		}
 	}
 	return out

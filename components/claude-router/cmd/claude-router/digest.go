@@ -84,11 +84,24 @@ type digest struct {
 	Conversations map[string]*conversationDigest
 	Migrations    []migration
 	Cache         cacheWindow
+	QuotaSince    time.Time
+	QuotaSamples  map[windowID][]quotaSample
+	RequestSpans  map[router.AccountID][]requestSpan
 }
 
 func readDigest(path string, since time.Time) (digest, error) {
-	d := digest{Accounts: map[router.AccountID]*usageTotals{}, Conversations: map[string]*conversationDigest{},
-		Cache: cacheWindow{Since: since, Accounts: map[router.AccountID]*usageTotals{}}}
+	return readDigestAt(path, since, time.Time{})
+}
+
+func readDigestAt(path string, since, quotaSince time.Time) (digest, error) {
+	d := digest{
+		Accounts:      map[router.AccountID]*usageTotals{},
+		Conversations: map[string]*conversationDigest{},
+		Cache:         cacheWindow{Since: since, Accounts: map[router.AccountID]*usageTotals{}},
+		QuotaSince:    quotaSince,
+		QuotaSamples:  map[windowID][]quotaSample{},
+		RequestSpans:  map[router.AccountID][]requestSpan{},
+	}
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return d, nil
@@ -100,27 +113,67 @@ func readDigest(path string, since time.Time) (digest, error) {
 	return d, d.read(f)
 }
 
+const maxEventLineBytes = 4 << 20
+
 func (d *digest) read(r io.Reader) error {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64<<10), 4<<20)
-	for sc.Scan() {
-		var e claude.Event
-		if json.Unmarshal(sc.Bytes(), &e) != nil {
-			continue
+	br := bufio.NewReaderSize(r, 64<<10)
+	var buf []byte
+	for {
+		chunk, err := br.ReadSlice('\n')
+		oversized := false
+		if errors.Is(err, bufio.ErrBufferFull) {
+			buf = append(buf[:0], chunk...)
+			for errors.Is(err, bufio.ErrBufferFull) {
+				chunk, err = br.ReadSlice('\n')
+				if !oversized && len(buf)+len(chunk) <= maxEventLineBytes {
+					buf = append(buf, chunk...)
+				} else {
+					oversized = true
+				}
+			}
+			chunk = buf
 		}
-		d.add(e)
+		if !oversized && len(chunk) > 0 {
+			var e claude.Event
+			if json.Unmarshal(chunk, &e) == nil {
+				d.add(e)
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 	}
-	return sc.Err()
 }
 
 func (d *digest) add(e claude.Event) {
+	if e.Account != "" && e.Quota != nil {
+		d.addQuota(e.Account, e.At, e.Quota)
+	}
 	switch e.Kind {
 	case "migrated":
 		d.Migrations = append(d.Migrations, migration{At: e.At, Conversation: e.Conversation, From: string(e.From), To: string(e.Account), Reason: e.Reason})
 		if e.Conversation != "" {
 			d.conversation(e.Conversation).moveReason = e.Reason
 		}
+	case "attempt_failed":
+		if e.Account != "" && e.Class != router.ClassNetwork {
+			start := e.At
+			if !e.AttemptStart.IsZero() && e.AttemptStart.Before(start) {
+				start = e.AttemptStart
+			}
+			d.recordRequestSpan(e.Account, start, e.At, e.Quota, e.Model)
+		}
 	case "request":
+		if e.Account != "" && requestHitUpstream(e) {
+			start := e.AttemptStart
+			if start.IsZero() {
+				start = requestStart(e)
+			}
+			d.recordRequestSpan(e.Account, start, e.At, e.Quota, e.Model)
+		}
 		if !e.At.Before(d.Cache.Since) && e.Account != "" {
 			d.Cache.count(e)
 		}
@@ -230,4 +283,64 @@ func val(p *int64) int64 {
 		return 0
 	}
 	return *p
+}
+
+func (d *digest) addQuota(account router.AccountID, fallback time.Time, q *claude.UsageReading) {
+	at := q.At
+	if at.IsZero() {
+		at = fallback
+	}
+	if !d.QuotaSince.IsZero() && at.Before(d.QuotaSince) {
+		return
+	}
+	if d.QuotaSamples == nil {
+		d.QuotaSamples = map[windowID][]quotaSample{}
+	}
+	for _, w := range q.Windows {
+		if w.Used == nil || w.Kind.Period() == 0 {
+			continue
+		}
+		id := windowID{Account: account, Kind: w.Kind, Model: w.Model}
+		d.QuotaSamples[id] = append(d.QuotaSamples[id], quotaSample{
+			At:       at,
+			Used:     min(max(*w.Used, 0), 1),
+			ResetsAt: w.ResetsAt,
+		})
+	}
+}
+
+func requestHitUpstream(e claude.Event) bool {
+	if e.Status == http.StatusOK || e.Quota != nil {
+		return true
+	}
+	switch e.Outcome {
+	case "completed", "incomplete", "error_after_output", "served_mark_failed":
+		return true
+	}
+	return false
+}
+
+func (d *digest) recordRequestSpan(account router.AccountID, start, end time.Time, q *claude.UsageReading, model string) {
+	if end.Before(start) {
+		end = start
+	}
+	if q != nil && !q.At.IsZero() {
+		if q.At.Before(start) {
+			start = q.At
+		}
+		if q.At.After(end) {
+			end = q.At
+		}
+	}
+	d.addRequestSpan(account, start, end, model)
+}
+
+func (d *digest) addRequestSpan(account router.AccountID, start, end time.Time, model string) {
+	if !d.QuotaSince.IsZero() && end.Before(d.QuotaSince) {
+		return
+	}
+	if d.RequestSpans == nil {
+		d.RequestSpans = map[router.AccountID][]requestSpan{}
+	}
+	d.RequestSpans[account] = append(d.RequestSpans[account], requestSpan{Start: start, End: end, Model: model})
 }
