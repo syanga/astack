@@ -426,10 +426,10 @@ and gives the reason in its `fallback` field.
 
 A box dies partway when one of these happens:
 
-- boat creates the box but reports an error before the box is ready. A
-  refusal, such as a full start limit or an empty wallet, runs the command here
-  instead, as [When the command runs here instead](#when-the-command-runs-here-instead)
-  says.
+- boat creates the box but reports an error before the box is ready. When boat
+  refuses the start, such as for a full start limit or a payment error, jobgate
+  runs the command here instead, as
+  [When the command runs here instead](#when-the-command-runs-here-instead) says.
 - The copy to the box fails.
 - The checkout or the setup script fails.
 - The box disappears.

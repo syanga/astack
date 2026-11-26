@@ -42,7 +42,8 @@ def box(box_id):
 def box_env(path):
     home = str(path / "home")
     machine = os.environ.get("FAKE_BOAT_BOX_MACHINE", os.environ.get("JOBGATE_MACHINE_FILE", ""))
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith("GIT_") or key in ("GIT_CONFIG_NOSYSTEM", "GIT_CEILING_DIRECTORIES")}
     return dict(env, HOME=home, JOBGATE_HOME=home, PATH=os.environ["FAKE_BOAT_BOX_PATH"], JOBGATE_MACHINE_FILE=machine)
 
 
@@ -179,8 +180,11 @@ def status(path, pid):
     if take("status_gone"):
         fail("not_found", 404, "not found (404)")
     if (path / "procs" / "{}.oom".format(pid)).exists():
-        if take("status_unknown"):
+        if take("status_without_memory_flag"):
             emit({"running": False, "exitCode": None, "signal": "SIGKILL"})
+            return
+        if take("status_not_out_of_memory"):
+            emit({"running": False, "exitCode": None, "oomKilled": False, "signal": "SIGKILL"})
             return
         emit({"running": False, "exitCode": None, "oomKilled": True, "signal": "SIGKILL"})
         return

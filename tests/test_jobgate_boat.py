@@ -373,17 +373,16 @@ class SourceTests(BoatTest):
         (self.repo / "app.py").write_text("version = 3\n")
 
         def files():
-            return sorted(str(path.relative_to(git_dir)) for path in git_dir.rglob("*") if path.is_file()
-                          and path.name != "index")
+            return {str(path.relative_to(git_dir)): path.read_bytes() for path in git_dir.rglob("*") if path.is_file()}
 
-        before = (files(), (git_dir / "config").read_bytes())
+        before = files()
         variables = {"GIT_DIR": str(git_dir), "GIT_COMMON_DIR": str(git_dir),
                      "GIT_OBJECT_DIRECTORY": str(git_dir / "objects")}
         result = self.gate("run", "test", "--", sys.executable, "-c", "print(open('app.py').read().strip())",
                            env=dict(self.env, **variables))
         self.assertEqual((result.returncode, result.stdout.strip()), (0, "version = 3"), result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["where"], "boat", result.stderr)
-        self.assertEqual((files(), (git_dir / "config").read_bytes()), before)
+        self.assertEqual(files(), before)
 
     def test_an_excluded_file_name_with_a_newline_is_checked(self):
         (self.repo / "private").mkdir()
@@ -488,7 +487,8 @@ class SourceTests(BoatTest):
         self.commit("root with a copy of the data")
         self.git("rm", "-q", "data/people.csv")
         self.commit("drop the copy")
-        self.env.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="log.showRoot", GIT_CONFIG_VALUE_0="false")
+        (self.root / "home").mkdir(exist_ok=True)
+        (self.root / "home/.gitconfig").write_text("[log]\n\tshowRoot = false\n")
         result = self.run_here(REPORT)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("data/people.csv", result.stderr)
@@ -538,7 +538,7 @@ class FallbackTests(BoatTest):
                  ("no_ready_machine", 503, "no machine is ready")]
         for code, status, message in cases:
             with self.subTest(code=code):
-                (self.repo / "ran-here").unlink() if (self.repo / "ran-here").exists() else None
+                (self.repo / "ran-here").unlink(missing_ok=True)
                 self.plan(new=[{"code": code, "status": status, "error": message}])
                 result = self.run_here(REPORT)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -581,7 +581,7 @@ class FallbackTests(BoatTest):
                  {"code": "billing_required", "status": 402, "error": "The wallet is empty."}]
         for refusal in cases:
             with self.subTest(code=refusal["code"]):
-                (self.repo / "ran-here").unlink() if (self.repo / "ran-here").exists() else None
+                (self.repo / "ran-here").unlink(missing_ok=True)
                 self.plan(new=[dict(refusal, after_created=True)])
                 result = self.run_here(REPORT)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -590,7 +590,7 @@ class FallbackTests(BoatTest):
                 self.assertNotIn("retries once", result.stderr)
                 self.assertEqual(self.boxes_left(), [])
 
-    def test_a_refusal_after_a_snapshot_box_is_deleted_keeps_boat_s_code(self):
+    def test_a_refusal_after_a_snapshot_box_is_deleted_is_not_reported_as_a_failed_box(self):
         self.plan(miss_after_created=[True], new=[{"code": "rate_limited", "status": 429, "error": "A start limit is full"}])
         result = self.run_here(REPORT)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -637,8 +637,27 @@ class FallbackTests(BoatTest):
         self.assertEqual(result.stderr.count("jobgate: time="), 1, result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["workers"], "4")
 
+    def test_a_kill_that_boat_says_was_not_out_of_memory_is_retried(self):
+        self.plan(oom=["run"], status_not_out_of_memory=[True])
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("retries once on a new box", result.stderr)
+        self.assertTrue(self.on_box(self.report_of(result.stdout)), result.stdout)
+
+    def test_the_command_on_the_box_does_not_see_the_result_token(self):
+        result = self.run_here("import os; print(os.environ.get('JOBGATE_RESULT_TOKEN'))")
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "None"), result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["workers"], "4")
+
+    def test_error_output_that_quotes_a_result_line_reaches_this_machine_whole(self):
+        quoted = "AssertionError: see jobgate: time=1 exit=0 and jobgate-result 00 time=2 in the log"
+        result = self.run_here("import sys; sys.stderr.write({!r} + chr(10))".format(quoted))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(quoted + "\n", result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["workers"], "4")
+
     def test_a_kill_whose_status_omits_the_memory_flag_is_not_retried(self):
-        self.plan(oom=["run"], status_unknown=[True])
+        self.plan(oom=["run"], status_without_memory_flag=[True])
         result = self.run_here(REPORT)
         self.assertEqual(result.returncode, 128 + signal.SIGKILL, result.stderr)
         self.assertFalse((self.repo / "ran-here").exists())

@@ -118,8 +118,7 @@ GITLINK_MODE = "160000"
 GIT_SELECTORS = ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
                  "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX", "GIT_QUARANTINE_PATH")
 VENDORED = ("tomllib/__init__.py", "tomllib/_parser.py", "tomllib/_re.py", "tomllib/_types.py")
-RESULT_PREFIX = "jobgate: time="
-RESULT_HOLD_CHARS = 65536
+RESULT_TOKEN_ENV = "JOBGATE_RESULT_TOKEN"
 
 Dirty = Literal["yes", "no", "unknown"]
 
@@ -1005,9 +1004,17 @@ def logfmt(value: object) -> str:
     return json.dumps(text) if not text or re.search(r'[\s"=]', text) else text
 
 
-def report(queue: Queue, entries: list[tuple[str, object]]) -> None:
+def result_mark(token: str) -> str:
+    return "jobgate-result {} ".format(token)
+
+
+def report(queue: Queue, entries: list[tuple[str, object]], token: str | None = None) -> None:
     line = " ".join("{}={}".format(key, logfmt(value)) for key, value in entries)
-    say(line)
+    if token is None:
+        say(line)
+    else:
+        with contextlib.suppress(OSError):
+            print(result_mark(token) + line, file=sys.stderr, flush=True)
     try:
         with open(queue.results, "a", errors="backslashreplace") as stream:
             stream.write(line + "\n")
@@ -1072,7 +1079,7 @@ class Plan(NamedTuple):
 
 
 @functools.lru_cache(maxsize=None)
-def repository_variables() -> frozenset:
+def repository_variables() -> frozenset[str]:
     listed = run_captured(["git", "rev-parse", "--local-env-vars"])
     return frozenset(GIT_SELECTORS) | frozenset(listed.stdout.split() if listed.returncode == 0 else ())
 
@@ -1188,26 +1195,38 @@ def content_ids(read: Callable[[], Iterator[bytes]], algorithm: str, with_raw: b
     return {digest.hexdigest() for digest in (raw, lf_digest, crlf_digest) if digest is not None}
 
 
+def subcommand(args: list[str]) -> str:
+    return next((arg for arg in args if not arg.startswith("-")), "git")
+
+
 @contextlib.contextmanager
 def git_lines(store: Path, *commands: list[str]) -> Iterator[Iterator[str]]:
     processes: list[subprocess.Popen] = []
+    lock = threading.Lock()
     expired = threading.Event()
 
     def expire() -> None:
-        expired.set()
-        for process in list(processes):
-            process.kill()
+        with lock:
+            expired.set()
+            for process in processes:
+                process.kill()
 
-    timer = threading.Timer(GIT_SECONDS, expire)
-    timer.start()
-    with tempfile.TemporaryFile() as errors:
+    with contextlib.ExitStack() as stack:
+        errors = [stack.enter_context(tempfile.TemporaryFile()) for _ in commands]
+        timer = threading.Timer(GIT_SECONDS, expire)
+        timer.daemon = True
+        timer.start()
+        stack.callback(timer.cancel)
         try:
             upstream = None
-            for args in commands:
+            for args, error_file in zip(commands, errors):
                 process = subprocess.Popen(["git", "--git-dir", str(store), *args],
-                                           stdin=upstream or subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors,
-                                           env=scratch_env())
-                processes.append(process)
+                                           stdin=upstream or subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                           stderr=error_file, env=scratch_env())
+                with lock:
+                    processes.append(process)
+                    if expired.is_set():
+                        process.kill()
                 if upstream is not None:
                     upstream.close()
                 upstream = process.stdout
@@ -1218,14 +1237,15 @@ def git_lines(store: Path, *commands: list[str]) -> Iterator[Iterator[str]]:
                 if process.stdout is not None:
                     process.stdout.close()
             codes = [process.wait() for process in processes]
-            timer.cancel()
-        failed = next((args for args, code in zip(commands, codes) if code), None)
-        if failed is not None:
-            name = next(arg for arg in failed if not arg.startswith("-"))
-            errors.seek(0)
-            reason = "timed out after {}".format(duration(GIT_SECONDS)) if expired.is_set() else (
-                errors.read().decode(errors="replace").strip().splitlines() or ["exit {}".format(codes)])[-1]
-            raise BoatUnavailable("git", "git {} failed: {}".format(name, reason))
+        if expired.is_set():
+            raise BoatUnavailable("git", "git {} timed out after {}".format(subcommand(commands[-1]),
+                                                                           duration(GIT_SECONDS)))
+        for args, error_file, code in zip(commands, errors, codes):
+            if code:
+                error_file.seek(0)
+                reason = (error_file.read().decode(errors="replace").strip().splitlines() or
+                          ["exit {}".format(code)])[-1]
+                raise BoatUnavailable("git", "git {} failed: {}".format(subcommand(args), reason))
 
 
 class BlobReader:
@@ -1233,6 +1253,7 @@ class BlobReader:
         self.process = subprocess.Popen(["git", "--git-dir", str(store), "cat-file", "--batch"], stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=scratch_env())
         self.timer = threading.Timer(GIT_SECONDS, self.process.kill)
+        self.timer.daemon = True
         self.timer.start()
 
     def chunks(self, blob: str) -> Iterator[bytes]:
@@ -1522,8 +1543,9 @@ class BoatLog:
 
 
 class Relay:
-    def __init__(self, log: BoatLog) -> None:
+    def __init__(self, log: BoatLog, mark: str | None = None) -> None:
         self.log = log
+        self.mark = mark
         self.partial = ""
         self.open_line = False
         self.results: list[str] = []
@@ -1537,22 +1559,26 @@ class Relay:
         rest = lines.pop()
         for line in lines:
             self.error_line(line + "\n")
-        start = rest.find(RESULT_PREFIX)
-        if start < 0:
-            start = next((len(rest) - size for size in range(min(len(rest), len(RESULT_PREFIX) - 1), 0, -1)
-                          if rest.endswith(RESULT_PREFIX[:size])), len(rest))
-        if len(rest) - start > RESULT_HOLD_CHARS:
-            start = len(rest)
-        self.error_text(rest[:start])
-        self.partial = rest[start:]
+        held = self.held_from(rest)
+        self.error_text(rest[:held])
+        self.partial = rest[held:]
+
+    def held_from(self, text: str) -> int:
+        if self.mark is None:
+            return len(text)
+        found = text.find(self.mark)
+        if found >= 0:
+            return found
+        return next((len(text) - size for size in range(min(len(text), len(self.mark) - 1), 0, -1)
+                     if text.endswith(self.mark[:size])), len(text))
 
     def error_line(self, line: str) -> None:
-        start = line.rfind(RESULT_PREFIX)
-        if start < 0:
+        found = line.find(self.mark) if self.mark is not None else -1
+        if found < 0:
             self.error_text(line)
             return
-        self.error_text(line[:start])
-        self.results.append(line[start + len("jobgate: "):].strip())
+        self.error_text(line[:found])
+        self.results.append(line[found + len(self.mark):].strip())
 
     def error_text(self, text: str) -> None:
         if text:
@@ -1705,10 +1731,12 @@ class Box:
                         raise BoatDied(step, "lost contact with the box for {}".format(duration(lost)))
             except BoatDied as died:
                 if ended is not None:
+                    code = self.exit_code(step, dict(killed or {}, **ended))
+                    relay.finish()
                     self.log.note("box {} disappeared after the {} step ended, so jobgate may have missed some of its "
                                   "output ({})".format(self.id, step, died.reason))
                     self.log.note("boat log: {}".format(self.log.where))
-                    return self.exit_code(step, dict(killed or {}, **ended))
+                    return code
                 if step == "run" and killed is not None and killed.get("signal") == "SIGKILL":
                     raise BoatDied(step, "boat killed the run step with SIGKILL and did not say why ({}). It may have "
                                          "run out of memory".format(died.reason), True) from None
@@ -1946,7 +1974,7 @@ def boat_attempt(cli: str, settings: BoatSettings, source: Source, plan: Plan, s
             box.save(plan.name, plan.prefix)
         step = "run"
         started = time.monotonic()
-        relay = Relay(log)
+        relay = Relay(log, result_mark(spec["result_token"]))
         return BoatRun(box.phase("run", BOX_RUN, relay), relay.result(), started)
     except BoatDied as died:
         died.box = box.id
@@ -2008,7 +2036,8 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
         spec = {"head": source.head, "commit": source.commit, "branch": source.branch,
                 "patterns": settings.sparse_patterns(), "setup": settings.setup, "setup_key": plan.setup_key,
                 "cwd": cwd, "path": repo_path_entries(root), "profile": profile.name,
-                "max_workers": max_workers, "command": command, "object_format": source.object_format}
+                "max_workers": max_workers, "command": command, "object_format": source.object_format,
+                "result_token": secrets.token_hex(16)}
         for attempt in (1, 2):
             log = BoatLog()
             try:
@@ -2106,7 +2135,8 @@ def box_prepare(spec: dict, run_dir: Path, repo: Path) -> int:
 
 def box_run(spec: dict, repo: Path) -> int:
     env = dict(os.environ, PATH=os.pathsep.join([str(repo / entry) for entry in spec["path"]] +
-                                                [os.environ.get("PATH", os.defpath)]))
+                                                [os.environ.get("PATH", os.defpath)]),
+               **{RESULT_TOKEN_ENV: spec["result_token"]})
     argv = [sys.executable, str(Path(__file__).resolve()), "run", "--local",
             *(["--max-workers", str(spec["max_workers"])] if spec["max_workers"] else []),
             spec["profile"], "--", *spec["command"]]
@@ -2132,6 +2162,7 @@ def box_main(step: str, spec_path: Path) -> int:
 
 
 def run(profile_name: str, max_workers: int | None, command: list[str], local: bool = False) -> int:
+    token = os.environ.pop(RESULT_TOKEN_ENV, None)
     config = find_config(Path.cwd())
     data = read_toml(config)
     profile = load_profile(config, data, profile_name)
@@ -2174,7 +2205,7 @@ def run(profile_name: str, max_workers: int | None, command: list[str], local: b
         ("dirty", dirty), ("workers", workers), ("wait", "{}s".format(round(waited))),
         ("peak", mebibytes(peak) if peak is not None else "unknown"), ("stated", mebibytes(stated)),
         *([("oom_kills", killed)] if killed else []), ("exit", outcome.code),
-    ])
+    ], token)
     return outcome.code
 
 
