@@ -261,7 +261,7 @@ def lost(script_words, W, mp3_raw, a1, a2, b1, b2):
     if a1 == a2 or b1 == b2 or not want:
         return True
     mp3 = canon(sum((mp3_raw.get(i, []) for i in range(a1, a2)), []))
-    return got != want and not (mp3 and got == mp3)
+    return got != want and not (mp3 and got == mp3 and b2 - b1 >= a2 - a1)
 
 
 def search_cut(render, lo_t, hi_t, want, expect):

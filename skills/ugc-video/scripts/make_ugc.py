@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, atexit, hashlib, json, math, os, re, shlex, shutil, subprocess, sys
+import argparse, fcntl, hashlib, json, math, os, re, shlex, shutil, subprocess, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -107,26 +107,22 @@ def archive(raw_v):
     log(f"  kept the old take as raw-480p-take{n}.mp4")
 
 
-def lock(out):
-    path = out / ".lock"
-    for _ in range(2):
-        try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            try:
-                pid = int(path.read_text().strip())
-                os.kill(pid, 0)
-            except PermissionError:
-                pass
-            except (OSError, ValueError):
-                path.unlink(missing_ok=True)
-                continue
-            sys.exit(f"Another run (pid {pid}) is using {out}. Let it finish.")
-        os.write(fd, str(os.getpid()).encode())
-        os.close(fd)
-        atexit.register(path.unlink, missing_ok=True)
-        return
-    sys.exit(f"Could not lock {out}.")
+LOCKS = []
+
+
+def lock(folder):
+    fd = os.open(folder / ".lock", os.O_CREAT | os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        sys.exit(f"Another run is using {folder}. Let it finish.")
+    LOCKS.append(fd)
+
+
+def save(path, text):
+    partial = path.with_name(path.name + ".partial")
+    partial.write_text(text)
+    partial.replace(path)
 
 
 def slugify(s):
@@ -169,6 +165,7 @@ def tts_body(text, voice_id):
 
 def clone_voice(a, d, meta):
     key = api_key("FAL_KEY")
+    lock(d)
     saved = d / ".clone-request.json"
     url = None if saved.exists() else upload(a.upload_cmd, d / "voice-ref.mp3", "voice-ref.mp3")
     log(f"clone: {CLONE}, about ${CLONE_USD:.2f}" if url else f"clone: checking the request in {saved} again")
@@ -184,7 +181,7 @@ def clone_voice(a, d, meta):
     if not vid:
         sys.exit(f"fal's clone reply has no custom_voice_id (fields: {', '.join(sorted(res))})")
     meta["voice_id"] = vid
-    (d / "presenter.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False) + "\n")
+    save(d / "presenter.json", json.dumps(meta, indent=2, ensure_ascii=False) + "\n")
     saved.unlink(missing_ok=True)
     log(f"new voice id {vid} saved to {d / 'presenter.json'}")
     try:
@@ -249,7 +246,7 @@ def main():
     slug = a.slug or slugify(" ".join(spoken.split()[:6]))
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", slug):
         ap.error("the slug may hold only letters, digits, dots, dashes, and underscores; pass --slug")
-    if re.fullmatch(r"(raw|fixed)-480p(-take\d+)?", slug):
+    if re.fullmatch(r"(raw|fixed)-480p(-take\d+)?", slug, re.IGNORECASE):
         ap.error(f"the slug {slug} names a working file; pass another --slug")
     out = Path(a.out_dir).expanduser().resolve() / slug
     template = PROMPT.read_text()
@@ -317,7 +314,7 @@ def main():
         clone_voice(a, d, meta)
     fal_key, kie_key = api_key("FAL_KEY"), api_key("KIE_API_KEY")
     out.mkdir(parents=True, exist_ok=True)
-    record.write_text(json.dumps(run, indent=1, ensure_ascii=False) + "\n")
+    save(record, json.dumps(run, indent=1, ensure_ascii=False) + "\n")
     (out / "script.txt").write_text(original + "\n")
     (out / "script-spoken.txt").write_text(spoken + "\n")
 
@@ -403,7 +400,7 @@ def main():
             except VendorError as e:
                 sys.exit(f"Seedance submit failed: {e}\nkie may have accepted it. Check the kie dashboard before "
                          f"you delete {pending} and submit again.")
-            pending.write_text(json.dumps({"taskId": task}) + "\n")
+            save(pending, json.dumps({"taskId": task}) + "\n")
         try:
             rec = vendors.kie_wait(task, key=kie_key, base=KIE_BASE, timeout=1800)
         except vendors.TakeFailed as e:
@@ -425,7 +422,6 @@ def main():
             raw_v.unlink(missing_ok=True)
             sys.exit(f"The take is done and paid for, but the download failed: {e}\n"
                      f"{again} to download it without paying again.")
-        pending.unlink()
         log(f"4 Seedance: done, {length:.2f}s")
     else:
         log("4 Seedance: reusing raw-480p.mp4 (use --rerender for a new take, only after the person says yes)")
@@ -450,6 +446,7 @@ def main():
     if not a.no_upscale:
         final = out / f"{slug}.mp4"
         resize_grain.upscale(fixed, final)
+    pending.unlink(missing_ok=True)
     log(f"\ndone -> {final} ({dur(final):.1f}s)")
     for s in report["splices"]:
         log(f"  fixed: '{s['heard']}' -> '{s['script']}' at {s['at']:.1f}s (spliced from the MP3)")

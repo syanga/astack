@@ -127,7 +127,9 @@ def fal_run(model, body, *, key, base=FAL_BASE, timeout=1800, saved=None):
                 Path(saved).unlink()
             raise
         if saved:
-            Path(saved).write_text(json.dumps({k: job.get(k) for k in ("request_id", "status_url", "response_url")}) + "\n")
+            partial = Path(saved).with_name(Path(saved).name + ".partial")
+            partial.write_text(json.dumps({k: job.get(k) for k in ("request_id", "status_url", "response_url")}) + "\n")
+            partial.replace(saved)
     name = f"fal request {job.get('request_id')}"
     for url in (job.get("status_url"), job.get("response_url")):
         if not isinstance(url, str) or not url.startswith(base + "/"):

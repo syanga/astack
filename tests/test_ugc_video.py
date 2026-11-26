@@ -1,4 +1,5 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import fcntl
 import hashlib
 import json
 import math
@@ -461,20 +462,42 @@ class MakeUgcTests(unittest.TestCase):
 
 
     @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
-    def test_a_folder_in_use_by_a_live_run_is_refused_and_a_dead_runs_lock_is_taken_over(self):
+    def test_a_folder_in_use_by_another_run_is_refused_until_that_run_ends(self):
         self.out.mkdir(parents=True)
-        (self.out / ".lock").write_text(str(os.getpid()))
+        held = os.open(self.out / ".lock", os.O_CREAT | os.O_RDWR)
+        fcntl.flock(held, fcntl.LOCK_EX)
         busy = self.run_script("--no-upscale")
-        dead = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"],
-                              capture_output=True, text=True, check=True).stdout.strip()
-        (self.out / ".lock").write_text(dead)
+        os.close(held)
         free = self.run_script("--no-upscale")
 
         self.assertNotEqual(busy.returncode, 0)
         self.assertIn("Another run", busy.stderr)
         self.assertEqual(free.returncode, 0, free.stdout + free.stderr)
         self.assertEqual(len(self.posts(CREATE)), 1)
-        self.assertFalse((self.out / ".lock").exists())
+
+    def test_a_clone_while_another_clones_the_same_presenter_is_refused(self):
+        held = os.open(self.presenter / ".lock", os.O_CREAT | os.O_RDWR)
+        fcntl.flock(held, fcntl.LOCK_EX)
+        self.addCleanup(os.close, held)
+
+        result = self.make("--clone-voice")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Another run", result.stderr)
+        self.assertEqual(self.posts(CLONE), [])
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_a_rerender_replayed_after_a_stop_during_upscale_pays_for_no_other_take(self):
+        self.assertEqual(self.run_script("--no-upscale").returncode, 0)
+        (self.out / "test-ad.mp4").mkdir()
+
+        stopped = self.run_script("--rerender")
+        replay = self.run_script("--rerender")
+
+        self.assertNotEqual(stopped.returncode, 0)
+        self.assertNotEqual(replay.returncode, 0)
+        self.assertIn("without --rerender", replay.stderr)
+        self.assertEqual(len(self.posts(CREATE)), 2)
 
     @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
     def test_a_new_voice_while_a_take_is_pending_stops_before_a_new_mp3(self):
@@ -560,6 +583,12 @@ class StutterCutTests(unittest.TestCase):
 
         self.assertEqual(report["cuts"], [{"heard": "app", "removed": [2.0, 2.4]}])
         self.assertEqual(report["unfixed"], [])
+
+    def test_a_cut_is_refused_when_the_mp3_also_merges_never_into_a_misheard_word(self):
+        report = self.fix({(1.0, 1.4): "our app chairs your data"}, voice="our app chairs your data")
+
+        self.assertEqual(report["cuts"], [])
+        self.assertEqual([u["kind"] for u in report["unfixed"]], ["extra words"])
 
     def test_a_stutter_with_only_word_losing_cuts_is_reported_not_fixed(self):
         report = self.fix({(1.0, 1.4): "our app shares your data"})
