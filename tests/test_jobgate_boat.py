@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -185,9 +186,6 @@ class SourceTests(BoatTest):
         (self.repo / "private/survey.csv").write_text("name,email\nAda,ada@example.com\n")
         (self.repo / "private/.gitkeep").write_text("")
         (self.repo / "empty.txt").write_text("")
-        (self.repo / "logs").mkdir()
-        for ignore in ("private/.gitignore", "logs/.gitignore"):
-            (self.repo / ignore).write_text("*.tmp\n")
         self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
         self.commit("add private data")
         committed = self.git("rev-parse", "HEAD:private/survey.csv").strip()
@@ -216,7 +214,21 @@ class SourceTests(BoatTest):
         self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere")
         self.assertEqual(self.calls("new"), [])
 
-    def test_the_exclude_check_reads_the_root_commit_whatever_the_git_config_says(self):
+    def test_an_uncommitted_copy_of_excluded_content_keeps_the_run_here(self):
+        (self.repo / "private").mkdir()
+        (self.repo / "private/people.csv").write_text("name,email\nAda,ada@example.com\n")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
+        self.commit("add private data")
+        (self.repo / "fixtures").mkdir()
+        shutil.copyfile(str(self.repo / "private/people.csv"), str(self.repo / "fixtures/copy.csv"))
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.repo / "ran-here").exists())
+        self.assertIn("fixtures/copy.csv", result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere")
+        self.assertEqual(self.calls("new"), [])
+
+    def test_the_exclude_check_reads_the_root_commit_when_git_log_hides_it(self):
         self.git("checkout", "-q", "--orphan", "fresh")
         for name in ("data", "private"):
             (self.repo / name).mkdir()
@@ -225,8 +237,7 @@ class SourceTests(BoatTest):
         self.commit("root with a copy of the data")
         self.git("rm", "-q", "data/people.csv")
         self.commit("drop the copy")
-        self.env.update(GIT_CONFIG_COUNT="2", GIT_CONFIG_KEY_0="log.showRoot", GIT_CONFIG_VALUE_0="false",
-                        GIT_CONFIG_KEY_1="log.diffMerges", GIT_CONFIG_VALUE_1="combined")
+        self.env.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="log.showRoot", GIT_CONFIG_VALUE_0="false")
         result = self.run_here(REPORT)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("data/people.csv", result.stderr)
@@ -280,6 +291,24 @@ class FallbackTests(BoatTest):
         self.assertIn("the box did not boot", Path(logs[0]).read_text())
         fields = self.result_fields(result.stderr)
         self.assertEqual((fields["where"], fields["fallback"]), ("local", "boot_failed"))
+        self.assertEqual(self.boxes_left(), [])
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads files without read permission")
+    def test_a_file_error_on_this_machine_after_the_box_starts_is_reported_and_left_to_this_machine(self):
+        copy = self.root / "jobgate copy"
+        shutil.copytree(str(SCRIPT.parent), str(copy), ignore=shutil.ignore_patterns("__pycache__"))
+        unreadable = copy / "_vendor" / "unreadable"
+        unreadable.write_text("")
+        unreadable.chmod(0)
+        self.addCleanup(unreadable.chmod, 0o644)
+        result = subprocess.run([sys.executable, str(copy / SCRIPT.name), "run", "test", "--", sys.executable, "-c",
+                                 REPORT], cwd=str(self.repo), env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.repo / "ran-here").exists())
+        self.assertRegex(result.stderr, r"BOAT RUN FAILED during upload on box bx_\w+: jobgate on this machine failed")
+        self.assertRegex(result.stderr, r"(?m)^jobgate: boat log: ")
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "local_error")
+        self.assertEqual(len(self.calls("delete")), 1)
         self.assertEqual(self.boxes_left(), [])
 
     def test_runs_here_without_the_boat_cli(self):

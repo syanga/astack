@@ -290,9 +290,9 @@ that read Git history therefore work on the box.
 - Before it starts a box, jobgate checks that no content that was ever under an
   excluded path also lives at another path in the history, such as a file that a
   commit moved into an excluded directory. If one does, the command runs here,
-  and jobgate prints the other paths to add to `exclude`. Empty files do not
-  count, and neither does content that the checked-out commit also has outside
-  the excluded paths, such as one `.gitignore` in two directories.
+  and jobgate prints a path to add to `exclude` for each such file. The check
+  covers the uncommitted changes that the box would get, such as an untracked
+  copy of an excluded file. Empty files do not count.
 - When the box starts from a snapshot, the bundle holds only the commits that
   the snapshot lacks.
 
@@ -361,7 +361,8 @@ is true:
   limit (`rate_limited`), no ready machine (`no_ready_machine`), or a box type
   that the plan lacks (`trial_machine_class_not_allowed`).
 - A step fails after boat creates the box, without the box dying. Examples:
-  boat reports an error before the box is ready, or Git cannot build the bundle.
+  boat reports an error before the box is ready, Git cannot build the bundle,
+  or jobgate on this machine hits a file error, such as a full disk.
   jobgate prints `BOAT RUN FAILED` with the step, the box, and a log, as in
   [When a box dies partway](#when-a-box-dies-partway), and deletes the box. It
   does not retry on a new box.
@@ -453,7 +454,7 @@ time=2026-11-17T18:00:00Z profile=test where=local repo=/src/app commit=4f0c2d9e
 | `profile` | The profile name |
 | `where` | Where the run ran: `local` or `boat` |
 | `box` | On a boat run, the box type |
-| `fallback` | On a run that went to this machine instead of boat, the reason: a boat error code, `boat_failed` when the `boat` CLI exited with an error and no code, `no_box` when `boat new` printed no box id, `no_cli`, `git`, `no_commit`, `no_setup`, `excluded_elsewhere`, `died`, or `off` when the payment refusal that turned boat off had no code |
+| `fallback` | On a run that went to this machine instead of boat, the reason: a boat error code, `boat_failed` when the `boat` CLI exited with an error and no code, `no_box` when `boat new` printed no box id, `no_cli`, `git`, `no_commit`, `no_setup`, `excluded_elsewhere`, `local_error`, `died`, or `off` when the payment refusal that turned boat off had no code |
 | `repo` | The directory that contains `jobgate.toml` |
 | `commit` | `git rev-parse HEAD` when the run started, or `none` |
 | `dirty` | `yes` when `git status --porcelain` printed anything when the run started, `no` when it printed nothing, `unknown` outside Git |
@@ -468,9 +469,9 @@ Values that are empty or contain whitespace, a double quote, or `=` are JSON
 strings. A byte that is not valid UTF-8, such as in a directory name, appears as
 `\udcXX`, where `XX` is the byte in hex. All of a user's runs append their lines
 to one log in the order they end. On this machine, jobgate runs dirty worktrees
-like clean ones. On boat, the box gets the uncommitted changes as a temporary
-commit. A line with `dirty=yes` does not describe the commit in its `commit`
-field.
+like clean ones. On a boat run, the box gets the uncommitted changes as a
+temporary commit. The `commit` field names `HEAD`, so a line with `dirty=yes`
+does not describe the code that ran.
 
 On a boat run, `workers`, `peak`, `stated`, and `oom_kills` come from the
 result line of jobgate on the box. jobgate holds that line back and prints its

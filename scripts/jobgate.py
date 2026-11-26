@@ -1112,9 +1112,6 @@ def check_exclude(source: Source, settings: BoatSettings) -> None:
     excluded_blobs.discard(git(["hash-object", "--stdin"], git_dir=source.store, stdin_text="").strip())
     if not excluded_blobs:
         return
-    tree = git(["ls-tree", "-r", "-z", "--full-tree", RUN_REF], git_dir=source.store)
-    excluded_blobs -= {entry.split("\t", 1)[0].split()[2] for entry in tree.split("\0")
-                       if "\t" in entry and not under_exclude(entry.split("\t", 1)[1], settings)}
     patterns = "".join(line + "\n" for line in settings.sparse_patterns())
     blob = git(["hash-object", "-w", "--stdin"], git_dir=source.store, stdin_text=patterns).strip()
     objects = git(["rev-list", "--objects", "--filter=sparse:oid=" + blob, RUN_REF], git_dir=source.store)
@@ -1123,11 +1120,7 @@ def check_exclude(source: Source, settings: BoatSettings) -> None:
     if elsewhere:
         shown = ", ".join(elsewhere[:5]) + ("" if len(elsewhere) <= 5 else ", and {} more".format(len(elsewhere) - 5))
         raise BoatUnavailable("excluded_elsewhere", "content from the excluded paths is also in the history at {}. "
-                              "Add {} to exclude".format(shown, "them" if len(elsewhere) > 1 else "it"))
-
-
-def under_exclude(path: str, settings: BoatSettings) -> bool:
-    return any(path == excluded or path.startswith(excluded + "/") for excluded in settings.exclude)
+                              "Add {} to exclude".format(shown, "these paths" if len(elsewhere) > 1 else "this path"))
 
 
 def make_plan(source: Source, settings: BoatSettings) -> Plan:
@@ -1581,6 +1574,10 @@ def boat_attempt(cli: str, settings: BoatSettings, source: Source, plan: Plan, s
     except BoatUnavailable as unavailable:
         unavailable.box, unavailable.step = box.id, step
         raise
+    except OSError as error:
+        unavailable = BoatUnavailable("local_error", "jobgate on this machine failed: {}".format(error))
+        unavailable.box, unavailable.step = box.id, step
+        raise unavailable from error
     finally:
         if heartbeat is not None:
             heartbeat.stop()
