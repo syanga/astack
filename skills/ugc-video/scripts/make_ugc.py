@@ -175,7 +175,11 @@ def clone_voice(a, d, meta):
         saved.unlink(missing_ok=True)
         sys.exit(f"The voice clone failed: {e}")
     except VendorError as e:
-        if not saved.exists() or "status_url" not in saved.read_text():
+        try:
+            known = saved.exists() and bool(json.loads(saved.read_text()).get("status_url"))
+        except ValueError:
+            known = False
+        if not known or "outside" in str(e):
             sys.exit(f"The voice clone did not finish: {e}")
         sys.exit(f"The voice clone did not finish: {e}\nfal may still finish it. Run --clone-voice again to check that "
                  f"request; that does not pay for another clone. If fal no longer knows the request, delete {saved} "

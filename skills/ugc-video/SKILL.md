@@ -72,7 +72,7 @@ A presenter is a synthetic person made for one brand. Each one is a folder in th
 }
 ```
 
-**Voice clone.** `make_ugc.py --clone-voice --presenter <dir>` uploads `voice-ref.mp3`, clones it with `fal-ai/minimax/voice-clone` (about $1.50), reads one short line with the new voice, and saves `voice_id` in `presenter.json`. fal deletes a clone that no TTS call uses within 7 days of cloning, so the short line keeps it. The clone request is kept in `.clone-request.json` in the presenter folder until the voice id is saved. If polling fails or the process stops, rerun `--clone-voice` to check that request without paying again. A clone that fal reports as failed clears the file. Run it for a new presenter, or when the TTS step fails on the voice id. Run it only after the user says yes, then commit `presenter.json` in the brand's repository.
+**Voice clone.** `make_ugc.py --clone-voice --presenter <dir>` uploads `voice-ref.mp3`, clones it with `fal-ai/minimax/voice-clone` (about $1.50), reads one short line with the new voice, and saves `voice_id` in `presenter.json`. fal deletes a clone that no TTS call uses within 7 days of cloning, so the short line keeps it. The clone request is kept in `.clone-request.json` in the presenter folder until the voice id is saved. If polling fails, rerun `--clone-voice` to check that request without paying again. If the submit got no clear answer, the rerun stops and points to the fal dashboard instead. A failed or refused clone clears the file. Run it for a new presenter, or when the TTS step fails on the voice id. Run it only after the user says yes, then commit `presenter.json` in the brand's repository.
 
 ## Uploads
 
