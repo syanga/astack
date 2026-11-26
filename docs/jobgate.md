@@ -316,12 +316,14 @@ report, run with `--local`.
 2. It prints the size of the upload. Then it copies the bundle, its own
    `jobgate.py`, and the run's settings to the box with `boat scp`.
 3. On the box, it fetches the bundle into `~/repo` and checks out the commit,
-   on a branch with the same name as the branch here.
+   on a branch with the same name as the branch here. Then it writes
+   `memory_share = 0.9` to the box's `~/.config/jobgate.toml` and checks that
+   the profile fits the box.
 4. On a box without a snapshot, it runs `bash <setup>` in `~/repo`. When the
    script exits with 0, jobgate saves the box as a snapshot.
 5. It runs `jobgate run --local` on the box, with the same profile,
-   `--max-workers`, and command. The box's `~/.config/jobgate.toml` sets
-   `memory_share = 0.9`, so the worker count fits the box. The command runs
+   `--max-workers`, and command. The `memory_share` from step 3 makes the
+   worker count fit the box. The command runs
    under `setpriv --ambient-caps=-all --inh-caps=-all`, without Linux
    capabilities.
 6. jobgate prints the command's output as it arrives. Then it prints a result
@@ -363,23 +365,30 @@ is true:
 - boat refuses to start a box. Examples: no login (`unauthorized`), a full start
   limit (`rate_limited`), no ready machine (`no_ready_machine`), or a box type
   that the plan lacks (`trial_machine_class_not_allowed`).
-- A step fails after boat creates the box, without the box dying. Examples:
-  boat reports an error before the box is ready, Git cannot build the bundle,
-  jobgate on this machine hits a file error, such as a full disk, or jobgate on
-  the box refuses the profile (`box_refused`). jobgate on the box refuses a
-  profile that needs more memory for 1 worker than 90% of the box's memory.
-  jobgate prints `BOAT RUN FAILED` with the step, the box, and a log, as in
+- A step fails after boat creates the box, without the box dying. jobgate
+  prints `BOAT RUN FAILED` with the step, the box, and a log, as in
   [When a box dies partway](#when-a-box-dies-partway), and deletes the box. It
-  does not retry on a new box.
+  does not retry on a new box. These failures, with their `fallback` codes,
+  are:
+  - boat reports an error before the box is ready (boat's error code).
+  - Git cannot build the bundle (`git`).
+  - jobgate on this machine hits a file error, such as a full disk
+    (`local_error`).
+  - jobgate on the box refuses the profile (`box_refused`). The box prints the
+    reason. For example, the profile needs more memory for 1 worker than 90% of
+    the box's memory, or the box lacks the directory that the command starts
+    in, because `exclude` or `.gitignore` leaves it out.
 - Content under an excluded path also lives at another path, in the history or
   in the uncommitted changes (`excluded_elsewhere`).
 - boat refused a start for payment less than an hour ago. After an HTTP 402
   error, such as `billing_required`, or after `trial_compute_limit_reached`,
   jobgate skips boat for an hour. It keeps the end time in
   `~/.cache/jobgate/boat-off.json`.
-- Before jobgate starts a box, Git cannot read the repository, the repository
-  has no commit, the commit has no setup script, or jobgate on this machine
-  hits a file error (`local_error`).
+- Before jobgate starts a box, one of these fails:
+  - Git cannot read the repository (`git`).
+  - The repository has no commit (`no_commit`).
+  - The commit has no setup script (`no_setup`).
+  - jobgate on this machine hits a file error (`local_error`).
 - The run died partway on two boxes in a row.
 
 jobgate prints why. The result line says `where=local` and gives the reason in
