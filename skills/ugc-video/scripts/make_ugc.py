@@ -250,8 +250,9 @@ def main():
         try:
             res = vendors.fal_run(TTS, body, key=fal_key, base=FAL_BASE, timeout=300)
         except VendorError as e:
-            sys.exit(f"TTS failed: {e}\nThe voice clone may have expired: fal deletes a clone that no TTS call uses "
-                     f"within 7 days. --clone-voice makes a new one (about ${CLONE_USD:.2f}); run it only after the user says yes.")
+            sys.exit(f"TTS failed: {e}\nIf fal rejected the voice id, the clone may have expired: fal deletes a clone that no "
+                     f"TTS call uses within 7 days. --clone-voice makes a new one (about ${CLONE_USD:.2f}); run it only after "
+                     "the user says yes.")
         (out / "tts.result.json").write_text(json.dumps(res, indent=1))
         url = (res.get("audio") or {}).get("url")
         if not url:
