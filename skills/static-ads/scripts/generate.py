@@ -222,7 +222,7 @@ def wants_compose(request_path):
 
 def art_clash(request_path):
     name = ad_name(request_path)
-    if name.lower().endswith(".art") and (request_path.parent / (name[:-4] + ".req.json")).is_file():
+    if name.lower().endswith(".art") and wants_compose(request_path.parent / (name[:-4] + ".req.json")):
         return "ad {} would share a file with the art of ad {}; rename it".format(name, name[:-4])
     return None
 

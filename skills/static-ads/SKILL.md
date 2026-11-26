@@ -138,7 +138,7 @@ The compose step needs `ffmpeg` 6.1 or later with the `drawtext` filter. The dry
 
 A missing or wrong font file, a character the font lacks, or a line too long to stay 28 px tall at 1080 wide fails that ad in the dry run, before any image call. Shorten or split the line it names.
 
-The real run saves the art as `<n>-<name>.art.png`. It then fills the art's flat background with the exact hex, resets accent lines to their exact hex, lays the type over it, and writes the ad as `<n>-<name>.png` and its type settings as `<n>-<name>.type.json`. The type settings name each line's font file, weight, width, size, and box. The ad's output line reads `done <size>, composed`, or `exists <size>, skip render, composed` when the art was already saved.
+The real run saves the art as `<n>-<name>.art.png`. It then fills the art's flat background with the exact hex, resets accent lines to their exact hex, lays the type over it, and writes the ad as `<n>-<name>.png` and its type settings as `<n>-<name>.type.json`. The type settings name each line's font file, weight, width, size, and box. The ad's output line reads `done <size>, composed`, or `exists <size>, skip render, composed` when the art was already saved. It ends in `, art background not filled` when the art's background was too far from the hex to fill.
 
 The script composes the ad again on every run. It skips the image call while `<n>-<name>.art.png` exists, and the same art and request give the same PNG bytes. To change only the type, edit the `compose` block and rerun. To draw the art again, delete the `.art.png` and rerun.
 

@@ -61,19 +61,27 @@ def square(width, height):
     return round(0.42 * width), round(0.40 * height), round(0.58 * width), round(0.46 * height)
 
 
-def art(width, height, color=ART_SQUARE):
+def column(width):
+    return width // 10
+
+
+def art(width, height, color=ART_SQUARE, ruled=False):
     x0, y0, x1, y1 = square(width, height)
     edge = bytes((a + b) // 2 for a, b in zip(ART_BACKGROUND, color))
     plain = ART_BACKGROUND * width
     marked = ART_BACKGROUND * (x0 - 1) + edge + color * (x1 - x0) + edge + ART_BACKGROUND * (width - x1 - 1)
-    return png(width, [marked if y0 <= y < y1 else plain for y in range(height)], 2)
+    rows = [marked if y0 <= y < y1 else plain for y in range(height)]
+    if ruled:
+        at = 3 * column(width)
+        rows = [row[:at] + color + row[at + 3:] for row in rows]
+    return png(width, rows, 2)
 
 
 def image_for(prompt):
     asked = re.search(r"ART ([0-9]+)x([0-9]+)", prompt)
     if not asked:
         return RENDER
-    return art(*map(int, asked.groups()), ART_ACCENT if "ACCENT" in prompt else ART_SQUARE)
+    return art(*map(int, asked.groups()), ART_ACCENT if "ACCENT" in prompt else ART_SQUARE, "RULED" in prompt)
 
 
 def sfnt(tables):
@@ -770,6 +778,27 @@ class GenerateTests(unittest.TestCase):
         self.assertGreaterEqual(min(y for x, y in found), 0.14 * height)
 
     @needs_ffmpeg
+    def test_the_dry_run_art_band_is_where_the_art_shows_unfaded(self):
+        self.write_brand()
+        for name, size, art_size, headline in [("1-portrait", "1472x1840", "928x1152", COPY["headline"]),
+                                               ("2-story", "1080x1920", "576x1024", "Read the sky")]:
+            self.write_request(name, {"prompt": "Ruled sky, RULED, ART " + art_size, "size": size,
+                                      "compose": {**COPY, "headline": headline}})
+
+        checked = self.generate_on_vertex("--dry-run")
+        result = self.generate_on_vertex()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name in ["1-portrait", "2-story"]:
+            with self.subTest(ad=name):
+                low, high = map(int, re.search(r"(?m)^{}: compose .* art ([0-9]+)-([0-9]+)%$".format(name),
+                                               checked.stdout).groups())
+                width, height, found = marks(self.run_folder / (name + ".png"))
+                shown = [y for (x, y), color in found.items() if x == column(width) and color == ART_SQUARE]
+                self.assertAlmostEqual(100 * min(shown) / height, low, delta=1.5)
+                self.assertAlmostEqual(100 * (max(shown) + 1) / height, high, delta=1.5)
+
+    @needs_ffmpeg
     def test_art_whose_background_is_far_from_the_hex_is_composed_with_a_note(self):
         self.write_brand()
         self.write_ad("1-day", "928x1152", background="#5b86a8")
@@ -797,11 +826,15 @@ class GenerateTests(unittest.TestCase):
             self.assertLine(run.stdout, "1-proof", "FAILED", "headline.ttf")
         self.assertEqual([prompt(request["body"]) for request in self.api.requests], ["Fine"])
 
-    def test_an_ad_named_like_another_ads_art_fails_before_any_image_request(self):
-        self.write_request("1-proof", {"prompt": "Fine"})
+    @needs_ffmpeg
+    def test_an_ad_named_like_a_composed_ads_art_fails_before_any_image_request(self):
+        self.write_brand()
+        self.write_ad("1-proof", "928x1152")
         self.write_request("1-proof.ART", {"prompt": "Clash"})
         (self.run_folder / "1-proof.ART.png").write_bytes(png_header(1080, 1350))
         self.write_request("2-solo.art", {"prompt": "Alone"})
+        self.write_request("3-plain", {"prompt": "Plain"})
+        self.write_request("3-plain.art", {"prompt": "Plain art"})
 
         checked = self.generate("--dry-run")
         result = self.generate()
@@ -809,8 +842,10 @@ class GenerateTests(unittest.TestCase):
         for run in [checked, result]:
             self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
             self.assertLine(run.stdout, "1-proof.ART", "FAILED", "1-proof")
-        self.assertLine(result.stdout, "2-solo.art", "done")
-        self.assertEqual(sorted(prompt(request["body"]) for request in self.api.requests), ["Alone", "Fine"])
+        for name in ["1-proof", "2-solo.art", "3-plain", "3-plain.art"]:
+            self.assertLine(result.stdout, name, "done")
+        self.assertEqual(sorted(prompt(request["body"]) for request in self.api.requests),
+                         ["Alone", "Night sky, no words, ART 928x1152", "Plain", "Plain art"])
 
     def test_a_compose_request_with_an_unusable_font_fails_before_any_image_request(self):
         self.write_request("2-plain", {"prompt": "Fine"})
