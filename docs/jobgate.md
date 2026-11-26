@@ -361,7 +361,7 @@ top of its work. Put what the script makes outside the checkout or in paths that
 jobgate runs the command on this machine, through admission, when any of these
 is true:
 
-- The `boat` CLI is not on `PATH`.
+- The `boat` CLI is not on `PATH` (`no_cli`).
 - boat refuses to start a box. Examples: no login (`unauthorized`), a full start
   limit (`rate_limited`), no ready machine (`no_ready_machine`), or a box type
   that the plan lacks (`trial_machine_class_not_allowed`).
@@ -374,22 +374,23 @@ is true:
   - Git cannot build the bundle (`git`).
   - jobgate on this machine hits a file error, such as a full disk
     (`local_error`).
-  - jobgate on the box refuses the profile (`box_refused`). The box prints the
-    reason. For example, the profile needs more memory for 1 worker than 90% of
-    the box's memory, or the box lacks the directory that the command starts
-    in, because `exclude` or `.gitignore` leaves it out.
+  - jobgate on the box refuses the profile (`box_refused`), and the box prints
+    why. One reason is a profile that needs more memory for 1 worker than 90%
+    of the box's memory. Another is a missing start directory: the command
+    starts in a directory that the commit lacks or that `exclude` leaves out.
 - Content under an excluded path also lives at another path, in the history or
   in the uncommitted changes (`excluded_elsewhere`).
 - boat refused a start for payment less than an hour ago. After an HTTP 402
   error, such as `billing_required`, or after `trial_compute_limit_reached`,
   jobgate skips boat for an hour. It keeps the end time in
-  `~/.cache/jobgate/boat-off.json`.
+  `~/.cache/jobgate/boat-off.json`. The `fallback` code is the code of that
+  refusal, or `off` when it had none.
 - Before jobgate starts a box, one of these fails:
   - Git cannot read the repository (`git`).
   - The repository has no commit (`no_commit`).
   - The commit has no setup script (`no_setup`).
   - jobgate on this machine hits a file error (`local_error`).
-- The run died partway on two boxes in a row.
+- The run died partway on two boxes in a row (`died`).
 
 jobgate prints why. The result line says `where=local` and gives the reason in
 its `fallback` field.

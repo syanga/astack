@@ -283,13 +283,16 @@ class FallbackTests(BoatTest):
                 self.assertIn(message, result.stderr)
 
     def test_a_box_that_boat_creates_but_cannot_start_is_reported_deleted_and_left_to_this_machine(self):
-        self.plan(new=[{"code": "boot_failed", "status": 500, "error": "the box did not boot", "after_created": True}])
+        self.plan(new=[{"code": "boot_failed", "status": 500, "error": "the box did not boot", "after_created": True,
+                        "detail": "kernel panic in the box image"}])
         result = self.run_here(REPORT)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.repo / "ran-here").exists())
         self.assertRegex(result.stderr, r"BOAT RUN FAILED during start on box bx_\w+: the box did not boot")
         logs = re.findall(r"^jobgate: boat log: (.+)$", result.stderr, re.MULTILINE)
-        self.assertIn("the box did not boot", Path(logs[0]).read_text())
+        log = Path(logs[0]).read_text()
+        self.assertIn("the box did not boot", log)
+        self.assertIn("kernel panic in the box image", log)
         fields = self.result_fields(result.stderr)
         self.assertEqual((fields["where"], fields["fallback"]), ("local", "boot_failed"))
         self.assertEqual(self.boxes_left(), [])
@@ -344,10 +347,33 @@ class FallbackTests(BoatTest):
         result = self.run_here(REPORT)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.repo / "ran-here").exists())
-        self.assertRegex(result.stderr, r"BOAT RUN FAILED during setup on box bx_\w+: jobgate on the box refused")
+        self.assertRegex(result.stderr, r"needs 2\.0G for 1 worker, more than the 1\.8G that this box gives commands"
+                                        r"[\s\S]*BOAT RUN FAILED during setup on box bx_\w+: jobgate on the box refused")
         self.assertEqual(self.result_fields(result.stderr)["fallback"], "box_refused")
         self.assertEqual(len(self.calls("delete")), 1)
         self.assertEqual(self.boxes_left(), [])
+
+    def test_a_command_that_starts_in_a_directory_the_box_lacks_is_reported_and_left_to_this_machine(self):
+        (self.repo / ".gitignore").write_text("build/\n")
+        self.commit("ignore build")
+        (self.repo / "build").mkdir()
+        result = subprocess.run([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", REPORT],
+                                cwd=str(self.repo / "build"), env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.repo / "build/ran-here").exists())
+        self.assertRegex(result.stderr, r"the box has no build, where the command starts"
+                                        r"[\s\S]*BOAT RUN FAILED during setup on box bx_\w+")
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "box_refused")
+        self.assertEqual(self.boxes_left(), [])
+
+    def test_the_setup_script_output_stays_out_of_the_command_output(self):
+        (self.repo / "boat-setup.sh").write_text('echo installing the tools\n')
+        self.commit("noisy setup")
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.on_box(self.report_of(result.stdout)), result.stdout)
+        self.assertNotIn("installing the tools", result.stdout)
+        self.assertIn("installing the tools", result.stderr)
 
     def test_a_file_error_on_this_machine_before_the_box_starts_leaves_the_run_to_this_machine(self):
         template = self.root / "git-template"

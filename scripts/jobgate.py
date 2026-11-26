@@ -1299,8 +1299,14 @@ class Box:
         self.id: str | None = None
 
     def call(self, args: list[str], timeout: float) -> tuple[subprocess.CompletedProcess, list[dict]]:
-        result = run_captured([self.cli, *args], timeout, env=boat_env())
-        return result, boat_objects(result)
+        return self.keep(run_captured([self.cli, *args], timeout, env=boat_env()))
+
+    def keep(self, result: subprocess.CompletedProcess) -> tuple[subprocess.CompletedProcess, list[dict]]:
+        objects = boat_objects(result)
+        if boat_failure(result, objects) is not None:
+            output = "".join(text if text.endswith("\n") else text + "\n" for text in (result.stdout, result.stderr) if text)
+            self.log.write("boat {} exited with {}:\n{}".format(shlex.join(result.args[1:]), result.returncode, output))
+        return result, objects
 
     def create(self, box_type: str, name: str) -> bool:
         for from_snapshot in (True, False):
@@ -1355,8 +1361,7 @@ class Box:
             stderr = errors.read().decode("utf-8", "replace")
         if fired.is_set():
             stderr += "\nboat new timed out after {}".format(duration(BOAT_NEW_SECONDS))
-        result = subprocess.CompletedProcess(argv, process.returncode, "".join(lines), stderr)
-        return result, boat_objects(result)
+        return self.keep(subprocess.CompletedProcess(argv, process.returncode, "".join(lines), stderr))
 
     def state(self) -> dict:
         _, objects = self.call(["exec", str(self.id), "--json", "--", "sh", "-c", 'cat "$HOME/.jobgate/state.json"'], 120)
@@ -1564,8 +1569,8 @@ def boat_attempt(cli: str, settings: BoatSettings, source: Source, plan: Plan, s
         if code == BOX_SETUP_FAILED:
             raise BoatDied("setup", "the setup script {} failed".format(settings.setup))
         if code == BOX_REFUSED:
-            raise BoatUnavailable("box_refused", "jobgate on the box refused to run [{}], for the reason that the box "
-                                  "printed above".format(profile.name))
+            raise BoatUnavailable("box_refused", "jobgate on the box refused to run [{}]. The box printed why "
+                                  "above".format(profile.name))
         if code != 0:
             raise BoatDied("setup", "the box could not check out the commit (exit {})".format(code))
         if not from_snapshot:
@@ -1704,6 +1709,9 @@ def box_prepare(spec: dict, run_dir: Path, repo: Path) -> int:
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text("memory_share = {}\n".format(BOX_MEMORY_SHARE))
     try:
+        if not (repo / spec["cwd"]).is_dir():
+            raise Refusal("the box has no {}, where the command starts. The commit lacks it, or exclude leaves it "
+                          "out".format(spec["cwd"]))
         profile_config = find_config(repo / spec["cwd"])
         profile = load_profile(profile_config, read_toml(profile_config), spec["profile"])
         host = machine()
@@ -1717,7 +1725,8 @@ def box_prepare(spec: dict, run_dir: Path, repo: Path) -> int:
     state_path = Path.home() / ".jobgate/state.json"
     if read_json(state_path).get("setup_key") != spec["setup_key"]:
         say("the box runs the setup script {}".format(spec["setup"]))
-        code = subprocess.run(["bash", spec["setup"]], cwd=str(repo), stdin=subprocess.DEVNULL).returncode
+        code = subprocess.run(["bash", spec["setup"]], cwd=str(repo), stdin=subprocess.DEVNULL,
+                              stdout=sys.stderr).returncode
         if code != 0:
             say("the setup script {} exited with {}".format(spec["setup"], code))
             return BOX_SETUP_FAILED

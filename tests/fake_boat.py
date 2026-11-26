@@ -67,6 +67,8 @@ def new(args):
         shutil.copytree(str(STATE / "saved" / source / "home"), str(path / "home"), symlinks=True)
     emit({"event": "created", "id": box_id, "ttlSeconds": int(option(args, "--ttl") or 0)})
     if error:
+        if "detail" in error:
+            print(error["detail"], file=sys.stderr)
         fail(error["code"], error["status"], error["error"])
     hold = take("hold_new")
     if hold:
