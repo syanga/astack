@@ -51,7 +51,7 @@ class InstallerLifecycleTests(InstallerFixture):
             excluded.parent.mkdir(exist_ok=True)
             excluded.write_text("Do not install")
         roots = [self.home / name / "test-skill" for name in (
-            ".claude/skills", ".agents/skills"
+            ".claude/skills", ".agents/skills", ".gemini/config/skills"
         )]
 
         self.run_installer("--target", "all")
@@ -142,6 +142,7 @@ class InstallerLifecycleTests(InstallerFixture):
         expected = [
             custom / "claude/CLAUDE.md", custom / "claude/skills/test-skill/SKILL.md",
             custom / "codex/AGENTS.md", self.home / ".agents/skills/test-skill/SKILL.md",
+            self.home / ".gemini/config/GEMINI.md", self.home / ".gemini/config/skills/test-skill/SKILL.md",
         ]
         self.assertTrue(all(path.is_file() for path in expected))
         state = custom / "state/astack/manifest.json"

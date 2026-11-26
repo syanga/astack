@@ -55,13 +55,14 @@ class InstallerTests(InstallerFixture):
         for config, filename, skills in [
             (".claude", "CLAUDE.md", ".claude/skills"),
             (".codex", "AGENTS.md", ".agents/skills"),
+            (".gemini/config", "GEMINI.md", ".gemini/config/skills"),
         ]:
             self.assertIn("Personal coding instructions", (self.home / config / filename).read_text())
             self.assertEqual((self.home / skills / "test-skill/SKILL.md").read_bytes(),
                              (self.skill / "SKILL.md").read_bytes())
             self.assertTrue(os.access(self.home / skills / "test-skill/scripts/helper.sh", os.X_OK))
         self.assertFalse(list(self.home.rglob("replace-with-skill-name")))
-        self.assertEqual(set(self.manifest()["targets"]), {"claude", "codex", "jobgate"})
+        self.assertEqual(set(self.manifest()["targets"]), {"claude", "codex", "antigravity", "jobgate"})
 
     def test_dependency_cache_is_not_installed_or_validated_as_skill_source(self):
         cache = self.skill / "scripts/node_modules"
@@ -87,7 +88,7 @@ class InstallerTests(InstallerFixture):
         result = self.run_installer()
         self.assertNotIn("WRITE", result.stdout)
         self.assertEqual(installed.stat().st_mtime_ns, previous_mtime)
-        self.assertEqual(set(self.manifest()["targets"]), {"claude", "codex", "jobgate"})
+        self.assertEqual(set(self.manifest()["targets"]), {"claude", "codex", "antigravity", "jobgate"})
 
     def test_shared_and_specific_instruction_updates(self):
         self.run_installer()
@@ -95,13 +96,21 @@ class InstallerTests(InstallerFixture):
             stream.write("\nShared preference.\n")
         with (self.repo / "instructions/CLAUDE.md").open("a") as stream:
             stream.write("\nClaude preference.\n")
+        with (self.repo / "instructions/ANTIGRAVITY.md").open("a") as stream:
+            stream.write("\nAntigravity preference.\n")
         self.run_installer()
         claude = (self.home / ".claude/CLAUDE.md").read_text()
         codex = (self.home / ".codex/AGENTS.md").read_text()
+        antigravity = (self.home / ".gemini/config/GEMINI.md").read_text()
         self.assertIn("Shared preference.", claude)
         self.assertIn("Shared preference.", codex)
+        self.assertIn("Shared preference.", antigravity)
         self.assertIn("Claude preference.", claude)
         self.assertNotIn("Claude preference.", codex)
+        self.assertNotIn("Claude preference.", antigravity)
+        self.assertIn("Antigravity preference.", antigravity)
+        self.assertNotIn("Antigravity preference.", claude)
+        self.assertNotIn("Antigravity preference.", codex)
 
     def test_conflicts_preflight_all_targets(self):
         existing = self.home / ".codex/AGENTS.md"
@@ -153,6 +162,7 @@ class InstallerTests(InstallerFixture):
         self.run_installer()
         self.assertFalse((self.home / ".agents/skills/test-skill/SKILL.md").exists())
         self.assertFalse((self.home / ".claude/skills/test-skill/scripts/helper.sh").exists())
+        self.assertFalse((self.home / ".gemini/config/skills/test-skill/SKILL.md").exists())
 
     def test_empty_skills_directory_installs(self):
         shutil.rmtree(self.skill)

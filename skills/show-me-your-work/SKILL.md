@@ -72,8 +72,8 @@ If the work diverged from what a row claims, append the corrected result with ev
 
 ## Independent review of the trail
 
-Before handing back, spawn an independent reviewer. Run Codex when hosted in
-Claude and Claude when hosted in Codex, following
+Before handing back, spawn an independent reviewer on an available outside
+provider different from the current host, following
 [provider execution](../arena/PROVIDERS.md). If the outside provider is
 unavailable, not permitted, or fails, use a fresh native agent on the session's
 model. The reviewer reads the audit trail and the run's transcript, or the

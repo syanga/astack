@@ -23,10 +23,10 @@ class RepositorySkillsTests(unittest.TestCase):
         def invocations(skill_path):
             text = (SOURCE / "skills" / skill_path).read_text(encoding="utf-8")
             blocks = re.findall(r"^```bash\n(.*?)^```", text, re.DOTALL | re.MULTILINE)
-            return {block for block in blocks if block.startswith(("codex ", "claude "))}
+            return {block for block in blocks if block.startswith(("codex ", "claude ", "agy "))}
 
         providers = invocations("arena/PROVIDERS.md")
-        self.assertEqual({block.split()[0] for block in providers}, {"codex", "claude"})
+        self.assertEqual({block.split()[0] for block in providers}, {"codex", "claude", "agy"})
         self.assertEqual(invocations("review-pr/SKILL.md"), providers)
 
 

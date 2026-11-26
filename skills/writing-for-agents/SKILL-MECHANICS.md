@@ -32,12 +32,13 @@ When user-invoked skills multiply past what you can remember, a **router skill**
 
 ## Harnesses
 
-`disable-model-invocation: true` is Claude Code's spelling. Codex sets it in `agents/openai.yaml`.
+`disable-model-invocation: true` is Claude Code's and Antigravity's spelling. Codex sets it in `agents/openai.yaml`.
 
 | Harness | User-invoked mechanism | Catalog cost |
 | --- | --- | --- |
 | Claude Code | `disable-model-invocation: true` in frontmatter | description truncated at 1536 characters |
 | Codex | `policy.allow_implicit_invocation: false` in `agents/openai.yaml` | As of 0.166, about 2% of the model's context, or 8000 characters when the window is unknown. Over that, Codex cuts the longest descriptions to a shared length. When names alone exceed the budget, it removes descriptions and drops later entries. |
+| Antigravity | `disable-model-invocation: true` in frontmatter | Skills share a customization budget with workflows, subagents, and MCP tools, separate from the 20,000-token rules budget. |
 
 ## Done when
 

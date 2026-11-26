@@ -96,7 +96,7 @@ If the spec is missing, skip the Spec sub-agent and note this in the final repor
 - The requirements or spec from step 2, when available.
 - The [shared adversarial brief](../harden-pr/sections/adversarial.md#shared-adversarial-brief), [the evidence requirements](../harden-pr/SKILL.md#verify-findings), and [the testing finding standard](../harden-pr/specialists/testing.md#finding-standard), pasted in full.
 
-Run it on an outside provider: Codex when hosted in Claude, and Claude when hosted in Codex. In a host other than Claude or Codex, choose the provider as [provider execution](../arena/PROVIDERS.md) describes. In T3 Code, start it with `delegate_task` on that provider. Elsewhere, run `codex exec --help` or `claude --help` as the help check. Save the prompt to a file. On a host with shell sandboxing, request approval to run the CLI outside the sandbox. Run the matching provider command below from the reviewed repository with a nine-minute timeout.
+Run it on an available outside provider different from the current host (Claude, Codex, or Antigravity), as [provider execution](../arena/PROVIDERS.md) describes. In T3 Code, start it with `delegate_task` on that provider. Elsewhere, run `codex exec --help`, `claude --help`, or `agy --help` as the help check. Save the prompt to a file. On a host with shell sandboxing, request approval to run the CLI outside the sandbox. Run the matching provider command below from the reviewed repository with a nine-minute timeout.
 
 ```bash
 codex exec --sandbox read-only --ephemeral \
@@ -108,6 +108,13 @@ codex exec --sandbox read-only --ephemeral \
 claude --print --safe-mode \
   --tools 'Read,Glob,Grep' --strict-mcp-config \
   --no-session-persistence --output-format json \
+  < '<prompt-file>' > '<response-file>' 2> '<stderr-file>'
+```
+
+```bash
+agy --input-format text --output-format stream-json \
+  --disable-slash-commands \
+  --settings '{"agentMode":"","permissions":{"deny":["write_file(*)","command(*)","mcp(*)","read_url(*)","execute_url(*)","download_url(*)"]}}' \
   < '<prompt-file>' > '<response-file>' 2> '<stderr-file>'
 ```
 

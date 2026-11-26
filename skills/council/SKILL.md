@@ -15,7 +15,8 @@ and explore new ideas, skip fixes to code being replaced.
 
 Bring in delegates to help with the user's request, usually for review or
 feedback. If the user's instructions name council members, use those.
-Otherwise use Claude Opus 5.5 and GPT-6.1 Sol, both at xhigh reasoning effort.
+Otherwise use Claude Opus 5.5 and GPT-6.1 Sol at xhigh reasoning effort, and
+Gemini 4 Neon at high reasoning effort.
 
 In T3 Code, use `orchestrator_capabilities` to resolve the models, then
 `delegate_task` to start one delegate per model in parallel. Elsewhere, follow
@@ -45,6 +46,7 @@ Rounds: 2
 | --- | --- | --- |
 | Claude Opus | 7/10 | 9/10 |
 | GPT Sol | 8/10 | 10/10 |
+| Gemini 4 Neon | 8/10 | 9/10 |
 ```
 
 If a delegate gives no score, write `no score`. Do not invent one.

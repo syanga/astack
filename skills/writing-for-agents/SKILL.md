@@ -3,7 +3,7 @@ name: writing-for-agents
 description: Writing documents for agents. Use when creating or editing skills, or modifying AGENTS.md or CLAUDE.md.
 ---
 
-Reference for writing any document an agent consumes: a skill, an `AGENTS.md` / `CLAUDE.md`, a doc reached by a pointer. The packaging differs. The writing does not. The same levers make each one predictable, because the agent takes the same _process_ every run rather than producing the same output.
+Reference for writing any document an agent consumes: a skill, an `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, or a doc reached by a pointer. The packaging differs. The writing does not. The same levers make each one predictable, because the agent takes the same _process_ every run rather than producing the same output.
 
 When the document you're writing is a skill, read [`SKILL-MECHANICS.md`](SKILL-MECHANICS.md) for frontmatter, invocation choice, and router skills. For a behavior change, start with the before runs in [Test a behavior change](#test-a-behavior-change). When a draft is done, run its prose through the sibling `unslop` skill at `../unslop/SKILL.md`.
 

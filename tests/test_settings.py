@@ -331,7 +331,7 @@ class SettingsTests(InstallerFixture):
         self.assertFalse(json.loads(claude.read_text())["autoMemoryEnabled"])
         state = self.manifest()
         self.assertEqual(set(state["settings"]), {"claude"})
-        self.assertEqual(set(state["targets"]), {"claude", "codex", "jobgate"})
+        self.assertEqual(set(state["targets"]), {"claude", "codex", "antigravity", "jobgate"})
         self.assertTrue(all(Path(path).exists() for records in state["targets"].values() for path in records))
         self.run_installer()
         self.run_installer(command="uninstall")
