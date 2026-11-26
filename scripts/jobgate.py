@@ -119,6 +119,8 @@ GIT_SELECTORS = ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
                  "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX", "GIT_QUARANTINE_PATH")
 VENDORED = ("tomllib/__init__.py", "tomllib/_parser.py", "tomllib/_re.py", "tomllib/_types.py")
 RESULT_TOKEN_ENV = "JOBGATE_RESULT_TOKEN"
+RESULT_HOLD_CHARS = 2**20
+EXCLUDE_GIT = (2, 36)
 
 Dirty = Literal["yes", "no", "unknown"]
 
@@ -137,9 +139,9 @@ def stop(number, frame):
     raise Stopped(number)
 
 
-def say(text: str) -> None:
+def say(text: str, prefix: str = "jobgate: ") -> None:
     try:
-        print("jobgate: " + text, file=sys.stderr, flush=True)
+        print(prefix + text, file=sys.stderr, flush=True)
     except OSError:
         pass
 
@@ -1010,11 +1012,7 @@ def result_mark(token: str) -> str:
 
 def report(queue: Queue, entries: list[tuple[str, object]], token: str | None = None) -> None:
     line = " ".join("{}={}".format(key, logfmt(value)) for key, value in entries)
-    if token is None:
-        say(line)
-    else:
-        with contextlib.suppress(OSError):
-            print(result_mark(token) + line, file=sys.stderr, flush=True)
+    say(line, "jobgate: " if token is None else result_mark(token))
     try:
         with open(queue.results, "a", errors="backslashreplace") as stream:
             stream.write(line + "\n")
@@ -1196,7 +1194,7 @@ def content_ids(read: Callable[[], Iterator[bytes]], algorithm: str, with_raw: b
 
 
 def subcommand(args: list[str]) -> str:
-    return next((arg for arg in args if not arg.startswith("-")), "git")
+    return next(arg for arg in args if not arg.startswith("-"))
 
 
 @contextlib.contextmanager
@@ -1237,15 +1235,15 @@ def git_lines(store: Path, *commands: list[str]) -> Iterator[Iterator[str]]:
                 if process.stdout is not None:
                     process.stdout.close()
             codes = [process.wait() for process in processes]
+        names = " | ".join("git " + subcommand(args) for args in commands)
         if expired.is_set():
-            raise BoatUnavailable("git", "git {} timed out after {}".format(subcommand(commands[-1]),
-                                                                           duration(GIT_SECONDS)))
-        for args, error_file, code in zip(commands, errors, codes):
-            if code:
-                error_file.seek(0)
-                reason = (error_file.read().decode(errors="replace").strip().splitlines() or
-                          ["exit {}".format(code)])[-1]
-                raise BoatUnavailable("git", "git {} failed: {}".format(subcommand(args), reason))
+            raise BoatUnavailable("git", "{} timed out after {}".format(names, duration(GIT_SECONDS)))
+        failed = [stage for stage in zip(commands, errors, codes) if stage[2]]
+        if failed:
+            args, error_file, code = ([stage for stage in failed if stage[2] != -signal.SIGPIPE] or failed)[-1]
+            error_file.seek(0)
+            reason = (error_file.read().decode(errors="replace").strip().splitlines() or ["exit {}".format(code)])[-1]
+            raise BoatUnavailable("git", "git {} failed: {}".format(subcommand(args), reason))
 
 
 class BlobReader:
@@ -1389,6 +1387,15 @@ def check_exclude(source: Source, settings: BoatSettings, root: Path) -> None:
                               "the uncommitted changes. Add {} to exclude. After that, the next run can name other "
                               "paths with the same content".format(
                                   shown, "these paths" if len(elsewhere) > 1 else "this path"))
+
+
+def check_exclude_git() -> None:
+    answer = git(["--version"])
+    found = re.search(r"(\d+)\.(\d+)", answer)
+    version = (int(found.group(1)), int(found.group(2))) if found else (0, 0)
+    if version < EXCLUDE_GIT:
+        raise BoatUnavailable("git", "exclude needs Git {}.{} or newer, which can filter a bundle. This machine has {}"
+                              .format(*EXCLUDE_GIT, answer.strip()))
 
 
 def check_box_paths(source: Source, settings: BoatSettings, cwd: str) -> None:
@@ -1543,7 +1550,7 @@ class BoatLog:
 
 
 class Relay:
-    def __init__(self, log: BoatLog, mark: str | None = None) -> None:
+    def __init__(self, log: BoatLog, mark: str) -> None:
         self.log = log
         self.mark = mark
         self.partial = ""
@@ -1553,6 +1560,9 @@ class Relay:
     def __call__(self, kind: str, data: str) -> None:
         self.log.write(data)
         if kind == "stdout":
+            if self.mark not in self.partial:
+                self.error_text(self.partial)
+                self.partial = ""
             self.emit(sys.stdout, data)
             return
         lines = (self.partial + data).split("\n")
@@ -1560,12 +1570,12 @@ class Relay:
         for line in lines:
             self.error_line(line + "\n")
         held = self.held_from(rest)
+        if len(rest) - held > RESULT_HOLD_CHARS:
+            held = len(rest)
         self.error_text(rest[:held])
         self.partial = rest[held:]
 
     def held_from(self, text: str) -> int:
-        if self.mark is None:
-            return len(text)
         found = text.find(self.mark)
         if found >= 0:
             return found
@@ -1573,7 +1583,7 @@ class Relay:
                      if text.endswith(self.mark[:size])), len(text))
 
     def error_line(self, line: str) -> None:
-        found = line.find(self.mark) if self.mark is not None else -1
+        found = line.find(self.mark)
         if found < 0:
             self.error_text(line)
             return
@@ -1962,7 +1972,7 @@ def boat_attempt(cli: str, settings: BoatSettings, source: Source, plan: Plan, s
         log.note("boat copies {:.1f} MB to box {}".format(upload.stat().st_size / 1e6, box.id))
         box.upload(upload)
         step = "setup"
-        code = box.phase("setup", BOX_PREPARE, Relay(log))
+        code = box.phase("setup", BOX_PREPARE, Relay(log, result_mark(spec["result_token"])))
         if code == BOX_SETUP_FAILED:
             raise BoatDied("setup", "the setup script {} failed".format(settings.setup))
         if code == BOX_REFUSED:
@@ -2022,6 +2032,8 @@ def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers
             check_exclude(source, settings, root)
             plan = make_plan(source, settings)
             check_box_paths(source, settings, cwd)
+            if settings.exclude:
+                check_exclude_git()
         except OSError as error:
             say("boat cannot run {}, so it runs here: jobgate on this machine failed: {}".format(profile.name, error))
             return Fallback("local_error")
@@ -2158,6 +2170,7 @@ def box_main(step: str, spec_path: Path) -> int:
     repo = Path.home() / "repo"
     if step == "prepare":
         return box_prepare(spec, spec_path.parent, repo)
+    spec_path.unlink()
     return box_run(spec, repo)
 
 

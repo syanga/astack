@@ -130,6 +130,11 @@ def attach(path, pid):
     stall = bool(stalls) and stalls[0] == step
     if stall:
         take("stall")
+    frame_bytes = (json.loads(plan_path.read_text()).get("frame_bytes") if plan_path.exists() else None) or 0
+    late_drops = json.loads(plan_path.read_text()).get("drop_after_output", []) if plan_path.exists() else []
+    drop_after_output = bool(late_drops) and late_drops[0] == step
+    if drop_after_output:
+        take("drop_after_output")
     drops = json.loads(plan_path.read_text()).get("drop", []) if plan_path.exists() else []
     if drops and drops[0] == step:
         take("drop")
@@ -160,11 +165,14 @@ def attach(path, pid):
                     data = stream.read()
             except FileNotFoundError:
                 data = b""
-            if data:
-                offsets[kind] += len(data)
-                emit({"data": data.decode("utf-8", "replace"), "nextOffset": offsets[kind], "type": kind})
-                if stall and kind == "stdout":
-                    time.sleep(600)
+            for start in range(0, len(data), frame_bytes or len(data) or 1):
+                piece = data[start:start + (frame_bytes or len(data))]
+                offsets[kind] += len(piece)
+                emit({"data": piece.decode("utf-8", "replace"), "nextOffset": offsets[kind], "type": kind})
+            if data and stall and kind == "stdout":
+                time.sleep(600)
+        if finished and drop_after_output:
+            fail("unavailable", 503, "the connection dropped")
         if finished:
             code = int((procs / "{}.exit".format(pid)).read_text())
             emit({"exitCode": code, "signal": None, "status": "exited", "type": "exit"})

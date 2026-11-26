@@ -83,6 +83,7 @@ class BoatTest(JobgateTest):
         process = subprocess.Popen([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", hold,
                                     str(started)], cwd=str(self.repo), env=self.env, stdout=subprocess.DEVNULL,
                                    stderr=subprocess.PIPE, text=True, start_new_session=True)
+        self.addCleanup(process.stderr.close)
         self.addCleanup(lambda: process.poll() is None and process.kill())
         wait_for(started.exists)
         return process
@@ -364,6 +365,20 @@ class SourceTests(BoatTest):
         result = self.run_here(REPORT)
         self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere", result.stderr)
 
+    def test_an_old_git_with_exclude_runs_the_command_here_before_a_box_starts(self):
+        real = shutil.which("git", path=self.env["PATH"])
+        (self.fake_bin / "git").write_text('#!/bin/sh\nif [ "$1" = "--version" ]; then echo "git version 2.34.1"; exit 0; fi\n'
+                                           'exec "{}" "$@"\n'.format(real))
+        (self.fake_bin / "git").chmod(0o755)
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
+        self.commit("exclude private")
+        result = self.run_here(REPORT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("exclude needs Git 2.36 or newer, which can filter a bundle. This machine has git version 2.34.1",
+                      result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["fallback"], "git")
+        self.assertEqual(self.calls("new"), [])
+
     def test_git_variables_from_the_caller_leave_the_repository_unchanged(self):
         git_dir = self.repo / ".git"
         (self.repo / "private").mkdir()
@@ -613,6 +628,12 @@ class FallbackTests(BoatTest):
         self.assertNotIn("BOAT RUN FAILED", result.stderr)
         self.assertRegex(result.stderr, r"box bx_\w+ disappeared after the run step ended, so jobgate may have missed")
         self.assertEqual(len(self.printed_logs(result.stderr)), 1, result.stderr)
+
+    def test_the_disappearance_note_follows_the_command_s_last_output(self):
+        self.plan(drop_after_output=["run", "run"], status_gone=[False, True])
+        result = self.run_here("import sys; sys.stderr.write('working'); sys.exit(7)")
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertRegex(result.stderr, r"working\njobgate: box bx_\w+ disappeared after the run step ended")
         self.assertEqual(len([argv for argv in self.calls("new") if "--from" not in argv]), 1)
         self.assertEqual(self.result_fields(result.stderr)["exit"], "7")
 
@@ -621,6 +642,7 @@ class FallbackTests(BoatTest):
         process = subprocess.Popen([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", command],
                                    cwd=str(self.repo), env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                    start_new_session=True)
+        self.addCleanup(process.stderr.close)
         self.addCleanup(lambda: process.poll() is None and process.kill())
         seen = []
         threading.Thread(target=lambda: seen.extend(iter(lambda: os.read(process.stderr.fileno(), 4096), b"")),
@@ -644,9 +666,20 @@ class FallbackTests(BoatTest):
         self.assertIn("retries once on a new box", result.stderr)
         self.assertTrue(self.on_box(self.report_of(result.stdout)), result.stdout)
 
-    def test_the_command_on_the_box_does_not_see_the_result_token(self):
-        result = self.run_here("import os; print(os.environ.get('JOBGATE_RESULT_TOKEN'))")
-        self.assertEqual((result.returncode, result.stdout.strip()), (0, "None"), result.stderr)
+    def test_the_command_on_the_box_cannot_read_the_result_token(self):
+        show = ("import os, pathlib; print(repr(dict(os.environ))); "
+                "print(*(path.read_text() for path in pathlib.Path.home().rglob('*.json')))")
+        result = self.run_here(show)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["workers"], "4")
+        token = re.search(r"jobgate-result (\w+) ", self.boat_logs()[-1].read_text()).group(1)
+        self.assertNotIn(token, result.stdout)
+
+    def test_the_box_result_is_read_when_boat_sends_it_in_small_frames(self):
+        self.plan(frame_bytes=3)
+        result = self.run_here("import sys; sys.stderr.write('progress' + chr(10) + 'tail')")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("progress\ntail\n", result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["workers"], "4")
 
     def test_error_output_that_quotes_a_result_line_reaches_this_machine_whole(self):

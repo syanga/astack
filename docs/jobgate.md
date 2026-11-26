@@ -428,8 +428,8 @@ A box dies partway when one of these happens:
 
 - boat creates the box but reports an error before the box is ready. When boat
   refuses the start, such as for a full start limit or a payment error, jobgate
-  runs the command here instead, as
-  [When the command runs here instead](#when-the-command-runs-here-instead) says.
+  runs the command here. [When the command runs here instead](#when-the-command-runs-here-instead)
+  lists those refusals.
 - The copy to the box fails.
 - The checkout or the setup script fails.
 - The box disappears.
@@ -564,6 +564,7 @@ code of `taskpolicy`.
 | `JOBGATE_RUN` | jobgate sets it to the path of the run's file. A nested call reads it to find the outer run. |
 | `HOME` | jobgate takes `~` from the password database instead, so runs under every `HOME` share one configuration, queue, and results log. It reads `HOME` only when the account has no entry there. jobgate also ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. |
 | `JOBGATE_HOME` | Tests only. Replaces the account's home directory, which holds the configuration, the queue, and the results log. With a real systemd user session, a run that sets it still sets the real `jobgate.slice` cap from the `memory_share` it finds there. That cap applies to all of the user's runs, so set this variable only with a stand-in `systemctl` on `PATH`, as jobgate's tests do. |
+| `JOBGATE_RESULT_TOKEN` | Internal. On a box, jobgate passes the run's random token to the box's `jobgate run --local` in this variable, which removes it before it starts the command. When it is set, jobgate prints its result line after `jobgate-result <token>` instead of `jobgate:`. |
 | `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with readings that replace the OS readings: `memory`, `cores`, `psi` or `darwin_level`, and `meminfo` or `vm_stat` text. jobgate reads `memory` and `cores` once per run. It reads the pressure and available-memory readings before each admission attempt. A `cgroup` value names a directory that stands in for the scope's cgroup. A `boat_silent_seconds` value replaces the 60 seconds that jobgate waits for output from `boat exec --attach`. A `boat_lost_seconds` value replaces the 10 minutes after which jobgate stops trying to reach a box. With a real systemd user session, a run that uses this file still sets the real `jobgate.slice` cap from its `memory` reading. That cap applies to all of the user's runs, so use this file only with a stand-in `systemctl` on `PATH`, as jobgate's tests do. |
 
 ## Files
