@@ -1,0 +1,15 @@
+Vertical 9:16 selfie video, shot on an iPhone front-facing camera at arm's length. The presenter is the person in [Image1]: {speaker}. They hold the phone in one hand slightly above eye level so the camera looks gently down at them. Setting: {setting}, softly blurred behind them, soft even light on their face, no bright rim light, no glow around their head.
+
+Camera: front-facing wide-angle selfie lens, subtle barrel distortion, face occupying the upper-center third of frame, torso and one shoulder visible, the extended arm just barely in frame at the bottom edge. Continuous handheld motion, small natural sway, micro-shakes, tiny reframes as they talk and shift their weight. Autofocus breathing, slight exposure shift. No tripod, no gimbal, no cinematic camera moves.
+
+Performance: they speak for the brand as its presenter, explaining what the product does and showing how it works to the viewer, straight into the lens, steady eye contact, friendly and confident like a host on a quick TikTok. BRISK delivery: speak fast, almost no pauses between sentences, keep talking through the whole clip with barely a breath. Energetic UGC pace, not a slow monologue. No long silences. Continue naturally from the previous moment if a first frame is provided.
+
+Audio: voice recorded on the phone mic, close, slightly roomy, faint room ambience. Same natural speaking voice throughout, with no sudden pitch or timbre jumps.
+
+Look: raw unpolished UGC, iPhone-native color, mild digital noise in the shadows, no color grade, no lens flare, no halo, aura, or glow around the head, no glowing edges or bright outline, no rim light, no b-roll, no text overlays, no captions or subtitles, no logo or watermark, no extra people, no split screen, no cartoon look, natural hands, no music. Single unbroken take.
+
+Dialogue: "{dialogue}"
+
+The speaker is the person in [Image1]. Lip-sync to [Audio1] exactly. Do not invent extra words, do not change the read, do not add background music. Mouth timing follows [Audio1]. Keep them looking into the lens for the full {duration} seconds.
+
+Say every word exactly as written in the Dialogue, in order, with no substitutions.
