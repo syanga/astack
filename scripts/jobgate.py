@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Admit heavy commands, such as test suites, builds, and renders, so that concurrent runs fit the machine.
 
-    jobgate run [--max-workers N] PROFILE -- COMMAND [ARG...]
+    jobgate run [--max-workers N] [--local] PROFILE -- COMMAND [ARG...]
     jobgate status
 
 See docs/jobgate.md in the astack repository.
@@ -16,6 +16,9 @@ import errno
 from dataclasses import asdict, dataclass, fields, replace
 import datetime
 import fcntl
+import fnmatch
+import hashlib
+import io
 import json
 import math
 import os
@@ -28,6 +31,9 @@ import shutil
 import signal
 import subprocess
 import sys
+import tarfile
+import tempfile
+import threading
 import time
 from typing import Callable, Literal, NamedTuple
 
@@ -68,6 +74,33 @@ UNITS = {"K": 2**10, "M": 2**20, "G": 2**30, "T": 2**40}
 ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 TASKPOLICY = "/usr/sbin/taskpolicy"
 RUSAGE_INFO_V0 = 0
+BOAT_TABLE = "boat"
+BOAT_KEYS = ("setup", "setup_inputs", "type", "exclude")
+BOAT_TYPES = ("small", "default", "large", "xlarge")
+BOAT_TTL_SECONDS = 3600
+BOAT_EXTEND_SECONDS = 600
+BOAT_OFF_SECONDS = 3600
+BOAT_SAVE_SECONDS = 900
+BOAT_SAVE_POLL_SECONDS = 10
+BOAT_LOST_SECONDS = 600
+BOAT_PAUSE_SECONDS = 5
+BOAT_LOGS_KEPT = 20
+BOAT_PAYMENT_STATUS = 402
+BOAT_PAYMENT_CODES = ("trial_compute_limit_reached",)
+BOX_HOME = "/home/user"
+BOX_UPLOAD = ".jobgate-upload.tgz"
+BOX_FORMAT = "1"
+BOX_MEMORY_SHARE = 0.9
+BOX_SETUP_FAILED = 4
+BOX_PREPARE = ('set -e; run="$HOME/.jobgate/run"; rm -rf "$run"; mkdir -p "$run"; tar -xzf "$HOME/{0}" -C "$run"; '
+               'rm -f "$HOME/{0}"; exec python3 "$run/jobgate.py" _box prepare "$run/run.json"').format(BOX_UPLOAD)
+BOX_RUN = 'exec python3 "$HOME/.jobgate/run/jobgate.py" _box run "$HOME/.jobgate/run/run.json"'
+RUN_REF = "refs/jobgate/run"
+GIT_SECONDS = 600
+SECRET_NAMES = (".env", ".env.*", "*.env", "*~", "*.pem", "*.key", "*.p12", "*.pfx", ".netrc", ".npmrc", ".pypirc",
+                "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*")
+REPO_PATH = re.compile(r"[^*?\[\]!#\\\n]+")
+COMMIT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 Dirty = Literal["yes", "no", "unknown"]
 
@@ -178,10 +211,10 @@ def read_toml(path: Path) -> dict:
         raise Refusal("cannot read {}: {}".format(path, error)) from None
 
 
-def run_captured(argv: list[str], timeout: float = 60) -> subprocess.CompletedProcess:
+def run_captured(argv: list[str], timeout: float = 60, env: dict | None = None) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(argv, capture_output=True, text=True, errors="surrogateescape", timeout=timeout,
-                              stdin=subprocess.DEVNULL)
+                              stdin=subprocess.DEVNULL, env=env)
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(argv, 124, "", "{} timed out after {:g}s".format(argv[0], timeout))
     except OSError as error:
@@ -201,11 +234,10 @@ def find_config(start: Path) -> Path:
     return candidate
 
 
-def load_profile(path: Path, name: str) -> Profile:
-    data = read_toml(path)
-    table = data.get(name)
+def load_profile(path: Path, data: dict, name: str) -> Profile:
+    table = data.get(name) if name != BOAT_TABLE else None
     if not isinstance(table, dict):
-        names = ", ".join(key for key, value in data.items() if isinstance(value, dict)) or "none"
+        names = ", ".join(key for key, value in data.items() if isinstance(value, dict) and key != BOAT_TABLE) or "none"
         raise Refusal("{} has no [{}] profile; its profiles: {}".format(path, name, names))
     unknown = sorted(set(table) - set(PROFILE_KEYS))
     missing = [key for key in PROFILE_KEYS if key not in table]
@@ -226,6 +258,52 @@ def load_profile(path: Path, name: str) -> Profile:
         raise Refusal("{} cannot be {}, which jobgate sets itself".format(where("workers_env"), workers_env))
     return Profile(name, parse_size(table["base_mem"], where("base_mem")),
                    parse_size(table["worker_mem"], where("worker_mem")), max_workers, workers_env)
+
+
+@dataclass(frozen=True)
+class BoatSettings:
+    setup: str
+    setup_inputs: tuple[str, ...]
+    type: str
+    exclude: tuple[str, ...]
+
+    def sparse_patterns(self) -> list[str]:
+        return ["/*"] + ["!/" + path for path in self.exclude]
+
+
+def repo_path(value: object, where: str) -> str:
+    parts = value.rstrip("/").split("/") if isinstance(value, str) else []
+    if not parts or any(part in ("", ".", "..") for part in parts) or not REPO_PATH.fullmatch(str(value)):
+        raise Refusal('{} must be a path inside the repository, such as "scripts/boat-setup.sh", not {!r}'.format(
+            where, value))
+    return "/".join(parts)
+
+
+def load_boat(path: Path, data: dict) -> BoatSettings | None:
+    if BOAT_TABLE not in data:
+        return None
+    table = data[BOAT_TABLE]
+    if not isinstance(table, dict):
+        raise Refusal("{} in {} must be a [boat] table".format(BOAT_TABLE, path))
+    unknown = sorted(set(table) - set(BOAT_KEYS))
+    if unknown:
+        raise Refusal("[boat] in {} has unknown keys: {}".format(path, ", ".join(unknown)))
+    if "setup" not in table:
+        raise Refusal("[boat] in {} needs setup, the path of the script that sets up a box".format(path))
+
+    def where(key: str) -> str:
+        return "[boat] {} in {}".format(key, path)
+
+    def paths(key: str) -> tuple[str, ...]:
+        value = table.get(key, [])
+        if not isinstance(value, list):
+            raise Refusal("{} must be a list of paths, not {!r}".format(where(key), value))
+        return tuple(repo_path(item, where(key)) for item in value)
+
+    box_type = table.get("type", "default")
+    if box_type not in BOAT_TYPES:
+        raise Refusal("{} must be one of {}, not {!r}".format(where("type"), ", ".join(BOAT_TYPES), box_type))
+    return BoatSettings(repo_path(table["setup"], where("setup")), paths("setup_inputs"), box_type, paths("exclude"))
 
 
 def account_home() -> Path:
@@ -925,14 +1003,659 @@ def nested(profile: Profile, workers: int, command: list[str], run_file: str) ->
         return launch_failure(command, error)
 
 
-def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
+class BoatUnavailable(Exception):
+    def __init__(self, code: str, reason: str, status: object = None) -> None:
+        super().__init__(reason)
+        self.code = code
+        self.reason = reason
+        self.status = status
+
+
+class BoatDied(Exception):
+    def __init__(self, step: str, reason: str) -> None:
+        super().__init__(reason)
+        self.step = step
+        self.reason = reason
+        self.box: str | None = None
+
+
+class Fallback(NamedTuple):
+    code: str
+
+
+@dataclass(frozen=True)
+class Source:
+    store: Path
+    head: str
+    commit: str
+    branch: str
+    left_out: tuple[str, ...]
+
+
+class Plan(NamedTuple):
+    name: str
+    prefix: str
+    setup_key: str
+
+
+def git(args: list[str], cwd: Path | None = None, git_dir: Path | None = None, env: dict | None = None,
+        stdin_text: str | None = None) -> str:
+    argv = ["git", *(["--git-dir", str(git_dir)] if git_dir is not None else []), *args]
+    feed: dict = {"input": stdin_text} if stdin_text is not None else {"stdin": subprocess.DEVNULL}
+    try:
+        result = subprocess.run(argv, cwd=None if cwd is None else str(cwd), env=env, capture_output=True, text=True,
+                                errors="surrogateescape", timeout=GIT_SECONDS, **feed)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise BoatUnavailable("git", "git {} failed: {}".format(args[0], error)) from None
+    if result.returncode != 0:
+        raise BoatUnavailable("git", "git {} failed: {}".format(args[0], last_error(result)))
+    return result.stdout
+
+
+def may_hold_secret(path: str) -> bool:
+    name = path.rsplit("/", 1)[-1]
+    return any(fnmatch.fnmatchcase(name, pattern) for pattern in SECRET_NAMES)
+
+
+def take_source(root: Path, scratch: Path, dirty: Dirty) -> Source:
+    head = run_captured(["git", "-C", str(root), "rev-parse", "--verify", "-q", "HEAD"])
+    if head.returncode != 0:
+        raise BoatUnavailable("no_commit", "the repository has no commit yet")
+    branch = run_captured(["git", "-C", str(root), "symbolic-ref", "--short", "-q", "HEAD"]).stdout.strip()
+    objects = git(["rev-parse", "--path-format=absolute", "--git-path", "objects"], cwd=root).strip()
+    store = scratch / "store.git"
+    git(["init", "-q", "--bare", str(store)])
+    (store / "objects/info/alternates").write_text(objects + "\n")
+    commit, left_out = head.stdout.strip(), ()
+    if dirty != "no":
+        commit, left_out = commit_worktree(root, scratch, store, objects, commit)
+    git(["update-ref", RUN_REF, commit], git_dir=store)
+    return Source(store, head.stdout.strip(), commit, branch, left_out)
+
+
+def commit_worktree(root: Path, scratch: Path, store: Path, objects: str, head: str) -> tuple[str, tuple[str, ...]]:
+    index = scratch / "index"
+    env = dict(os.environ, GIT_INDEX_FILE=str(index), GIT_OBJECT_DIRECTORY=str(store / "objects"),
+               GIT_ALTERNATE_OBJECT_DIRECTORIES=objects, GIT_LITERAL_PATHSPECS="1", GIT_AUTHOR_NAME="jobgate",
+               GIT_AUTHOR_EMAIL="jobgate@localhost", GIT_COMMITTER_NAME="jobgate", GIT_COMMITTER_EMAIL="jobgate@localhost")
+    try:
+        shutil.copyfile(git(["rev-parse", "--path-format=absolute", "--git-path", "index"], cwd=root).strip(), str(index))
+    except OSError:
+        git(["read-tree", head], cwd=root, env=env)
+    git(["add", "-u"], cwd=root, env=env)
+    untracked = [name for name in git(["ls-files", "-z", "--others", "--exclude-standard"], cwd=root, env=env).split("\0")
+                 if name]
+    sent = [name for name in untracked if not may_hold_secret(name)]
+    if sent:
+        git(["add", "--pathspec-from-file=-", "--pathspec-file-nul"], cwd=root, env=env, stdin_text="\0".join(sent))
+    tree = git(["write-tree"], cwd=root, env=env).strip()
+    left_out = tuple(name for name in untracked if may_hold_secret(name))
+    if tree == git(["rev-parse", head + "^{tree}"], cwd=root, env=env).strip():
+        return head, left_out
+    return git(["commit-tree", tree, "-p", head, "-m", "jobgate: uncommitted changes"], cwd=root, env=env).strip(), left_out
+
+
+def make_plan(source: Source, settings: BoatSettings) -> Plan:
+    digest = hashlib.sha256(BOX_FORMAT.encode())
+    for path in (settings.setup, *settings.setup_inputs):
+        blob = run_captured(["git", "--git-dir", str(source.store), "rev-parse", "--verify", "-q",
+                             "{}:{}".format(source.commit, path)])
+        if path == settings.setup and blob.returncode != 0:
+            raise BoatUnavailable("no_setup", "the setup script {} is not in the repository".format(settings.setup))
+        digest.update("{}\0{}\n".format(path, blob.stdout.strip()).encode(errors="surrogateescape"))
+    digest.update("\0".join(settings.exclude).encode(errors="surrogateescape"))
+    roots = sorted(git(["rev-list", "--max-parents=0", source.commit], git_dir=source.store).split())
+    prefix = "jobgate-{}-".format(roots[0][:12])
+    key = digest.hexdigest()
+    return Plan(prefix + key[:12], prefix, key)
+
+
+def make_bundle(source: Source, settings: BoatSettings, basis: object, path: Path) -> bool:
+    revs = [RUN_REF]
+    if isinstance(basis, str) and COMMIT_ID.fullmatch(basis) and run_captured(
+            ["git", "--git-dir", str(source.store), "cat-file", "-e", basis + "^{commit}"]).returncode == 0:
+        if run_captured(["git", "--git-dir", str(source.store), "merge-base", "--is-ancestor", source.commit,
+                         basis]).returncode == 0:
+            return False
+        revs.append("^" + basis)
+    options = []
+    if settings.exclude:
+        patterns = "".join(line + "\n" for line in settings.sparse_patterns())
+        blob = git(["hash-object", "-w", "--stdin"], git_dir=source.store, stdin_text=patterns).strip()
+        options.append("--filter=sparse:oid=" + blob)
+    git(["bundle", "create", "-q", str(path), *options, *revs], git_dir=source.store)
+    return True
+
+
+def pack_upload(scratch: Path, spec: dict) -> Path:
+    here = Path(__file__).resolve()
+    vendor = here.parent / "_vendor"
+    path = scratch / "upload.tgz"
+    with tarfile.open(str(path), "w:gz") as archive:
+        archive.add(str(here), "jobgate.py")
+        if vendor.is_dir():
+            archive.add(str(vendor), "_vendor", filter=lambda info: None if "__pycache__" in info.name else info)
+        data = json.dumps(spec).encode()
+        info = tarfile.TarInfo("run.json")
+        info.size, info.mode, info.mtime = len(data), 0o644, int(time.time())
+        archive.addfile(info, io.BytesIO(data))
+        if spec["bundle"]:
+            archive.add(str(scratch / "run.bundle"), "run.bundle")
+    return path
+
+
+def repo_path_entries(root: Path) -> list[str]:
+    top = os.path.realpath(str(root))
+    entries = []
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        real = os.path.realpath(entry) if entry else ""
+        if real == top or real.startswith(top + os.sep):
+            entries.append(os.path.relpath(real, top))
+    return entries
+
+
+def boat_env() -> dict:
+    return dict(os.environ, BOAT_NO_UPDATE="1")
+
+
+def boat_objects(result: subprocess.CompletedProcess) -> list[dict]:
+    found = []
+    for line in (result.stdout + "\n" + result.stderr).splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            with contextlib.suppress(ValueError):
+                value = json.loads(line)
+                if isinstance(value, dict):
+                    found.append(value)
+    return found
+
+
+def boat_failure(result: subprocess.CompletedProcess, objects: list[dict]) -> dict | None:
+    error = next((value for value in objects if value.get("event") == "error"), None)
+    if error is not None:
+        return error
+    if result.returncode != 0:
+        return {"code": "boat_failed", "error": last_error(result)}
+    return None
+
+
+def describe(failure: dict) -> str:
+    text = failure.get("error") or failure.get("message") or failure.get("code") or "unknown error"
+    return str(text).strip().splitlines()[0]
+
+
+class BoatLog:
+    def __init__(self) -> None:
+        directory = account_home() / ".cache/jobgate/boat"
+        self.path: Path | None = None
+        self.stream = None
+        try:
+            directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            logs = sorted(directory.glob("*.log"))
+            for old in logs[:max(0, len(logs) - BOAT_LOGS_KEPT + 1)]:
+                old.unlink()
+            stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+            self.path = directory / "{}-{}.log".format(stamp, secrets.token_hex(3))
+            self.stream = open(str(self.path), "w", encoding="utf-8", errors="backslashreplace")
+        except OSError as error:
+            say("cannot keep a boat log in {}: {}".format(directory, error.strerror or error))
+
+    @property
+    def where(self) -> str:
+        return str(self.path) if self.stream is not None else "none"
+
+    def write(self, text: str) -> None:
+        if self.stream is not None:
+            with contextlib.suppress(OSError):
+                self.stream.write(text)
+                self.stream.flush()
+
+    def note(self, text: str) -> None:
+        say(text)
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.write("{} jobgate: {}\n".format(stamp, text))
+
+    def close(self) -> None:
+        if self.stream is not None:
+            with contextlib.suppress(OSError):
+                self.stream.close()
+
+
+class Relay:
+    def __init__(self, log: BoatLog) -> None:
+        self.log = log
+        self.partial = ""
+        self.results: list[str] = []
+
+    def __call__(self, kind: str, data: str) -> None:
+        self.log.write(data)
+        if kind == "stdout":
+            self.emit(sys.stdout, data)
+            return
+        lines = (self.partial + data).split("\n")
+        self.partial = lines.pop()
+        for line in lines:
+            self.error_line(line + "\n")
+
+    def error_line(self, line: str) -> None:
+        if line.startswith("jobgate: time="):
+            self.results.append(line[len("jobgate: "):].strip())
+        else:
+            self.emit(sys.stderr, line)
+
+    def finish(self) -> None:
+        if self.partial:
+            self.error_line(self.partial)
+            self.partial = ""
+
+    def result(self) -> dict:
+        try:
+            return dict(field.split("=", 1) for field in shlex.split(self.results[-1]) if "=" in field)
+        except (IndexError, ValueError):
+            return {}
+
+    @staticmethod
+    def emit(stream, text: str) -> None:
+        with contextlib.suppress(OSError):
+            stream.write(text)
+            stream.flush()
+
+
+class Box:
+    def __init__(self, cli: str, log: BoatLog) -> None:
+        self.cli = cli
+        self.log = log
+        self.id: str | None = None
+
+    def call(self, args: list[str], timeout: float) -> tuple[subprocess.CompletedProcess, list[dict]]:
+        result = run_captured([self.cli, *args], timeout, env=boat_env())
+        return result, boat_objects(result)
+
+    def create(self, box_type: str, name: str) -> bool:
+        for from_snapshot in (True, False):
+            args = ["new", "--type", box_type, "--no-env", "--fail-fast", "--ttl", str(BOAT_TTL_SECONDS), "--json"]
+            if from_snapshot:
+                args += ["--from", name, "--no-snapshots"]
+            result, objects = self.call(args, 600)
+            self.id = next((value["id"] for value in objects if isinstance(value.get("id"), str) and value["id"]),
+                           self.id)
+            failure = boat_failure(result, objects)
+            if failure is None and self.id is not None:
+                return from_snapshot
+            if from_snapshot and failure is not None and failure.get("code") == "snapshot_not_found":
+                continue
+            failure = failure or {"code": "no_box", "error": "boat new printed no box id"}
+            raise BoatUnavailable(str(failure.get("code") or "boat_failed"), describe(failure), failure.get("status"))
+        raise AssertionError("unreachable")
+
+    def state(self) -> dict:
+        _, objects = self.call(["exec", str(self.id), "--json", "--", "sh", "-c", 'cat "$HOME/.jobgate/state.json"'], 120)
+        for value in objects:
+            if value.get("exitCode") == 0 and isinstance(value.get("stdout"), str):
+                with contextlib.suppress(ValueError):
+                    state = json.loads(value["stdout"])
+                    return state if isinstance(state, dict) else {}
+        return {}
+
+    def upload(self, path: Path) -> None:
+        result, objects = self.call(["scp", str(path), "{}:{}/{}".format(self.id, BOX_HOME, BOX_UPLOAD)], 3600)
+        failure = boat_failure(result, objects)
+        if failure is not None:
+            raise BoatDied("upload", "the copy to the box failed: " + describe(failure))
+
+    def phase(self, step: str, script: str, relay: Relay) -> int:
+        result, objects = self.call(["exec", str(self.id), "--detach", "--json", "--", "sh", "-c", script], 120)
+        pid = next((value.get("pid") or value.get("processId") for value in objects
+                    if isinstance(value.get("pid") or value.get("processId"), int)), None)
+        failure = boat_failure(result, objects)
+        if failure is not None or pid is None:
+            raise BoatDied(step, "the box did not start it: " + describe(failure or {"error": "no process id"}))
+        try:
+            return self.follow(step, pid, relay)
+        finally:
+            relay.finish()
+
+    def follow(self, step: str, pid: int, relay: Relay) -> int:
+        printed = {"stdout": 0, "stderr": 0}
+        lost_since: float | None = None
+        ended = False
+        while True:
+            frame = self.attach(pid, printed, relay)
+            if frame is not None:
+                return self.exit_code(step, frame)
+            status = self.status(step, pid)
+            if status is None:
+                lost_since = lost_since or time.monotonic()
+                if time.monotonic() - lost_since >= BOAT_LOST_SECONDS:
+                    raise BoatDied(step, "lost contact with the box for {}".format(duration(BOAT_LOST_SECONDS)))
+            else:
+                lost_since = None
+                if not status.get("running"):
+                    if ended:
+                        return self.exit_code(step, status)
+                    ended = True
+            time.sleep(BOAT_PAUSE_SECONDS)
+
+    def attach(self, pid: int, printed: dict, relay: Relay) -> dict | None:
+        # `boat exec --attach` replays a process's output from offset 0 on every attach.
+        exit_frame = None
+        with tempfile.TemporaryFile() as errors:
+            process = subprocess.Popen([self.cli, "exec", str(self.id), "--attach", str(pid), "--json"],
+                                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors, env=boat_env(),
+                                       text=True, encoding="utf-8", errors="replace")
+            output = process.stdout
+            assert output is not None
+            try:
+                for line in output:
+                    try:
+                        frame = json.loads(line)
+                    except ValueError:
+                        continue
+                    if not isinstance(frame, dict):
+                        continue
+                    kind = frame.get("type")
+                    if kind in ("stdout", "stderr") and isinstance(frame.get("data"), str):
+                        end = frame.get("nextOffset")
+                        if isinstance(end, int):
+                            if end <= printed[kind]:
+                                continue
+                            printed[kind] = end
+                        relay(kind, frame["data"])
+                    elif kind == "exit":
+                        exit_frame = frame
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait()
+                output.close()
+        return exit_frame
+
+    def status(self, step: str, pid: int) -> dict | None:
+        result, objects = self.call(["exec", str(self.id), "--status", str(pid), "--json"], 60)
+        failure = boat_failure(result, objects)
+        if failure is not None:
+            if failure.get("code") == "not_found" or failure.get("status") == 404:
+                raise BoatDied(step, "the box is gone")
+            return None
+        return next((value for value in objects if "running" in value), None)
+
+    @staticmethod
+    def exit_code(step: str, info: dict) -> int:
+        if info.get("oomKilled"):
+            raise BoatDied(step, "the box ran out of memory and killed the {} step".format(step))
+        code = info.get("exitCode")
+        if isinstance(code, int) and not info.get("signal"):
+            return code
+        raise BoatDied(step, "the {} step on the box ended by signal {}".format(step, info.get("signal")))
+
+    def save(self, name: str, prefix: str) -> None:
+        self.log.note("boat saves this box as snapshot {}, so later runs skip the setup".format(name))
+        result, objects = self.call(["snapshot", str(self.id), name, "--json"], 120)
+        failure = boat_failure(result, objects)
+        if failure is not None:
+            self.log.note("boat cannot save snapshot {}, so the next run sets up a new box again: {}".format(
+                name, describe(failure)))
+            return
+        deadline = time.monotonic() + BOAT_SAVE_SECONDS
+        while True:
+            named = self.saved()
+            entry = next((value for value in named if value.get("name") == name), {})
+            if entry.get("status") == "ready":
+                break
+            if entry.get("status") == "failed":
+                self.log.note("boat could not save snapshot {}: {}".format(name, describe(entry)))
+                return
+            if time.monotonic() >= deadline:
+                self.log.note("boat still saves snapshot {} after {}, and the run goes on".format(
+                    name, duration(BOAT_SAVE_SECONDS)))
+                return
+            time.sleep(BOAT_SAVE_POLL_SECONDS)
+        for value in named:
+            other = value.get("name")
+            if isinstance(other, str) and other.startswith(prefix) and other != name:
+                self.call(["snapshot", "rm", other, "--json"], 120)
+
+    def saved(self) -> list[dict]:
+        _, objects = self.call(["snapshots", "--json"], 120)
+        for value in objects:
+            if isinstance(value.get("named"), list):
+                return [entry for entry in value["named"] if isinstance(entry, dict)]
+        return []
+
+    def extend(self) -> None:
+        self.call(["extend", str(self.id), "--ttl", str(BOAT_TTL_SECONDS), "--json"], 60)
+
+    def delete(self) -> None:
+        result, objects = self.call(["delete", str(self.id), "--yes", "--json"], 120)
+        failure = boat_failure(result, objects)
+        if failure is not None and failure.get("code") != "not_found":
+            self.log.note("cannot delete box {}, so boat stops it within {}: {}".format(
+                self.id, duration(BOAT_TTL_SECONDS), describe(failure)))
+
+
+class Heartbeat:
+    def __init__(self, box: Box) -> None:
+        self.done = threading.Event()
+        self.box = box
+        threading.Thread(target=self.beat, daemon=True).start()
+
+    def beat(self) -> None:
+        while not self.done.wait(BOAT_EXTEND_SECONDS):
+            self.box.extend()
+
+    def stop(self) -> None:
+        self.done.set()
+
+
+def boat_off_file() -> Path:
+    return account_home() / ".cache/jobgate/boat-off.json"
+
+
+def boat_off() -> dict | None:
+    data = read_json(boat_off_file())
+    until = data.get("until")
+    return data if isinstance(until, (int, float)) and until > time.time() else None
+
+
+def turn_boat_off(unavailable: BoatUnavailable) -> None:
+    with contextlib.suppress(OSError):
+        boat_off_file().parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        write_json(boat_off_file(), {"until": time.time() + BOAT_OFF_SECONDS, "code": unavailable.code,
+                                     "reason": unavailable.reason})
+
+
+class BoatRun(NamedTuple):
+    code: int
+    result: dict
+    started: float
+
+
+def boat_attempt(cli: str, settings: BoatSettings, source: Source, plan: Plan, spec: dict, scratch: Path,
+                 log: BoatLog, profile: Profile) -> BoatRun:
+    box = Box(cli, log)
+    heartbeat = None
+    try:
+        from_snapshot = box.create(settings.type, plan.name)
+        log.note("{} runs on boat: {} box {}, {}".format(
+            profile.name, settings.type, box.id,
+            "from snapshot " + plan.name if from_snapshot else "new, so the setup script runs first"))
+        heartbeat = Heartbeat(box)
+        basis = box.state().get("basis") if from_snapshot else None
+        spec = dict(spec, bundle=make_bundle(source, settings, basis, scratch / "run.bundle"))
+        upload = pack_upload(scratch, spec)
+        log.note("boat copies {:.1f} MB to box {}".format(upload.stat().st_size / 1e6, box.id))
+        box.upload(upload)
+        code = box.phase("setup", BOX_PREPARE, Relay(log))
+        if code == BOX_SETUP_FAILED:
+            raise BoatDied("setup", "the setup script {} failed".format(settings.setup))
+        if code != 0:
+            raise BoatDied("setup", "the box could not check out the commit (exit {})".format(code))
+        if not from_snapshot:
+            box.save(plan.name, plan.prefix)
+        started = time.monotonic()
+        relay = Relay(log)
+        return BoatRun(box.phase("run", BOX_RUN, relay), relay.result(), started)
+    except BoatDied as died:
+        died.box = box.id
+        raise
+    finally:
+        if heartbeat is not None:
+            heartbeat.stop()
+        if box.id is not None:
+            box.delete()
+
+
+def boat_run(config: Path, settings: BoatSettings, profile: Profile, max_workers: int | None,
+             command: list[str]) -> int | Fallback:
+    arrived = time.monotonic()
+    off = boat_off()
+    if off is not None:
+        say("boat is off until {}, so {} runs here. Boat refused a run with: {}".format(
+            time.strftime("%H:%M %Z", time.localtime(off["until"])), profile.name, off.get("reason")))
+        return Fallback(str(off.get("code") or "off"))
+    cli = shutil.which("boat")
+    if cli is None:
+        say("the boat CLI is not on PATH, so {} runs here".format(profile.name))
+        return Fallback("no_cli")
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(AttributeError, ValueError):
+            stream.reconfigure(errors="backslashreplace")
+    queue = Queue.open()
+    root = config.parent
+    _, dirty = git_state(root)
+    scratch = Path(tempfile.mkdtemp(prefix="jobgate-boat-"))
+    try:
+        try:
+            source = take_source(root, scratch, dirty)
+            plan = make_plan(source, settings)
+        except BoatUnavailable as unavailable:
+            say("boat cannot run {}, so it runs here: {}".format(profile.name, unavailable.reason))
+            return Fallback(unavailable.code)
+        if source.commit != source.head:
+            say("the box gets the uncommitted changes as a temporary commit, so the result counts as dirty")
+        if source.left_out:
+            say("left out {} that may hold secrets: {}".format(
+                plural(len(source.left_out), "untracked file"), ", ".join(source.left_out)))
+        cwd = os.path.relpath(os.path.realpath(os.getcwd()), os.path.realpath(str(root)))
+        spec = {"head": source.head, "commit": source.commit, "branch": source.branch,
+                "patterns": settings.sparse_patterns(), "setup": settings.setup, "setup_key": plan.setup_key,
+                "cwd": "." if cwd.startswith("..") else cwd, "path": repo_path_entries(root), "profile": profile.name,
+                "max_workers": max_workers, "command": command}
+        for attempt in (1, 2):
+            log = BoatLog()
+            try:
+                outcome = boat_attempt(cli, settings, source, plan, spec, scratch, log, profile)
+            except BoatUnavailable as unavailable:
+                log.note("boat cannot run {}, so it runs here: {}".format(profile.name, unavailable.reason))
+                if unavailable.status == BOAT_PAYMENT_STATUS or unavailable.code in BOAT_PAYMENT_CODES:
+                    turn_boat_off(unavailable)
+                return Fallback(unavailable.code)
+            except BoatDied as died:
+                log.note("BOAT RUN FAILED during {} on box {}: {}".format(died.step, died.box or "none", died.reason))
+                log.note("boat log: {}".format(log.where))
+                log.note("{} retries once on a new box".format(profile.name) if attempt == 1 else
+                         "{} runs here instead".format(profile.name))
+                continue
+            finally:
+                log.close()
+            fields = outcome.result
+            report(queue, [
+                ("time", datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
+                ("profile", profile.name), ("where", "boat"), ("box", settings.type), ("repo", root),
+                ("commit", source.head), ("dirty", dirty), ("workers", fields.get("workers", "unknown")),
+                ("wait", "{}s".format(round(outcome.started - arrived))), ("peak", fields.get("peak", "unknown")),
+                ("stated", fields.get("stated", "unknown")),
+                *([("oom_kills", fields["oom_kills"])] if "oom_kills" in fields else []), ("exit", outcome.code),
+            ])
+            return outcome.code
+        return Fallback("died")
+    finally:
+        shutil.rmtree(str(scratch), ignore_errors=True)
+
+
+def box_git(repo: Path, *args: str) -> bool:
+    result = subprocess.run(["git", "-C", str(repo), *args], stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                            errors="replace")
+    if result.returncode != 0:
+        say("git {} on the box exited with {}: {}".format(args[0], result.returncode,
+                                                         (result.stderr or result.stdout).strip()[-2000:]))
+    return result.returncode == 0
+
+
+def box_prepare(spec: dict, run_dir: Path, repo: Path) -> int:
+    bundle = run_dir / "run.bundle"
+    steps: list[list[str]] = []
+    if not (repo / ".git").is_dir():
+        if subprocess.run(["git", "init", "-q", str(repo)], stdin=subprocess.DEVNULL).returncode != 0:
+            return 1
+        steps += [["config", "core.repositoryformatversion", "1"], ["config", "extensions.partialClone", "jobgate"],
+                  ["config", "remote.jobgate.url", str(bundle)], ["config", "remote.jobgate.promisor", "true"],
+                  ["config", "remote.jobgate.partialclonefilter", "blob:none"]]
+    steps.append(["sparse-checkout", "set", "--no-cone", *spec["patterns"]])
+    if spec["bundle"]:
+        steps.append(["fetch", "-q", str(bundle), "+{0}:{0}".format(RUN_REF)])
+    steps.append(["checkout", "-q", "--force", *(["-B", spec["branch"]] if spec["branch"] else ["--detach"]),
+                  spec["commit"]])
+    for args in steps:
+        if not box_git(repo, *args):
+            return 1
+    state_path = Path.home() / ".jobgate/state.json"
+    if read_json(state_path).get("setup_key") != spec["setup_key"]:
+        say("the box runs the setup script {}".format(spec["setup"]))
+        code = subprocess.run(["bash", spec["setup"]], cwd=str(repo), stdin=subprocess.DEVNULL).returncode
+        if code != 0:
+            say("the setup script {} exited with {}".format(spec["setup"], code))
+            return BOX_SETUP_FAILED
+        write_json(state_path, {"setup_key": spec["setup_key"], "basis": spec["head"]})
+    return 0
+
+
+def box_run(spec: dict, repo: Path) -> int:
+    config = machine_config()
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("memory_share = {}\n".format(BOX_MEMORY_SHARE))
+    env = dict(os.environ, PATH=os.pathsep.join([str(repo / entry) for entry in spec["path"]] +
+                                                [os.environ.get("PATH", os.defpath)]))
+    argv = [sys.executable, str(Path(__file__).resolve()), "run", "--local",
+            *(["--max-workers", str(spec["max_workers"])] if spec["max_workers"] else []),
+            spec["profile"], "--", *spec["command"]]
+    setpriv = shutil.which("setpriv")
+    if setpriv is not None:
+        # Some boat boxes start commands with CAP_DAC_READ_SEARCH in the ambient set, which lets them read files that
+        # their permissions deny.
+        argv = [setpriv, "--ambient-caps=-all", "--inh-caps=-all", "--", *argv]
+    try:
+        os.chdir(str(repo / spec["cwd"]))
+        os.execve(argv[0], argv, env)
+    except OSError as error:
+        say("cannot start {} on the box: {}".format(spec["profile"], error.strerror or error))
+    return CANNOT_EXECUTE
+
+
+def box_main(step: str, spec_path: Path) -> int:
+    spec = json.loads(spec_path.read_text())
+    repo = Path.home() / "repo"
+    if step == "prepare":
+        return box_prepare(spec, spec_path.parent, repo)
+    return box_run(spec, repo)
+
+
+def run(profile_name: str, max_workers: int | None, command: list[str], local: bool = False) -> int:
     config = find_config(Path.cwd())
-    profile = load_profile(config, profile_name)
+    data = read_toml(config)
+    profile = load_profile(config, data, profile_name)
+    settings = load_boat(config, data)
     limit = min(profile.max_workers, max_workers or profile.max_workers)
     outer = os.environ.get(RUN_ENV, "")
     outer_workers = os.environ.get(WORKERS_ENV, "")
     if outer_workers.isdigit() and int(outer_workers) >= 1 and run_is_live(outer):
         return nested(profile, min(limit, int(outer_workers)), command, outer)
+    fallback = None
+    if settings is not None and not local:
+        outcome = boat_run(config, settings, profile, max_workers, command)
+        if not isinstance(outcome, Fallback):
+            return outcome
+        fallback = outcome.code
     queue = Queue.open()
     host = machine()
     refuse_if_never_fits(profile, host, config)
@@ -955,7 +1678,8 @@ def run(profile_name: str, max_workers: int | None, command: list[str]) -> int:
             size(peak), size(stated), profile.name, plural(workers, "worker"), needed, config))
     report(queue, [
         ("time", datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
-        ("profile", profile.name), ("where", "local"), ("repo", config.parent), ("commit", commit),
+        ("profile", profile.name), ("where", "local"), *([("fallback", fallback)] if fallback else []),
+        ("repo", config.parent), ("commit", commit),
         ("dirty", dirty), ("workers", workers), ("wait", "{}s".format(round(waited))),
         ("peak", mebibytes(peak) if peak is not None else "unknown"), ("stated", mebibytes(stated)),
         *([("oom_kills", killed)] if killed else []), ("exit", outcome.code),
@@ -1027,16 +1751,20 @@ def positive(text: str) -> int:
 def main(argv: list[str]) -> int:
     if argv[:1] == ["_scope"] and len(argv) >= 4 and argv[2] == "--":
         return scope_main(Path(argv[1]), argv[3:])
+    if argv[:1] == ["_box"] and len(argv) == 3 and argv[1] in ("prepare", "run"):
+        return box_main(argv[1], Path(argv[2]))
     command: list[str] = []
     if "--" in argv:
         split = argv.index("--")
         argv, command = argv[:split], argv[split + 1:]
     parser = Parser(prog="jobgate", description="Admit heavy commands so that concurrent runs fit the machine.")
     actions = parser.add_subparsers(dest="action", required=True)
-    run_parser = actions.add_parser("run", usage="jobgate run [--max-workers N] PROFILE -- COMMAND [ARG...]",
+    run_parser = actions.add_parser("run", usage="jobgate run [--max-workers N] [--local] PROFILE -- COMMAND [ARG...]",
                                     help="wait for room, then run the command with a worker count")
     run_parser.add_argument("--max-workers", type=positive, metavar="N",
                             help="use at most N workers, below the profile's max_workers")
+    run_parser.add_argument("--local", action="store_true",
+                            help="run on this machine even when jobgate.toml has [boat] settings")
     run_parser.add_argument("profile", help="a [profile] table in the repository's jobgate.toml")
     actions.add_parser("status", help="show the share, pressure, cap, and runs")
     args = parser.parse_args(argv)
@@ -1048,7 +1776,7 @@ def main(argv: list[str]) -> int:
             return status()
         if not command:
             parser.error("give the command after --, as in: jobgate run test -- pytest")
-        return run(args.profile, args.max_workers, command)
+        return run(args.profile, args.max_workers, command, args.local)
     except Refusal as refusal:
         say(str(refusal))
         return REFUSED
