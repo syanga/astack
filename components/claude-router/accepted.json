@@ -1,7 +1,7 @@
 {
- "head": "946e4f2fc9d19fa68c78a79983fd0f9d1933afec",
- "code_sha256": "08b342d6aa88f1876acdcc2060151c6e34d794a6facbae1bfd49fd51a4d28132",
- "binary_sha256": "e1c765e06ee65ad54490f40acaee3ee9ca6e7903f13907c9e24402ccfdab8779",
+ "head": "0033cc6d2487c2cc10df441f60782cd342d7b9d3",
+ "code_sha256": "b45e97b6feca17e0df4674298f2a3875985ac8e2a924df78d2fc295619f65bf8",
+ "binary_sha256": "98c7f4c5016f65b3add1dc9ab1c44b35706dd7b57652e7c46b6feeb6d3607566",
  "helpers_sha256": "91ec69daf66a7ac317dcd4261552a269c88f68940a6e638df1149e1e0db7fd98",
  "sdk": "v8.0.11",
  "go": "go1.27.3",
@@ -10,29 +10,29 @@
   "claude_code": "2.1.331"
  },
  "result": "pass",
- "scope": "Per-machine quota logging and stacked status bars at 946e4f2. A foreground lane router built at 946e4f2 ran beside the daily router on darwin/arm64 with copies of the crookshanks and work logins (both >7 h from token expiry, capacities 1 and 1). Both accounts verified paid overflow disabled and logged quota windows on startup overage_read. One live POST /v1/messages (claude-sonnet-4-6, max_tokens 16) hit 429 on work, migrated to crookshanks, answered 200, and logged model and response-header quota windows in events.jsonl. claude-router status rendered stacked bars, % here, and the legend at 100 and 80 columns, (% here) in status -v, and compact account lines when piped. Offline gofmt, go vet, and go test -race passed at the same head, and a 2-machine fake-upstream end-to-end simulation verified exact additive attribution across both routers. Unchanged historical scenarios are references and were not rerun.",
- "evidence_root": "/Users/alan/GitHub/astack/.scratch/router-per-machine-usage/evidence/946e4f2",
+ "scope": "Per-machine quota logging and stacked status bars at 0033cc6. A foreground lane router built at 0033cc6 ran beside the daily router on darwin/arm64 with copies of the crookshanks and work logins (both >5 h from token expiry, capacities 1 and 1). Both accounts verified paid overflow disabled and logged quota windows on startup overage_read. One live POST /v1/messages (claude-sonnet-4-6, max_tokens 16) hit 429 on work, migrated to crookshanks, answered 200, and logged model and response-header quota windows in events.jsonl. claude-router status rendered stacked bars, % here, and the legend at 100 and 80 columns, (% here) in status -v, and compact account lines when piped. Offline gofmt, go vet, and go test -race passed at the same head, and a 2-machine fake-upstream end-to-end simulation verified exact additive attribution across both routers. Unchanged historical scenarios are references and were not rerun.",
+ "evidence_root": "/Users/alan/GitHub/astack/.scratch/router-per-machine-usage/evidence/0033cc6",
  "matrix": [
   {
    "scenario": "crookshanks token expires more than 4.5 h from now, outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 434.2
+    "expires_in_min": 340.2
    }
   },
   {
    "scenario": "work token expires more than 4.5 h from now, outside the four-hour refresh lead",
    "status": "pass",
    "detail": {
-    "expires_in_min": 420.9
+    "expires_in_min": 327.0
    }
   },
   {
-   "scenario": "Lane code, executable, and SDK match the build at 946e4f2 and go.mod",
+   "scenario": "Lane code, executable, and SDK match the build at 0033cc6 and go.mod",
    "status": "pass",
    "detail": {
-    "code_sha256": "08b342d6aa88f1876acdcc2060151c6e34d794a6facbae1bfd49fd51a4d28132",
-    "binary_sha256": "e1c765e06ee65ad54490f40acaee3ee9ca6e7903f13907c9e24402ccfdab8779",
+    "code_sha256": "b45e97b6feca17e0df4674298f2a3875985ac8e2a924df78d2fc295619f65bf8",
+    "binary_sha256": "98c7f4c5016f65b3add1dc9ab1c44b35706dd7b57652e7c46b6feeb6d3607566",
     "sdk": "v8.0.11",
     "evidence": [
      "status-start.json"
@@ -84,8 +84,8 @@
    "scenario": "Identity and disabled paid-overflow state are unchanged at the end",
    "status": "pass",
    "detail": {
-    "code_sha256": "08b342d6aa88f1876acdcc2060151c6e34d794a6facbae1bfd49fd51a4d28132",
-    "binary_sha256": "e1c765e06ee65ad54490f40acaee3ee9ca6e7903f13907c9e24402ccfdab8779",
+    "code_sha256": "b45e97b6feca17e0df4674298f2a3875985ac8e2a924df78d2fc295619f65bf8",
+    "binary_sha256": "98c7f4c5016f65b3add1dc9ab1c44b35706dd7b57652e7c46b6feeb6d3607566",
     "sdk": "v8.0.11",
     "evidence": [
      "status-start.json",
@@ -128,16 +128,16 @@
   "status": "historical reference, not rerun at this code"
  },
  "offline_verification": {
-  "head": "946e4f2fc9d19fa68c78a79983fd0f9d1933afec",
+  "head": "0033cc6d2487c2cc10df441f60782cd342d7b9d3",
   "note": "The lane and offline checks ran on the same head. The commit that adds this record changes only accepted.json, which is not router code.",
   "gofmt": "pass",
   "go_test_race": "pass",
   "go_vet": "pass",
   "evidence": [
-   "/Users/alan/GitHub/astack/.scratch/router-per-machine-usage/evidence/946e4f2/offline/gofmt.txt",
-   "/Users/alan/GitHub/astack/.scratch/router-per-machine-usage/evidence/946e4f2/offline/vet.log",
-   "/Users/alan/GitHub/astack/.scratch/router-per-machine-usage/evidence/946e4f2/offline/go-race.log"
+   "/Users/alan/GitHub/astack/.scratch/router-per-machine-usage/evidence/0033cc6/offline/gofmt.txt",
+   "/Users/alan/GitHub/astack/.scratch/router-per-machine-usage/evidence/0033cc6/offline/vet.log",
+   "/Users/alan/GitHub/astack/.scratch/router-per-machine-usage/evidence/0033cc6/offline/go-race.log"
   ]
  },
- "written": "2026-11-26T00:46:13.423269+00:00"
+ "written": "2026-11-26T02:20:16.912911+00:00"
 }
