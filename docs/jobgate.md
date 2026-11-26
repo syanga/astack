@@ -290,12 +290,16 @@ that read Git history therefore work on the box.
   excluded paths, in every commit of the history. The box gets the file names,
   but its checkout leaves the files out. A Git command on the box that reads
   their contents fails.
-- Before it starts a box, jobgate checks that no content that was ever under an
-  excluded path, or that is there now, also lives at another path, in the
-  history or in the uncommitted changes that the box would get. Content under
-  an excluded path counts even when `.gitignore` hides it. Examples are a file
-  that a commit moved into an excluded directory, and an untracked copy of an
-  excluded file.
+- Before it starts a box, jobgate looks for private content at other paths in
+  the history and in the uncommitted changes that the box would get. Private
+  content is what any commit ever had under an excluded path, and every file
+  under an excluded path now. That includes files that `.gitignore` hides and
+  files that a symbolic link leads to. Examples are a file that a commit moved
+  into an excluded directory, and an untracked copy of an excluded file. jobgate
+  reads each file under the excluded paths on every run. It compares the file's
+  bytes, and for a file up to 64 MiB also the bytes that Git would store for it
+  at its own path. A copy that Git stores with other line endings can still
+  reach the box.
   If it finds such content, the command runs on this machine. jobgate prints up
   to 5 such paths to add to `exclude`, and the number of the others. It names
   one path for each such content. After you add those paths, the next run can
@@ -343,9 +347,9 @@ again. It prints only the output that it has not printed yet. While jobgate
 follows a box, it keeps the box's auto-stop an hour away. When jobgate dies, the
 box stops within an hour.
 
-Ctrl-C, SIGTERM, and SIGHUP delete the box. While jobgate deletes the box, it
-holds further Ctrl-C, SIGTERM, and SIGHUP signals, and it tries the delete up to
-3 times. When one of the signals arrives before `boat new` prints the new box's
+Ctrl-C, SIGTERM, and SIGHUP delete the box. jobgate tries the delete up to 3
+times. A Ctrl-C, SIGTERM, or SIGHUP that arrives during the delete waits until
+the delete ends, and then jobgate stops. When one of the signals arrives before `boat new` prints the new box's
 id, jobgate cannot delete the box, and the box stops within an hour.
 
 ### Snapshots

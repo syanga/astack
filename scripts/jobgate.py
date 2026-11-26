@@ -89,6 +89,7 @@ BOAT_PAUSE_SECONDS = 5
 BOAT_SILENT_SECONDS = 60
 BOAT_DELETE_TRIES = 3
 BOAT_DELETE_SECONDS = 60
+FILTERED_HASH_BYTES = 64 * 2**20
 BOAT_LOGS_KEPT = 20
 BOAT_PAYMENT_STATUS = 402
 BOAT_PAYMENT_CODES = ("trial_compute_limit_reached",)
@@ -219,10 +220,11 @@ def read_toml(path: Path) -> dict:
         raise Refusal("cannot read {}: {}".format(path, error)) from None
 
 
-def run_captured(argv: list[str], timeout: float = 60, env: dict | None = None) -> subprocess.CompletedProcess:
+def run_captured(argv: list[str], timeout: float = 60, env: dict | None = None,
+                 new_session: bool = False) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(argv, capture_output=True, text=True, errors="surrogateescape", timeout=timeout,
-                              stdin=subprocess.DEVNULL, env=env)
+                              stdin=subprocess.DEVNULL, env=env, start_new_session=new_session)
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(argv, 124, "", "{} timed out after {:g}s".format(argv[0], timeout))
     except OSError as error:
@@ -1121,17 +1123,26 @@ def commit_worktree(root: Path, scratch: Path, store: Path, objects: str, head: 
 
 
 def worktree_blobs(root: Path, settings: BoatSettings) -> set[str]:
-    files = []
+    files: list[str] = []
+    walked: set[tuple[int, int]] = set()
     for excluded in settings.exclude:
-        top = root / excluded
-        if top.is_file() and not top.is_symlink():
-            files.append(str(top))
-        for directory, _, names in os.walk(str(top)) if top.is_dir() and not top.is_symlink() else ():
-            files += [path for path in (os.path.join(directory, name) for name in names)
-                      if os.path.isfile(path) and not os.path.islink(path)]
-    paths = "".join(path + "\n" for path in files)
-    return {blob for options in (["--no-filters"], []) if files
-            for blob in git(["hash-object", *options, "--stdin-paths"], cwd=root, stdin_text=paths).split()}
+        top = str(root / excluded)
+        if os.path.isfile(top):
+            files.append(top)
+        for directory, subdirectories, names in os.walk(top, followlinks=True):
+            identity = os.stat(directory)
+            if (identity.st_dev, identity.st_ino) in walked:
+                subdirectories.clear()
+                continue
+            walked.add((identity.st_dev, identity.st_ino))
+            files += [path for path in (os.path.join(directory, name) for name in names) if os.path.isfile(path)]
+    small = [path for path in files if os.path.getsize(path) <= FILTERED_HASH_BYTES]
+    blobs: set[str] = set()
+    for options, paths in ((["--no-filters"], files), ([], small)):
+        if paths:
+            blobs.update(git(["hash-object", *options, "--stdin-paths"], cwd=root,
+                             stdin_text="".join(path + "\n" for path in paths)).split())
+    return blobs
 
 
 def check_exclude(source: Source, settings: BoatSettings, root: Path) -> None:
@@ -1174,12 +1185,15 @@ def make_plan(source: Source, settings: BoatSettings) -> Plan:
     for path in (settings.setup, *settings.setup_inputs):
         answer = git(["cat-file", "--batch-check", "--follow-symlinks"], git_dir=source.store,
                      stdin_text="{}:{}\n".format(source.commit, path)).strip()
-        fields = answer.split()
-        found = fields[0] if len(fields) == 3 and fields[1] in ("blob", "tree") else ""
-        if path == settings.setup and (len(fields) != 3 or fields[1] != "blob"):
+        parts = answer.split()
+        kind = parts[1] if len(parts) == 3 else ""
+        if path == settings.setup and kind != "blob":
             raise BoatUnavailable("no_setup", "the setup script {} is not in the repository".format(settings.setup))
-        digest.update("{}\0{}\n".format(path, found or (answer if fields[:1] == ["symlink"] else "")).encode(
-            errors="surrogateescape"))
+        if kind in ("blob", "tree"):
+            content = parts[0]
+        else:
+            content = answer if answer.startswith("symlink ") else ""
+        digest.update("{}\0{}\n".format(path, content).encode(errors="surrogateescape"))
     digest.update("\0".join(settings.exclude).encode(errors="surrogateescape"))
     roots = sorted(git(["rev-list", "--max-parents=0", source.commit], git_dir=source.store).split())
     prefix = "jobgate-{}-".format(roots[0][:12])
@@ -1295,6 +1309,9 @@ class BoatLog:
 
     def note(self, text: str) -> None:
         say(text)
+        self.entry(text)
+
+    def entry(self, text: str) -> None:
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         self.write("{} jobgate: {}\n".format(stamp, text))
 
@@ -1350,9 +1367,9 @@ class Box:
         self.log = log
         self.id: str | None = None
 
-    def call(self, args: list[str], timeout: float,
-             expected: tuple[str, ...] = ()) -> tuple[subprocess.CompletedProcess, list[dict]]:
-        return self.keep(run_captured([self.cli, *args], timeout, env=boat_env()), expected)
+    def call(self, args: list[str], timeout: float, expected: tuple[str, ...] = (),
+             new_session: bool = False) -> tuple[subprocess.CompletedProcess, list[dict]]:
+        return self.keep(run_captured([self.cli, *args], timeout, env=boat_env(), new_session=new_session), expected)
 
     def keep(self, result: subprocess.CompletedProcess,
              expected: tuple[str, ...] = ()) -> tuple[subprocess.CompletedProcess, list[dict]]:
@@ -1460,9 +1477,11 @@ class Box:
                     raise BoatDied(step, "lost contact with the box for {}".format(duration(BOAT_LOST_SECONDS)))
             else:
                 lost_since = None
-                if frame is not None or not status.get("running"):
-                    if ended or frame is not None:
-                        return self.exit_code(step, dict(frame or {}, **status))
+                if frame is not None:
+                    return self.exit_code(step, dict(frame, **status))
+                if not status.get("running"):
+                    if ended:
+                        return self.exit_code(step, status)
                     ended = True
             time.sleep(BOAT_PAUSE_SECONDS)
 
@@ -1477,19 +1496,21 @@ class Box:
                                        env=boat_env(), text=True, encoding="utf-8", errors="replace")
             output = process.stdout
             assert output is not None
-            heard = [time.monotonic()]
-            done = threading.Event()
+            heard = time.monotonic()
+            replayed = {"stdout": 0, "stderr": 0}
+            done, fired = threading.Event(), threading.Event()
 
             def watch() -> None:
                 while not done.wait(min(silent, BOAT_PAUSE_SECONDS)):
-                    if time.monotonic() - heard[0] >= silent:
+                    if time.monotonic() - heard >= silent:
+                        fired.set()
                         process.kill()
                         return
 
             threading.Thread(target=watch, daemon=True).start()
             try:
                 for line in output:
-                    heard[0] = time.monotonic()
+                    heard = time.monotonic()
                     try:
                         frame = json.loads(line)
                     except ValueError:
@@ -1499,11 +1520,12 @@ class Box:
                         data = frame["data"]
                         end = frame.get("nextOffset")
                         if isinstance(end, int):
+                            start, replayed[kind] = replayed[kind], end
                             if end <= printed[kind]:
                                 continue
                             raw = data.encode()
-                            if end - len(raw) < printed[kind]:
-                                data = raw[printed[kind] - end + len(raw):].decode(errors="replace")
+                            if start < printed[kind] and len(raw) == end - start:
+                                data = raw[printed[kind] - start:].decode(errors="replace")
                             printed[kind] = end
                         relay(kind, data)
                     elif kind == "exit":
@@ -1516,7 +1538,10 @@ class Box:
                     process.kill()
                 process.wait()
                 output.close()
-            if exit_frame is None:
+            if fired.is_set() and exit_frame is None:
+                self.log.entry("boat exec {} --attach {} printed nothing for {}, so jobgate checks the step and "
+                               "attaches again".format(self.id, pid, duration(silent)))
+            elif exit_frame is None:
                 errors.seek(0)
                 self.keep(subprocess.CompletedProcess(argv, process.returncode, "".join(other),
                                                       errors.read().decode("utf-8", "replace")))
@@ -1578,24 +1603,30 @@ class Box:
         self.call(["extend", str(self.id), "--ttl", str(BOAT_TTL_SECONDS), "--json"], 60)
 
     def delete(self) -> None:
-        with held_signals():
+        with held_signals("jobgate stops after it deletes box {}".format(self.id)):
             for attempt in range(BOAT_DELETE_TRIES):
                 if attempt:
                     time.sleep(BOAT_PAUSE_SECONDS)
                 result, objects = self.call(["delete", str(self.id), "--yes", "--json"], BOAT_DELETE_SECONDS,
-                                            ("not_found",))
+                                            ("not_found",), new_session=True)
                 failure = boat_failure(result, objects)
                 if failure is None or failure.get("code") == "not_found":
                     return
-        self.log.note("cannot delete box {}, so boat stops it within {}: {}".format(
-            self.id, duration(BOAT_TTL_SECONDS), describe(failure)))
+            self.log.note("cannot delete box {}, so boat stops it within {}: {}".format(
+                self.id, duration(BOAT_TTL_SECONDS), describe(failure)))
 
 
 @contextlib.contextmanager
-def held_signals():
+def held_signals(message: str):
     held: list[int] = []
+
+    def hold(number, frame) -> None:
+        if not held:
+            say(message)
+        held.append(number)
+
     numbers = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
-    previous = {number: signal.signal(number, lambda number, frame: held.append(number)) for number in numbers}
+    previous = {number: signal.signal(number, hold) for number in numbers}
     try:
         yield
     finally:

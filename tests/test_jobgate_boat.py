@@ -76,6 +76,20 @@ class BoatTest(JobgateTest):
     def run_here(self, *command):
         return self.gate("run", "test", "--", sys.executable, "-c", *command)
 
+    def start_a_held_run(self):
+        started = self.root / "box started"
+        hold = "import pathlib, sys, time; pathlib.Path(sys.argv[1]).touch(); time.sleep(60)"
+        process = subprocess.Popen([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", hold,
+                                    str(started)], cwd=str(self.repo), env=self.env, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.PIPE, text=True, start_new_session=True)
+        self.addCleanup(lambda: process.poll() is None and process.kill())
+        wait_for(started.exists)
+        return process
+
+    def run_in(self, start):
+        return subprocess.run([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", REPORT],
+                              cwd=str(self.repo / start), env=self.env, capture_output=True, text=True, timeout=60)
+
     def report_of(self, stdout):
         return dict(line.split(" ", 1) for line in stdout.splitlines() if " " in line)
 
@@ -222,19 +236,35 @@ class SourceTests(BoatTest):
         self.assertIn(self.git("rev-parse", "HEAD:app.py").strip(), uploaded)
         self.assertEqual(uploaded & private, set())
 
-    def test_a_copy_of_an_ignored_file_under_an_excluded_path_keeps_the_run_here(self):
-        (self.repo / ".gitignore").write_text("private/\n")
+    def assert_a_copy_keeps_the_run_here(self, private, attributes=""):
+        (self.repo / ".gitignore").write_text("private\n")
+        (self.repo / ".gitattributes").write_text(attributes)
         self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
         self.commit("ignore private")
-        (self.repo / "private").mkdir()
-        (self.repo / "private/people.csv").write_text("name,email\nAda,ada@example.com\n")
-        shutil.copyfile(str(self.repo / "private/people.csv"), str(self.repo / "copy.csv"))
+        (private / "people.csv").write_bytes(b"name,email\r\nAda,ada@example.com\r\n")
+        shutil.copyfile(str(private / "people.csv"), str(self.repo / "copy.csv"))
         result = self.run_here(REPORT)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.repo / "ran-here").exists())
         self.assertIn("copy.csv", result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere")
         self.assertEqual(self.calls("new"), [])
+
+    def test_a_copy_of_an_ignored_file_under_an_excluded_path_keeps_the_run_here(self):
+        (self.repo / "private").mkdir()
+        self.assert_a_copy_keeps_the_run_here(self.repo / "private")
+
+    def test_a_copy_that_git_stores_with_other_line_endings_keeps_the_run_here(self):
+        (self.repo / "private").mkdir()
+        self.assert_a_copy_keeps_the_run_here(self.repo / "private", "* text=auto\n")
+
+    def test_a_copy_of_a_file_behind_symlinks_under_an_excluded_path_keeps_the_run_here(self):
+        outside, nested = self.root / "outside", self.root / "nested"
+        outside.mkdir()
+        nested.mkdir()
+        (self.repo / "private").symlink_to(outside)
+        (outside / "data").symlink_to(nested)
+        self.assert_a_copy_keeps_the_run_here(nested)
 
     def test_a_dirty_run_adds_no_file_to_a_split_index_repository(self):
         self.git("config", "core.splitIndex", "true")
@@ -261,11 +291,16 @@ class SourceTests(BoatTest):
     def test_untracked_files_reach_the_box_when_git_status_hides_them(self):
         self.git("config", "status.showUntrackedFiles", "no")
         (self.repo / "new_test.py").write_text("found = True\n")
-        (self.repo / "a\rb.txt").write_text("odd name\n")
-        result = self.run_here("import os; print(os.path.exists('new_test.py'), os.path.exists('a' + chr(13) + 'b.txt'))")
-        self.assertEqual((result.returncode, result.stdout.strip()), (0, "True True"), result.stderr)
+        result = self.run_here("import os; print(os.path.exists('new_test.py'))")
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "True"), result.stderr)
         fields = self.result_fields(result.stderr)
         self.assertEqual((fields["where"], fields["dirty"]), ("boat", "yes"))
+
+    def test_an_untracked_file_with_a_carriage_return_in_its_name_reaches_the_box(self):
+        (self.repo / "a\rb.txt").write_text("odd name\n")
+        result = self.run_here("import os; print(os.path.exists('a' + chr(13) + 'b.txt'))")
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "True"), result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["where"], "boat")
 
     def test_excluded_contents_that_also_live_at_another_path_keep_the_run_here(self):
         (self.repo / "data").mkdir()
@@ -399,9 +434,10 @@ class FallbackTests(BoatTest):
         self.assertEqual(result.returncode, 0, result.stderr)
         uploads = sorted((self.boat_dir / "uploads").glob("*.tgz"))
         with tarfile.open(str(uploads[0])) as archive:
-            names = archive.getnames()
-        self.assertIn("_vendor/tomllib/_parser.py", names)
-        self.assertEqual([name for name in names if name.endswith(".env")], [])
+            vendored = [member.name for member in archive.getmembers()
+                        if member.name.startswith("_vendor/") and not member.isdir()]
+        self.assertIn("_vendor/tomllib/_parser.py", vendored)
+        self.assertEqual([name for name in vendored if not name.endswith(".py")], [])
 
     @unittest.skipIf(os.geteuid() == 0, "root reads files without read permission")
     def test_a_file_error_on_this_machine_after_the_box_starts_is_reported_and_left_to_this_machine(self):
@@ -464,30 +500,37 @@ class FallbackTests(BoatTest):
 
     def test_a_command_that_starts_in_a_directory_the_box_would_lack_runs_here_without_a_box(self):
         (self.repo / ".gitignore").write_text("build/\n")
-        for name in ("private/people.csv", "src/secret/key.txt", "mixed/secret/key.txt", "mixed/kept.txt"):
+        for name in ("private/people.csv", "src/secret/key.txt"):
             (self.repo / name).parent.mkdir(parents=True, exist_ok=True)
             (self.repo / name).write_text(name + "\n")
-        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private", "src/secret", "mixed/secret"]\n')
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private", "src/secret"]\n')
         for name in ("build", "vendored/lib"):
             (self.repo / name).mkdir(parents=True)
         head = self.git("rev-parse", "HEAD").strip()
         self.git("update-index", "--add", "--cacheinfo", "160000,{},vendored/lib".format(head))
         self.commit("add private data and a submodule")
         self.assertIn("160000 commit", self.git("ls-tree", "HEAD", "vendored/lib"))
-        for start in ("build", "private", "src", "vendored", "mixed"):
+        for start in ("build", "private", "src", "vendored"):
             with self.subTest(start=start):
-                result = subprocess.run([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c",
-                                         REPORT], cwd=str(self.repo / start), env=self.env, capture_output=True,
-                                        text=True, timeout=60)
+                result = self.run_in(start)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                fields = self.result_fields(result.stderr)
-                if start == "mixed":
-                    self.assertEqual(fields["where"], "boat", result.stderr)
-                    continue
+                self.assertTrue((self.repo / start / "ran-here").exists())
                 (self.repo / start / "ran-here").unlink()
                 self.assertIn("the box would not get {}, which the run needs".format(start), result.stderr)
-                self.assertEqual(fields["fallback"], "missing_on_box")
-        self.assertEqual(len(self.calls("delete")), 1)
+                self.assertEqual(self.result_fields(result.stderr)["fallback"], "missing_on_box")
+                self.assertEqual(self.calls("new"), [])
+
+    def test_a_command_that_starts_next_to_an_excluded_directory_runs_on_the_box(self):
+        for name in ("mixed/secret/key.txt", "mixed/kept.txt"):
+            (self.repo / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.repo / name).write_text(name + "\n")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["mixed/secret"]\n')
+        self.commit("add a private directory next to kept files")
+        result = self.run_in("mixed")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = self.report_of(result.stdout)
+        self.assertTrue(self.on_box(report), report)
+        self.assertTrue(report["cwd"].endswith(os.sep + "mixed"), report)
 
     def test_a_jobgate_toml_that_git_ignores_keeps_the_run_here_without_a_box(self):
         self.git("rm", "-q", "--cached", "jobgate.toml")
@@ -563,6 +606,13 @@ class FallbackTests(BoatTest):
         self.assertEqual((result.returncode, result.stdout), (0, "first\nsecond\n"), result.stderr)
         self.assertEqual(result.stderr.count("test starts with"), 1, result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["where"], "boat")
+        log = self.boat_logs()[-1].read_text()
+        self.assertIn("printed nothing for 1s, so jobgate checks the step", log)
+        self.assertNotIn("exited with", log)
+
+    def test_output_that_is_not_utf8_reaches_this_machine_whole(self):
+        result = self.run_here("import sys; sys.stdout.buffer.write(b'abc\\xffdef\\n')")
+        self.assertEqual((result.returncode, result.stdout), (0, "abc\ufffddef\n"), result.stderr)
 
     def test_an_out_of_memory_kill_is_not_retried_when_the_box_answers_late(self):
         self.plan(oom=["run"], status_fail=[True])
@@ -596,29 +646,33 @@ class FallbackTests(BoatTest):
         self.assertEqual(self.boxes_left(), [])
 
     def test_a_second_stop_while_jobgate_deletes_the_box_still_deletes_it(self):
-        started = self.root / "box started"
         self.plan(hold_delete=[2])
-        hold = "import pathlib, sys, time; pathlib.Path(sys.argv[1]).touch(); time.sleep(60)"
-        process = subprocess.Popen([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", hold,
-                                    str(started)], cwd=str(self.repo), env=self.env, stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.PIPE, text=True, start_new_session=True)
-        self.addCleanup(lambda: process.poll() is None and process.kill())
-        wait_for(started.exists)
+        process = self.start_a_held_run()
         os.killpg(process.pid, signal.SIGINT)
         wait_for((self.boat_dir / "delete-held").exists)
+        for _ in range(3):
+            os.killpg(process.pid, signal.SIGINT)
+            time.sleep(0.2)
+        _, stderr = process.communicate(timeout=60)
+        self.assertEqual(process.returncode, 128 + signal.SIGINT, stderr)
+        self.assertIn("jobgate stops after it deletes box", stderr)
+        self.assertEqual(len(self.calls("delete")), 1)
+        self.assertEqual(self.boxes_left(), [])
+
+    def test_a_box_that_jobgate_cannot_delete_after_a_stop_is_named(self):
+        self.plan(delete_fail=[True, True, True])
+        process = self.start_a_held_run()
+        os.killpg(process.pid, signal.SIGINT)
+        wait_for(lambda: len(self.calls("delete")) >= 1)
         os.killpg(process.pid, signal.SIGINT)
         _, stderr = process.communicate(timeout=60)
         self.assertEqual(process.returncode, 128 + signal.SIGINT, stderr)
-        self.assertEqual(self.boxes_left(), [])
+        self.assertIn("jobgate stops after it deletes box", stderr)
+        self.assertRegex(stderr, r"cannot delete box bx_\w+, so boat stops it within 1h 00m: boat could not reach")
+        self.assertEqual(len(self.calls("delete")), 3)
 
     def test_stopping_jobgate_deletes_the_box(self):
-        started = self.root / "box started"
-        hold = "import pathlib, sys, time; pathlib.Path(sys.argv[1]).touch(); time.sleep(60)"
-        process = subprocess.Popen([sys.executable, str(SCRIPT), "run", "test", "--", sys.executable, "-c", hold,
-                                    str(started)], cwd=str(self.repo), env=self.env, stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.PIPE, text=True, start_new_session=True)
-        self.addCleanup(lambda: process.poll() is None and process.kill())
-        wait_for(started.exists)
+        process = self.start_a_held_run()
         os.killpg(process.pid, signal.SIGINT)
         _, stderr = process.communicate(timeout=60)
         self.assertEqual(process.returncode, 128 + signal.SIGINT, stderr)

@@ -242,6 +242,8 @@ def main(argv):
         box(args[1])
         emit({"ok": True})
     elif args[0] == "delete":
+        if take("delete_fail"):
+            fail("unavailable", 503, "boat could not reach the box")
         hold = take("hold_delete")
         if hold:
             (STATE / "delete-held").touch()
