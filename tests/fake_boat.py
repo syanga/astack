@@ -89,6 +89,12 @@ def detach(path, command):
                                env=box_env(path), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL, start_new_session=True)
     (procs / "{}.command".format(process.pid)).write_text(" ".join(command))
+    if "_box run" in " ".join(command):
+        locked = take("lock_after_run")
+        if locked:
+            while not (procs / "{}.exit".format(process.pid)).exists():
+                time.sleep(0.05)
+            os.chmod(locked, 0o500)
     emit({"pid": process.pid, "processId": process.pid, "success": True})
 
 

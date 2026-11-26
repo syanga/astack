@@ -301,10 +301,11 @@ that read Git history therefore work on the box.
   file that a commit moved into an excluded directory, and an untracked copy of
   an excluded file. jobgate reads each file under the excluded paths on every
   run.
-  Here, a path in a commit matches an excluded path without regard to case, so
-  `Private/` counts for `private`. The bundle filter matches paths with case,
-  on every system. So the check names such a path, and the command runs here
-  until `exclude` lists that path too.
+  In this check, a path in a commit matches an excluded path without regard to
+  the case of ASCII letters, so `Private/` counts for `private`. Git compares
+  other letters by case, so `Ärea/` does not count for `ärea`. The bundle
+  filter matches paths with case, on every system. So the check names such a
+  path, and the command runs here until `exclude` lists that path too.
   If it finds a copy, the command runs on this machine. jobgate prints up to 5
   such paths to add to `exclude`, and the number of the others. It names one
   path for each such content. After you add those paths, the next run can name

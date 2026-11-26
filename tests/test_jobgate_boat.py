@@ -412,6 +412,21 @@ class SourceTests(BoatTest):
         self.assertEqual(self.result_fields(result.stderr)["where"], "boat", result.stderr)
         self.assertEqual(files(), before)
 
+    def test_git_pathspec_variables_from_the_caller_do_not_turn_off_the_history_check(self):
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
+        (self.repo / "private").mkdir()
+        (self.repo / "private/people.csv").write_text("name,email\nAda,ada@example.com\n")
+        self.commit("private data")
+        self.git("mv", "private/people.csv", "public.csv")
+        self.commit("move it out")
+        for variable in ("GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS"):
+            with self.subTest(variable):
+                result = self.gate("run", "test", "--", sys.executable, "-c", REPORT, env=dict(self.env, **{variable: "1"}))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("public.csv", result.stderr)
+                self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere")
+        self.assertEqual(self.calls("new"), [])
+
     def test_a_path_that_differs_from_an_excluded_path_only_in_case_keeps_the_run_here(self):
         self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
         (self.repo / "Private").mkdir()
@@ -435,6 +450,16 @@ class SourceTests(BoatTest):
         self.assertIn("public.csv", result.stderr)
         self.assertEqual(self.result_fields(result.stderr)["fallback"], "excluded_elsewhere")
         self.assertEqual(self.calls("new"), [])
+
+    def test_an_excluded_path_that_ends_in_a_space_leaves_out_only_that_path(self):
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private "]\n')
+        (self.repo / "private").write_text("public\n")
+        (self.repo / "private ").mkdir()
+        (self.repo / "private /people.csv").write_text("name,email\nAda,ada@example.com\n")
+        self.commit("a path with a trailing space")
+        result = self.run_here("import os; print(os.path.exists('private'), os.path.exists('private /people.csv'))")
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "True False"), result.stderr)
+        self.assertEqual(self.result_fields(result.stderr)["where"], "boat")
 
     def test_an_excluded_file_name_with_a_newline_is_checked(self):
         (self.repo / "private").mkdir()
@@ -674,6 +699,19 @@ class FallbackTests(BoatTest):
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertRegex(result.stderr, r"working\njobgate: the run step on box bx_\w+ ended, but jobgate may have missed")
 
+    def test_a_file_error_here_before_jobgate_sees_the_command_s_end_keeps_its_exit_code(self):
+        temporary = self.root / "tmp"
+        temporary.mkdir()
+        self.addCleanup(os.chmod, str(temporary), 0o700)
+        self.env["TMPDIR"] = str(temporary)
+        self.plan(lock_after_run=[str(temporary)])
+        result = self.run_here(REPORT, "7")
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertFalse((self.repo / "ran-here").exists())
+        self.assertNotIn("BOAT RUN FAILED", result.stderr)
+        self.assertRegex(result.stderr, r"the run step on box bx_\w+ ended, but jobgate may have missed some of its "
+                                        r"output \(jobgate on this machine failed")
+
     def test_a_file_error_here_after_boat_reports_the_command_s_end_keeps_its_exit_code(self):
         self.plan(drop=["run"], cli_gone_after_status=[str(self.fake_bin / "boat")])
         result = self.run_here(REPORT, "7")
@@ -723,8 +761,10 @@ class FallbackTests(BoatTest):
                                "raise SystemExit(3)")
         self.assertEqual(result.returncode, 3, result.stderr)
         self.assertIn("result.json", result.stderr)
-        self.assertRegex(result.stderr, r"jobgate cannot read the result of jobgate on box bx_\w+, so workers, peak, "
-                                        r"and stated are unknown\. The boat log has the reason: ")
+        log = re.search(r"jobgate cannot read the result of jobgate on box bx_\w+, so workers, peak, and stated are "
+                        r"unknown\. The boat log has the reason: (.+)$", result.stderr, re.MULTILINE)
+        self.assertIsNotNone(log, result.stderr)
+        self.assertIn("jobgate could not read a JSON object from ~/.jobgate/run/result.json", Path(log.group(1)).read_text())
         fields = self.result_fields(result.stderr)
         self.assertEqual((fields["where"], fields["workers"], fields["peak"], fields["stated"], fields["exit"]),
                          ("boat", "unknown", "unknown", "unknown", "3"))
@@ -1047,17 +1087,14 @@ class FallbackTests(BoatTest):
         self.assertEqual(self.boxes_left(), [])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class StopNoticeTests(unittest.TestCase):
     def test_a_signal_during_the_stop_notice_lets_the_cleanup_finish(self):
         spec = importlib.util.spec_from_file_location("jobgate_under_test", str(SCRIPT))
         jobgate = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = jobgate
         self.addCleanup(sys.modules.pop, spec.name)
-        spec.loader.exec_module(jobgate)
+        with mock.patch.object(sys, "path", [str(SCRIPT.parent), *sys.path]):
+            spec.loader.exec_module(jobgate)
 
         class Stderr:
             def __init__(self, signals):
@@ -1093,3 +1130,7 @@ class StopNoticeTests(unittest.TestCase):
                         finished = True
                 self.assertTrue(finished)
                 self.assertEqual(stops, [signal.SIGINT])
+
+
+if __name__ == "__main__":
+    unittest.main()

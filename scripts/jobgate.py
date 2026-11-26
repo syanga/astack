@@ -117,6 +117,7 @@ COMMIT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 GITLINK_MODE = "160000"
 GIT_SELECTORS = ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
                  "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX", "GIT_QUARANTINE_PATH")
+PATHSPEC_MODES = ("GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS")
 VENDORED = ("tomllib/__init__.py", "tomllib/_parser.py", "tomllib/_re.py", "tomllib/_types.py")
 RESULT_FILE_ENV = "JOBGATE_RESULT_FILE"
 BOX_RESULT = ".jobgate/run/result.json"
@@ -289,7 +290,7 @@ class BoatSettings:
     exclude: tuple[str, ...]
 
     def sparse_patterns(self) -> list[str]:
-        return ["/*"] + ["!/" + path for path in self.exclude]
+        return ["/*"] + ["!/" + re.sub(r" (?= *$)", r"\\ ", path) for path in self.exclude]
 
     def excludes(self, path: str) -> bool:
         return any(path == excluded or path.startswith(excluded + "/") for excluded in self.exclude)
@@ -1085,7 +1086,8 @@ def repository_variables() -> frozenset[str]:
 
 
 def scratch_env() -> dict:
-    return {key: value for key, value in os.environ.items() if key not in repository_variables()}
+    return {key: value for key, value in os.environ.items()
+            if key not in repository_variables() and key not in PATHSPEC_MODES}
 
 
 def git(args: list[str], cwd: Path | None = None, git_dir: Path | None = None, env: dict | None = None,
@@ -1132,7 +1134,8 @@ def take_source(root: Path, scratch: Path, dirty: Dirty) -> Source:
 
 def commit_worktree(root: Path, scratch: Path, store: Path, objects: str, head: str) -> tuple[str, tuple[str, ...]]:
     index = scratch / "index"
-    env = dict(os.environ, GIT_INDEX_FILE=str(index), GIT_OBJECT_DIRECTORY=str(store / "objects"),
+    env = dict({key: value for key, value in os.environ.items() if key not in PATHSPEC_MODES},
+               GIT_INDEX_FILE=str(index), GIT_OBJECT_DIRECTORY=str(store / "objects"),
                GIT_ALTERNATE_OBJECT_DIRECTORIES=objects, GIT_LITERAL_PATHSPECS="1", GIT_AUTHOR_NAME="jobgate",
                GIT_AUTHOR_EMAIL="jobgate@localhost", GIT_COMMITTER_NAME="jobgate", GIT_COMMITTER_EMAIL="jobgate@localhost")
     config = ("core.splitIndex=false",)
@@ -1668,7 +1671,9 @@ class Box:
             if value.get("exitCode") == 0 and isinstance(value.get("stdout"), str):
                 with contextlib.suppress(ValueError):
                     state = json.loads(value["stdout"])
-                    return state if isinstance(state, dict) else {}
+                    if isinstance(state, dict):
+                        return state
+        self.log.entry("jobgate could not read a JSON object from ~/{} on box {}".format(path, self.id))
         return {}
 
     def upload(self, path: Path) -> None:
@@ -1700,7 +1705,7 @@ class Box:
             try:
                 frame = self.attach(pid, printed, relay)
             except OSError as error:
-                return self.lost(step, "jobgate on this machine failed: {}".format(error), ended, killed, relay, error)
+                return self.follow_failed(step, pid, error, ended, killed, relay)
             if frame is not None and not (frame.get("signal") and "oomKilled" not in frame):
                 return self.exit_code(step, frame)
             killed = frame or killed
@@ -1711,7 +1716,7 @@ class Box:
                     if time.monotonic() - lost_since >= lost:
                         raise BoatDied(step, "lost contact with the box for {}".format(duration(lost)))
             except BoatDied as died:
-                return self.lost(step, died.reason, ended, killed, relay, died)
+                return self.follow_failed(step, pid, died, ended, killed, relay)
             if status is not None:
                 lost_since = None
                 if killed is not None:
@@ -1722,8 +1727,14 @@ class Box:
                     ended = status
             time.sleep(BOAT_PAUSE_SECONDS)
 
-    def lost(self, step: str, reason: str, ended: dict | None, killed: dict | None, relay: Relay,
-             error: Exception) -> int:
+    def follow_failed(self, step: str, pid: int, error: BoatDied | OSError, ended: dict | None, killed: dict | None,
+                      relay: Relay) -> int:
+        reason = error.reason if isinstance(error, BoatDied) else "jobgate on this machine failed: {}".format(error)
+        if ended is None and isinstance(error, OSError):
+            with contextlib.suppress(BoatDied):
+                status = self.status(step, pid)
+                if status is not None and not status.get("running"):
+                    ended = status
         if ended is not None:
             code = self.exit_code(step, dict(killed or {}, **ended))
             relay.finish()
