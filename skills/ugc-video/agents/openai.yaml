@@ -1,0 +1,5 @@
+interface:
+  display_name: "UGC video"
+  short_description: "Script to vertical presenter video ad"
+policy:
+  allow_implicit_invocation: false

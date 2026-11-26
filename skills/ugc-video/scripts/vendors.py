@@ -1,0 +1,167 @@
+import http.client
+import json
+import os
+from pathlib import Path
+import shutil
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+FAL_BASE = "https://queue.fal.run"
+KIE_BASE = "https://api.kie.ai"
+REFUSED = (429, 502, 503, 504)
+KIE_REFUSED = (429, 455)
+UNANSWERED = (OSError, http.client.HTTPException, ValueError)
+SCALE = float(os.environ.get("UGC_RETRY_SCALE") or 1)
+
+
+class VendorError(Exception):
+    pass
+
+
+class RefuseRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args):
+        return None
+
+
+OPENER = urllib.request.build_opener(RefuseRedirect)
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+def call(method, url, headers, body=None):
+    data = None if body is None else json.dumps(body).encode()
+    with OPENER.open(urllib.request.Request(url, data=data, method=method, headers=headers), timeout=60) as reply:
+        result = json.loads(reply.read())
+    if not isinstance(result, dict):
+        raise ValueError("the reply is not a JSON object")
+    return result
+
+
+def http_error(error):
+    try:
+        text = " ".join(error.read().decode("utf-8", "replace").split())
+    except (OSError, http.client.HTTPException):
+        text = ""
+    return f"HTTP {error.code} {text[:300]}".rstrip()
+
+
+def submit(vendor, url, headers, body, refused):
+    for attempt in range(3):
+        try:
+            reply = call("POST", url, headers, body)
+        except urllib.error.HTTPError as error:
+            if error.code not in REFUSED or attempt == 2:
+                raise VendorError(f"{vendor} refused the submit: {http_error(error)}") from None
+            reason = f"HTTP {error.code}"
+        except UNANSWERED as error:
+            raise VendorError(f"{vendor} submit got no clear answer ({error}). Not resubmitted, "
+                              "because the job may have been accepted") from None
+        else:
+            reason = refused(reply)
+            if not reason or attempt == 2:
+                return reply
+        wait = 2 ** (attempt + 1)
+        log(f"  {vendor} refused the submit ({reason}), retrying in {wait}s")
+        time.sleep(wait * SCALE)
+
+
+def poll(url, headers, deadline, job, done):
+    wait = 1
+    while True:
+        try:
+            reply = call("GET", url, headers)
+        except urllib.error.HTTPError as error:
+            if error.code != 429 and error.code < 500:
+                raise VendorError(f"{job}: {http_error(error)}") from None
+            reply = None
+        except UNANSWERED:
+            reply = None
+        result = None if reply is None else done(reply)
+        if result is not None:
+            return result
+        if time.monotonic() + wait * SCALE > deadline:
+            raise VendorError(f"{job} did not finish in time. Not resubmitted")
+        time.sleep(wait * SCALE)
+        wait = min(wait * 2, 15)
+
+
+def fal_failure(job, reply):
+    return VendorError(f"{job} failed: {reply.get('error_type') or reply.get('status') or 'error'}: {reply.get('error')}")
+
+
+def fal_run(model, body, *, key, base=FAL_BASE, timeout=1800):
+    base = base.rstrip("/")
+    auth = {"Authorization": f"Key {key}"}
+    deadline = time.monotonic() + timeout
+    job = submit("fal", f"{base}/{model}", {**auth, "Content-Type": "application/json"}, body, lambda reply: None)
+    name = f"fal request {job.get('request_id')}"
+    for url in (job.get("status_url"), job.get("response_url")):
+        if not isinstance(url, str) or not url.startswith(base + "/"):
+            raise VendorError(f"{name}: not polling {url!r}, which is outside {base}")
+
+    def completed(status):
+        if status.get("status") in ("IN_QUEUE", "IN_PROGRESS"):
+            return None
+        if status.get("status") != "COMPLETED" or status.get("error"):
+            raise fal_failure(name, status)
+        return status
+
+    poll(job["status_url"], auth, deadline, name, completed)
+    result = poll(job["response_url"], auth, deadline, name, lambda reply: reply)
+    if result.get("error"):
+        raise fal_failure(name, result)
+    return result
+
+
+def kie_run(model, input, *, key, base=KIE_BASE, timeout=1800):
+    base = base.rstrip("/")
+    auth = {"Authorization": f"Bearer {key}"}
+    deadline = time.monotonic() + timeout
+    reply = submit("kie", f"{base}/api/v1/jobs/createTask", {**auth, "Content-Type": "application/json"},
+                   {"model": model, "input": input},
+                   lambda reply: f"code {reply.get('code')}" if reply.get("code") in KIE_REFUSED else None)
+    task = (reply.get("data") or {}).get("taskId")
+    if reply.get("code") != 200 or not task:
+        raise VendorError(f"kie refused the task: code {reply.get('code')}: {reply.get('msg')}")
+    name = f"kie task {task}"
+
+    def finished(reply):
+        code = reply.get("code")
+        if code in KIE_REFUSED or (isinstance(code, int) and code >= 500):
+            return None
+        if code != 200:
+            raise VendorError(f"{name}: code {code}: {reply.get('msg')}")
+        record = reply.get("data") or {}
+        state = record.get("state")
+        if state in ("waiting", "queuing", "generating"):
+            return None
+        if state == "fail":
+            raise VendorError(f"{name} failed: {record.get('failCode')}: {record.get('failMsg')}")
+        if state != "success":
+            raise VendorError(f"{name}: unknown state {state!r}")
+        try:
+            record["result"] = json.loads(record.get("resultJson") or "")
+        except ValueError:
+            raise VendorError(f"{name} succeeded, but its resultJson is not JSON") from None
+        return record
+
+    query = urllib.parse.urlencode({"taskId": task})
+    return poll(f"{base}/api/v1/jobs/recordInfo?{query}", auth, deadline, name, finished)
+
+
+def fetch(url, dest):
+    if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+        raise VendorError(f"not downloading {url!r}, which is not an http or https URL")
+    dest = Path(dest)
+    partial = dest.with_name(dest.name + ".partial")
+    try:
+        with urllib.request.urlopen(url, timeout=300) as reply, open(partial, "wb") as out:
+            shutil.copyfileobj(reply, out)
+    except (OSError, http.client.HTTPException, ValueError) as error:
+        partial.unlink(missing_ok=True)
+        raise VendorError(f"download failed: {error}") from None
+    partial.replace(dest)
