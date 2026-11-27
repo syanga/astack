@@ -292,8 +292,10 @@ that read Git history therefore work on the box.
 - With `exclude`, the bundle leaves out the contents of every file under the
   excluded paths, in every commit of the history. The box gets the file names,
   but its checkout leaves the files out. A Git command on the box that reads
-  their contents fails, such as `git archive` of a whole commit. One that reads
-  only other paths works, such as `git archive HEAD -- src`.
+  their contents fails. For example, `git archive HEAD` fails, and
+  `git archive HEAD -- src` works. `git fsck` and `git gc` fail too. When
+  `exclude` names a file, a commit that changes another file in its directory
+  fails.
 - Before it starts a box, jobgate also looks for copies of private content at
   other paths, in the history and in the uncommitted changes that the box
   would get. Private content is what any commit ever had under an excluded

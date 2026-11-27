@@ -2095,9 +2095,8 @@ def box_prepare(spec: dict, run_dir: Path, repo: Path) -> int:
         if subprocess.run(["git", "init", "-q", "--object-format=" + spec["object_format"], str(repo)],
                           stdin=subprocess.DEVNULL).returncode != 0:
             return 1
-    # The fetch accepts a bundle without the excluded paths' contents only from a promisor remote. The bundle can
-    # never send those contents later, and Git fails a command such as `git archive` that tries to fetch them, so the
-    # repository stops naming the bundle as a promisor after the checkout.
+    # Git's fetch accepts a bundle without the excluded paths' contents only from a promisor remote. The bundle can
+    # never send those contents later, and Git fails a command such as `git archive` that tries to fetch them.
     steps = [["config", "core.repositoryformatversion", "1"], ["config", "extensions.partialClone", "jobgate"],
              ["config", "remote.jobgate.url", str(bundle)], ["config", "remote.jobgate.promisor", "true"],
              ["config", "remote.jobgate.partialclonefilter", "blob:none"],
