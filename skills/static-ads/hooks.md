@@ -1,6 +1,6 @@
 # Hook formulas
 
-Each formula is a headline shape, with an example and the formula's trap, the most common way it fails. The examples are for a made-up roaster that roasts every Monday, prints the roast date on each bag, ships within 48 hours of roasting, and sells a light roast at $14 a bag with no subscription needed. Each example assumes its cited page states the fact it uses.
+Each formula is a headline shape, with an example and the formula's trap, the most common way it fails. The examples are for a made-up roaster that roasts every Monday, prints the roast date on each bag, ships within 48 hours of roasting, and sells a light roast at $14 a bag with no subscription needed. Each example assumes its cited page states the fact it uses. The examples are in caps. Set yours in the style guide's headline case.
 
 **Say the number.** When the headline states an amount, a time, or a price, give it as a number. "Fast" and "a lot" are not numbers. Step 3 of SKILL.md builds each idea on an item from the style guide's Only us list.
 
@@ -19,3 +19,4 @@ Each formula is a headline shape, with an example and the formula's trap, the mo
 | Versus | {A} or {B}? | MONDAY'S ROAST OR A SUPERMARKET BAG? | Refusing to pick. The ad answers its own question. |
 | Deadline | {Thing} ends {date}. | THE WINTER BLEND ENDS FRIDAY | Made-up urgency. Use a date the cited page states, or pick another formula. |
 | Statistic | {N}% of {group} {fact}. | 90% OF OUR BEANS SHIP IN A DAY | A number the cited page doesn't state. |
+| Demonstration | We asked {the product, run on a sample} {the buyer's question, in their words}. | WE ASKED 3 BAGS WHEN THEY WERE ROASTED | Dropping the buyer's question, a speaker who reads as a customer, or a result that reads as the viewer's own. The visual shows the answer, labeled as the sample's. |
