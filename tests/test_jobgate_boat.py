@@ -249,6 +249,20 @@ class SourceTests(BoatTest):
         self.assertIn(self.git("rev-parse", "HEAD:app.py").strip(), uploaded)
         self.assertEqual(uploaded & private, set())
 
+    def test_a_command_on_the_box_archives_paths_outside_the_excluded_ones_with_worktree_attributes(self):
+        (self.repo / "private").mkdir()
+        (self.repo / "private/survey.csv").write_text("name,email\nAda,ada@example.com\n")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
+        self.commit("add private data")
+        command = ("import io, subprocess, sys, tarfile; archive = lambda *flags: subprocess.run(['git', 'archive', *flags, "
+                   "'HEAD', '--', 'app.py'], capture_output=True); plain, attributes = archive(), "
+                   "archive('--worktree-attributes'); sys.stderr.buffer.write(plain.stderr + attributes.stderr); "
+                   "print(plain.returncode != 0, tarfile.open(fileobj=io.BytesIO(attributes.stdout))"
+                   ".extractfile('app.py').read().decode().strip())")
+        result = self.run_here(command)
+        self.assertEqual(self.result_fields(result.stderr)["where"], "boat", result.stderr)
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "True version = 2"), result.stderr)
+
     def assert_a_copy_keeps_the_run_here(self, private, attributes=""):
         (self.repo / ".gitignore").write_text("private\n")
         (self.repo / ".gitattributes").write_text(attributes)
