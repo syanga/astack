@@ -180,6 +180,8 @@ def main():
     state_path, state, lock = claude_router.locked_state(state_root, args.dry_run)
     with lock or contextlib.nullcontext():
         deploy(args, harnesses, selected, home, use_env, state_root, state_path, state, lock)
+    if args.command == "install" and astack_jobgate.NAME in selected:
+        astack_jobgate.offer_boat(home, args.dry_run)
 
 
 def deploy(args, harnesses, selected, home, use_env, state_root, state_path, state, lock):

@@ -3,7 +3,12 @@
 import json
 import os
 from pathlib import Path
+import pty
+import re
+import select
+import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -11,6 +16,18 @@ import unittest
 
 SOURCE = Path(__file__).resolve().parent.parent
 JOBGATE_PATH = os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"])
+BOAT_INSTALL = "curl -fsSL https://boat.dev/install | sh"
+FAKE_CURL = r"""#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_CURL_LOG"
+[ -z "$FAKE_CURL_FAIL" ] || exit 22
+cat <<'EOF'
+mkdir -p "$HOME/.local/bin"
+printf '#!/bin/sh\n' > "$HOME/.local/bin/boat"
+chmod +x "$HOME/.local/bin/boat"
+if [ -n "$FAKE_BOAT_INTERRUPT" ]; then kill -INT 0; sleep 1; fi
+exit "${FAKE_BOAT_STATUS:-0}"
+EOF
+"""
 
 
 class InstallerFixture(unittest.TestCase):
@@ -34,10 +51,10 @@ class InstallerFixture(unittest.TestCase):
         helper.write_text("#!/bin/sh\nexit 0\n")
         helper.chmod(0o755)
 
-    def run_installer(self, *arguments, command="install", success=True, env=None):
+    def run_installer(self, *arguments, command="install", success=True, env=None, input=None):
         result = subprocess.run(
             [str(self.repo / (command + ".sh")), "--home", str(self.home), *arguments],
-            cwd=str(self.root), capture_output=True, text=True, env=env,
+            cwd=str(self.root), capture_output=True, text=True, env=env, input=input,
         )
         if success:
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -377,6 +394,158 @@ class InstallerTests(InstallerFixture):
         self.assertIn("distinct destinations", result.stderr)
         self.assertEqual(installed.read_bytes(), content)
         self.assertEqual(self.manifest(), before)
+
+
+class BoatOfferTests(InstallerFixture):
+    def setUp(self):
+        super().setUp()
+        self.fake_bin = self.root / "fake bin"
+        self.fake_bin.mkdir()
+        (self.fake_bin / "curl").write_text(FAKE_CURL)
+        (self.fake_bin / "curl").chmod(0o755)
+        python_bin = self.root / "python bin"
+        python_bin.mkdir()
+        (python_bin / "python3").write_text('#!/bin/sh\nexec {} "$@"\n'.format(shlex.quote(sys.executable)))
+        (python_bin / "python3").chmod(0o755)
+        self.curl_log = self.root / "curl.log"
+        self.process_home = self.root / "process home"
+        path = os.pathsep.join([str(self.fake_bin), str(python_bin), "/usr/bin", "/bin"])
+        self.env = dict(os.environ, SHELL="/bin/zsh", PATH=path, FAKE_CURL_LOG=str(self.curl_log),
+                        HOME=str(self.process_home))
+        for name in ("FAKE_BOAT_STATUS", "FAKE_CURL_FAIL", "FAKE_BOAT_INTERRUPT"):
+            self.env.pop(name, None)
+
+    def on_terminal(self, answer, *arguments, at_question=lambda process: None, **env):
+        primary, secondary = pty.openpty()
+        process = subprocess.Popen([str(self.repo / "install.sh"), "--home", str(self.home), *arguments],
+                                   stdin=secondary, stdout=secondary, stderr=secondary, cwd=str(self.root),
+                                   env=dict(self.env, **env), start_new_session=True)
+        os.close(secondary)
+        output, asked = b"", 0
+        try:
+            while True:
+                ready, _, _ = select.select([primary], [], [], 60)
+                self.assertTrue(ready, "the installer printed nothing for 60 seconds:\n" + output.decode())
+                try:
+                    chunk = os.read(primary, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                output += chunk
+                if output.count(b"[y/N] ") > asked:
+                    at_question(process)
+                    os.write(primary, answer.encode() + b"\n")
+                    asked += 1
+            process.wait(timeout=60)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            os.close(primary)
+        text = output.decode().replace("\r\n", "\n")
+        self.assertEqual(process.returncode, 0, text)
+        return text, asked
+
+    def boat_lines(self, output):
+        lines = output.splitlines()
+        start = next((i for i, line in enumerate(lines) if line.startswith("OPTIONAL boat")), len(lines))
+        return lines[start:start + 2]
+
+    def test_on_a_terminal_only_yes_runs_boats_installer_in_the_installed_home(self):
+        for answer in ("", "n", "no", "maybe"):
+            with self.subTest(answer=answer):
+                output, asked = self.on_terminal(answer, "--target", "jobgate")
+                self.assertEqual(asked, 1, output)
+                self.assertFalse(self.curl_log.exists())
+
+        output, asked = self.on_terminal("y", "--target", "jobgate")
+        self.assertEqual(asked, 1, output)
+        self.assertNotRegex(output, r"(?m)^WARN ")
+        self.assertEqual(self.curl_log.read_text(), "-fsSL https://boat.dev/install\n")
+        self.assertTrue(os.access(self.home / ".local/bin/boat", os.X_OK))
+        self.assertFalse(self.process_home.exists(), "boat's installer ran in the installer's HOME, not the installed home")
+
+        output, asked = self.on_terminal("y", "--target", "jobgate")
+        self.assertEqual(asked, 0, output)
+        self.assertEqual(self.boat_lines(output), [])
+
+    def test_a_preview_or_an_install_without_a_terminal_prints_boats_command_and_asks_nothing(self):
+        output, asked = self.on_terminal("y", "--target", "jobgate", "--dry-run")
+        self.assertEqual(asked, 0, output)
+        lines = self.boat_lines(output)
+        self.assertEqual(lines[1].strip(), BOAT_INSTALL)
+
+        output = self.run_installer("--target", "jobgate", env=self.env, input="y\n").stdout
+        lines = self.boat_lines(output)
+        self.assertEqual(lines[1].strip(), BOAT_INSTALL)
+        self.assertNotIn("[y/N]", output)
+        self.assertFalse(self.curl_log.exists())
+        (doc, anchor), = re.findall(r"\((docs/[\w.-]+\.md)#([\w-]+)\)", lines[0])
+        headings = re.findall(r"^#+ (.+)$", (self.repo / doc).read_text(), re.MULTILINE)
+        self.assertIn(anchor, {heading.lower().replace(" ", "-") for heading in headings})
+
+    def test_boat_on_path_or_an_install_without_jobgate_gets_no_boat_line(self):
+        self.assertNotEqual(self.boat_lines(self.run_installer("--target", "jobgate", env=self.env).stdout), [])
+        self.assertEqual(self.boat_lines(self.run_installer("--target", "claude", env=self.env).stdout), [])
+
+        (self.fake_bin / "boat").write_text("#!/bin/sh\n")
+        (self.fake_bin / "boat").chmod(0o755)
+        self.assertEqual(self.boat_lines(self.run_installer("--target", "jobgate", env=self.env).stdout), [])
+
+    def test_the_question_waits_without_holding_the_claude_router_lock(self):
+        sys.path.insert(0, str(SOURCE / "scripts"))
+        import claude_router
+        state_dir = self.root / "router state"
+        state_dir.mkdir()
+        manifest = self.home / ".local/state/astack/manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(json.dumps({"version": 3, "targets": {},
+                                        "components": {"claude-router": {"layout": {"state": str(state_dir)}}}}))
+        held = []
+
+        def take_lock(process=None):
+            try:
+                claude_router.ActivationLock(state_dir).close()
+            except claude_router.Refusal:
+                held.append("held")
+
+        with claude_router.ActivationLock(state_dir):
+            take_lock()
+        self.assertEqual(held, ["held"])
+
+        output, asked = self.on_terminal("n", "--target", "jobgate", at_question=take_lock)
+        self.assertEqual(asked, 1, output)
+        self.assertEqual(held, ["held"])
+
+    def warning(self, output):
+        lines = [line for line in output.splitlines() if line.startswith("WARN boat")]
+        self.assertEqual(len(lines), 1, output)
+        return lines[0]
+
+    def test_a_failed_boat_install_warns_and_the_install_still_succeeds(self):
+        output, asked = self.on_terminal("yes", "--target", "jobgate", FAKE_CURL_FAIL="1")
+        self.assertEqual(asked, 1, output)
+        self.assertTrue(self.warning(output).endswith(BOAT_INSTALL), output)
+        self.assertFalse((self.home / ".local/bin/boat").exists())
+        self.assertTrue((self.home / ".local/bin/jobgate").exists())
+
+    def test_a_failed_or_interrupted_sign_in_after_boat_installs_names_boat_login(self):
+        for env in ({"FAKE_BOAT_STATUS": "3"}, {"FAKE_BOAT_INTERRUPT": "1"}):
+            with self.subTest(env=env):
+                shutil.rmtree(self.home, ignore_errors=True)
+                output, asked = self.on_terminal("y", "--target", "jobgate", **env)
+                self.assertEqual(asked, 1, output)
+                self.assertTrue(self.warning(output).endswith("boat login"), output)
+                self.assertNotIn("Traceback", output)
+
+    def test_ctrl_c_at_the_question_declines_it(self):
+        output, asked = self.on_terminal("y", "--target", "jobgate",
+                                         at_question=lambda process: os.killpg(process.pid, signal.SIGINT))
+        self.assertEqual(asked, 1, output)
+        self.assertNotIn("Traceback", output)
+        self.assertFalse(self.curl_log.exists())
+        self.assertTrue((self.home / ".local/bin/jobgate").exists())
 
 
 if __name__ == "__main__":

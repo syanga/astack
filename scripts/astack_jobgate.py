@@ -3,7 +3,9 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 
@@ -12,6 +14,8 @@ import claude_router
 NAME = "jobgate"
 MARKER = "# astack: jobgate on PATH"
 BASH_LOGIN_FILES = (".bash_profile", ".bash_login", ".profile")
+BOAT_INSTALL = "curl -fsSL https://boat.dev/install | sh"
+BOAT_SETUP = "docs/jobgate-setup.md#run-heavy-commands-on-boat"
 
 
 def lib_dir(home, use_env):
@@ -206,6 +210,35 @@ def update_shell_and_library(command, state, home, use_env, recorded, dry_run, s
         record = Record(state, save)
         record.lib = None
         record.store()
+
+
+def offer_boat(home, dry_run):
+    # boat's installer (https://boat.dev/install) links the CLI into ~/.local/bin.
+    search = os.pathsep.join([os.environ.get("PATH", ""), str(bin_path(home).parent)])
+    if shutil.which("boat", path=search):
+        return
+    print("OPTIONAL boat is not installed, so jobgate runs commands only on this machine ({}):".format(BOAT_SETUP))
+    print("     " + BOAT_INSTALL)
+    if dry_run or not claude_router.on_terminal():
+        return
+    try:
+        answer = input("Install boat now? [y/N] ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if answer.strip().lower() not in ("y", "yes"):
+        return
+    try:
+        status = subprocess.run(["sh", "-c", BOAT_INSTALL], env=dict(os.environ, HOME=str(home))).returncode
+        failure = "exit status {}".format(status) if status else None
+    except KeyboardInterrupt:
+        print()
+        failure = "interrupted"
+    if not shutil.which("boat", path=search):
+        print("WARN boat install ({}); to try again: {}".format(failure or "boat is still missing", BOAT_INSTALL))
+    elif failure:
+        # boat's installer ends with its sign-in, `boat onboard`, so a failure after the CLI is in place is the sign-in's.
+        print("WARN boat sign-in ({}); to sign in: boat login".format(failure))
 
 
 def prune(lib, dry_run):
