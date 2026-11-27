@@ -15,7 +15,7 @@ Send each brief to a new thread, or to a thread you launched that has never run 
 
 When a thread that has not yet received your `$full-send` brief asks you whether to run full-send, or asks for your question and the user's answer, take the steps below. A thread has not received a brief that `t3_queue` still lists in its queue.
 
-1. If you have not yet asked the user the question above for that thread's task, ask it. After the user answers, take step 2.
+1. If you have not yet asked the user the question above for every task that thread asked about, ask it for the remaining tasks. After the user answers, take step 2.
 2. If that thread asked with the question tool, reply through `t3_pending_request`. Otherwise, reply with `t3_thread_send`. In the reply, write only "I send any full-send brief myself." and, for each task that thread asked about, the line for that task's case:
    - You send the brief to that thread: "<task>: End your turn. The brief starts your next turn."
    - You send the brief to another thread: "<task>: Another thread runs full-send on this task. Leave this task to that thread."
