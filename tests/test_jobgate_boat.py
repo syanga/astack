@@ -249,6 +249,17 @@ class SourceTests(BoatTest):
         self.assertIn(self.git("rev-parse", "HEAD:app.py").strip(), uploaded)
         self.assertEqual(uploaded & private, set())
 
+    def test_a_command_on_the_box_reads_the_history_of_paths_outside_the_excluded_ones(self):
+        (self.repo / "private").mkdir()
+        (self.repo / "private/survey.csv").write_text("name,email\nAda,ada@example.com\n")
+        self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
+        self.commit("add private data")
+        archive = ("import subprocess, sys; done = subprocess.run(['git', 'archive', 'HEAD', '--', 'app.py'], "
+                   "capture_output=True); sys.stderr.buffer.write(done.stderr); print(done.returncode, len(done.stdout) > 0)")
+        result = self.run_here(archive)
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "0 True"), result.stderr)
+        self.assertTrue(self.calls("new"))
+
     def assert_a_copy_keeps_the_run_here(self, private, attributes=""):
         (self.repo / ".gitignore").write_text("private\n")
         (self.repo / ".gitattributes").write_text(attributes)
