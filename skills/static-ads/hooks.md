@@ -19,4 +19,4 @@ Each formula is a headline shape, with an example and the formula's trap, the mo
 | Versus | {A} or {B}? | MONDAY'S ROAST OR A SUPERMARKET BAG? | Refusing to pick. The ad answers its own question. |
 | Deadline | {Thing} ends {date}. | THE WINTER BLEND ENDS FRIDAY | Made-up urgency. Use a date the cited page states, or pick another formula. |
 | Statistic | {N}% of {group} {fact}. | 90% OF OUR BEANS SHIP IN A DAY | A number the cited page doesn't state. |
-| Demonstration | We asked {the product, run on a sample} {the buyer's question, in their words}. | WE ASKED 3 BAGS WHEN THEY WERE ROASTED | Dropping the buyer's question, a speaker who reads as a customer, or a result that reads as the viewer's own. The visual shows the answer, labeled as the sample's. |
+| Demonstration | We asked {an Only us item, run on a sample} {the buyer's question, in their words}. | WE ASKED MONDAY'S ROAST WHEN IT WOULD ARRIVE | Dropping the buyer's question, a speaker who reads as a customer, or a result that reads as the viewer's own. The visual shows the answer, labeled as the sample's. |
