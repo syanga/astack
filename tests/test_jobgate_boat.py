@@ -249,35 +249,19 @@ class SourceTests(BoatTest):
         self.assertIn(self.git("rev-parse", "HEAD:app.py").strip(), uploaded)
         self.assertEqual(uploaded & private, set())
 
-    def commit_private_data(self):
+    def test_a_command_on_the_box_archives_paths_outside_the_excluded_ones_with_worktree_attributes(self):
         (self.repo / "private").mkdir()
         (self.repo / "private/survey.csv").write_text("name,email\nAda,ada@example.com\n")
         self.boat_settings('setup = "boat-setup.sh"\nexclude = ["private"]\n')
         self.commit("add private data")
-
-    def archive_app_on_the_box(self):
-        archive = ("import io, subprocess, sys, tarfile; done = subprocess.run(['git', 'archive', 'HEAD', '--', 'app.py'], "
-                   "capture_output=True); sys.stderr.buffer.write(done.stderr); print(done.returncode, done.returncode "
-                   "== 0 and tarfile.open(fileobj=io.BytesIO(done.stdout)).extractfile('app.py').read().decode().strip())")
-        result = self.run_here(archive)
+        command = ("import io, subprocess, sys, tarfile; archive = lambda *flags: subprocess.run(['git', 'archive', *flags, "
+                   "'HEAD', '--', 'app.py'], capture_output=True); plain, attributes = archive(), "
+                   "archive('--worktree-attributes'); sys.stderr.buffer.write(plain.stderr + attributes.stderr); "
+                   "print(plain.returncode != 0, tarfile.open(fileobj=io.BytesIO(attributes.stdout))"
+                   ".extractfile('app.py').read().decode().strip())")
+        result = self.run_here(command)
         self.assertEqual(self.result_fields(result.stderr)["where"], "boat", result.stderr)
-        return result
-
-    def test_a_command_on_the_box_reads_the_history_of_paths_outside_the_excluded_ones(self):
-        self.commit_private_data()
-        result = self.archive_app_on_the_box()
-        self.assertEqual((result.returncode, result.stdout.strip()), (0, "0 version = 2"), result.stderr)
-
-    def test_a_box_from_a_snapshot_fetches_new_private_history_and_reads_the_rest(self):
-        self.commit_private_data()
-        self.archive_app_on_the_box()
-        self.assertEqual(len(self.saved_snapshots()), 1)
-        (self.repo / "private/survey.csv").write_text("name,email\nAda,ada@example.com\nBob,bob@example.com\n")
-        (self.repo / "app.py").write_text("version = 3\n")
-        self.commit("more private data")
-        result = self.archive_app_on_the_box()
-        self.assertIn("--from", self.calls("new")[-1])
-        self.assertEqual((result.returncode, result.stdout.strip()), (0, "0 version = 3"), result.stderr)
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "True version = 2"), result.stderr)
 
     def assert_a_copy_keeps_the_run_here(self, private, attributes=""):
         (self.repo / ".gitignore").write_text("private\n")

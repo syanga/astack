@@ -2091,21 +2091,19 @@ def box_git(repo: Path, *args: str) -> bool:
 
 def box_prepare(spec: dict, run_dir: Path, repo: Path) -> int:
     bundle = run_dir / "run.bundle"
+    steps: list[list[str]] = []
     if not (repo / ".git").is_dir():
         if subprocess.run(["git", "init", "-q", "--object-format=" + spec["object_format"], str(repo)],
                           stdin=subprocess.DEVNULL).returncode != 0:
             return 1
-    # Git's fetch accepts a bundle without the excluded paths' contents only from a promisor remote. The bundle can
-    # never send those contents later, and Git fails a command such as `git archive` that tries to fetch them.
-    steps = [["config", "core.repositoryformatversion", "1"], ["config", "extensions.partialClone", "jobgate"],
-             ["config", "remote.jobgate.url", str(bundle)], ["config", "remote.jobgate.promisor", "true"],
-             ["config", "remote.jobgate.partialclonefilter", "blob:none"],
-             ["sparse-checkout", "set", "--no-cone", *spec["patterns"]]]
+        steps += [["config", "core.repositoryformatversion", "1"], ["config", "extensions.partialClone", "jobgate"],
+                  ["config", "remote.jobgate.url", str(bundle)], ["config", "remote.jobgate.promisor", "true"],
+                  ["config", "remote.jobgate.partialclonefilter", "blob:none"]]
+    steps.append(["sparse-checkout", "set", "--no-cone", *spec["patterns"]])
     if spec["bundle"]:
         steps.append(["fetch", "-q", str(bundle), "+{0}:{0}".format(RUN_REF)])
-    steps += [["checkout", "-q", "--force", *(["-B", spec["branch"]] if spec["branch"] else ["--detach"]),
-               spec["commit"]], ["config", "--unset", "extensions.partialClone"],
-              ["config", "--remove-section", "remote.jobgate"]]
+    steps.append(["checkout", "-q", "--force", *(["-B", spec["branch"]] if spec["branch"] else ["--detach"]),
+                  spec["commit"]])
     for args in steps:
         if not box_git(repo, *args):
             return 1
