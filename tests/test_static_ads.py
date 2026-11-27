@@ -95,16 +95,16 @@ def sfnt(tables):
     return header + directory + body
 
 
-def glyph(top):
-    return (struct.pack(">5hHH", 1, 50, 0, 550, top, 3, 0) + bytes([1] * 4)
-            + struct.pack(">8h", 50, 0, 500, 0, 0, top, 0, -top))
+def glyph(top, right=550):
+    return (struct.pack(">5hHH", 1, 50, 0, right, top, 3, 0) + bytes([1] * 4)
+            + struct.pack(">8h", 50, 0, right - 50, 0, 0, top, 0, -top))
 
 
-def font(weight, width, chars=string.ascii_letters + string.digits + " .,!?'-", variable=False, tall="É"):
-    block, high = glyph(700), glyph(950)
-    codes = sorted(map(ord, chars + tall))
-    segments = [(code, ((1 if code == 32 else 3 if chr(code) in tall else 2) - code) & 0xFFFF)
-                for code in codes] + [(0xFFFF, 1)]
+def font(weight, width, chars=string.ascii_letters + string.digits + " .,!?'-", variable=False, tall="É", wide=""):
+    block, high, broad = glyph(700), glyph(950), glyph(700, 3050)
+    codes = sorted(map(ord, chars + tall + wide))
+    segments = [(code, ((1 if code == 32 else 3 if chr(code) in tall else 4 if chr(code) in wide else 2) - code)
+                 & 0xFFFF) for code in codes] + [(0xFFFF, 1)]
     count = len(segments)
     power = 2 ** (count.bit_length() - 1)
     starts = struct.pack(">{}H".format(count), *(code for code, _ in segments))
@@ -120,13 +120,13 @@ def font(weight, width, chars=string.ascii_letters + string.digits + " .,!?'-", 
     tables = {
         b"head": struct.pack(">IIIIHHqq4hHHhhh", 0x10000, 0x10000, 0, 0x5F0F3CF5, 3, 1000, 0, 0, 0, 0, 550, 700,
                              0, 8, 2, 1, 0),
-        b"hhea": struct.pack(">IhhhHhhhhhh4hhH", 0x10000, 900, -200, 0, 600, 0, 50, 550, 1, 0, 0, 0, 0, 0, 0, 0, 4),
-        b"maxp": struct.pack(">IH13H", 0x10000, 4, 4, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0),
+        b"hhea": struct.pack(">IhhhHhhhhhh4hhH", 0x10000, 900, -200, 0, 3100, 0, 50, 3050, 1, 0, 0, 0, 0, 0, 0, 0, 5),
+        b"maxp": struct.pack(">IH13H", 0x10000, 5, 4, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0),
         b"OS/2": bytes(os2),
-        b"hmtx": struct.pack(">8h", 500, 0, 300, 0, 600, 50, 600, 50),
+        b"hmtx": struct.pack(">10h", 500, 0, 300, 0, 600, 50, 600, 50, 3100, 50),
         b"cmap": cmap,
-        b"loca": struct.pack(">5I", 0, 0, 0, len(block), len(block) + len(high)),
-        b"glyf": block + high,
+        b"loca": struct.pack(">6I", 0, 0, 0, len(block), len(block) + len(high), len(block) + len(high) + len(broad)),
+        b"glyf": block + high + broad,
         b"name": struct.pack(">3H", 0, 0, 6),
         b"post": struct.pack(">IIhhIIIII", 0x30000, 0, -100, 50, 0, 0, 0, 0, 0),
     }
@@ -771,6 +771,22 @@ class GenerateTests(unittest.TestCase):
         self.assertEqual([line["text"] for line in settings["text"] if line["role"] == "headline"], ["READ THE SKY"])
         self.assertNotEqual((self.run_folder / "1-proof.png").read_bytes(), composed)
         self.assertEqual(len(self.api.requests), 1)
+
+    @needs_ffmpeg
+    def test_a_glyph_wider_than_its_text_canvas_is_set_whole(self):
+        self.write_brand()
+        (self.run_folder / "fonts/headline.ttf").write_bytes(font(500, 7, wide="\u2e3b"))
+        self.write_ad("1-dash", "928x1152", headline="\u2e3b")
+
+        result = self.generate_on_vertex()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        settings = json.loads((self.run_folder / "1-dash.type.json").read_text(encoding="utf-8"))
+        line = next(line for line in settings["text"] if line["role"] == "headline")
+        _, _, found = marks(self.run_folder / "1-dash.png")
+        x0, y0, x1, y1 = line["box"]
+        drawn = [x for (x, y), color in found.items() if y0 <= y < y1 and color == bytes.fromhex("ffffff")]
+        self.assertAlmostEqual(max(drawn) + 1 - min(drawn), 3.0 * line["size"], delta=2)
 
     @needs_ffmpeg
     def test_a_symlinked_art_folder_fails_without_writing_through_it(self):

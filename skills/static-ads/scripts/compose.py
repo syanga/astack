@@ -18,6 +18,7 @@ MIN_CAP = 28
 ART_TOLERANCE = 0.02
 SCRIM_GAP = 0.02
 SCRIM_FADE = 0.05
+CANVAS_ROOM = (1, 2, 4)
 MAX_LINES = {"headline": 3, "subline": 2, "cta": 1}
 LEADING = {"headline": 1.05, "subline": 1.3}
 PILL_HEIGHT = 2.2
@@ -314,24 +315,28 @@ def ink(data, width, height):
 
 
 def rasterize(font, size, text):
-    width, height, baseline = 2 * size + math.ceil(1.5 * size * len(text)), math.ceil(2.4 * size), round(1.6 * size)
-    with tempfile.TemporaryDirectory(prefix="static-ads-") as temp:
-        shutil.copyfile(font, Path(temp, "f.ttf"))
-        Path(temp, "t.txt").write_text(text, encoding="utf-8")
-        Path(temp, "fonts.conf").write_text("<fontconfig></fontconfig>\n", encoding="utf-8")
-        # drawtext falls back to a fontconfig match when the font file does not load; an empty config makes it fail.
-        data = ffmpeg("{}; could not set type in {}".format(FFMPEG, font.name),
-                      "-f", "lavfi", "-i", "color=c=black:s={}x{}:d=1,format=gray".format(width, height),
-                      "-vf", "drawtext=fontfile=f.ttf:textfile=t.txt:fontsize={0}:fontcolor=white:x={0}:y={1}"
-                      ":y_align=baseline:expansion=none:ft_load_flags=no_hinting".format(size, baseline),
-                      "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-", cwd=temp,
-                      env={**os.environ, "FONTCONFIG_FILE": str(Path(temp, "fonts.conf"))})
-    if len(data) != width * height:
-        raise ComposeError("{} (drawtext gave {} bytes, not {})".format(FFMPEG, len(data), width * height))
-    box = ink(data, width, height)
-    if box is None:
-        raise ComposeError('"{}" draws nothing in {}'.format(text, font.name))
-    return Mask(width, data, box, baseline)
+    for room in CANVAS_ROOM:
+        width, height = room * (2 * size + math.ceil(1.5 * size * len(text))), room * math.ceil(2.4 * size)
+        left, baseline = room * size, room * round(1.6 * size)
+        with tempfile.TemporaryDirectory(prefix="static-ads-") as temp:
+            shutil.copyfile(font, Path(temp, "f.ttf"))
+            Path(temp, "t.txt").write_text(text, encoding="utf-8")
+            Path(temp, "fonts.conf").write_text("<fontconfig></fontconfig>\n", encoding="utf-8")
+            # drawtext falls back to a fontconfig match when the font file does not load; an empty config makes it fail.
+            data = ffmpeg("{}; could not set type in {}".format(FFMPEG, font.name),
+                          "-f", "lavfi", "-i", "color=c=black:s={}x{}:d=1,format=gray".format(width, height),
+                          "-vf", "drawtext=fontfile=f.ttf:textfile=t.txt:fontsize={}:fontcolor=white:x={}:y={}"
+                          ":y_align=baseline:expansion=none:ft_load_flags=no_hinting".format(size, left, baseline),
+                          "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-", cwd=temp,
+                          env={**os.environ, "FONTCONFIG_FILE": str(Path(temp, "fonts.conf"))})
+        if len(data) != width * height:
+            raise ComposeError("{} (drawtext gave {} bytes, not {})".format(FFMPEG, len(data), width * height))
+        box = ink(data, width, height)
+        if box is None:
+            raise ComposeError('"{}" draws nothing in {}'.format(text, font.name))
+        if box[0] and box[1] and box[2] < width and box[3] < height:
+            return Mask(width, data, box, baseline)
+    raise ComposeError('"{}" draws past a {}x{} px canvas in {} at {} px'.format(text, width, height, font.name, size))
 
 
 def layout(brand, copy, width, height):
