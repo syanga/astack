@@ -1,0 +1,5 @@
+interface:
+  display_name: "Ad Refine"
+  short_description: "Refine one ad with a craft check and buyer panel"
+policy:
+  allow_implicit_invocation: false
