@@ -744,7 +744,8 @@ class GenerateTests(unittest.TestCase):
         outside = self.home / "outside.json"
         outside.write_text("kept", encoding="utf-8")
         (self.run_folder / "art").mkdir()
-        for planted in ["art/1-proof.png.partial", "1-proof.png.partial", "1-proof.type.json.partial"]:
+        for planted in ["art/1-proof.png.partial", "1-proof.png.partial", "1-proof.type.json.partial",
+                        "1-proof.res.json.partial", "1-proof.res.json"]:
             (self.run_folder / planted).symlink_to(outside)
         first = self.generate_on_vertex()
         composed = (self.run_folder / "1-proof.png").read_bytes()

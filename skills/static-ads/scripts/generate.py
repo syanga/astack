@@ -272,7 +272,7 @@ def generate(request_path, backend, session):
             url, body = backend.build(session, request, references)
             image, response = backend.unpack(post(url, body, session.token))
             compose.save(saved, image)
-            (folder / (name + ".res.json")).write_text(json.dumps(response, indent=2) + "\n", encoding="utf-8")
+            compose.save(folder / (name + ".res.json"), (json.dumps(response, indent=2) + "\n").encode("utf-8"))
             status = "done {}"
         if plan:
             filled = compose.render(plan, art, png, folder / (name + ".type.json"))
