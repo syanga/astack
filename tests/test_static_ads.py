@@ -95,13 +95,13 @@ def sfnt(tables):
     return header + directory + body
 
 
-def glyph(top, right=550):
-    return (struct.pack(">5hHH", 1, 50, 0, right, top, 3, 0) + bytes([1] * 4)
-            + struct.pack(">8h", 50, 0, right - 50, 0, 0, top, 0, -top))
+def glyph(top, left=50, right=550):
+    return (struct.pack(">5hHH", 1, left, 0, right, top, 3, 0) + bytes([1] * 4)
+            + struct.pack(">8h", left, 0, right - left, 0, 0, top, 0, -top))
 
 
 def font(weight, width, chars=string.ascii_letters + string.digits + " .,!?'-", variable=False, tall="É", wide=""):
-    block, high, broad = glyph(700), glyph(950), glyph(700, 3050)
+    block, high, broad = glyph(700), glyph(950), glyph(700, 3550, 4050)
     codes = sorted(map(ord, chars + tall + wide))
     segments = [(code, ((1 if code == 32 else 3 if chr(code) in tall else 4 if chr(code) in wide else 2) - code)
                  & 0xFFFF) for code in codes] + [(0xFFFF, 1)]
@@ -118,12 +118,12 @@ def font(weight, width, chars=string.ascii_letters + string.digits + " .,!?'-", 
     struct.pack_into(">HHhhhHH", os2, 64, codes[0], codes[-1], 900, -200, 0, 900, 200)
     struct.pack_into(">hh", os2, 86, 500, 700)
     tables = {
-        b"head": struct.pack(">IIIIHHqq4hHHhhh", 0x10000, 0x10000, 0, 0x5F0F3CF5, 3, 1000, 0, 0, 0, 0, 550, 700,
+        b"head": struct.pack(">IIIIHHqq4hHHhhh", 0x10000, 0x10000, 0, 0x5F0F3CF5, 3, 1000, 0, 0, 50, 0, 4050, 950,
                              0, 8, 2, 1, 0),
-        b"hhea": struct.pack(">IhhhHhhhhhh4hhH", 0x10000, 900, -200, 0, 3100, 0, 50, 3050, 1, 0, 0, 0, 0, 0, 0, 0, 5),
+        b"hhea": struct.pack(">IhhhHhhhhhh4hhH", 0x10000, 900, -200, 0, 4100, 0, 50, 4050, 1, 0, 0, 0, 0, 0, 0, 0, 5),
         b"maxp": struct.pack(">IH13H", 0x10000, 5, 4, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0),
         b"OS/2": bytes(os2),
-        b"hmtx": struct.pack(">10h", 500, 0, 300, 0, 600, 50, 600, 50, 3100, 50),
+        b"hmtx": struct.pack(">10h", 500, 0, 300, 0, 600, 50, 600, 50, 4100, 3550),
         b"cmap": cmap,
         b"loca": struct.pack(">6I", 0, 0, 0, len(block), len(block) + len(high), len(block) + len(high) + len(broad)),
         b"glyf": block + high + broad,
@@ -773,10 +773,10 @@ class GenerateTests(unittest.TestCase):
         self.assertEqual(len(self.api.requests), 1)
 
     @needs_ffmpeg
-    def test_a_glyph_wider_than_its_text_canvas_is_set_whole(self):
+    def test_a_line_ending_in_a_glyph_whose_ink_sits_four_ems_out_is_drawn_whole(self):
         self.write_brand()
         (self.run_folder / "fonts/headline.ttf").write_bytes(font(500, 7, wide="\u2e3b"))
-        self.write_ad("1-dash", "928x1152", headline="\u2e3b")
+        self.write_ad("1-dash", "928x1152", headline="A\u2e3b")
 
         result = self.generate_on_vertex()
 
@@ -784,9 +784,9 @@ class GenerateTests(unittest.TestCase):
         settings = json.loads((self.run_folder / "1-dash.type.json").read_text(encoding="utf-8"))
         line = next(line for line in settings["text"] if line["role"] == "headline")
         _, _, found = marks(self.run_folder / "1-dash.png")
-        x0, y0, x1, y1 = line["box"]
-        drawn = [x for (x, y), color in found.items() if y0 <= y < y1 and color == bytes.fromhex("ffffff")]
-        self.assertAlmostEqual(max(drawn) + 1 - min(drawn), 3.0 * line["size"], delta=2)
+        _, top, _, bottom = line["box"]
+        drawn = [x for (x, y), color in found.items() if top <= y < bottom and color == WHITE]
+        self.assertAlmostEqual(max(drawn) + 1 - min(drawn), 4.6 * line["size"], delta=2)
 
     @needs_ffmpeg
     def test_a_symlinked_art_folder_fails_without_writing_through_it(self):

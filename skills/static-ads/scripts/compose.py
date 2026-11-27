@@ -18,7 +18,6 @@ MIN_CAP = 28
 ART_TOLERANCE = 0.02
 SCRIM_GAP = 0.02
 SCRIM_FADE = 0.05
-CANVAS_ROOM = (1, 2, 4)
 MAX_LINES = {"headline": 3, "subline": 2, "cta": 1}
 LEADING = {"headline": 1.05, "subline": 1.3}
 PILL_HEIGHT = 2.2
@@ -54,6 +53,8 @@ class Font:
     path: Path
     cap: float
     chars: frozenset[int]
+    advance: float
+    bounds: tuple[float, float, float, float]
 
 
 @dataclass(frozen=True)
@@ -199,9 +200,14 @@ def read_font(folder, where, name, weight, width_class):
         version, _, found_weight, found_class = struct.unpack_from(">HhHH", data, tables[b"OS/2"])
         cap = struct.unpack_from(">h", data, tables[b"OS/2"] + 88)[0] if version >= 2 else 0
         units = struct.unpack_from(">H", data, tables[b"head"] + 18)[0]
+        bounds = struct.unpack_from(">4h", data, tables[b"head"] + 36)
+        metrics = struct.unpack_from(">H", data, tables[b"hhea"] + 34)[0]
+        advance = max(struct.unpack_from(">{}H".format(2 * metrics), data, tables[b"hmtx"])[::2])
         chars = mapped(data, tables[b"cmap"])
-    except (KeyError, struct.error):
+    except (KeyError, struct.error, ValueError):
         raise ComposeError("{} is not a readable TTF or OTF file".format(where)) from None
+    if not units:
+        raise ComposeError("{} is not a readable TTF or OTF file".format(where))
     if b"fvar" in tables:
         raise ComposeError("{} is a variable font, which renders only its default instance; use a static "
                            "instance at weight {} width {}".format(where, weight, CLASS_WIDTHS[width_class]))
@@ -209,7 +215,8 @@ def read_font(folder, where, name, weight, width_class):
         raise ComposeError("{} is weight {} width {}, not the asked weight {} width {}".format(
             where, found_weight, CLASS_WIDTHS.get(found_class, "class {}".format(found_class)), weight,
             CLASS_WIDTHS[width_class]))
-    return Font(name, path, cap / units if cap > 0 and units else 0.7, chars)
+    return Font(name, path, cap / units if cap > 0 else 0.7, chars, advance / units,
+                tuple(edge / units for edge in bounds))
 
 
 def read_style(folder, role, style):
@@ -315,28 +322,29 @@ def ink(data, width, height):
 
 
 def rasterize(font, size, text):
-    for room in CANVAS_ROOM:
-        width, height = room * (2 * size + math.ceil(1.5 * size * len(text))), room * math.ceil(2.4 * size)
-        left, baseline = room * size, room * round(1.6 * size)
-        with tempfile.TemporaryDirectory(prefix="static-ads-") as temp:
-            shutil.copyfile(font, Path(temp, "f.ttf"))
-            Path(temp, "t.txt").write_text(text, encoding="utf-8")
-            Path(temp, "fonts.conf").write_text("<fontconfig></fontconfig>\n", encoding="utf-8")
-            # drawtext falls back to a fontconfig match when the font file does not load; an empty config makes it fail.
-            data = ffmpeg("{}; could not set type in {}".format(FFMPEG, font.name),
-                          "-f", "lavfi", "-i", "color=c=black:s={}x{}:d=1,format=gray".format(width, height),
-                          "-vf", "drawtext=fontfile=f.ttf:textfile=t.txt:fontsize={}:fontcolor=white:x={}:y={}"
-                          ":y_align=baseline:expansion=none:ft_load_flags=no_hinting".format(size, left, baseline),
-                          "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-", cwd=temp,
-                          env={**os.environ, "FONTCONFIG_FILE": str(Path(temp, "fonts.conf"))})
-        if len(data) != width * height:
-            raise ComposeError("{} (drawtext gave {} bytes, not {})".format(FFMPEG, len(data), width * height))
-        box = ink(data, width, height)
-        if box is None:
-            raise ComposeError('"{}" draws nothing in {}'.format(text, font.name))
-        if box[0] and box[1] and box[2] < width and box[3] < height:
-            return Mask(width, data, box, baseline)
-    raise ComposeError('"{}" draws past a {}x{} px canvas in {} at {} px'.format(text, width, height, font.name, size))
+    x_min, y_min, x_max, y_max = font.bounds
+    left, baseline = size + math.ceil(max(-x_min, 0) * size), size + math.ceil(max(y_max, 0) * size)
+    width = left + math.ceil((len(text) * font.advance + max(x_max, 0)) * size) + size
+    height = baseline + size + math.ceil(max(-y_min, 0) * size)
+    with tempfile.TemporaryDirectory(prefix="static-ads-") as temp:
+        shutil.copyfile(font.path, Path(temp, "f.ttf"))
+        Path(temp, "t.txt").write_text(text, encoding="utf-8")
+        Path(temp, "fonts.conf").write_text("<fontconfig></fontconfig>\n", encoding="utf-8")
+        # drawtext falls back to a fontconfig match when the font file does not load; an empty config makes it fail.
+        data = ffmpeg("{}; could not set type in {}".format(FFMPEG, font.file),
+                      "-f", "lavfi", "-i", "color=c=black:s={}x{}:d=1,format=gray".format(width, height),
+                      "-vf", "drawtext=fontfile=f.ttf:textfile=t.txt:fontsize={}:fontcolor=white:x={}:y={}"
+                      ":y_align=baseline:expansion=none:ft_load_flags=no_hinting".format(size, left, baseline),
+                      "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-", cwd=temp,
+                      env={**os.environ, "FONTCONFIG_FILE": str(Path(temp, "fonts.conf"))})
+    if len(data) != width * height:
+        raise ComposeError("{} (drawtext gave {} bytes, not {})".format(FFMPEG, len(data), width * height))
+    box = ink(data, width, height)
+    if box is None:
+        raise ComposeError('"{}" draws nothing in {}'.format(text, font.file))
+    if not (box[0] and box[1] and box[2] < width and box[3] < height):
+        raise ComposeError('"{}" draws past the glyph bounds that {} states'.format(text, font.file))
+    return Mask(width, data, box, baseline)
 
 
 def layout(brand, copy, width, height):
@@ -351,7 +359,7 @@ def layout(brand, copy, width, height):
         return round(units * scale)
 
     def drawn(role, size):
-        font = brand.styles[role].font.path
+        font = brand.styles[role].font
         for text in copy.lines[role]:
             if (font, size, text) not in masks:
                 masks[font, size, text] = rasterize(font, size, text)
