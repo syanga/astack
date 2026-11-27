@@ -17,6 +17,9 @@ import time
 import urllib.error
 import urllib.request
 
+sys.dont_write_bytecode = True
+import compose
+
 TIMEOUT_SECONDS = 300
 RETRIED_STATUSES = frozenset({429, 500, 502, 503, 504})
 RETRY_WAITS = (5, 10)
@@ -100,7 +103,8 @@ def openai_shape(request):
 
 
 def openai_call(session, request, references):
-    body = {**{field: value for field, value in request.items() if field != "images"}, "model": session.model}
+    body = {**{field: value for field, value in request.items() if field not in ("images", "compose")},
+            "model": session.model}
     if not references:
         return session.url + "/images/generations", body
     body["images"] = [{"image_url": data_url(image)} for image in references]
@@ -208,6 +212,14 @@ def ad_name(request_path):
     return request_path.name[: -len(".req.json")]
 
 
+def wants_compose(request_path):
+    try:
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(request, dict) and "compose" in request
+
+
 def load(request_path):
     request = json.loads(request_path.read_text(encoding="utf-8"))
     if not isinstance(request, dict) or not isinstance(request.get("prompt"), str) or not request["prompt"]:
@@ -223,17 +235,20 @@ def load(request_path):
     missing = [image for image, path in zip(references, paths) if not path.is_file()]
     if missing:
         raise ValueError("missing reference {}".format(", ".join(missing)))
-    return request, paths
+    plan = compose.preview(folder, request["compose"], request.get("size")) if "compose" in request else None
+    return request, paths, plan
 
 
 def check(request_path, backend):
     try:
-        request, references = load(request_path)
+        request, references, plan = load(request_path)
         shape = backend.describe(request)
     except Exception as error:
         say("{}: FAILED ({})".format(ad_name(request_path), error))
         return False
     say("{}: {}, {} chars, {} refs".format(ad_name(request_path), shape, len(request["prompt"]), len(references)))
+    if plan:
+        say("{}: {}".format(ad_name(request_path), compose.describe(plan)))
     return True
 
 
@@ -241,24 +256,34 @@ def generate(request_path, backend, session):
     folder = request_path.parent
     name = ad_name(request_path)
     png = folder / (name + ".png")
+    art = folder / "art" / (name + ".png")
     try:
-        if png.is_file() and png.stat().st_size:
+        if png.is_file() and png.stat().st_size and not wants_compose(request_path):
             say("{}: exists {}, skip".format(name, png_size(png.read_bytes())))
             return True
-        request, references = load(request_path)
-        url, body = backend.build(session, request, references)
-        image, response = backend.unpack(post(url, body, session.token))
-        partial = folder / (name + ".png.partial")
-        partial.write_bytes(image)
-        partial.replace(png)
-        (folder / (name + ".res.json")).write_text(json.dumps(response, indent=2) + "\n", encoding="utf-8")
+        request, references, plan = load(request_path)
+        if plan and art.parent.is_symlink():
+            raise ValueError("art in the run folder is a symlink, not a folder")
+        if plan and art.is_file() and art.stat().st_size:
+            image, status = art.read_bytes(), "exists {}, skip render"
+        else:
+            saved = art if plan else png
+            saved.parent.mkdir(exist_ok=True)
+            url, body = backend.build(session, request, references)
+            image, response = backend.unpack(post(url, body, session.token))
+            compose.save(saved, image)
+            compose.save(folder / (name + ".res.json"), (json.dumps(response, indent=2) + "\n").encode("utf-8"))
+            status = "done {}"
+        if plan:
+            filled = compose.render(plan, art, png, folder / (name + ".type.json"))
     except urllib.error.HTTPError as error:
         say("{}: FAILED ({})".format(name, api_error(error)))
         return False
     except Exception as error:
         say("{}: FAILED ({})".format(name, error))
         return False
-    say("{}: done {}".format(name, png_size(image)))
+    composed = (", composed" if filled else ", composed, art background not filled") if plan else ""
+    say("{}: {}{}".format(name, status.format(png_size(image)), composed))
     return True
 
 
