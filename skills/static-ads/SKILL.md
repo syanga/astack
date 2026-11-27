@@ -136,7 +136,7 @@ The compose step needs `ffmpeg` 6.1 or later with the `drawtext` filter. The dry
 1-proof: compose 4:5 on #061521, headline 2x72px, subline 1x46px, cta 42px, logo lockup.png, art 33-72%
 ```
 
-A missing or wrong font file, a character the font lacks, or a line too long to stay 28 px tall at 1080 wide fails that ad in the dry run, before any image call. Shorten or split the line it names. Type that leaves the art less than 30% of the height, or 20% on 9:16, also fails that ad. Shorten the headline or sub-line.
+A missing or wrong font file, a character the font lacks, or a line too long to stay 28 px tall at 1080 wide fails that ad in the dry run, before any image call. Shorten or split the line it names. Type that leaves too little room for the art between the headline and the sub-line also fails that ad. Put the headline or sub-line on fewer lines.
 
 The real run saves the art as `art/<n>-<name>.png`. It then fills the art's flat background with the exact hex, resets accent lines to their exact hex, lays the type over it, and writes the ad as `<n>-<name>.png` and its type settings as `<n>-<name>.type.json`. The type settings name each line's font file, weight, width, size, and box. The ad's output line reads `done <size>, composed`, or `exists <size>, skip render, composed` when the art was already saved. It ends in `, art background not filled` when the art's background was too far from the hex to fill.
 

@@ -416,8 +416,8 @@ def layout(brand, copy, width, height):
             return plan
         smaller = sizes["headline"] * 96 // 100
         if smaller < minimum("headline"):
-            raise ComposeError("the type leaves too little room for the art, under {:.0%} of the height; shorten "
-                               "the headline or sub-line".format(spec.band))
+            raise ComposeError("the type leaves too little room for the art, under {:.0%} of the height between "
+                               "the headline and the sub-line; put either on fewer lines".format(spec.band))
         sizes["headline"] = fit("headline", smaller)
 
 
