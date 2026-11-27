@@ -19,6 +19,16 @@ class RepositorySkillsTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_no_skill_text_has_a_dollar_before_a_digit(self):
+        # Claude Code replaces $0, $1, and so on in SKILL.md with the slash command's arguments.
+        found = [
+            "{}:{}: {}".format(path.relative_to(SOURCE), number, line.strip())
+            for path in sorted((SOURCE / "skills").glob("*/SKILL.md"))
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+            if re.search(r"\$\d", line)
+        ]
+        self.assertEqual(found, [], "Write amounts such as 7 cents or 0.07 USD:\n" + "\n".join(found))
+
     def test_review_pr_copies_provider_execution_invocations(self):
         def invocations(skill_path):
             text = (SOURCE / "skills" / skill_path).read_text(encoding="utf-8")
