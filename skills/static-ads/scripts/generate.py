@@ -262,6 +262,8 @@ def generate(request_path, backend, session):
             say("{}: exists {}, skip".format(name, png_size(png.read_bytes())))
             return True
         request, references, plan = load(request_path)
+        if plan and art.parent.is_symlink():
+            raise ValueError("art in the run folder is a symlink, not a folder")
         if plan and art.is_file() and art.stat().st_size:
             image, status = art.read_bytes(), "exists {}, skip render"
         else:
@@ -269,9 +271,7 @@ def generate(request_path, backend, session):
             saved.parent.mkdir(exist_ok=True)
             url, body = backend.build(session, request, references)
             image, response = backend.unpack(post(url, body, session.token))
-            partial = saved.with_name(saved.name + ".partial")
-            partial.write_bytes(image)
-            partial.replace(saved)
+            compose.save(saved, image)
             (folder / (name + ".res.json")).write_text(json.dumps(response, indent=2) + "\n", encoding="utf-8")
             status = "done {}"
         if plan:

@@ -741,10 +741,13 @@ class GenerateTests(unittest.TestCase):
     def test_a_rerun_composes_the_same_bytes_from_the_saved_art_without_rendering_again(self):
         self.write_brand()
         self.write_ad("1-proof", "928x1152")
-        first = self.generate_on_vertex()
-        composed = (self.run_folder / "1-proof.png").read_bytes()
         outside = self.home / "outside.json"
         outside.write_text("kept", encoding="utf-8")
+        (self.run_folder / "art").mkdir()
+        for planted in ["art/1-proof.png.partial", "1-proof.png.partial", "1-proof.type.json.partial"]:
+            (self.run_folder / planted).symlink_to(outside)
+        first = self.generate_on_vertex()
+        composed = (self.run_folder / "1-proof.png").read_bytes()
         (self.run_folder / "1-proof.type.json").unlink()
         (self.run_folder / "1-proof.type.json").symlink_to(outside)
 
@@ -767,6 +770,23 @@ class GenerateTests(unittest.TestCase):
         self.assertEqual([line["text"] for line in settings["text"] if line["role"] == "headline"], ["READ THE SKY"])
         self.assertNotEqual((self.run_folder / "1-proof.png").read_bytes(), composed)
         self.assertEqual(len(self.api.requests), 1)
+
+    @needs_ffmpeg
+    def test_a_symlinked_art_folder_fails_without_writing_through_it(self):
+        self.write_brand()
+        self.write_ad("1-proof", "928x1152")
+        self.write_request("2-plain", {"prompt": "Fine"})
+        elsewhere = self.home / "elsewhere"
+        elsewhere.mkdir()
+        (self.run_folder / "art").symlink_to(elsewhere)
+
+        result = self.generate_on_vertex()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertLine(result.stdout, "1-proof", "FAILED", "art")
+        self.assertLine(result.stdout, "2-plain", "done")
+        self.assertEqual([prompt(request["body"]) for request in self.api.requests], ["Fine"])
+        self.assertEqual(list(elsewhere.iterdir()), [])
 
     @needs_ffmpeg
     def test_type_stays_below_the_story_interface_with_marks_above_the_capitals_and_no_logo(self):

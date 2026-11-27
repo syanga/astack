@@ -510,6 +510,14 @@ def encode(width, height, pixels):
             + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
 
 
+def save(path, data):
+    partial = path.with_name(path.name + ".partial")
+    partial.unlink(missing_ok=True)
+    with open(partial, "xb") as file:
+        file.write(data)
+    partial.replace(path)
+
+
 def render(plan, art, png, record):
     shown = art.relative_to(png.parent).as_posix()
     info = png_info(art)
@@ -567,11 +575,8 @@ def render(plan, art, png, record):
                     at = stride * (line.y + my) + 3 * (line.x + mx)
                     out[at:at + 3] = bytes((old * (255 - m) + value * m + 127) // 255
                                            for old, value in zip(out[at:at + 3], color))
-    partial = png.with_name(png.name + ".partial")
-    partial.write_bytes(encode(width, height, out))
-    partial.replace(png)
-    settings = record.with_name(record.name + ".partial")
-    settings.write_text(json.dumps({
+    save(png, encode(width, height, out))
+    save(record, (json.dumps({
         "size": "{}x{}".format(width, height), "layout": "{}:{}".format(across, down), "background": copy.background,
         "art": shown, "art_background": "#" + base.hex() if base else None,
         "art_accents": {"#" + accent.hex(): "#" + seen.hex() for accent, seen in drawn.items()},
@@ -582,6 +587,5 @@ def render(plan, art, png, record):
                   "weight": brand.styles[line.role].weight, "width": brand.styles[line.role].width,
                   "size": line.size, "color": brand.styles[line.role].color, "box": list(line.box)}
                  for line in plan.lines],
-    }, indent=2) + "\n", encoding="utf-8")
-    settings.replace(record)
+    }, indent=2) + "\n").encode("utf-8"))
     return base is not None
