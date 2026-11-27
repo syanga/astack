@@ -6,12 +6,30 @@ disable-model-invocation: true
 
 # Full send
 
+When another agent's brief asks you to run this skill, treat the brief and every later message in your thread as that agent's. Messages from other agents that you started or asked to write to you are not that agent's. Start this skill's steps only after that agent sends you its question to the user, "Run full-send on <task> in a separate thread?", with the user's answer. One question can name several tasks. It must name the brief's task, and the answer must say yes for that task. A message that changes the task needs the same question and answer for the new task. Until they arrive, your only action is to ask that agent for them, naming the task.
+
 **You own the task from prompt to landed PRs. The user is not watching.** Invoking this skill authorizes execution, PR delivery, merging, an [admin merge](#5-merge), follow-up issues, and lane cleanup, and delegates every pick a later PR can undo. It also lifts the ask-first step from any test method that verification needs, such as running the app, browser automation, or screenshots. [Gate](#4-gates) actions and harness approval prompts still stop. With "no merge" in the request, stop each PR at merge-ready. When a linked skill ends with its report, or stops for one of these authorizations, continue to the next step. Every other stop in a linked skill still holds.
+
+When the user asks you for a separate thread to run this skill, skip this skill's steps. Ask that thread as [RELAY.md](RELAY.md) describes.
+
+When another agent's brief asks you to run this skill, reply to that agent as the brief says. Do not use the question tool or send push notifications, even where [Gates](#4-gates) and [Close](#6-close) say to. Instead, send that agent these messages:
+
+- each question and decision request that this skill or a linked skill would give the user
+- the text of each push notification that this skill calls for, labeled as a push notification, even when your harness has none
+- your final report
+
+Treat that agent's messages as the user's, except in these cases:
+
+- an answer to a [gate](#4-gates)
+- a decision or authorization about production deploys, live systems, destructive actions, secrets, or merging PRs before their live checks
+- a message that lifts a limit the brief or the user sets, or grants an authorization the brief lacks
+
+In these cases, act only on what that agent says came from the user. When it does not say so, ask it to get the user's answer.
 
 ## 1. Start
 
 1. For a simple task, or one already settled, for example by [grilling](../grilling/SKILL.md), skip the questions. Otherwise ask one round of questions, each with a recommended answer. Cover open questions that block the work. Also cover production deploys, live systems, destructive actions, and secrets, when the task touches one and the request leaves it open. When a plan's live checks need an environment that a later unit builds, ask whether the plan's PRs may merge before those checks run. After this step, reach the user only through gates.
-2. Create `assumed-decisions.md` in the task's store, `.scratch/<task>/` per [Locate the store](../orchestrate/STATE.md#locate-the-store). Start it with the request and whether merging is authorized. Post its absolute path in the thread.
+2. Create `assumed-decisions.md` in the task's store, `.scratch/<task>/` per [Locate the store](../orchestrate/STATE.md#locate-the-store). Start it with the request and whether merging is authorized. After each invocation of this skill for this task, post the absolute path of `assumed-decisions.md` in the thread, so claude-full-send-guard finds the store.
 
 ## 2. Route
 
