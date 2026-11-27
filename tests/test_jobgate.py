@@ -168,10 +168,12 @@ class JobgateTest(unittest.TestCase):
         self.queue_dir = self.root / "home/.cache/jobgate"
         self.env = {key: value for key, value in os.environ.items()
                     if not key.startswith(("JOBGATE_", "XDG_", "DBUS_"))}
+        path = [entry for entry in os.environ.get("PATH", "").split(os.pathsep)
+                if not os.access(os.path.join(entry or ".", "boat"), os.X_OK)]
         self.env.update(
             HOME=str(self.root / "home"), XDG_CACHE_HOME=str(self.root / "xdg cache"),
             XDG_CONFIG_HOME=str(self.root / "xdg config"), XDG_RUNTIME_DIR=str(self.root / "runtime"),
-            PATH=str(fake_bin) + os.pathsep + os.environ.get("PATH", ""), JOBGATE_MACHINE_FILE=str(self.machine_file),
+            PATH=os.pathsep.join([str(fake_bin), *path]), JOBGATE_MACHINE_FILE=str(self.machine_file),
             JOBGATE_HOME=str(self.root / "home"),
             GIT_CEILING_DIRECTORIES=str(self.root), GIT_CONFIG_NOSYSTEM="1")
         self.held = []

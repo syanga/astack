@@ -11,7 +11,7 @@ see [Gate a repository's commands with jobgate](jobgate-setup.md).
 ## Commands
 
 ```sh
-jobgate run [--max-workers N] PROFILE -- COMMAND [ARG...]
+jobgate run [--max-workers N] [--local] PROFILE -- COMMAND [ARG...]
 jobgate status
 ```
 
@@ -21,6 +21,9 @@ reads `jobgate.toml` in the current directory. It waits until the run fits, sets
 the profile's `workers_env` variable to the worker count, and runs the command.
 Then it prints a result line. `--max-workers N` lowers the profile's
 `max_workers` for one run. A value above `max_workers` has no effect.
+
+When `jobgate.toml` has a `[boat]` table, `jobgate run` runs the command on a
+boat box instead, as [Boat](#boat) describes. `--local` runs it on this machine.
 
 `jobgate status` prints six lines first. They give the share, the stated memory
 of running runs, free memory, the workers that running runs use, the pressure
@@ -32,7 +35,8 @@ run's line gives why it waits.
 ## Repository file
 
 A repository's `jobgate.toml` contains one table per profile. Each profile needs
-all four keys, and jobgate refuses unknown keys.
+all four keys, and jobgate refuses unknown keys. The `[boat]` table is not a
+profile. [Boat](#boat) describes it.
 
 ```toml
 [test]
@@ -235,6 +239,248 @@ Linux with the kernel memory cap on,
 contains it. Otherwise, find it by its command line, for example with
 `pgrep -fl`.
 
+## Boat
+
+A repository whose `jobgate.toml` has a `[boat]` table runs `jobgate run` on a
+box: a Linux virtual machine from [boat.dev](https://boat.dev). A boat run does
+not go through admission on this machine, so it uses none of the share.
+`jobgate run --local` runs the command on this machine. A nested call runs inside
+its outer run, as [Nested calls](#nested-calls) describes.
+
+```toml
+[boat]
+setup = "scripts/boat-setup.sh"
+setup_inputs = ["requirements-dev.txt", "package-lock.json"]
+exclude = ["documents"]
+type = "large"
+```
+
+| Key | Value |
+| --- | --- |
+| `setup` | Required. The bash script that installs what the command needs on a new box. |
+| `setup_inputs` | Files that the setup script reads, such as lockfiles. Default: none. |
+| `exclude` | Files and directories whose contents never leave this machine. Default: none. |
+| `type` | The box size: `small`, `default`, `large`, or `xlarge`. Default: `default`. |
+
+Each path is relative to the repository root. A path cannot contain `*`, `?`,
+`[`, `]`, `!`, `#`, `\`, a newline, a carriage return, or a NUL character, and
+cannot step outside the repository. `exclude` cannot cover `jobgate.toml`, the
+`setup` script, or a `setup_inputs` file, because the box needs them.
+
+A boat run needs the `boat` CLI on `PATH`, signed in, and Git 2.31 or newer.
+With `exclude`, it needs Git 2.36 or newer, which can filter a bundle.
+
+### What the box gets
+
+jobgate sends a Git bundle, which holds commits with their history. Commands
+that read Git history therefore work on the box.
+
+- With a clean worktree, the box checks out `HEAD`.
+- With a dirty worktree, jobgate commits the worktree's tracked files and the
+  untracked files that `.gitignore` does not hide. It makes this commit in a
+  scratch repository, so the repository's index, refs, and objects do not
+  change. The result line says `dirty=yes`. Changes that `git status` does not
+  show do not reach the box. Examples are edits to files marked
+  `assume-unchanged` or `skip-worktree`.
+- jobgate leaves out files that `HEAD` lacks, untracked or staged, whose names
+  match `.env`, `.env.*`, `*.env`, `.envrc`, `*~`, `*.pem`, `*.key`, `*.p12`,
+  `*.pfx`, `.netrc`, `.npmrc`, `.pypirc`, `.yarnrc.yml`, `.pgpass`,
+  `.git-credentials`, `credentials`, `credentials.json`,
+  `application_default_credentials.json`, `*.tfvars`, `*.tfstate`,
+  `*.tfstate.*`, `*.jks`, `*.keystore`, `*.ppk`, `id_rsa*`, `id_dsa*`,
+  `id_ecdsa*`, or `id_ed25519*`. It prints their paths.
+- With `exclude`, the bundle leaves out the contents of every file under the
+  excluded paths, in every commit of the history. The box gets the file names,
+  but its checkout leaves the files out. A Git command on the box that reads
+  their contents fails.
+- Before it starts a box, jobgate also looks for copies of private content at
+  other paths, in the history and in the uncommitted changes that the box
+  would get. Private content is what any commit ever had under an excluded
+  path, and every file under an excluded path now. That includes files that
+  `.gitignore` hides and files that a symbolic link leads to. Examples are a
+  file that a commit moved into an excluded directory, and an untracked copy of
+  an excluded file. jobgate reads each file under the excluded paths on every
+  run.
+  In this check, a path in a commit matches an excluded path without regard to
+  the case of ASCII letters, so `Private/` counts for `private`. The bundle
+  filter matches paths with case, on every system. So the check names a file
+  under `Private/`, and the command runs here until `exclude` lists that file
+  or `Private` too. Git compares other letters by case, so `Ärea/` does not
+  count for `ärea`.
+  If it finds a copy, the command runs on this machine. jobgate prints up to 5
+  such paths to add to `exclude`, and the number of the others. It names one
+  path for each such content. After you add those paths, the next run can name
+  another path with the same content. Empty files and submodules do not count.
+  When jobgate cannot read a file or directory under an excluded path, the
+  command also runs on this machine.
+- The copy check is a best effort. It finds a copy only in one of three forms:
+  the same bytes, the bytes with each CRLF line ending turned into LF, or the
+  bytes with each LF that has no CR before it turned into CRLF. Git's
+  line-ending conversion stores and checks out files in these forms. A copy in
+  any other form reaches the box.
+  Examples are an edited copy, and a copy that `working-tree-encoding` or a
+  clean filter changes.
+- When the box starts from a snapshot, the bundle holds only the commits that
+  the snapshot lacks.
+- The box checks out no submodules. A submodule's directory is empty on the
+  box.
+
+The box gets none of this machine's environment variables, and none of the
+secrets that the boat account stores, because jobgate creates it with
+`boat new --no-env`. Entries of this machine's `PATH` that are inside the
+repository, such as `node_modules/.bin`, go to the front of the box's `PATH`.
+The command starts in the same subdirectory of the checkout as here. A command
+that names an absolute path on this machine fails on the box. Files that the
+command writes stay on the box. To keep output files, such as a coverage
+report, run with `--local`.
+
+### A boat run, step by step
+
+1. jobgate creates a box with
+   `boat new --type <type> --no-env --fail-fast --ttl 3600`, from the
+   repository's snapshot when one exists.
+2. It prints the size of the upload. Then it copies the bundle, its own
+   `jobgate.py`, and the run's settings to the box with `boat scp`.
+3. On the box, it fetches the bundle into `~/repo` and checks out the commit,
+   on a branch with the same name as the branch here. Then it writes
+   `memory_share = 0.9` to the box's `~/.config/jobgate.toml` and checks that
+   the profile fits the box.
+4. On a box without a snapshot, it runs `bash <setup>` in `~/repo`. When the
+   script exits with 0, jobgate saves the box as a snapshot.
+5. It runs `jobgate run --local` on the box, with the same profile,
+   `--max-workers`, and command. The `memory_share` from step 3 makes the
+   worker count fit the box. The command runs
+   under `setpriv --ambient-caps=-all --inh-caps=-all`, without Linux
+   capabilities.
+6. jobgate prints the command's output as it arrives. Then it reads the result
+   of jobgate on the box, prints a result line, and deletes the box.
+
+The box runs each step as a background process (`boat exec --detach`). When
+this machine sleeps or loses its network, the step keeps running. jobgate then
+attaches again and prints the output it missed. When `boat exec --attach`
+prints nothing for 60 seconds, jobgate checks the step's status and attaches
+again. It prints only the output that it has not printed yet. While jobgate
+follows a box, it keeps the box's auto-stop an hour away. When jobgate dies, the
+box stops within an hour.
+
+Ctrl-C, SIGTERM, and SIGHUP delete the box. jobgate tries the delete up to 3
+times. A Ctrl-C, SIGTERM, or SIGHUP that arrives during the delete waits until
+the delete ends, and then jobgate stops. When one of the signals arrives before
+`boat new` prints the new box's id, jobgate cannot delete the box, and the box
+stops within an hour.
+
+### Snapshots
+
+A snapshot is a saved copy of a box's disk. It holds the checkout, its history,
+and what the setup script installed. Its name is `jobgate-R-K`. `R` is the
+first 12 hex digits of the repository's root commit. `K` is the first 12 hex
+digits of the setup key. The setup key is a SHA-256 hash of the setup script and
+the `setup_inputs` files in the commit that the box checks out. It also covers
+the patterns that jobgate makes from `exclude`, which filter the bundle and the
+box's checkout. When the setup script or a `setup_inputs` file is a symbolic
+link to a file in the repository, the hash covers that file.
+
+A run whose snapshot exists starts from it and skips the setup script. A run
+whose snapshot is missing sets up a new box and saves it under the new name
+before the command starts. jobgate waits up to 15 minutes for the save. Then it
+removes the repository's other `jobgate-R-` snapshots. During the boat free
+trial, boat refuses to save snapshots, so every run sets up a new box.
+
+The setup script runs once per snapshot. Later runs check out other commits on
+top of its work. Put what the script makes outside the checkout or in paths that
+`.gitignore` hides.
+
+### When the command runs here instead
+
+jobgate runs the command on this machine, through admission, when any of these
+is true:
+
+- The `boat` CLI is not on `PATH` (`no_cli`).
+- boat refuses to start a box. Examples: no login (`unauthorized`), a full start
+  limit (`rate_limited`), no ready machine (`no_ready_machine`), or a box type
+  that the plan lacks (`trial_machine_class_not_allowed`). The `fallback` code is
+  boat's error code. It is `boat_failed` when the `boat` CLI exits with an error
+  and no code, and `no_box` when `boat new` prints no box id.
+- A step fails after boat creates the box, without the box dying. jobgate
+  prints `BOAT RUN FAILED` with the step, the box, and a log, as in
+  [When a box dies partway](#when-a-box-dies-partway), and deletes the box. It
+  does not retry on a new box. These failures, with their `fallback` codes,
+  are:
+  - Git cannot build the bundle (`git`).
+  - jobgate on this machine hits a file error, such as a full disk
+    (`local_error`).
+  - jobgate on the box refuses the profile (`box_refused`), and the box prints
+    why. An example is a profile that needs more memory for 1 worker than 90%
+    of the box's memory.
+- Content under an excluded path also lives at another path, in the history or
+  in the uncommitted changes (`excluded_elsewhere`).
+- boat refused a start for payment less than an hour ago. After an HTTP 402
+  error, such as `billing_required`, or after `trial_compute_limit_reached`,
+  jobgate skips boat for an hour. It keeps the end time in
+  `~/.cache/jobgate/boat-off.json`. The `fallback` code is the code of that
+  refusal, or `off` when it had none.
+- Before jobgate starts a box, one of these fails:
+  - Git cannot read the repository (`git`).
+  - `exclude` is set, and this machine's Git is older than 2.36, which cannot
+    filter a bundle (`git`).
+  - The repository has no commit (`no_commit`).
+  - The commit has no setup script (`no_setup`).
+  - The box would not get `jobgate.toml` or the directory where the command
+    starts (`missing_on_box`). The commit lacks their files, or `exclude`
+    leaves the files out. Submodules do not count.
+  - jobgate on this machine hits a file error (`local_error`).
+- The run died partway on two boxes in a row (`died`).
+
+jobgate prints why. When it tried to start a box, it also prints a `boat log`
+line with the path of that attempt's log. The result line says `where=local`
+and gives the reason in its `fallback` field.
+
+### When a box dies partway
+
+A box dies partway when one of these happens:
+
+- boat creates the box but reports an error before the box is ready. When boat
+  refuses the start, such as for a full start limit or a payment error, jobgate
+  runs the command here. [When the command runs here instead](#when-the-command-runs-here-instead)
+  lists those refusals.
+- The copy to the box fails.
+- The checkout or the setup script fails.
+- The box disappears.
+- boat kills a step's process, or the box runs out of memory during the setup
+  step.
+- jobgate cannot reach the box for 10 minutes.
+
+jobgate then prints the step, the box, the reason, and a log:
+
+```text
+jobgate: BOAT RUN FAILED during setup on box bx_1a2b3c4d: the setup script scripts/boat-setup.sh failed
+jobgate: boat log: /home/me/.cache/jobgate/boat/2026-11-25T23-10-00Z-1a2b3c.log
+jobgate: test retries once on a new box
+```
+
+It deletes the box and tries once more on a new box. When the second box also
+dies partway, the command runs on this machine. A command that exits with an
+error on the box has not died. jobgate returns its exit code and does not run the
+command again. Sometimes boat reports that the command ended, and then jobgate
+cannot get the rest of the output. The box disappears, or jobgate on this
+machine hits a file error. jobgate then returns the exit code that boat
+reported. It prints that it may have missed output, and the path of the boat
+log.
+
+When the box runs out of memory during the run step, jobgate prints the
+`BOAT RUN FAILED` and `boat log` lines, deletes the box, and exits with 137. It
+does not retry the command and does not run it on this machine, because the
+command would use the same memory here. jobgate does the same when boat kills
+the run step with SIGKILL and boat does not say whether the box ran out of
+memory. One case is a box that disappears after the kill. Another is a box that
+jobgate cannot reach for 10 minutes after the kill.
+
+Each log holds everything that the box printed during one attempt, and
+jobgate's boat messages. It also holds the arguments, exit code, and output of
+each `boat` call that failed. It leaves out the two failures that jobgate
+expects: a missing snapshot, and the delete of a box that is already gone.
+`~/.cache/jobgate/boat/` keeps the last 20 logs.
+
 ## Results
 
 jobgate measures each run's peak memory:
@@ -277,12 +523,14 @@ time=2026-11-17T18:00:00Z profile=test where=local repo=/src/app commit=4f0c2d9e
 | --- | --- |
 | `time` | When the run ended, in UTC |
 | `profile` | The profile name |
-| `where` | Where the run ran: `local` |
+| `where` | Where the run ran: `local` or `boat` |
+| `box` | On a boat run, the box type |
+| `fallback` | On a run that went to this machine instead of boat, the reason: a boat error code, `boat_failed` when the `boat` CLI exited with an error and no code, `no_box` when `boat new` printed no box id, `no_cli`, `git`, `no_commit`, `no_setup`, `missing_on_box`, `excluded_elsewhere`, `local_error`, `box_refused`, `died`, or `off` when the payment refusal that turned boat off had no code |
 | `repo` | The directory that contains `jobgate.toml` |
 | `commit` | `git rev-parse HEAD` when the run started, or `none` |
-| `dirty` | `yes` when `git status --porcelain` printed anything when the run started, `no` when it printed nothing, `unknown` outside Git |
+| `dirty` | `yes` when `git status --porcelain --untracked-files=normal` printed anything when the run started, `no` when it printed nothing, `unknown` outside Git |
 | `workers` | The worker count |
-| `wait` | Seconds from arrival to start |
+| `wait` | Seconds from arrival to start. On a boat run, the time to create, copy to, and set up the box. `unknown` when the box ran out of memory during the run step |
 | `peak` | Peak memory in MiB, or `unknown` when jobgate could not measure it, such as for a command that ended before the first sample |
 | `stated` | `base_mem + workers × worker_mem` in MiB |
 | `oom_kills` | On Linux in a scope, the number of the run's processes that the kernel OOM-killed, from the scope's `memory.events`. jobgate writes this field only when the number is above 0. |
@@ -291,7 +539,17 @@ time=2026-11-17T18:00:00Z profile=test where=local repo=/src/app commit=4f0c2d9e
 Values that are empty or contain whitespace, a double quote, or `=` are JSON
 strings. A byte that is not valid UTF-8, such as in a directory name, appears as
 `\udcXX`, where `XX` is the byte in hex. All of a user's runs append their lines
-to one log in the order they end. jobgate runs dirty worktrees like clean ones.
+to one log in the order they end. On this machine, jobgate runs dirty worktrees
+like clean ones. On a boat run, the box gets the uncommitted changes as a
+temporary commit. The `commit` field names `HEAD`, so a line with `dirty=yes`
+does not describe the code that ran.
+
+On a boat run, `workers`, `peak`, `stated`, and `oom_kills` come from jobgate
+on the box. That jobgate writes its result to `~/.jobgate/run/result.json` on
+the box instead of printing it. After the run step, jobgate reads the file with
+`boat exec` and prints its own line with `where=boat`. When it cannot read the
+file, it prints the path of the boat log, which holds the reason. Then
+`workers`, `peak`, and `stated` are `unknown`, and the line has no `oom_kills`.
 
 ## Exit codes
 
@@ -323,7 +581,8 @@ code of `taskpolicy`.
 | `JOBGATE_RUN` | jobgate sets it to the path of the run's file. A nested call reads it to find the outer run. |
 | `HOME` | jobgate takes `~` from the password database instead, so runs under every `HOME` share one configuration, queue, and results log. It reads `HOME` only when the account has no entry there. jobgate also ignores `XDG_CACHE_HOME` and `XDG_CONFIG_HOME`. |
 | `JOBGATE_HOME` | Tests only. Replaces the account's home directory, which holds the configuration, the queue, and the results log. With a real systemd user session, a run that sets it still sets the real `jobgate.slice` cap from the `memory_share` it finds there. That cap applies to all of the user's runs, so set this variable only with a stand-in `systemctl` on `PATH`, as jobgate's tests do. |
-| `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with readings that replace the OS readings: `memory`, `cores`, `psi` or `darwin_level`, and `meminfo` or `vm_stat` text. jobgate reads `memory` and `cores` once per run. It reads the pressure and available-memory readings before each admission attempt. A `cgroup` value names a directory that stands in for the scope's cgroup. With a real systemd user session, a run that uses this file still sets the real `jobgate.slice` cap from its `memory` reading. That cap applies to all of the user's runs, so use this file only with a stand-in `systemctl` on `PATH`, as jobgate's tests do. |
+| `JOBGATE_RESULT_FILE` | Internal. On a box, jobgate sets it for the box's `jobgate run --local`. That run removes the variable before it starts the command. That run also writes its result to the named file as JSON instead of printing a result line. |
+| `JOBGATE_MACHINE_FILE` | Tests only. A JSON file with readings that replace the OS readings: `memory`, `cores`, `psi` or `darwin_level`, and `meminfo` or `vm_stat` text. jobgate reads `memory` and `cores` once per run. It reads the pressure and available-memory readings before each admission attempt. A `cgroup` value names a directory that stands in for the scope's cgroup. A `boat_silent_seconds` value replaces the 60 seconds that jobgate waits for output from `boat exec --attach`. A `boat_lost_seconds` value replaces the 10 minutes after which jobgate stops trying to reach a box. With a real systemd user session, a run that uses this file still sets the real `jobgate.slice` cap from its `memory` reading. That cap applies to all of the user's runs, so use this file only with a stand-in `systemctl` on `PATH`, as jobgate's tests do. |
 
 ## Files
 
@@ -336,6 +595,8 @@ runs share these files under every `HOME`.
 | `~/.cache/jobgate/runs/<run id>.json` | One file per waiting or running run, which the run locks with `flock`. It holds the run's admission and, while the run waits, why it waits. The OS releases the lock when the run's process dies. The next run that reads the queue then deletes the file. |
 | `~/.cache/jobgate/runs/<run id>.scope` | Written by jobgate's helper inside the scope: the scope's cgroup and peak memory, or why the kernel memory cap is off. The next run that reads the queue deletes it after the run's `.json` file is gone. |
 | `~/.cache/jobgate/results.log` | Result lines |
+| `~/.cache/jobgate/boat/*.log` | The logs of the last 20 boat attempts |
+| `~/.cache/jobgate/boat-off.json` | After a boat payment error, the time until which jobgate skips boat |
 
 ## Install and remove
 
