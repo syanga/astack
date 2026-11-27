@@ -295,7 +295,9 @@ that read Git history therefore work on the box.
   their contents fails. Without `--worktree-attributes`, `git archive` loads the
   whole tree to read its `.gitattributes` files. On the box, that load fails
   with `could not fetch <id> from promisor remote`. Pass the flag, as in
-  `git archive --worktree-attributes HEAD -- src`.
+  `git archive --worktree-attributes HEAD -- src`. The flag applies the
+  checkout's `.gitattributes`, so an archive of another commit follows the
+  checkout's `export-ignore` and `export-subst` rules, not that commit's.
 - Before it starts a box, jobgate also looks for copies of private content at
   other paths, in the history and in the uncommitted changes that the box
   would get. Private content is what any commit ever had under an excluded
