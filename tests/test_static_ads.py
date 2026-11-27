@@ -853,7 +853,7 @@ class GenerateTests(unittest.TestCase):
     @needs_ffmpeg
     def test_a_font_file_that_ffmpeg_cannot_load_fails_instead_of_falling_back(self):
         self.write_brand()
-        broken = font(500, 7).replace(b"hhea", b"xxxx", 1)
+        broken = font(500, 7).replace(b"loca", b"xxxx", 1)
         (self.run_folder / "fonts/headline.ttf").write_bytes(broken)
         self.write_ad("1-proof", "928x1152")
         self.write_request("2-plain", {"prompt": "Fine"})
