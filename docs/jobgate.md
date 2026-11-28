@@ -617,6 +617,18 @@ The installer writes `~/.local/bin/jobgate`, a shell wrapper that runs `python3`
 on the script in `~/.local/share/astack/jobgate/`. When `XDG_DATA_HOME` is set,
 the script goes to `$XDG_DATA_HOME/astack/jobgate/` instead.
 
+When the installer finds `boat` neither on its `PATH` nor in `~/.local/bin`, it
+prints an `OPTIONAL` line and boat's install command,
+`curl -fsSL https://boat.dev/install | sh`. When the installer's input and
+output are both a terminal, it then asks `Install boat now? [y/N]`. On `y` or
+`yes`, it runs that command with `HOME` set to the home it installs into. boat's
+installer then starts boat's sign-in. When `boat` is still missing after the
+command, the installer prints a `WARN` line with the command. When `boat` is in
+place but the command failed or was interrupted, the `WARN` line names
+`boat login` instead. In both cases, the install succeeds. Ctrl-C at the
+question declines it. A preview prints the `OPTIONAL` line and the command, and
+asks nothing. `./uninstall.sh` leaves boat installed.
+
 When `~/.local/bin` is not on the installer's own `PATH`, the installer appends
 a marked `PATH` line to the shell's startup files. It does not read the startup
 files for other `PATH` lines. The startup files depend on `SHELL`:

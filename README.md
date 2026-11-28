@@ -152,8 +152,9 @@ keep logins and assignments.
 ## Gate heavy commands with jobgate
 
 The default install puts `jobgate` in `~/.local/bin` and, for zsh and bash, on
-`PATH`. To make a repository's test suite
-or build wait for room on the machine, follow
+`PATH`. When the `boat` CLI is missing, the install prints the command that
+installs it, and in a terminal asks whether to run that command. To make a
+repository's test suite or build wait for room on the machine, follow
 [Gate a repository's commands with jobgate](docs/jobgate-setup.md). To run them
 on boat.dev boxes instead of this machine, follow
 [Run heavy commands on boat](docs/jobgate-setup.md#run-heavy-commands-on-boat).

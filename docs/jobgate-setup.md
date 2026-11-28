@@ -101,10 +101,13 @@ a Linux box from [boat.dev](https://boat.dev). When boat cannot run it, the
 command runs on this machine. The [Boat section of the reference](jobgate.md#boat)
 covers what the box gets and each step of a boat run.
 
-1. Install the `boat` CLI from [boat.dev](https://boat.dev).
+1. Install the `boat` CLI from [boat.dev](https://boat.dev) with
+   `curl -fsSL https://boat.dev/install | sh`. When `boat` is missing and you
+   run `./install.sh` in a terminal, the installer asks whether to run that
+   command. boat's installer then starts boat's sign-in.
 
-2. Sign in with `boat login`. To sign in with an API key, keep the key in a file
-   and pass it on stdin:
+2. If you have not signed in to boat, sign in with `boat login`. To sign in with
+   an API key, keep the key in a file and pass it on stdin:
 
    ```sh
    boat login --key-stdin < path/to/key-file
